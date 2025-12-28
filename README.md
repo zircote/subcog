@@ -1,93 +1,167 @@
-# {{crate_name}}
+# Subcog
 
-<!-- Badges -->
-[![GitHub Template](https://img.shields.io/badge/template-zircote%2Frust--template-blue?logo=github)](https://github.com/zircote/rust-template)
-[![CI](https://github.com/zircote/{{crate_name}}/actions/workflows/ci.yml/badge.svg)](https://github.com/zircote/{{crate_name}}/actions/workflows/ci.yml)
-[![Crates.io](https://img.shields.io/crates/v/{{crate_name}}.svg?logo=rust&logoColor=white)](https://crates.io/crates/{{crate_name}})
-[![Documentation](https://docs.rs/{{crate_name}}/badge.svg)](https://docs.rs/{{crate_name}})
-[![Rust Version](https://img.shields.io/badge/rust-1.80%2B-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![CI](https://github.com/zircote/subcog/actions/workflows/ci.yml/badge.svg)](https://github.com/zircote/subcog/actions/workflows/ci.yml)
+[![Rust Version](https://img.shields.io/badge/rust-1.85%2B-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Clippy](https://img.shields.io/badge/linting-clippy-orange?logo=rust&logoColor=white)](https://github.com/rust-lang/rust-clippy)
 [![cargo-deny](https://img.shields.io/badge/security-cargo--deny-blue?logo=rust&logoColor=white)](https://github.com/EmbarkStudios/cargo-deny)
-[![Security: gitleaks](https://img.shields.io/badge/security-gitleaks-blue?logo=git&logoColor=white)](https://github.com/gitleaks/gitleaks)
-[![Dependabot](https://img.shields.io/badge/dependabot-enabled-025e8c?logo=dependabot)](https://docs.github.com/en/code-security/dependabot)
 
-A Rust crate description.
+A persistent memory system for AI coding assistants. Subcog captures decisions, learnings, and context from coding sessions and surfaces them when relevant.
+
+## Overview
+
+Subcog is a Rust rewrite of the [git-notes-memory](https://github.com/zircote/git-notes-memory) Python system, delivering:
+
+- **Single-binary distribution** (<100MB, <10ms cold start)
+- **Pluggable storage backends** (Git Notes, SQLite+usearch, PostgreSQL+pgvector)
+- **MCP server integration** for AI agent interoperability
+- **Claude Code hooks** for seamless IDE integration
+- **Semantic search** with hybrid vector + BM25 ranking
 
 ## Features
 
-- Feature 1
-- Feature 2
-- Feature 3
+### Core (Always Available)
+- Memory capture with automatic embedding generation
+- Semantic search using all-MiniLM-L6-v2 embeddings
+- Git notes persistence with YAML front matter
+- Multi-domain memories (project, user, organization)
+- 10 memory namespaces (decisions, learnings, patterns, blockers, etc.)
+
+### Enhanced (Opt-in)
+- Entity and temporal extraction
+- Secrets filtering (API keys, PII detection)
+- OpenTelemetry observability
+- Full Claude Code hook integration
+
+### LLM-Powered (Requires Provider)
+- Implicit capture from conversations
+- Memory consolidation and summarization
+- Supersession detection
+- Temporal reasoning queries
 
 ## Installation
 
-Add this to your `Cargo.toml`:
-
-```toml
-[dependencies]
-{{crate_name}} = "0.1"
-```
-
-Or use cargo add:
-
 ```bash
-cargo add {{crate_name}}
+# From source
+cargo install --path .
+
+# Or build locally
+cargo build --release
 ```
 
 ## Quick Start
 
-```rust
-use {{crate_name}}::{add, divide, Config};
+```bash
+# Capture a memory
+subcog capture --namespace decisions "Use PostgreSQL for primary storage due to ACID requirements"
 
-fn main() -> Result<(), {{crate_name}}::Error> {
-    // Basic arithmetic
-    let sum = add(2, 3);
-    println!("2 + 3 = {}", sum);
+# Search memories
+subcog recall "database storage decision"
 
-    // Safe division with error handling
-    let quotient = divide(10, 2)?;
-    println!("10 / 2 = {}", quotient);
+# Check status
+subcog status
 
-    // Using configuration builder
-    let config = Config::new()
-        .with_verbose(true)
-        .with_max_retries(5);
+# Sync with git remote
+subcog sync
+```
 
-    Ok(())
+## MCP Server
+
+Run as an MCP server for AI agent integration:
+
+```bash
+subcog serve
+```
+
+Configure in Claude Desktop's `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "subcog": {
+      "command": "subcog",
+      "args": ["serve"]
+    }
+  }
 }
 ```
 
-## API Overview
+### Available MCP Tools
 
-### Functions
-
-| Function | Description |
-|----------|-------------|
-| `add(a, b)` | Adds two numbers |
-| `divide(a, b)` | Divides with error handling |
-
-### Types
-
-| Type | Description |
+| Tool | Description |
 |------|-------------|
-| `Config` | Configuration with builder pattern |
-| `Error` | Error type for operations |
-| `Result<T>` | Type alias for `Result<T, Error>` |
+| `memory.capture` | Store a new memory |
+| `memory.recall` | Search memories semantically |
+| `memory.status` | Get system statistics |
+| `memory.sync` | Sync with remote |
+| `memory.consolidate` | Run memory consolidation |
+| `memory.configure` | Get/set configuration |
+
+## Claude Code Hooks
+
+Subcog integrates with all 5 Claude Code hooks:
+
+| Hook | Purpose |
+|------|---------|
+| `SessionStart` | Inject relevant context at session start |
+| `UserPromptSubmit` | Detect capture signals in prompts |
+| `PostToolUse` | Surface related memories after file operations |
+| `PreCompact` | Analyze conversation for auto-capture |
+| `Stop` | Finalize session, sync to remote |
+
+Configure in `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{ "command": "subcog hook session-start" }],
+    "UserPromptSubmit": [{ "command": "subcog hook user-prompt-submit" }],
+    "PostToolUse": [{ "command": "subcog hook post-tool-use" }],
+    "PreCompact": [{ "command": "subcog hook pre-compact" }],
+    "Stop": [{ "command": "subcog hook stop" }]
+  }
+}
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Access Layer                            │
+│  ┌─────────┐  ┌─────────────┐  ┌────────────────────────┐   │
+│  │   CLI   │  │  MCP Server │  │  Claude Code Hooks     │   │
+│  └────┬────┘  └──────┬──────┘  └───────────┬────────────┘   │
+└───────┼──────────────┼─────────────────────┼────────────────┘
+        │              │                     │
+┌───────┴──────────────┴─────────────────────┴────────────────┐
+│                     Service Layer                            │
+│  ┌────────────────┐  ┌─────────────────┐  ┌──────────────┐  │
+│  │ CaptureService │  │  RecallService  │  │ SyncService  │  │
+│  └────────────────┘  └─────────────────┘  └──────────────┘  │
+└─────────────────────────────┬───────────────────────────────┘
+                              │
+┌─────────────────────────────┴───────────────────────────────┐
+│                    Storage Layer                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
+│  │ Persistence  │  │    Index     │  │     Vector       │   │
+│  │  (Git Notes) │  │   (SQLite)   │  │    (usearch)     │   │
+│  └──────────────┘  └──────────────┘  └──────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ## Development
 
 ### Prerequisites
 
-- Rust 1.80+ (2024 edition)
+- Rust 1.85+ (Edition 2024)
+- Git 2.30+
 - [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) for supply chain security
 
 ### Setup
 
 ```bash
-# Clone the repository
-git clone https://github.com/zircote/{{crate_name}}.git
-cd {{crate_name}}
+git clone https://github.com/zircote/subcog.git
+cd subcog
 
 # Build
 cargo build
@@ -95,84 +169,80 @@ cargo build
 # Run tests
 cargo test
 
-# Run linting
-cargo clippy --all-targets --all-features
-
-# Format code
-cargo fmt
-
-# Check supply chain security
-cargo deny check
-
-# Generate documentation
-cargo doc --open
-```
-
-### Project Structure
-
-```
-src/
-├── lib.rs           # Library entry point
-├── main.rs          # Binary entry point
-└── ...              # Additional modules
-
-tests/
-└── integration_test.rs
-
-Cargo.toml           # Project manifest
-clippy.toml          # Clippy configuration
-rustfmt.toml         # Formatter configuration
-deny.toml            # cargo-deny configuration
-CLAUDE.md            # AI assistant instructions
-```
-
-### Code Quality
-
-This project maintains high code quality standards:
-
-- **Linting**: clippy with pedantic and nursery lints
-- **Formatting**: rustfmt with custom configuration
-- **Testing**: Unit tests, integration tests, and property-based tests
-- **Documentation**: All public APIs documented with examples
-- **Supply Chain**: cargo-deny for dependency auditing
-- **CI/CD**: GitHub Actions for automated testing
-
-### Running Checks
-
-```bash
 # Run all checks
 cargo fmt -- --check && \
 cargo clippy --all-targets --all-features -- -D warnings && \
 cargo test && \
 cargo doc --no-deps && \
 cargo deny check
-
-# Run with MIRI for undefined behavior detection
-cargo +nightly miri test
 ```
 
-## MSRV Policy
+### Project Structure
 
-The Minimum Supported Rust Version (MSRV) is **1.80**. Increasing the MSRV is considered a minor breaking change.
+```
+src/
+├── lib.rs              # Library entry point
+├── main.rs             # CLI entry point
+├── models/             # Data structures (Memory, Domain, Namespace)
+├── storage/            # Storage backends (Git Notes, SQLite, usearch)
+├── services/           # Business logic (Capture, Recall, Sync)
+├── mcp/                # MCP server implementation
+├── hooks/              # Claude Code hook handlers
+├── embedding/          # Vector embedding generation
+└── observability/      # Tracing, metrics, logging
 
-## Contributing
+docs/
+├── research/           # Research documents
+└── spec/               # Specification documents
+    └── active/
+        └── 2025-12-28-subcog-rust-rewrite/
+            ├── README.md
+            ├── REQUIREMENTS.md
+            ├── ARCHITECTURE.md
+            ├── IMPLEMENTATION_PLAN.md
+            └── ...
+```
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run the test suite (`cargo test`)
-5. Run linting (`cargo clippy --all-targets --all-features`)
-6. Format code (`cargo fmt`)
-7. Commit your changes (`git commit -m 'feat: add amazing feature'`)
-8. Push to the branch (`git push origin feature/amazing-feature`)
-9. Open a Pull Request
+## Configuration
 
-Please ensure your PR:
-- Passes all CI checks
-- Includes tests for new functionality
-- Updates documentation as needed
-- Follows the existing code style
-- Does not introduce unsafe code without justification
+Configuration file at `~/.config/subcog/config.toml`:
+
+```toml
+[storage]
+backend = "sqlite"  # "git-notes", "sqlite", "postgres"
+data_dir = "~/.local/share/subcog"
+
+[embedding]
+model = "all-MiniLM-L6-v2"
+dimensions = 384
+
+[hooks]
+enabled = true
+session_start_timeout_ms = 2000
+user_prompt_timeout_ms = 50
+
+[llm]
+provider = "anthropic"  # Optional: for Tier 3 features
+```
+
+## Performance Targets
+
+| Metric | Target |
+|--------|--------|
+| Cold start | <10ms |
+| Capture latency | <30ms |
+| Search latency | <50ms |
+| Binary size | <100MB |
+| Memory (idle) | <50MB |
+
+## Specification
+
+Full specification documents are in [`docs/spec/active/2025-12-28-subcog-rust-rewrite/`](docs/spec/active/2025-12-28-subcog-rust-rewrite/):
+
+- [REQUIREMENTS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/REQUIREMENTS.md) - Product requirements
+- [ARCHITECTURE.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/ARCHITECTURE.md) - Technical architecture
+- [IMPLEMENTATION_PLAN.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/IMPLEMENTATION_PLAN.md) - Phased implementation
+- [DECISIONS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/DECISIONS.md) - Architecture decision records
 
 ## License
 
@@ -180,6 +250,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- [The Rust Programming Language](https://www.rust-lang.org/)
-- [Cargo](https://doc.rust-lang.org/cargo/)
-- [clippy](https://github.com/rust-lang/rust-clippy)
+- [git-notes-memory](https://github.com/zircote/git-notes-memory) - Python proof-of-concept
+- [fastembed](https://github.com/Anush008/fastembed-rs) - Embedding generation
+- [usearch](https://github.com/unum-cloud/usearch) - Vector similarity search
+- [rmcp](https://github.com/anthropics/rmcp) - MCP protocol implementation
