@@ -1,0 +1,37 @@
+{
+  "hooks": [
+    {
+      "name": "rust-format-on-edit",
+      "event": "afterWrite",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "rustfmt \"$CLAUDE_FILE_PATH\" 2>/dev/null || true"
+        }
+      ],
+      "matcher": "**/*.rs"
+    },
+    {
+      "name": "rust-check-on-edit",
+      "event": "afterWrite",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "cargo check --message-format=short 2>&1 | head -20 || true"
+        }
+      ],
+      "matcher": "**/*.rs"
+    },
+    {
+      "name": "rust-clippy-on-edit",
+      "event": "afterWrite",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "cargo clippy --message-format=short -- -W clippy::all 2>&1 | head -30 || true"
+        }
+      ],
+      "matcher": "**/*.rs"
+    }
+  ]
+}

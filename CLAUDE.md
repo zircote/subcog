@@ -75,7 +75,7 @@ This project uses **clippy** with pedantic and nursery lints, and **rustfmt** fo
 
 - **Line length**: 100 characters
 - **Edition**: 2024
-- **MSRV**: 1.80
+- **MSRV**: 1.85
 - **Unsafe code**: Forbidden unless explicitly justified
 - **Panics**: Not allowed in library code (`unwrap`, `expect`, `panic!`)
 
@@ -294,3 +294,36 @@ The CI pipeline includes:
 5. **Supply chain**: `cargo deny check`
 6. **MSRV check**: Verify minimum supported Rust version
 7. **Coverage**: Generate code coverage reports
+
+## LSP Integration
+
+This project is configured with rust-analyzer LSP for enhanced code intelligence.
+
+### Available LSP Operations
+
+Use the LSP tool for semantic code navigation:
+
+| Operation | Use Case |
+|-----------|----------|
+| `goToDefinition` | Jump to where a symbol is defined |
+| `findReferences` | Find all usages of a symbol |
+| `hover` | Get type info and documentation |
+| `documentSymbol` | List all symbols in a file |
+| `workspaceSymbol` | Search symbols across the project |
+| `goToImplementation` | Find trait implementations |
+
+### LSP Workflow
+
+When working with Rust code:
+
+1. **Before modifying**: Use `findReferences` to understand impact
+2. **For refactoring**: Use `goToDefinition` to trace dependencies
+3. **For traits**: Use `goToImplementation` to find all implementors
+4. **For exploration**: Use `documentSymbol` to understand file structure
+
+### Hooks Configured
+
+The following hooks run automatically on file save:
+- `rustfmt` - Auto-formats code to project standards
+- `cargo check` - Fast compilation checking
+- `cargo clippy` - Lint warnings and suggestions
