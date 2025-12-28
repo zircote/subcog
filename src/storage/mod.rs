@@ -1,0 +1,56 @@
+//! Storage layer abstraction.
+//!
+//! This module provides a three-layer storage architecture:
+//! - **Persistence**: Authoritative storage (Git Notes, PostgreSQL, Filesystem)
+//! - **Index**: Full-text search (SQLite + FTS5, PostgreSQL, RediSearch)
+//! - **Vector**: Embedding similarity search (usearch, pgvector, Redis)
+
+pub mod index;
+pub mod persistence;
+pub mod traits;
+pub mod vector;
+
+pub use traits::{IndexBackend, PersistenceBackend, VectorBackend};
+
+/// Composite storage combining all three layers.
+pub struct CompositeStorage<P, I, V>
+where
+    P: PersistenceBackend,
+    I: IndexBackend,
+    V: VectorBackend,
+{
+    persistence: P,
+    index: I,
+    vector: V,
+}
+
+impl<P, I, V> CompositeStorage<P, I, V>
+where
+    P: PersistenceBackend,
+    I: IndexBackend,
+    V: VectorBackend,
+{
+    /// Creates a new composite storage with the given backends.
+    pub const fn new(persistence: P, index: I, vector: V) -> Self {
+        Self {
+            persistence,
+            index,
+            vector,
+        }
+    }
+
+    /// Returns a reference to the persistence backend.
+    pub const fn persistence(&self) -> &P {
+        &self.persistence
+    }
+
+    /// Returns a reference to the index backend.
+    pub const fn index(&self) -> &I {
+        &self.index
+    }
+
+    /// Returns a reference to the vector backend.
+    pub const fn vector(&self) -> &V {
+        &self.vector
+    }
+}

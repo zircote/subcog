@@ -1,33 +1,70 @@
-//! # {{crate_name}}
+//! # Subcog
 //!
-//! A Rust crate description.
+//! A persistent memory system for AI coding assistants.
+//! Rust rewrite of git-notes-memory.
+//!
+//! Subcog captures decisions, learnings, and context from coding sessions
+//! and surfaces them when relevant through semantic search.
 //!
 //! ## Features
 //!
-//! - Feature 1
-//! - Feature 2
-//! - Feature 3
+//! - Single-binary distribution (<100MB, <10ms cold start)
+//! - Three-layer storage architecture (Persistence, Index, Vector)
+//! - Pluggable backends (Git Notes, SQLite+usearch, PostgreSQL+pgvector)
+//! - MCP server integration for AI agent interoperability
+//! - Claude Code hooks for seamless IDE integration
+//! - Semantic search with hybrid vector + BM25 ranking
 //!
 //! ## Example
 //!
-//! ```rust
-//! use {{crate_name}}::add;
+//! ```rust,ignore
+//! use subcog::{CaptureService, CaptureRequest, Namespace};
 //!
-//! let result = add(2, 3);
-//! assert_eq!(result, 5);
+//! let service = CaptureService::new(config)?;
+//! let result = service.capture(CaptureRequest {
+//!     namespace: Namespace::Decisions,
+//!     content: "Use PostgreSQL for primary storage".to_string(),
+//!     ..Default::default()
+//! })?;
 //! ```
 
-#![doc = include_str!("../README.md")]
 #![deny(clippy::all)]
 #![warn(clippy::pedantic)]
 #![warn(clippy::nursery)]
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
+// Allow todo! in stub implementations during development
+#![allow(clippy::todo)]
 
 use std::error::Error as StdError;
 use std::fmt;
 
-/// Error type for {{crate_name}} operations.
+// Module declarations
+pub mod cli;
+pub mod config;
+pub mod embedding;
+pub mod git;
+pub mod hooks;
+pub mod llm;
+pub mod mcp;
+pub mod models;
+pub mod observability;
+pub mod security;
+pub mod services;
+pub mod storage;
+
+// Re-exports for convenience
+pub use config::{FeatureFlags, SubcogConfig};
+pub use embedding::Embedder;
+pub use llm::LlmProvider;
+pub use models::{
+    CaptureRequest, CaptureResult, Domain, Memory, MemoryId, MemoryStatus, Namespace, SearchFilter,
+    SearchMode, SearchResult,
+};
+pub use services::{CaptureService, ConsolidationService, ContextBuilderService, RecallService, SyncService};
+pub use storage::{CompositeStorage, IndexBackend, PersistenceBackend, VectorBackend};
+
+/// Error type for subcog operations.
 #[derive(Debug)]
 pub enum Error {
     /// Invalid input was provided.
@@ -47,14 +84,14 @@ impl fmt::Display for Error {
             Self::InvalidInput(msg) => write!(f, "invalid input: {msg}"),
             Self::OperationFailed { operation, cause } => {
                 write!(f, "operation '{operation}' failed: {cause}")
-            }
+            },
         }
     }
 }
 
 impl StdError for Error {}
 
-/// Result type alias for {{crate_name}} operations.
+/// Result type alias for subcog operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Adds two numbers together.
@@ -71,7 +108,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// # Examples
 ///
 /// ```rust
-/// use {{crate_name}}::add;
+/// use subcog::add;
 ///
 /// assert_eq!(add(2, 3), 5);
 /// assert_eq!(add(-1, 1), 0);
@@ -99,7 +136,7 @@ pub const fn add(a: i64, b: i64) -> i64 {
 /// # Examples
 ///
 /// ```rust
-/// use {{crate_name}}::divide;
+/// use subcog::divide;
 ///
 /// assert_eq!(divide(10, 2).unwrap(), 5);
 /// assert!(divide(10, 0).is_err());
@@ -112,7 +149,7 @@ pub fn divide(dividend: i64, divisor: i64) -> Result<i64> {
 }
 
 /// Configuration for the crate.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Config {
     /// Enable verbose logging.
     pub verbose: bool,
@@ -120,6 +157,12 @@ pub struct Config {
     pub max_retries: u32,
     /// Timeout in seconds.
     pub timeout_secs: u64,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Config {
@@ -180,7 +223,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::InvalidInput(msg) => assert!(msg.contains("zero")),
-            _ => panic!("Expected InvalidInput error"),
+            Error::OperationFailed { .. } => unreachable!("Expected InvalidInput error"),
         }
     }
 

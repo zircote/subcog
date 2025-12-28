@@ -1,6 +1,6 @@
-//! Integration tests for {{crate_name}}.
+//! Integration tests for subcog.
 
-use {{crate_name}}::{add, divide, Config, Error, Result};
+use subcog::{Config, Error, Result, add, divide};
 
 #[test]
 fn test_add_integration() {
@@ -34,7 +34,7 @@ fn test_divide_by_zero() {
     if let Err(Error::InvalidInput(msg)) = result {
         assert!(msg.contains("zero"), "Error message should mention zero");
     } else {
-        panic!("Expected InvalidInput error");
+        unreachable!("Expected InvalidInput error");
     }
 }
 

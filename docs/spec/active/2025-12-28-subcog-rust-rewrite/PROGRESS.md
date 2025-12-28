@@ -3,11 +3,11 @@ document_type: progress
 format_version: "1.0.0"
 project_id: SPEC-2025-12-28-001
 project_name: "Subcog: Memory System Rust Rewrite"
-project_status: draft
+project_status: in-progress
 current_phase: 1
 implementation_started: 2025-12-28T21:00:00Z
-last_session: 2025-12-28T21:00:00Z
-last_updated: 2025-12-28T21:00:00Z
+last_session: 2025-12-28T22:30:00Z
+last_updated: 2025-12-28T22:30:00Z
 ---
 
 # Subcog: Memory System Rust Rewrite - Implementation Progress
@@ -26,13 +26,13 @@ This document tracks implementation progress against the spec plan.
 
 | ID | Description | Status | Started | Completed | Notes |
 |----|-------------|--------|---------|-----------|-------|
-| 1.1.1 | Initialize Rust project with cargo | pending | | | |
-| 1.1.2 | Configure development tooling | pending | | | |
-| 1.1.3 | Create module structure | pending | | | |
-| 1.2.1 | Implement core types | pending | | | |
+| 1.1.1 | Initialize Rust project with cargo | done | 2025-12-28 | 2025-12-28 | Cargo.toml configured |
+| 1.1.2 | Configure development tooling | done | 2025-12-28 | 2025-12-28 | clippy, rustfmt, CI/CD |
+| 1.1.3 | Create module structure | done | 2025-12-28 | 2025-12-28 | 12 modules, 60+ files |
+| 1.2.1 | Implement core types | done | 2025-12-28 | 2025-12-28 | Memory, Namespace, Domain, etc. |
 | 1.2.2 | Implement serialization | pending | | | |
 | 1.2.3 | Add validation | pending | | | |
-| 1.3.1 | Define storage traits | pending | | | |
+| 1.3.1 | Define storage traits | done | 2025-12-28 | 2025-12-28 | Persistence, Index, Vector traits |
 | 1.3.2 | Implement SQLite index backend | pending | | | |
 | 1.3.3 | Implement usearch vector backend | pending | | | |
 | 1.3.4 | Implement CompositeStorage | pending | | | |
@@ -129,7 +129,7 @@ This document tracks implementation progress against the spec plan.
 
 | Phase | Name | Progress | Status |
 |-------|------|----------|--------|
-| 1 | Core Foundation | 0% | pending |
+| 1 | Core Foundation | 17% | in-progress |
 | 2 | Hook Integration | 0% | pending |
 | 3 | MCP Server | 0% | pending |
 | 4 | Advanced Features | 0% | pending |
@@ -151,3 +151,16 @@ This document tracks implementation progress against the spec plan.
 - PROGRESS.md initialized from IMPLEMENTATION_PLAN.md
 - 95 tasks identified across 5 phases
 - Ready to begin implementation
+
+### 2025-12-28 - Module Structure & Core Types
+
+- Created complete module structure per ARCHITECTURE.md
+- 12 top-level modules: cli, config, embedding, git, hooks, llm, mcp, models, observability, security, services, storage
+- 60+ source files with stub implementations
+- Implemented core types: Memory, MemoryId, Namespace (10 variants), Domain, MemoryStatus
+- Implemented search types: SearchMode, SearchFilter, SearchResult
+- Implemented capture types: CaptureRequest, CaptureResult
+- Implemented consolidation types: MemoryTier, EdgeType, RetentionScore
+- Defined storage traits: PersistenceBackend, IndexBackend, VectorBackend
+- Added feature flags for postgres and redis backends
+- All 19 tests passing

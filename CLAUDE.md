@@ -4,22 +4,127 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-{{crate_name}} is a Rust crate built with modern tooling, strict type safety, and zero-cost abstractions.
+Subcog is a persistent memory system for AI coding assistants, written in Rust. It captures decisions, learnings, and context from coding sessions and surfaces them when relevant. This is a Rust rewrite of the [git-notes-memory](https://github.com/zircote/git-notes-memory) Python system.
+
+### Key Features
+
+- **Single-binary distribution** (<100MB, <10ms cold start)
+- **Three-layer storage architecture** (Persistence, Index, Vector)
+- **Pluggable backends** (Git Notes, SQLite+usearch, PostgreSQL+pgvector)
+- **MCP server integration** for AI agent interoperability
+- **Claude Code hooks** for seamless IDE integration
+- **Semantic search** with hybrid vector + BM25 ranking (RRF fusion)
 
 ## Project Structure
 
 ```
 src/
-├── lib.rs           # Library entry point and public API
-├── main.rs          # Binary entry point (optional)
-├── error.rs         # Error types (if separated)
-└── ...              # Additional modules
+├── lib.rs                    # Library entry point
+├── main.rs                   # CLI entry point
+│
+├── models/                   # Data structures
+│   ├── mod.rs
+│   ├── memory.rs            # Memory, MemoryId, MemoryResult
+│   ├── capture.rs           # CaptureResult, CaptureRequest
+│   ├── search.rs            # SearchResult, SearchFilter, SearchMode
+│   ├── consolidation.rs     # MemoryTier, EdgeType, RetentionScore
+│   ├── domain.rs            # Domain, Namespace (10 variants), MemoryStatus
+│   └── events.rs            # MemoryEvent variants
+│
+├── storage/                  # Three-layer storage abstraction
+│   ├── mod.rs               # CompositeStorage, layer trait re-exports
+│   ├── traits/
+│   │   ├── persistence.rs   # PersistenceBackend trait
+│   │   ├── index.rs         # IndexBackend trait
+│   │   └── vector.rs        # VectorBackend trait
+│   ├── persistence/
+│   │   ├── git_notes.rs     # Git notes implementation (primary)
+│   │   ├── postgresql.rs    # PostgreSQL implementation
+│   │   └── filesystem.rs    # Fallback filesystem storage
+│   ├── index/
+│   │   ├── sqlite.rs        # SQLite + FTS5 implementation
+│   │   ├── postgresql.rs    # PostgreSQL full-text
+│   │   └── redis.rs         # RediSearch implementation
+│   └── vector/
+│       ├── usearch.rs       # usearch HNSW implementation
+│       ├── pgvector.rs      # pgvector implementation
+│       └── redis.rs         # Redis vector search
+│
+├── services/                 # Business logic
+│   ├── mod.rs               # ServiceContainer
+│   ├── capture.rs           # CaptureService
+│   ├── recall.rs            # RecallService (search)
+│   ├── sync.rs              # SyncService
+│   ├── consolidation.rs     # ConsolidationService
+│   └── context.rs           # ContextBuilderService
+│
+├── git/                      # Git operations
+│   ├── notes.rs             # Git notes CRUD
+│   ├── remote.rs            # Fetch/push operations
+│   └── parser.rs            # YAML front matter parsing
+│
+├── embedding/                # Embedding generation
+│   ├── mod.rs               # Embedder trait
+│   ├── fastembed.rs         # FastEmbed implementation
+│   └── fallback.rs          # Fallback to BM25-only
+│
+├── llm/                      # LLM client abstraction
+│   ├── mod.rs               # LLMProvider trait
+│   ├── anthropic.rs         # Anthropic Claude implementation
+│   ├── openai.rs            # OpenAI implementation
+│   ├── ollama.rs            # Ollama (local) implementation
+│   └── lmstudio.rs          # LM Studio implementation
+│
+├── hooks/                    # Claude Code hooks
+│   ├── mod.rs               # HookHandler trait
+│   ├── session_start.rs     # Context injection
+│   ├── user_prompt.rs       # Signal detection
+│   ├── post_tool_use.rs     # Related memory surfacing
+│   ├── pre_compact.rs       # Auto-capture before compaction
+│   └── stop.rs              # Session analysis, sync
+│
+├── mcp/                      # MCP server
+│   ├── server.rs            # MCP server setup (rmcp)
+│   ├── tools.rs             # Tool implementations
+│   ├── resources.rs         # Resource handlers (URN scheme)
+│   └── prompts.rs           # Pre-defined prompts
+│
+├── security/                 # Security features
+│   ├── secrets.rs           # Secret detection patterns
+│   ├── pii.rs               # PII detection
+│   ├── redactor.rs          # Content redaction/masking
+│   └── audit.rs             # SOC2/GDPR audit logging
+│
+├── config/                   # Configuration
+│   ├── mod.rs               # Config struct, loading
+│   └── features.rs          # FeatureFlags
+│
+├── cli/                      # CLI commands
+│   ├── capture.rs           # capture subcommand
+│   ├── recall.rs            # recall subcommand
+│   ├── status.rs            # status subcommand
+│   ├── sync.rs              # sync subcommand
+│   ├── consolidate.rs       # consolidate subcommand
+│   ├── config.rs            # config subcommand
+│   ├── serve.rs             # serve subcommand (MCP)
+│   └── hook.rs              # hook subcommand
+│
+└── observability/            # Telemetry
+    ├── metrics.rs           # Prometheus metrics
+    ├── tracing.rs           # Distributed tracing
+    ├── logging.rs           # Structured logging
+    └── otlp.rs              # OTLP export
 
 tests/
-└── integration_test.rs  # Integration tests
+└── integration_test.rs      # Integration tests
 
-benches/              # Benchmarks (with criterion)
-examples/             # Example programs
+docs/spec/active/2025-12-28-subcog-rust-rewrite/
+├── README.md                # Spec overview
+├── REQUIREMENTS.md          # Product requirements
+├── ARCHITECTURE.md          # Technical architecture
+├── IMPLEMENTATION_PLAN.md   # Phased implementation
+├── DECISIONS.md             # Architecture decision records
+└── PROGRESS.md              # Implementation progress
 ```
 
 ## Build Commands
@@ -67,6 +172,32 @@ cargo +nightly miri test
 cargo fmt -- --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test && cargo doc --no-deps && cargo deny check
 ```
 
+## CLI Usage
+
+```bash
+# Capture a memory
+subcog capture --namespace decisions "Use PostgreSQL for primary storage"
+
+# Search memories
+subcog recall "database storage decision"
+
+# Check status
+subcog status
+
+# Sync with git remote
+subcog sync
+
+# Run as MCP server
+subcog serve
+
+# Hook commands (called by Claude Code)
+subcog hook session-start
+subcog hook user-prompt-submit
+subcog hook post-tool-use
+subcog hook pre-compact
+subcog hook stop
+```
+
 ## Code Style Requirements
 
 This project uses **clippy** with pedantic and nursery lints, and **rustfmt** for formatting.
@@ -105,15 +236,18 @@ Use `thiserror` for custom error types:
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum Error {
-    #[error("invalid input: {0}")]
-    InvalidInput(String),
+pub enum MemoryError {
+    #[error("Capture failed: {0}")]
+    Capture(#[source] CaptureError),
 
-    #[error("operation failed")]
-    OperationFailed {
-        #[source]
-        source: std::io::Error,
-    },
+    #[error("Memory not found: {0}")]
+    NotFound(String),
+
+    #[error("Security: content blocked")]
+    ContentBlocked,
+
+    #[error("Feature not enabled: {0}")]
+    FeatureNotEnabled(String),
 }
 ```
 
@@ -122,31 +256,35 @@ pub enum Error {
 All public items must have documentation with examples:
 
 ```rust
-/// Processes the input data according to the configuration.
+/// Captures a memory to persistent storage.
 ///
 /// # Arguments
 ///
-/// * `input` - The data to process.
-/// * `config` - Processing configuration.
+/// * `request` - The capture request containing content and metadata.
 ///
 /// # Returns
 ///
-/// The processed result.
+/// A [`CaptureResult`] with the memory ID and URN.
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidInput`] if the input is malformed.
+/// Returns [`MemoryError::ContentBlocked`] if secrets are detected.
 ///
 /// # Examples
 ///
 /// ```rust
-/// use {{crate_name}}::{process, Config};
+/// use subcog::{CaptureService, CaptureRequest, Namespace};
 ///
-/// let result = process("data", &Config::default())?;
-/// assert!(!result.is_empty());
-/// # Ok::<(), {{crate_name}}::Error>(())
+/// let service = CaptureService::new(config)?;
+/// let result = service.capture(CaptureRequest {
+///     namespace: Namespace::Decisions,
+///     content: "Use PostgreSQL".to_string(),
+///     ..Default::default()
+/// })?;
+/// assert!(!result.memory_id.is_empty());
+/// # Ok::<(), subcog::MemoryError>(())
 /// ```
-pub fn process(input: &str, config: &Config) -> Result<Output, Error> {
+pub async fn capture(&self, request: CaptureRequest) -> Result<CaptureResult, MemoryError> {
     // implementation
 }
 ```
@@ -234,7 +372,7 @@ mod tests {
     #[test]
     fn test_error_case() {
         let result = function_under_test(invalid_input);
-        assert!(matches!(result, Err(Error::InvalidInput(_))));
+        assert!(matches!(result, Err(MemoryError::NotFound(_))));
     }
 }
 ```
@@ -269,30 +407,48 @@ This project uses `cargo-deny` to audit dependencies:
 
 ## Architecture Guidelines
 
+### Three-Layer Storage
+
+1. **Persistence Layer** (Authoritative): Git Notes (primary), PostgreSQL, Filesystem
+2. **Index Layer** (Searchable): SQLite + FTS5, PostgreSQL full-text, RediSearch
+3. **Vector Layer** (Embeddings): usearch HNSW, pgvector, Redis vector
+
+### Feature Tiers
+
+| Tier | Features | Requirements |
+|------|----------|--------------|
+| **Core** | Capture, search, git notes, CLI | None |
+| **Enhanced** | Secrets filtering, multi-domain, audit | Configuration |
+| **LLM-Powered** | Auto-capture, consolidation, temporal | LLM provider |
+
+### Design Principles
+
 1. **Zero-cost abstractions**: Prefer compile-time over runtime overhead
 2. **Explicit over implicit**: No hidden allocations or side effects
 3. **Error propagation**: Use `?` operator, avoid `.unwrap()`
 4. **Const by default**: Use `const fn` where possible
 5. **Minimal dependencies**: Only add what's truly needed
-6. **Documentation-driven**: Public API documented with examples
+6. **Graceful degradation**: Features fail open with fallbacks
 
-## Performance Considerations
+## Performance Targets
 
-- Use `#[must_use]` for functions returning values that should not be ignored
-- Prefer `&str` over `String` in function parameters
-- Use `Vec::with_capacity()` when size is known
-- Avoid allocations in hot paths
-- Profile before optimizing
+| Metric | Target |
+|--------|--------|
+| Cold start | <10ms |
+| Capture latency | <30ms |
+| Search latency | <50ms |
+| Binary size | <100MB |
+| Memory (idle) | <50MB |
 
 ## CI/CD
 
 The CI pipeline includes:
 1. **Format check**: `cargo fmt -- --check`
 2. **Lint**: `cargo clippy --all-targets --all-features`
-3. **Test**: `cargo test --all-features`
+3. **Test**: `cargo test --all-features` (ubuntu, macos, windows)
 4. **Documentation**: `cargo doc --no-deps`
 5. **Supply chain**: `cargo deny check`
-6. **MSRV check**: Verify minimum supported Rust version
+6. **MSRV check**: Rust 1.85
 7. **Coverage**: Generate code coverage reports
 
 ## LSP Integration
@@ -327,3 +483,28 @@ The following hooks run automatically on file save:
 - `rustfmt` - Auto-formats code to project standards
 - `cargo check` - Fast compilation checking
 - `cargo clippy` - Lint warnings and suggestions
+
+## Key Dependencies
+
+| Crate | Purpose |
+|-------|---------|
+| `clap` | CLI argument parsing |
+| `rmcp` | MCP server implementation |
+| `fastembed` | Embedding generation (all-MiniLM-L6-v2) |
+| `usearch` | HNSW vector similarity search |
+| `rusqlite` | SQLite + FTS5 for indexing |
+| `git2` | Git operations |
+| `serde` / `serde_json` / `serde_yml` | Serialization |
+| `tokio` | Async runtime |
+| `tracing` | Observability |
+| `thiserror` / `anyhow` | Error handling |
+
+## Specification Documents
+
+Full specification in `docs/spec/active/2025-12-28-subcog-rust-rewrite/`:
+
+- [REQUIREMENTS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/REQUIREMENTS.md) - Product requirements
+- [ARCHITECTURE.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/ARCHITECTURE.md) - Technical architecture
+- [IMPLEMENTATION_PLAN.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/IMPLEMENTATION_PLAN.md) - Phased implementation
+- [DECISIONS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/DECISIONS.md) - Architecture decision records
+- [PROGRESS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/PROGRESS.md) - Implementation progress

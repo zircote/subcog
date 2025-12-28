@@ -1,18 +1,25 @@
-//! Binary entry point for {{crate_name}}.
+//! Binary entry point for subcog.
+//!
+//! This binary provides the CLI interface for the subcog memory system.
 
 #![deny(clippy::all)]
 #![warn(clippy::pedantic)]
 #![warn(missing_docs)]
+// Allow print_stderr in main binary for CLI output
+#![allow(clippy::print_stderr)]
 
-use {{crate_name}}::{add, divide, Config};
+use subcog::{Config, add, divide};
 
 /// Main entry point.
+///
+/// Currently a placeholder demonstrating basic library usage.
+/// Will be replaced with clap-based CLI in Phase 1.
 fn main() {
     // Example usage
     let config = Config::new().with_verbose(true);
 
     if config.verbose {
-        eprintln!("Running {{crate_name}} with verbose mode enabled");
+        eprintln!("Running subcog with verbose mode enabled");
     }
 
     // Demonstrate add function
