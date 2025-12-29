@@ -1,0 +1,8 @@
+---
+created_at: 1767031535
+id: 1767031535646420000
+namespace: learnings
+status: active
+updated_at: 1767031535
+---
+Implemented MCP Sampling provider for delegating LLM calls to host. Added SamplingProvider (src/llm/sampling.rs) implementing LlmProvider trait that uses peer.create_message() via MCP sampling/createMessage protocol. Integrated into RmcpServerHandler with auto-configuration of peer from RequestContext on first tool call. Eliminates need for external API keys when running as MCP server - LLM operations delegate to the host (Claude).
