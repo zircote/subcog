@@ -1,0 +1,8 @@
+---
+created_at: 1766998600
+id: patterns-1766998600973300000
+namespace: patterns
+status: active
+updated_at: 1766998600
+---
+Error handling pattern in Rust: thiserror for library errors (custom error types with #[derive(Error)]), anyhow for application errors. Use #[from] attribute for automatic conversion to reduce boilerplate. All trait methods should document errors with # Errors sections.
