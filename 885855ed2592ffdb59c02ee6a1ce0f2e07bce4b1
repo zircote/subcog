@@ -1,0 +1,9 @@
+---
+created_at: 1766992765
+id: dba19133e89e3818
+namespace: learnings
+status: active
+tags: security,validation
+updated_at: 1766992765
+---
+Always validate input at service boundaries to prevent injection attacks
