@@ -1,0 +1,8 @@
+---
+created_at: 1767029471
+id: learnings-1767029471042182000
+namespace: learnings
+status: active
+updated_at: 1767029471
+---
+git2 crate (libgit2 Rust bindings) is comprehensive but requires understanding of underlying C semantics. The C library has specific patterns for object lifetimes, reference handling, and error codes that don't map directly to Rust idioms. Read libgit2 docs alongside git2 Rust docs for full understanding.
