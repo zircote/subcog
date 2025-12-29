@@ -1,0 +1,8 @@
+---
+created_at: 1767029486
+id: patterns-1767029486971036000
+namespace: patterns
+status: active
+updated_at: 1767029486
+---
+Recommendations for future Rust projects from retrospective: (1) Plan for shared backend access from start - ServiceContainer pattern emerged as need, (2) Design hook dependency injection upfront, (3) Consider async-first - Tokio added late simplified HTTP integration, (4) Add database migrations strategy early. Architecture tests first to validate public API contracts before implementation.
