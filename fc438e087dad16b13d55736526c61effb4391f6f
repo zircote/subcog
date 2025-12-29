@@ -1,0 +1,8 @@
+---
+created_at: 1766999431
+id: 22fd596ff2c93b20
+namespace: learnings
+status: active
+updated_at: 1766999431
+---
+Pushgateway integration enables CLI metrics persistence across invocations
