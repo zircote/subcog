@@ -1,0 +1,22 @@
+---
+created_at: 1767039120
+id: 1767039120605941000
+namespace: patterns
+status: active
+updated_at: 1767039120
+---
+Pattern: Read-only system namespaces in Subcog
+
+When adding system-managed content that users shouldn't modify:
+1. Add variant to Namespace enum (e.g., Namespace::Help)
+2. Implement is_system() method returning true for system namespaces
+3. Implement user_namespaces() to exclude system namespaces from user enumeration
+4. Add ReadOnlyNamespace error variant to CaptureError
+5. Check is_system() in CaptureService.capture() to reject writes
+6. Apply weight adjustment in RecallService to deprioritize system content (0.7x)
+
+This pattern ensures:
+- Users can search/recall system content
+- Users cannot overwrite or pollute system content
+- System content doesn't dominate user memory search results
+- Clear separation between user and system namespaces
