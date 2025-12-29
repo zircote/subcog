@@ -1,0 +1,8 @@
+---
+created_at: 1767029448
+id: decisions-1767029448569414000
+namespace: decisions
+status: active
+updated_at: 1767029448
+---
+usearch chosen for vector similarity search: HNSW algorithm for approximate KNN, single file persistence, 384 dimensions (MiniLM), cosine similarity. Performance: <10ms for 10K vectors, small memory footprint, no external server. Trade-offs: separate file from SQLite, no ACID guarantees (acceptable given git notes as authoritative). This is ADR-008.
