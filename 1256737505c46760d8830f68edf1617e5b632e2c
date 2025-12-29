@@ -1,0 +1,8 @@
+---
+created_at: 1766998618
+id: patterns-1766998618591980000
+namespace: patterns
+status: active
+updated_at: 1766998618
+---
+Multi-layered testing strategy: Architecture tests validate public API contracts before implementation. Property-based tests (proptest) for complex logic like SearchFilter, RRF fusion. Functional tests for end-to-end workflows. tempfile crate excellent for test isolation. Establish benchmark baselines from day 1.
