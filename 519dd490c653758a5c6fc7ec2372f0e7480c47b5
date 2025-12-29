@@ -1,0 +1,8 @@
+---
+created_at: 1767033623
+id: 1767033623780515000
+namespace: progress
+status: active
+updated_at: 1767033623
+---
+Revised SessionStart guidance templates with MCP-first capture protocol. Key changes: (1) RULE 0 now at TOP instructs to call mcp__subcog__memory.capture FIRST, get URN with ID, THEN output visual block with full URN. (2) Trimmed fat - removed redundant examples, failure modes, accountability framework. (3) Token budgets reduced: minimal ~200 (was ~400), standard ~600 (was ~1500), detailed ~1000 (was ~2500). (4) Stop hook behavior explained: block WITH ID → skips (already saved), block WITHOUT ID → fallback capture from transcript.
