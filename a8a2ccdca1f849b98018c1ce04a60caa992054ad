@@ -1,0 +1,9 @@
+---
+created_at: 1766992761
+id: 3259b7e6b023da03
+namespace: decisions
+status: active
+tags: redis,caching
+updated_at: 1766992761
+---
+We chose Redis for session caching due to its in-memory performance
