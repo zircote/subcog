@@ -1,0 +1,8 @@
+---
+created_at: 1766998618
+id: patterns-1766998618559844000
+namespace: patterns
+status: active
+updated_at: 1766998618
+---
+Claude Code hook timing constraints: SessionStart 2000ms (can do remote fetch), UserPromptSubmit 50ms (must be fast), PostToolUse 100ms (context injection), PreCompact 500ms (content analysis), Stop 5000ms (can do remote push). Hooks must NEVER fail with non-zero exit and must ALWAYS output valid JSON.
