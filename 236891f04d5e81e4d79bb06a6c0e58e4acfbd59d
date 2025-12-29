@@ -1,0 +1,8 @@
+---
+created_at: 1767029471
+id: learnings-1767029471086283000
+namespace: learnings
+status: active
+updated_at: 1767029471
+---
+Bottom-up task breakdown (150 granular tasks) proved highly accurate for scope estimation. Effort estimates were off due to parallel agent execution vs sequential planning assumption. Definition of Done checklists caught incomplete implementations. Lesson: plan tasks granularly, but expect different execution models to dramatically change timelines.
