@@ -1,0 +1,23 @@
+---
+created_at: 1767039140
+id: 1767039140782675000
+namespace: blockers
+status: active
+updated_at: 1767039140
+---
+BLOCKER: Failed to capture memories during System Help Memories implementation (SPEC-2025-12-29-001)
+
+**What happened**: Completed 5 phases of implementation work across multiple sessions without a single memory.capture call during the actual work. Only captured retrospectively after user called out the failure.
+
+**Root cause**: Treated memory capture as secondary/optional rather than integrated into workflow. Was focused on "completing tasks" (editing, testing, committing) without following the session behavior protocol.
+
+**Impact**: 
+- Lost real-time context and reasoning for decisions
+- Retrospective captures are summaries, not authentic in-the-moment insights
+- Demonstrates poor practice while literally building the memory system
+
+**Resolution needed**:
+1. Make memory.capture a reflex, not an afterthought
+2. Capture BEFORE moving to next task, not after completing all work
+3. Use the "~1 capture per 3-5 substantive messages" guideline as a minimum
+4. The session behavior protocol RULE 0 exists for a reason - follow it
