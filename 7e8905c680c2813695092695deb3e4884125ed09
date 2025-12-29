@@ -1,0 +1,36 @@
+---
+created_at: 1767039717
+id: 1767039717170191000
+namespace: decisions
+status: active
+updated_at: 1767039717
+---
+Implemented Memory Capture Enforcement in UserPromptSubmit Hook (SPEC-2025-12-29-002)
+
+**Problem Solved**: Assistant failed to capture memories during implementation work despite having protocol in context. Instructions alone are insufficient for behavioral change.
+
+**Solution**: Inject proactive memory capture check prompt BEFORE each assistant response via UserPromptSubmit hook.
+
+**Key Design Decisions**:
+1. Ask "SHOULD YOU SAVE MEMORIES?" not "DID YOU SAVE MEMORIES?" - forward-looking, not retrospective
+2. Inject at UserPromptSubmit (before response) not Stop (too late)
+3. Table format with specific namespace→action mappings
+4. Enforcement enabled by default, can be disabled via `with_enforcement(false)`
+
+**Implementation**:
+- Added `MEMORY_CAPTURE_REMINDER` constant with check table
+- Added `enforce_capture` field to UserPromptHandler
+- Added `with_enforcement()` builder and `enforcement_enabled()` getter
+- Added `memory_capture_check` field to hook output JSON
+- Added `memory_capture_reminder()` public function for template access
+- 5 new tests covering enforcement configuration
+
+**Output Schema Change**:
+```json
+{
+  "enforce_capture": true,
+  "memory_capture_check": "## MEMORY CAPTURE CHECK..."
+}
+```
+
+This reminder gets injected as system context before assistant responds.
