@@ -1,0 +1,21 @@
+---
+created_at: 1767040248
+id: 1767040248830747000
+namespace: decisions
+status: active
+updated_at: 1767040248
+---
+Completed Memory Capture Enforcement CLI integration (SPEC-2025-12-29-002):
+
+**Issue**: Library had enforcement via UserPromptHandler, but CLI main.rs had duplicate inline implementation that didn't use it. Hook returned null for memory_capture_check.
+
+**Fix**: 
+1. Replaced inline HookType::UserPromptSubmit handling (lines 1126-1136) with UserPromptHandler::new().handle(&input)
+2. Removed duplicate local functions: CAPTURE_SIGNALS constant, detect_capture_signals(), calculate_signal_confidence() (lines 1360-1393)
+3. Fixed raw string syntax: r#"..."# → r"..." to satisfy clippy::needless_raw_string_hashes
+
+**Verification**: `echo '{"prompt": "test"}' | subcog hook user-prompt-submit` now returns:
+- enforce_capture: true
+- memory_capture_check: 793-char enforcement reminder
+
+**Lesson**: When implementing features in library code, verify the CLI actually uses the library handlers instead of having inline duplicates.
