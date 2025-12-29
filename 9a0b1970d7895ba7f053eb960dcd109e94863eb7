@@ -1,0 +1,8 @@
+---
+created_at: 1766998618
+id: learnings-1766998618523915000
+namespace: learnings
+status: active
+updated_at: 1766998618
+---
+Rust rewrite achieved 10x better performance than Python: <10MB binary (vs ~50MB), <10ms startup (vs ~200ms), 93% test coverage. fastembed for local embeddings, usearch for HNSW vector search, rmcp for native MCP server. Memory safety without GC overhead.
