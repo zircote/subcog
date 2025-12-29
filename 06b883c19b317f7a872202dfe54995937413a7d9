@@ -1,0 +1,8 @@
+---
+created_at: 1767029430
+id: decisions-1767029430957505000
+namespace: decisions
+status: active
+updated_at: 1767029430
+---
+URN scheme for memory addressing: subcog://mem/{domain}/{namespace}/{id}. Examples: subcog://mem/project:my-app/decisions/abc1234:0, subcog://mem/user/learnings/def5678:1, subcog://mem/org:acme-corp/patterns/ghi9012:0. Benefits: consistent addressing across interfaces, MCP resource compatibility, human-readable format, domain hierarchy encoded. This is ADR-005 from the Rust rewrite project.
