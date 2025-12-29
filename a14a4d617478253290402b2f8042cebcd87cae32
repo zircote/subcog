@@ -1,0 +1,9 @@
+---
+created_at: 1766992751
+id: 261c685291f1ab00
+namespace: decisions
+status: active
+tags: database,postgresql
+updated_at: 1766992751
+---
+We decided to use PostgreSQL for the primary database because it provides excellent ACID compliance and JSON support
