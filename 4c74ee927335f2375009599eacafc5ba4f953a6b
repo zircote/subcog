@@ -1,0 +1,8 @@
+---
+created_at: 1766998600
+id: learnings-1766998600886481000
+namespace: learnings
+status: active
+updated_at: 1766998600
+---
+Verification gate after agent completion is critical - one agent truncated a file during editing (usearch.rs fix). Required manual recovery from context. Always verify agent output before proceeding, especially for file modifications.
