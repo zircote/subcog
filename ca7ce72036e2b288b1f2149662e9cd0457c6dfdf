@@ -1,0 +1,8 @@
+---
+created_at: 1766984586
+id: af183c34e56c07f1
+namespace: decisions
+status: active
+updated_at: 1766984586
+---
+Use GitNotesBackend for persistence storage
