@@ -1,0 +1,88 @@
+---
+created_at: 1767035994
+id: 1767035994388242000
+namespace: learnings
+status: active
+updated_at: 1767035994
+---
+MCP Prompts Architecture in Subcog
+
+STRUCTURE & COMPONENTS:
+- PromptInfo: Defines a prompt with name, description, and arguments
+- PromptArgument: Individual argument with name, description, required flag
+- PromptRegistry: Registry that manages all prompts (similar to ToolRegistry pattern)
+
+KEY FINDINGS:
+
+1. PROMPT DEFINITION (src/mcp/prompts.rs, lines 6-66):
+   - PromptInfo::new(name, description) creates a prompt
+   - .with_argument(arg) builder pattern adds arguments
+   - Arguments can be required() or optional()
+   - Converts to MCP JSON via to_mcp_json()
+
+2. ARGUMENT PATTERN (lines 68-109):
+   - PromptArgument::required(name, description)
+   - PromptArgument::optional(name, description)
+   - Arguments have no type validation in schema (unlike tools)
+   - Both convert to JSON with required boolean
+
+3. REGISTRATION (lines 111-186):
+   - PromptRegistry::new() auto-registers defaults
+   - register_default_prompts() adds 4 built-in prompts
+   - No manual registration method (unlike tools) - must extend register_default_prompts()
+
+4. CURRENT PROMPTS (4 total):
+   a) capture_decision
+      - Required: decision (str)
+      - Optional: context (str), alternatives (str)
+   
+   b) recall_context
+      - Required: topic (str)
+      - Optional: namespace (str)
+   
+   c) summarize_session
+      - Optional: focus (str)
+   
+   d) analyze_patterns
+      - Optional: category (str)
+
+5. PROMPT EXECUTION (src/mcp/server.rs, lines 1240-1288):
+   - RmcpServerHandler::get_prompt() handles prompt execution
+   - Arguments passed via request.arguments as Option<HashMap>
+   - get() -> and_then(|a| a.get("name")) -> and_then(|v| v.as_str()) pattern
+   - Returns GetPromptResult with messages (list of PromptMessage)
+   - Messages are PromptMessageRole::User with text content
+   - Prompt execution interpolates arguments into message_text
+
+6. MCP SERVER INTEGRATION (lines 1169-1210):
+   - handle_prompts_list() converts registry to rmcp Prompt structs
+   - Maps PromptArgument to RmcpPromptArgument
+   - PromptsCapability registered in get_info()
+
+7. REGISTRY & EXPOSURE:
+   - prompts() getter returns &PromptRegistry
+   - to_mcp_json() serializes all prompts
+   - prompt_names() returns list of prompt names
+   - get_prompt(name) retrieves by name
+
+DIFFERENCES FROM TOOLS:
+- Tools have input_schema (JSON Schema), prompts have simple argument list
+- Tools are invoked directly, prompts generate user messages
+- Arguments lack type/enum constraints (all strings)
+- No validation or default values in argument definitions
+
+TESTING PATTERN (src/mcp/prompts.rs, lines 226-326):
+- test_prompt_count() validates registration count
+- test_prompt_names() checks prompt names exist
+- test_get_prompt() tests retrieval
+- test_prompt_argument_required/optional() test argument creation
+- test_prompt_to_mcp_json() validates JSON output
+- test_capture_decision_prompt() validates specific prompts
+
+CURRENT LIMITATIONS:
+1. No type validation on arguments (all strings)
+2. No default values
+3. No enum constraints
+4. No custom argument types beyond string
+5. Must edit register_default_prompts() to add new prompts (not extensible)
+6. Prompt execution is hardcoded in get_prompt() with match statements
