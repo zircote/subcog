@@ -1,0 +1,8 @@
+---
+created_at: 1767029471
+id: learnings-1767029471125223000
+namespace: learnings
+status: active
+updated_at: 1767029471
+---
+Deep-clean code review with 12 parallel specialist agents identified 176 findings: 18 critical, 44 high, 63 medium, 51 low. All 18 critical findings remediated. Health scores improved from critical (database 3/10, git 2/10) to functional. Process: severity-based prioritization (Critical → High → Medium → Low) with targeted domain-specific agents for remediation.
