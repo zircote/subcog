@@ -1,0 +1,29 @@
+---
+created_at: 1767039120
+id: 1767039120538069000
+namespace: decisions
+status: active
+updated_at: 1767039120
+---
+System Help Memories Implementation (SPEC-2025-12-29-001) completed successfully across 5 phases:
+
+**Key Implementation Decisions:**
+1. Added Namespace::Help as a read-only system namespace (12 total namespaces now)
+2. Help content embedded at compile-time via include_str!() from src/help/content/*.md
+3. HelpIndexService indexes help during startup into Help namespace with stable IDs
+4. RecallService applies 0.7x weight multiplier to Help namespace to prioritize user memories
+5. First-run detection uses has_any_user_memories() to check for tutorial invitation
+6. MCP integration: subcog_tutorial prompt with familiarity/focus args, help resources via subcog://help/{category}
+
+**Performance Results:**
+- Startup time: ~5ms (target <10ms) ✓
+- Binary size: 26MB (target <100MB) ✓
+- 900+ tests passing
+
+**Files Added/Modified:**
+- src/help/ module (content.rs, indexer.rs, mod.rs + 7 markdown files)
+- src/mcp/prompts.rs (subcog_tutorial prompt)
+- src/mcp/resources.rs (ParsedUrn.help_category/help_topic, help templates)
+- src/mcp/server.rs (generate_tutorial_content, read_help_content)
+- src/services/context.rs (has_any_user_memories, has_memories_in_namespace)
+- src/hooks/session_start.rs (first-run detection, tutorial_invitation)
