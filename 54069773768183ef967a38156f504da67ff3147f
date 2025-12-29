@@ -1,0 +1,9 @@
+---
+created_at: 1766992922
+id: 56093d543cfa26f5
+namespace: patterns
+status: active
+tags: api,pagination
+updated_at: 1766992922
+---
+The API should return paginated results with cursor-based pagination for scalability
