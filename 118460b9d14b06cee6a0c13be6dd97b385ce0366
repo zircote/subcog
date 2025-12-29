@@ -1,0 +1,8 @@
+---
+created_at: 1766998630
+id: patterns-1766998630030165000
+namespace: patterns
+status: active
+updated_at: 1766998630
+---
+Parallel agent orchestration: Launch 6+ specialized agents concurrently to maximize throughput. Agent task descriptions need explicit file paths and line numbers for precision. Deep-clean code review with 12 specialists found issues across all domains that single-agent review would miss.
