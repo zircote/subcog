@@ -1,0 +1,23 @@
+---
+created_at: 1767039120
+id: 1767039120657765000
+namespace: learnings
+status: active
+updated_at: 1767039120
+---
+Learning: MCP prompts vs tools architecture difference
+
+MCP Prompts (src/mcp/prompts.rs):
+- Define PromptInfo with name, description, and PromptArguments
+- Arguments are simple strings with no type/enum constraints
+- Prompts generate PromptMessage content (user messages) - not direct actions
+- Executed via get_prompt() which interpolates arguments into message text
+- No validation or defaults on arguments
+
+MCP Tools (src/mcp/tools.rs):
+- Define ToolInfo with JSON Schema input_schema
+- Strong type validation, enums, defaults, required fields
+- Tools are invoked directly and perform actions
+- call_tool() validates input against schema
+
+Key takeaway: Use prompts for generating context/instructions, use tools for performing actions. Prompts lack the validation rigor of tools - keep them simple.
