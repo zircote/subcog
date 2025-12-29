@@ -1,0 +1,8 @@
+---
+created_at: 1766998600
+id: patterns-1766998600736465000
+namespace: patterns
+status: active
+updated_at: 1766998600
+---
+Three-layer storage architecture (Persistence/Index/Vector) with trait-based abstraction enables pluggable backends. Each layer can have multiple implementations: Persistence (Git Notes, PostgreSQL, Filesystem), Index (SQLite FTS5, PostgreSQL, RediSearch), Vector (usearch, pgvector, Redis). The flexibility to support git notes locally while allowing PostgreSQL+pgvector for team deployments justifies the complexity.
