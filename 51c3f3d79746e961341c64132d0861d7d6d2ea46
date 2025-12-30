@@ -3,6 +3,11 @@ created_at: 1767029431
 id: decisions-1767029431052462000
 namespace: decisions
 status: active
+tags:
+- fastembed-crate
+- all-minilm-l6-v2-model
+- offline-embeddings
+- local-first
 updated_at: 1767029431
 ---
 fastembed crate chosen for embedding generation with all-MiniLM-L6-v2 model (384 dimensions). Benefits: no external API dependency for core features, works offline, single binary (model embedded or cached), fast inference. Trade-offs: model download on first use, fixed model (no custom training), larger binary size. Local embedding generation aligns with local-first philosophy. This is ADR-007.
