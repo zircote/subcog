@@ -3,6 +3,12 @@ created_at: 1766998629
 id: patterns-1766998629998840000
 namespace: patterns
 status: active
+tags:
+- builder-pattern
+- must-use-attribute
+- const-fn
+- borrowed-slices
+- cow-string
 updated_at: 1766998629
 ---
 Builder pattern with #[must_use] annotation prevents API misuse in Rust. Use const fn where possible for compile-time evaluation. Prefer borrowing over ownership (&[u8] instead of Vec<u8>). Use Cow for flexible string handling when modification is conditional.
