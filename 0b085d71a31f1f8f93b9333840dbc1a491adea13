@@ -3,6 +3,11 @@ created_at: 1767031904
 id: 556256b788f6931e
 namespace: progress
 status: active
+tags:
+- progress-namespace
+- cli-test
+- command-line-interface
+- namespace-testing
 updated_at: 1767031904
 ---
 Test progress namespace via CLI
