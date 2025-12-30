@@ -3,6 +3,11 @@ created_at: 1767031944
 id: 1767031944170683000
 namespace: blockers
 status: active
+tags:
+- blockers-namespace
+- mcp-reconnect
+- test-capture
+- connectivity-test
 updated_at: 1767031944
 ---
 Test capture for blockers namespace after MCP reconnect.
