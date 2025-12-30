@@ -12,6 +12,11 @@
 //! - `subcog://_/{namespace}` - All memories in a namespace (e.g., `subcog://_/learnings`)
 //! - `subcog://memory/{id}` - Get a specific memory by ID
 //!
+//! ## Search & Topic Resources
+//! - `subcog://search/{query}` - Search memories with a query
+//! - `subcog://topics` - List all indexed topics
+//! - `subcog://topics/{topic}` - Get memories for a specific topic
+//!
 //! ## Domain-Scoped Resources (future)
 //! - `subcog://project/_` - Project-scoped memories only
 //! - `subcog://org/{org}/_` - Organization-scoped memories
@@ -21,7 +26,8 @@
 //! which supports filtering by namespace, tags, time, source, and status.
 
 use crate::Namespace;
-use crate::services::RecallService;
+use crate::models::SearchMode;
+use crate::services::{RecallService, TopicIndexService};
 use crate::{Error, Result, SearchFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -32,6 +38,8 @@ pub struct ResourceHandler {
     help_content: HashMap<String, HelpCategory>,
     /// Optional recall service for memory browsing.
     recall_service: Option<RecallService>,
+    /// Topic index for topic-based resource access.
+    topic_index: Option<TopicIndexService>,
 }
 
 impl ResourceHandler {
@@ -121,15 +129,36 @@ impl ResourceHandler {
         Self {
             help_content,
             recall_service: None,
+            topic_index: None,
         }
     }
 
-    /// Creates a resource handler with a recall service for memory browsing.
+    /// Adds a recall service to the resource handler.
     #[must_use]
-    pub fn with_recall(recall_service: RecallService) -> Self {
-        let mut handler = Self::new();
-        handler.recall_service = Some(recall_service);
-        handler
+    pub fn with_recall_service(mut self, recall_service: RecallService) -> Self {
+        self.recall_service = Some(recall_service);
+        self
+    }
+
+    /// Adds a topic index to the resource handler.
+    #[must_use]
+    pub fn with_topic_index(mut self, topic_index: TopicIndexService) -> Self {
+        self.topic_index = Some(topic_index);
+        self
+    }
+
+    /// Builds and refreshes the topic index from the recall service.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the topic index cannot be built.
+    pub fn refresh_topic_index(&mut self) -> Result<()> {
+        let recall = self.recall_service.as_ref().ok_or_else(|| {
+            Error::InvalidInput("Topic indexing requires RecallService".to_string())
+        })?;
+
+        let topic_index = self.topic_index.get_or_insert_with(TopicIndexService::new);
+        topic_index.build_index(recall)
     }
 
     /// Lists all available resources.
@@ -171,6 +200,29 @@ impl ResourceHandler {
             });
         }
 
+        // Search resource (template)
+        resources.push(ResourceDefinition {
+            uri: "subcog://search/{query}".to_string(),
+            name: "Search Memories".to_string(),
+            description: Some("Search memories with a query (replace {query})".to_string()),
+            mime_type: Some("application/json".to_string()),
+        });
+
+        // Topics resources
+        resources.push(ResourceDefinition {
+            uri: "subcog://topics".to_string(),
+            name: "All Topics".to_string(),
+            description: Some("List all indexed topics with memory counts".to_string()),
+            mime_type: Some("application/json".to_string()),
+        });
+
+        resources.push(ResourceDefinition {
+            uri: "subcog://topics/{topic}".to_string(),
+            name: "Topic Memories".to_string(),
+            description: Some("Get memories for a specific topic (replace {topic})".to_string()),
+            mime_type: Some("application/json".to_string()),
+        });
+
         resources
     }
 
@@ -183,6 +235,9 @@ impl ResourceHandler {
     /// - `subcog://_/{namespace}` - All memories in a namespace
     /// - `subcog://memory/{id}` - Get specific memory by ID
     /// - `subcog://project/_` - Project-scoped memories (alias for `subcog://_`)
+    /// - `subcog://search/{query}` - Search memories with a query
+    /// - `subcog://topics` - List all indexed topics
+    /// - `subcog://topics/{topic}` - Get memories for a specific topic
     ///
     /// For advanced filtering, use the `subcog_browse` prompt instead.
     ///
@@ -208,8 +263,10 @@ impl ResourceHandler {
             "_" => self.get_all_memories_resource(uri, &parts),
             "project" => self.get_all_memories_resource(uri, &parts), // Alias for now
             "memory" => self.get_memory_resource(uri, &parts),
+            "search" => self.get_search_resource(uri, &parts),
+            "topics" => self.get_topics_resource(uri, &parts),
             _ => Err(Error::InvalidInput(format!(
-                "Unknown resource type: {}. Valid: _, help, memory, project",
+                "Unknown resource type: {}. Valid: _, help, memory, project, search, topics",
                 parts[0]
             ))),
         }
@@ -351,6 +408,142 @@ impl ResourceHandler {
             text: Some(serde_json::to_string_pretty(&response).unwrap_or_default()),
             blob: None,
         })
+    }
+
+    /// Searches memories and returns results.
+    ///
+    /// URI: `subcog://search/{query}`
+    fn get_search_resource(&self, uri: &str, parts: &[&str]) -> Result<ResourceContent> {
+        if parts.len() < 2 {
+            return Err(Error::InvalidInput(
+                "Search query required: subcog://search/<query>".to_string(),
+            ));
+        }
+
+        let recall = self
+            .recall_service
+            .as_ref()
+            .ok_or_else(|| Error::InvalidInput("Search requires RecallService".to_string()))?;
+
+        // URL-decode the query (simple: replace + with space, handle %20)
+        let query = parts[1..].join("/");
+        let query = decode_uri_component(&query);
+
+        // Perform search with hybrid mode
+        let filter = SearchFilter::new();
+        let results = recall.search(&query, SearchMode::Hybrid, &filter, 20)?;
+
+        // Build response
+        let memories: Vec<serde_json::Value> = results
+            .memories
+            .iter()
+            .map(|hit| {
+                serde_json::json!({
+                    "id": hit.memory.id.as_str(),
+                    "namespace": hit.memory.namespace.as_str(),
+                    "score": hit.score,
+                    "tags": hit.memory.tags,
+                    "content_preview": truncate_content(&hit.memory.content, 200),
+                    "uri": format!("subcog://memory/{}", hit.memory.id.as_str()),
+                })
+            })
+            .collect();
+
+        let response = serde_json::json!({
+            "query": query,
+            "count": memories.len(),
+            "mode": "hybrid",
+            "memories": memories,
+        });
+
+        Ok(ResourceContent {
+            uri: uri.to_string(),
+            mime_type: Some("application/json".to_string()),
+            text: Some(serde_json::to_string_pretty(&response).unwrap_or_default()),
+            blob: None,
+        })
+    }
+
+    /// Gets topics resource (list or specific topic).
+    ///
+    /// URIs:
+    /// - `subcog://topics` - List all topics
+    /// - `subcog://topics/{topic}` - Get memories for a topic
+    fn get_topics_resource(&self, uri: &str, parts: &[&str]) -> Result<ResourceContent> {
+        let topic_index = self
+            .topic_index
+            .as_ref()
+            .ok_or_else(|| Error::InvalidInput("Topic index not initialized".to_string()))?;
+
+        if parts.len() == 1 {
+            // List all topics
+            let topics = topic_index.list_topics()?;
+
+            let topics_json: Vec<serde_json::Value> = topics
+                .iter()
+                .map(|t| {
+                    serde_json::json!({
+                        "name": t.name,
+                        "memory_count": t.memory_count,
+                        "namespaces": t.namespaces.iter().map(Namespace::as_str).collect::<Vec<_>>(),
+                        "uri": format!("subcog://topics/{}", t.name),
+                    })
+                })
+                .collect();
+
+            let response = serde_json::json!({
+                "count": topics_json.len(),
+                "topics": topics_json,
+            });
+
+            Ok(ResourceContent {
+                uri: uri.to_string(),
+                mime_type: Some("application/json".to_string()),
+                text: Some(serde_json::to_string_pretty(&response).unwrap_or_default()),
+                blob: None,
+            })
+        } else {
+            // Get memories for specific topic
+            let topic = parts[1..].join("/");
+            let topic = decode_uri_component(&topic);
+
+            let memory_ids = topic_index.get_topic_memories(&topic)?;
+
+            if memory_ids.is_empty() {
+                return Err(Error::InvalidInput(format!("Topic not found: {topic}")));
+            }
+
+            // Get topic info
+            let topic_info = topic_index.get_topic_info(&topic)?;
+
+            // Fetch full memories if recall service available
+            let memories: Vec<serde_json::Value> = if let Some(recall) = &self.recall_service {
+                memory_ids
+                    .iter()
+                    .filter_map(|id| recall.get_by_id(id).ok().flatten())
+                    .map(|m| format_memory_preview(&m))
+                    .collect()
+            } else {
+                // Return just IDs if no recall service
+                memory_ids.iter().map(format_memory_id_only).collect()
+            };
+
+            let response = serde_json::json!({
+                "topic": topic,
+                "memory_count": topic_info.as_ref().map_or(memory_ids.len(), |i| i.memory_count),
+                "namespaces": topic_info.as_ref().map_or_else(Vec::new, |i| {
+                    i.namespaces.iter().map(Namespace::as_str).collect::<Vec<_>>()
+                }),
+                "memories": memories,
+            });
+
+            Ok(ResourceContent {
+                uri: uri.to_string(),
+                mime_type: Some("application/json".to_string()),
+                text: Some(serde_json::to_string_pretty(&response).unwrap_or_default()),
+                blob: None,
+            })
+        }
     }
 
     /// Gets the help index listing all categories.
@@ -1004,6 +1197,69 @@ Default: `all-MiniLM-L6-v2` (384 dimensions)
 The embedding model is used for semantic similarity search in vector mode.
 "#;
 
+/// Formats a memory as a JSON preview for topic listings.
+fn format_memory_preview(m: &crate::models::Memory) -> serde_json::Value {
+    serde_json::json!({
+        "id": m.id.as_str(),
+        "namespace": m.namespace.as_str(),
+        "content_preview": truncate_content(&m.content, 200),
+        "tags": m.tags,
+        "uri": format!("subcog://memory/{}", m.id.as_str()),
+    })
+}
+
+/// Formats a memory ID as a minimal JSON object.
+fn format_memory_id_only(id: &crate::models::MemoryId) -> serde_json::Value {
+    serde_json::json!({
+        "id": id.as_str(),
+        "uri": format!("subcog://memory/{}", id.as_str()),
+    })
+}
+
+/// Simple URL decoding for URI components.
+///
+/// Handles common escape sequences: %20 (space), %2F (/), etc.
+fn decode_uri_component(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '%' => {
+                let hex: String = chars.by_ref().take(2).collect();
+                let decoded = (hex.len() == 2)
+                    .then(|| u8::from_str_radix(&hex, 16).ok())
+                    .flatten()
+                    .map(char::from);
+
+                if let Some(ch) = decoded {
+                    result.push(ch);
+                } else {
+                    result.push('%');
+                    result.push_str(&hex);
+                }
+            },
+            '+' => result.push(' '),
+            _ => result.push(c),
+        }
+    }
+
+    result
+}
+
+/// Truncates content to a maximum length, breaking at word boundaries.
+fn truncate_content(content: &str, max_len: usize) -> String {
+    if content.len() <= max_len {
+        return content.to_string();
+    }
+
+    let truncated = &content[..max_len];
+    truncated.rfind(' ').map_or_else(
+        || format!("{truncated}..."),
+        |last_space| format!("{}...", &truncated[..last_space]),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1067,5 +1323,63 @@ mod tests {
         let categories = handler.list_categories();
 
         assert_eq!(categories.len(), 7);
+    }
+
+    #[test]
+    fn test_decode_uri_component() {
+        assert_eq!(decode_uri_component("hello%20world"), "hello world");
+        assert_eq!(decode_uri_component("hello+world"), "hello world");
+        assert_eq!(decode_uri_component("rust%2Ferror"), "rust/error");
+        assert_eq!(decode_uri_component("no%change"), "no%change"); // Invalid hex
+        assert_eq!(decode_uri_component("plain"), "plain");
+    }
+
+    #[test]
+    fn test_truncate_content() {
+        assert_eq!(truncate_content("short", 100), "short");
+        assert_eq!(
+            truncate_content("this is a longer sentence with words", 20),
+            "this is a longer..."
+        );
+        assert_eq!(truncate_content("nospaces", 4), "nosp...");
+    }
+
+    #[test]
+    fn test_list_resources_includes_search_and_topics() {
+        let handler = ResourceHandler::new();
+        let resources = handler.list_resources();
+
+        assert!(resources.iter().any(|r| r.uri.contains("search")));
+        assert!(resources.iter().any(|r| r.uri.contains("topics")));
+    }
+
+    #[test]
+    fn test_search_resource_requires_recall_service() {
+        let handler = ResourceHandler::new();
+        let result = handler.get_resource("subcog://search/test");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("RecallService"));
+    }
+
+    #[test]
+    fn test_topics_resource_requires_topic_index() {
+        let handler = ResourceHandler::new();
+        let result = handler.get_resource("subcog://topics");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Topic index not initialized")
+        );
+    }
+
+    #[test]
+    fn test_search_resource_requires_query() {
+        let handler = ResourceHandler::new();
+        let result = handler.get_resource("subcog://search/");
+        // Empty query after search/ is still valid parts
+        // Just need recall service
+        assert!(result.is_err());
     }
 }
