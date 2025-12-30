@@ -3,6 +3,11 @@ created_at: 1767039140
 id: 1767039140782675000
 namespace: blockers
 status: active
+tags:
+- memory-capture-failure
+- session-protocol-violation
+- retrospective-capture
+- process-integration-gap
 updated_at: 1767039140
 ---
 BLOCKER: Failed to capture memories during System Help Memories implementation (SPEC-2025-12-29-001)
