@@ -367,12 +367,12 @@ impl IndexBackend for SqliteBackend {
         let (filter_clause, filter_params, next_param) =
             self.build_filter_clause_numbered(filter, 1);
 
-        // Query all memories without FTS MATCH, ordered by updated_at desc
+        // Query all memories without FTS MATCH, ordered by created_at desc
         let sql = format!(
             "SELECT m.id, 1.0 as score
              FROM memories m
              WHERE 1=1 {filter_clause}
-             ORDER BY m.updated_at DESC
+             ORDER BY m.created_at DESC
              LIMIT ?{next_param}"
         );
 
