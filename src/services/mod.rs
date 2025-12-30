@@ -26,6 +26,7 @@ mod enrichment;
 mod query_parser;
 mod recall;
 mod sync;
+mod topic_index;
 
 pub use capture::CaptureService;
 pub use consolidation::ConsolidationService;
@@ -34,6 +35,7 @@ pub use enrichment::{EnrichmentResult, EnrichmentService, EnrichmentStats};
 pub use query_parser::parse_filter_query;
 pub use recall::RecallService;
 pub use sync::SyncService;
+pub use topic_index::{TopicIndexService, TopicInfo};
 
 use crate::git::{NotesManager, YamlFrontMatterParser};
 use crate::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace};

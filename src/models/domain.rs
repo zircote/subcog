@@ -1,9 +1,11 @@
 //! Domain and namespace types.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Memory namespace categories.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Namespace {
     /// Architectural and design decisions.
     #[default]
@@ -15,6 +17,8 @@ pub enum Namespace {
     /// Important contextual information.
     Context,
     /// Technical debts and future improvements.
+    #[serde(alias = "techdebt", alias = "tech_debt")]
+    #[serde(rename = "tech-debt")]
     TechDebt,
     /// Blockers and impediments.
     Blockers,

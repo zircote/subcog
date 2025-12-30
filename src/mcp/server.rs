@@ -62,7 +62,10 @@ impl McpServer {
         // Use ServiceContainer for domain-scoped index access
         ServiceContainer::from_current_dir()
             .and_then(|services| services.recall())
-            .map_or_else(|_| ResourceHandler::new(), ResourceHandler::with_recall)
+            .map_or_else(
+                |_| ResourceHandler::new(),
+                |recall| ResourceHandler::new().with_recall_service(recall),
+            )
     }
 
     /// Sets the transport type.
