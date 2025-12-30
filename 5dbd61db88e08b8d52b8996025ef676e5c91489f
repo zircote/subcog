@@ -3,7 +3,11 @@ created_at: 1766992910
 id: eefd7945ba632f34
 namespace: decisions
 status: active
-tags: database,postgresql
+tags:
+- postgresql
+- primary-database
+- acid-compliance
+- json-support
 updated_at: 1766992910
 ---
 We decided to use PostgreSQL for the primary database because it provides excellent ACID compliance and JSON support
