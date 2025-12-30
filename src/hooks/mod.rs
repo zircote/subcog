@@ -2,6 +2,10 @@
 //!
 //! Implements handlers for Claude Code hook events.
 
+// Allow unused_self for methods that are kept as methods for API consistency
+// or may use self in future implementations.
+#![allow(clippy::unused_self)]
+
 mod post_tool_use;
 mod pre_compact;
 mod session_start;

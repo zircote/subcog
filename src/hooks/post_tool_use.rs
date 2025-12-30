@@ -1,18 +1,15 @@
 //! Post tool use hook handler.
 
 use super::HookHandler;
-use crate::config::SubcogConfig;
+use crate::Result;
 use crate::models::{SearchFilter, SearchMode};
 use crate::services::RecallService;
-use crate::Result;
 use tracing::instrument;
 
 /// Handles `PostToolUse` hook events.
 ///
 /// Surfaces related memories after tool usage.
 pub struct PostToolUseHandler {
-    /// Configuration.
-    config: SubcogConfig,
     /// Recall service for searching memories.
     recall: Option<RecallService>,
     /// Maximum number of memories to surface.
@@ -23,22 +20,14 @@ pub struct PostToolUseHandler {
 
 /// Tools that may benefit from memory context.
 const CONTEXTUAL_TOOLS: &[&str] = &[
-    "Read",
-    "Write",
-    "Edit",
-    "Bash",
-    "Search",
-    "Grep",
-    "Glob",
-    "LSP",
+    "Read", "Write", "Edit", "Bash", "Search", "Grep", "Glob", "LSP",
 ];
 
 impl PostToolUseHandler {
     /// Creates a new handler.
     #[must_use]
-    pub fn new(config: SubcogConfig) -> Self {
+    pub const fn new() -> Self {
         Self {
-            config,
             recall: None,
             max_memories: 3,
             min_relevance: 0.5,
@@ -67,11 +56,17 @@ impl PostToolUseHandler {
     }
 
     /// Determines if a tool use warrants memory lookup.
+    /// Kept as method for API consistency.
+    #[allow(clippy::unused_self)]
     fn should_lookup(&self, tool_name: &str) -> bool {
-        CONTEXTUAL_TOOLS.iter().any(|t| t.eq_ignore_ascii_case(tool_name))
+        CONTEXTUAL_TOOLS
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case(tool_name))
     }
 
     /// Extracts a search query from tool input.
+    /// Kept as method for API consistency.
+    #[allow(clippy::unused_self)]
     fn extract_query(&self, tool_name: &str, tool_input: &serde_json::Value) -> Option<String> {
         match tool_name.to_lowercase().as_str() {
             "read" | "write" | "edit" => {
@@ -88,16 +83,10 @@ impl PostToolUseHandler {
             },
             "bash" => {
                 // Use command as query
-                tool_input
-                    .get("command")
-                    .and_then(|v| v.as_str())
-                    .map(|c| {
-                        // Extract key terms from command
-                        c.split_whitespace()
-                            .take(5)
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    })
+                tool_input.get("command").and_then(|v| v.as_str()).map(|c| {
+                    // Extract key terms from command
+                    c.split_whitespace().take(5).collect::<Vec<_>>().join(" ")
+                })
             },
             "search" | "grep" => {
                 // Use pattern as query
@@ -112,7 +101,7 @@ impl PostToolUseHandler {
                 tool_input
                     .get("pattern")
                     .and_then(|v| v.as_str())
-                    .map(|p| p.replace('*', " ").replace('.', " "))
+                    .map(|p| p.replace(['*', '.'], " "))
             },
             "lsp" => {
                 // Use symbol or file as query
@@ -127,16 +116,17 @@ impl PostToolUseHandler {
     }
 
     /// Searches for related memories.
-    fn find_related_memories(
-        &self,
-        query: &str,
-    ) -> Result<Vec<RelatedMemory>> {
-        let recall = match &self.recall {
-            Some(r) => r,
-            None => return Ok(Vec::new()),
+    fn find_related_memories(&self, query: &str) -> Result<Vec<RelatedMemory>> {
+        let Some(recall) = &self.recall else {
+            return Ok(Vec::new());
         };
 
-        let result = recall.search(query, SearchMode::Hybrid, &SearchFilter::new(), self.max_memories)?;
+        let result = recall.search(
+            query,
+            SearchMode::Hybrid,
+            &SearchFilter::new(),
+            self.max_memories,
+        )?;
 
         let memories: Vec<RelatedMemory> = result
             .memories
@@ -165,7 +155,7 @@ fn truncate_content(content: &str, max_len: usize) -> String {
 
 impl Default for PostToolUseHandler {
     fn default() -> Self {
-        Self::new(SubcogConfig::default())
+        Self::new()
     }
 }
 
@@ -177,9 +167,8 @@ impl HookHandler for PostToolUseHandler {
     #[instrument(skip(self, input), fields(hook = "PostToolUse"))]
     fn handle(&self, input: &str) -> Result<String> {
         // Parse input as JSON
-        let input_json: serde_json::Value = serde_json::from_str(input).unwrap_or_else(|_| {
-            serde_json::json!({})
-        });
+        let input_json: serde_json::Value =
+            serde_json::from_str(input).unwrap_or_else(|_| serde_json::json!({}));
 
         // Extract tool information
         let tool_name = input_json
@@ -194,9 +183,12 @@ impl HookHandler for PostToolUseHandler {
         // Check if we should look up memories for this tool
         if !self.should_lookup(tool_name) {
             let response = serde_json::json!({
-                "memories": [],
-                "lookup_performed": false,
-                "reason": "Tool does not warrant memory lookup"
+                "continue": true,
+                "metadata": {
+                    "memories": [],
+                    "lookup_performed": false,
+                    "reason": "Tool does not warrant memory lookup"
+                }
             });
             return serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
                 operation: "serialize_response".to_string(),
@@ -209,13 +201,18 @@ impl HookHandler for PostToolUseHandler {
             Some(q) if !q.is_empty() => q,
             _ => {
                 let response = serde_json::json!({
-                    "memories": [],
-                    "lookup_performed": false,
-                    "reason": "Could not extract query from tool input"
+                    "continue": true,
+                    "metadata": {
+                        "memories": [],
+                        "lookup_performed": false,
+                        "reason": "Could not extract query from tool input"
+                    }
                 });
-                return serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
-                    operation: "serialize_response".to_string(),
-                    cause: e.to_string(),
+                return serde_json::to_string(&response).map_err(|e| {
+                    crate::Error::OperationFailed {
+                        operation: "serialize_response".to_string(),
+                        cause: e.to_string(),
+                    }
                 });
             },
         };
@@ -223,7 +220,7 @@ impl HookHandler for PostToolUseHandler {
         // Search for related memories
         let memories = self.find_related_memories(&query)?;
 
-        // Build response
+        // Build memories JSON for metadata
         let memories_json: Vec<serde_json::Value> = memories
             .iter()
             .map(|m| {
@@ -236,12 +233,39 @@ impl HookHandler for PostToolUseHandler {
             })
             .collect();
 
-        let response = serde_json::json!({
+        let metadata = serde_json::json!({
             "memories": memories_json,
             "lookup_performed": true,
             "query": query,
             "tool_name": tool_name
         });
+
+        // Build context message with related memories
+        let context_message = if memories.is_empty() {
+            None
+        } else {
+            let mut lines = vec!["**Related Subcog Memories**\n".to_string()];
+            for m in &memories {
+                lines.push(format!(
+                    "- **[{}]** (relevance: {:.0}%): {}",
+                    m.namespace,
+                    m.relevance * 100.0,
+                    m.content
+                ));
+            }
+            Some(lines.join("\n"))
+        };
+
+        // Build Claude Code hook response format
+        let mut response = serde_json::json!({
+            "continue": true,
+            "metadata": metadata
+        });
+
+        // Add context only if we have related memories
+        if let Some(ctx) = context_message {
+            response["context"] = serde_json::Value::String(ctx);
+        }
 
         serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
             operation: "serialize_response".to_string(),
@@ -296,7 +320,7 @@ mod tests {
 
         let query = handler.extract_query("Read", &input);
         assert!(query.is_some());
-        assert!(query.as_ref().map_or(false, |q| q.contains("capture")));
+        assert!(query.as_ref().is_some_and(|q| q.contains("capture")));
     }
 
     #[test]
@@ -309,7 +333,7 @@ mod tests {
 
         let query = handler.extract_query("Bash", &input);
         assert!(query.is_some());
-        assert!(query.as_ref().map_or(false, |q| q.contains("cargo")));
+        assert!(query.as_ref().is_some_and(|q| q.contains("cargo")));
     }
 
     #[test]
@@ -335,7 +359,16 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        assert_eq!(response.get("lookup_performed"), Some(&serde_json::Value::Bool(false)));
+        // Claude Code hook format
+        assert_eq!(
+            response.get("continue"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        let metadata = response.get("metadata").unwrap();
+        assert_eq!(
+            metadata.get("lookup_performed"),
+            Some(&serde_json::Value::Bool(false))
+        );
     }
 
     #[test]
@@ -348,8 +381,14 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        // Without recall service, should still handle gracefully
-        assert!(response.get("memories").is_some());
+        // Claude Code hook format
+        assert_eq!(
+            response.get("continue"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        // Metadata contains memories
+        let metadata = response.get("metadata").unwrap();
+        assert!(metadata.get("memories").is_some());
     }
 
     #[test]
@@ -357,7 +396,8 @@ mod tests {
         let short = "Short text";
         assert_eq!(truncate_content(short, 100), short);
 
-        let long = "This is a much longer text that should be truncated because it exceeds the limit";
+        let long =
+            "This is a much longer text that should be truncated because it exceeds the limit";
         let truncated = truncate_content(long, 30);
         assert!(truncated.ends_with("..."));
         assert!(truncated.len() <= 30);

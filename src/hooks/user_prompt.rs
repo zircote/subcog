@@ -1,25 +1,24 @@
 //! User prompt submit hook handler.
+// Allow expect() on static regex patterns - these are guaranteed to compile
+#![allow(clippy::expect_used)]
 
 use super::HookHandler;
-use crate::config::SubcogConfig;
-use crate::models::Namespace;
 use crate::Result;
-use once_cell::sync::Lazy;
+use crate::models::Namespace;
 use regex::Regex;
+use std::sync::LazyLock;
 use tracing::instrument;
 
 /// Handles `UserPromptSubmit` hook events.
 ///
 /// Detects signals for memory capture in user prompts.
 pub struct UserPromptHandler {
-    /// Configuration.
-    config: SubcogConfig,
     /// Minimum confidence threshold for capture.
     confidence_threshold: f32,
 }
 
 /// Signal patterns for memory capture detection.
-static DECISION_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+static DECISION_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
         Regex::new(r"(?i)\b(we('re| are|'ll| will) (going to |gonna )?use|let's use|using)\b").ok(),
         Regex::new(r"(?i)\b(decided|decision|choosing|chose|picked|selected)\b").ok(),
@@ -32,7 +31,7 @@ static DECISION_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
     .collect()
 });
 
-static PATTERN_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+static PATTERN_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
         Regex::new(r"(?i)\b(pattern|convention|standard|best practice)\b").ok(),
         Regex::new(r"(?i)\b(always|never|should|must)\b.*\b(when|if|before|after)\b").ok(),
@@ -43,7 +42,7 @@ static PATTERN_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
     .collect()
 });
 
-static LEARNING_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+static LEARNING_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
         Regex::new(r"(?i)\b(learned|discovered|realized|found out|figured out)\b").ok(),
         Regex::new(r"(?i)\b(TIL|turns out|apparently|actually)\b").ok(),
@@ -55,7 +54,7 @@ static LEARNING_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
     .collect()
 });
 
-static BLOCKER_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+static BLOCKER_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
         Regex::new(r"(?i)\b(blocked|stuck|issue|problem|bug|error)\b").ok(),
         Regex::new(r"(?i)\b(fixed|solved|resolved|workaround|solution)\b").ok(),
@@ -66,7 +65,7 @@ static BLOCKER_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
     .collect()
 });
 
-static TECH_DEBT_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+static TECH_DEBT_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
         Regex::new(r"(?i)\b(tech debt|technical debt|refactor|cleanup)\b").ok(),
         Regex::new(r"(?i)\b(TODO|FIXME|HACK|XXX)\b").ok(),
@@ -78,9 +77,10 @@ static TECH_DEBT_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
 });
 
 /// Explicit capture commands.
-static CAPTURE_COMMAND: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)^@?subcog\s+(capture|remember|save|store)\b").ok()
-        .unwrap_or_else(|| Regex::new(r"^$").ok().unwrap())
+static CAPTURE_COMMAND: LazyLock<Regex> = LazyLock::new(|| {
+    // This regex is static and guaranteed to compile
+    Regex::new(r"(?i)^@?subcog\s+(capture|remember|save|store)\b")
+        .expect("static regex: capture command pattern")
 });
 
 /// A detected signal for memory capture.
@@ -99,9 +99,8 @@ pub struct CaptureSignal {
 impl UserPromptHandler {
     /// Creates a new handler.
     #[must_use]
-    pub fn new(config: SubcogConfig) -> Self {
+    pub const fn new() -> Self {
         Self {
-            config,
             confidence_threshold: 0.6,
         }
     }
@@ -129,36 +128,66 @@ impl UserPromptHandler {
         }
 
         // Check each namespace's patterns
-        let mut check_patterns = |patterns: &[Regex], namespace: Namespace| {
-            let matches: Vec<String> = patterns
-                .iter()
-                .filter(|p| p.is_match(prompt))
-                .map(|p| p.to_string())
-                .collect();
-
-            if !matches.is_empty() {
-                let confidence = calculate_confidence(&matches, prompt);
-                if confidence >= self.confidence_threshold {
-                    signals.push(CaptureSignal {
-                        namespace,
-                        confidence,
-                        matched_patterns: matches,
-                        is_explicit: false,
-                    });
-                }
-            }
-        };
-
-        check_patterns(&DECISION_PATTERNS, Namespace::Decisions);
-        check_patterns(&PATTERN_PATTERNS, Namespace::Patterns);
-        check_patterns(&LEARNING_PATTERNS, Namespace::Learnings);
-        check_patterns(&BLOCKER_PATTERNS, Namespace::Blockers);
-        check_patterns(&TECH_DEBT_PATTERNS, Namespace::TechDebt);
+        self.check_patterns(
+            &DECISION_PATTERNS,
+            Namespace::Decisions,
+            prompt,
+            &mut signals,
+        );
+        self.check_patterns(&PATTERN_PATTERNS, Namespace::Patterns, prompt, &mut signals);
+        self.check_patterns(
+            &LEARNING_PATTERNS,
+            Namespace::Learnings,
+            prompt,
+            &mut signals,
+        );
+        self.check_patterns(&BLOCKER_PATTERNS, Namespace::Blockers, prompt, &mut signals);
+        self.check_patterns(
+            &TECH_DEBT_PATTERNS,
+            Namespace::TechDebt,
+            prompt,
+            &mut signals,
+        );
 
         // Sort by confidence, highest first
-        signals.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        signals.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         signals
+    }
+
+    /// Checks patterns for a specific namespace and adds matching signals.
+    fn check_patterns(
+        &self,
+        patterns: &[Regex],
+        namespace: Namespace,
+        prompt: &str,
+        signals: &mut Vec<CaptureSignal>,
+    ) {
+        let pattern_matches: Vec<String> = patterns
+            .iter()
+            .filter(|p| p.is_match(prompt))
+            .map(std::string::ToString::to_string)
+            .collect();
+
+        if pattern_matches.is_empty() {
+            return;
+        }
+
+        let confidence = calculate_confidence(&pattern_matches, prompt);
+        if confidence < self.confidence_threshold {
+            return;
+        }
+
+        signals.push(CaptureSignal {
+            namespace,
+            confidence,
+            matched_patterns: pattern_matches,
+            is_explicit: false,
+        });
     }
 
     /// Extracts the content to capture from the prompt.
@@ -177,9 +206,10 @@ impl UserPromptHandler {
 }
 
 /// Calculates confidence score based on pattern matches.
-fn calculate_confidence(matches: &[String], prompt: &str) -> f32 {
+#[allow(clippy::cast_precision_loss)]
+fn calculate_confidence(pattern_matches: &[String], prompt: &str) -> f32 {
     let base_confidence = 0.5;
-    let match_bonus = 0.15_f32.min(matches.len() as f32 * 0.1);
+    let match_bonus = 0.15_f32.min(pattern_matches.len() as f32 * 0.1);
 
     // Longer prompts with patterns are more likely to be intentional
     let length_factor = if prompt.len() > 50 { 0.1 } else { 0.0 };
@@ -196,7 +226,7 @@ fn calculate_confidence(matches: &[String], prompt: &str) -> f32 {
 
 impl Default for UserPromptHandler {
     fn default() -> Self {
-        Self::new(SubcogConfig::default())
+        Self::new()
     }
 }
 
@@ -208,9 +238,8 @@ impl HookHandler for UserPromptHandler {
     #[instrument(skip(self, input), fields(hook = "UserPromptSubmit"))]
     fn handle(&self, input: &str) -> Result<String> {
         // Parse input as JSON
-        let input_json: serde_json::Value = serde_json::from_str(input).unwrap_or_else(|_| {
-            serde_json::json!({})
-        });
+        let input_json: serde_json::Value =
+            serde_json::from_str(input).unwrap_or_else(|_| serde_json::json!({}));
 
         // Extract prompt from input
         let prompt = input_json
@@ -220,8 +249,11 @@ impl HookHandler for UserPromptHandler {
 
         if prompt.is_empty() {
             let response = serde_json::json!({
-                "signals": [],
-                "should_capture": false
+                "continue": true,
+                "metadata": {
+                    "signals": [],
+                    "should_capture": false
+                }
             });
             return serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
                 operation: "serialize_response".to_string(),
@@ -233,7 +265,9 @@ impl HookHandler for UserPromptHandler {
         let signals = self.detect_signals(prompt);
 
         // Determine if we should capture
-        let should_capture = signals.iter().any(|s| s.confidence >= self.confidence_threshold);
+        let should_capture = signals
+            .iter()
+            .any(|s| s.confidence >= self.confidence_threshold);
 
         // Extract content if capturing
         let content = if should_capture {
@@ -242,7 +276,7 @@ impl HookHandler for UserPromptHandler {
             None
         };
 
-        // Build response
+        // Build signals JSON for metadata
         let signals_json: Vec<serde_json::Value> = signals
             .iter()
             .map(|s| {
@@ -255,23 +289,95 @@ impl HookHandler for UserPromptHandler {
             })
             .collect();
 
-        let mut response = serde_json::json!({
+        let mut metadata = serde_json::json!({
             "signals": signals_json,
             "should_capture": should_capture,
             "confidence_threshold": self.confidence_threshold
         });
 
-        if let Some(content) = content {
-            response["suggested_content"] = serde_json::Value::String(content);
-            if let Some(signal) = signals.first() {
-                response["suggested_namespace"] = serde_json::Value::String(signal.namespace.as_str().to_string());
-            }
+        // Build context message for capture suggestions
+        let context_message =
+            build_capture_context(should_capture, content.as_ref(), &signals, &mut metadata);
+
+        // Build Claude Code hook response format
+        let mut response = serde_json::json!({
+            "continue": true,
+            "metadata": metadata
+        });
+
+        // Add context only if we have a suggestion
+        if let Some(ctx) = context_message {
+            response["context"] = serde_json::Value::String(ctx);
         }
 
         serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
             operation: "serialize_response".to_string(),
             cause: e.to_string(),
         })
+    }
+}
+
+/// Builds context message for capture suggestions.
+fn build_capture_context(
+    should_capture: bool,
+    content: Option<&String>,
+    signals: &[CaptureSignal],
+    metadata: &mut serde_json::Value,
+) -> Option<String> {
+    if !should_capture {
+        return None;
+    }
+
+    let content_str = content.map_or("", String::as_str);
+    if content_str.is_empty() {
+        return None;
+    }
+
+    // Get the top signal for suggestions
+    let top_signal = signals.first()?;
+
+    // Add capture suggestion to metadata
+    metadata["capture_suggestion"] = serde_json::json!({
+        "namespace": top_signal.namespace.as_str(),
+        "content_preview": truncate_for_display(content_str, 100),
+        "confidence": top_signal.confidence,
+    });
+
+    // Build context message
+    let mut lines = vec!["**Subcog Capture Suggestion**\n".to_string()];
+
+    if top_signal.is_explicit {
+        lines.push(format!(
+            "Explicit capture command detected. Capturing to `{}`:\n",
+            top_signal.namespace.as_str()
+        ));
+        lines.push(format!("> {}", truncate_for_display(content_str, 200)));
+        lines.push("\nUse `subcog_capture` tool to save this memory.".to_string());
+    } else {
+        lines.push(format!(
+            "Detected {} signal (confidence: {:.0}%):\n",
+            top_signal.namespace.as_str(),
+            top_signal.confidence * 100.0
+        ));
+        lines.push(format!("> {}", truncate_for_display(content_str, 200)));
+        lines.push(format!(
+            "\n**Suggestion**: Consider capturing this as a `{}` memory.",
+            top_signal.namespace.as_str()
+        ));
+        lines.push(
+            "Use `subcog_capture` tool or ask: \"Should I save this to subcog?\"".to_string(),
+        );
+    }
+
+    Some(lines.join("\n"))
+}
+
+/// Truncates content for display in suggestions.
+fn truncate_for_display(content: &str, max_len: usize) -> String {
+    if content.len() <= max_len {
+        content.to_string()
+    } else {
+        format!("{}...", &content[..max_len.saturating_sub(3)])
     }
 }
 
@@ -295,7 +401,18 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        assert_eq!(response.get("should_capture"), Some(&serde_json::Value::Bool(true)));
+        // Claude Code hook format
+        assert_eq!(
+            response.get("continue"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        let metadata = response.get("metadata").unwrap();
+        assert_eq!(
+            metadata.get("should_capture"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        // Should have context with capture suggestion
+        assert!(response.get("context").is_some());
     }
 
     #[test]
@@ -320,7 +437,8 @@ mod tests {
     fn test_pattern_signal_detection() {
         let handler = UserPromptHandler::default();
 
-        let signals = handler.detect_signals("The best practice is to always validate input before processing");
+        let signals = handler
+            .detect_signals("The best practice is to always validate input before processing");
         assert!(!signals.is_empty());
         assert!(signals.iter().any(|s| s.namespace == Namespace::Patterns));
     }
@@ -338,7 +456,8 @@ mod tests {
     fn test_tech_debt_signal_detection() {
         let handler = UserPromptHandler::default();
 
-        let signals = handler.detect_signals("This is a temporary workaround, we need to refactor later");
+        let signals =
+            handler.detect_signals("This is a temporary workaround, we need to refactor later");
         assert!(!signals.is_empty());
         assert!(signals.iter().any(|s| s.namespace == Namespace::TechDebt));
     }
@@ -364,13 +483,21 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        assert_eq!(response.get("should_capture"), Some(&serde_json::Value::Bool(false)));
+        // Claude Code hook format
+        assert_eq!(
+            response.get("continue"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        let metadata = response.get("metadata").unwrap();
+        assert_eq!(
+            metadata.get("should_capture"),
+            Some(&serde_json::Value::Bool(false))
+        );
     }
 
     #[test]
     fn test_confidence_threshold() {
-        let handler = UserPromptHandler::default()
-            .with_confidence_threshold(0.9);
+        let handler = UserPromptHandler::default().with_confidence_threshold(0.9);
 
         // Even with patterns, high threshold should reject low-confidence signals
         let signals = handler.detect_signals("maybe use something");
@@ -396,7 +523,7 @@ mod tests {
         let low = calculate_confidence(&["pattern1".to_string()], "short");
         let high = calculate_confidence(
             &["pattern1".to_string(), "pattern2".to_string()],
-            "This is a longer prompt with more context."
+            "This is a longer prompt with more context.",
         );
         assert!(high >= low);
     }

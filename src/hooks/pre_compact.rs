@@ -2,33 +2,27 @@
 //!
 //! Analyzes content being compacted and auto-captures important memories.
 
-use crate::config::SubcogConfig;
+use crate::Result;
 use crate::hooks::HookHandler;
 use crate::models::{CaptureRequest, Domain, Namespace};
 use crate::services::CaptureService;
-use crate::Result;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-/// Handler for the PreCompact hook event.
+/// Handler for the `PreCompact` hook event.
 ///
 /// Analyzes context being compacted and auto-captures valuable memories.
 pub struct PreCompactHandler {
-    /// Configuration.
-    config: SubcogConfig,
     /// Capture service instance.
     capture: Option<CaptureService>,
 }
 
-/// Input for the PreCompact hook.
+/// Input for the `PreCompact` hook.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct PreCompactInput {
     /// Conversation context being compacted.
     #[serde(default)]
     pub context: String,
-    /// Current summary if any.
-    #[serde(default)]
-    pub summary: Option<String>,
     /// Sections of the conversation.
     #[serde(default)]
     pub sections: Vec<ConversationSection>,
@@ -39,25 +33,13 @@ pub struct PreCompactInput {
 pub struct ConversationSection {
     /// Section content.
     pub content: String,
-    /// Type of content (user, assistant, tool_result).
+    /// Type of content (user, assistant, `tool_result`).
     #[serde(default = "default_role")]
     pub role: String,
 }
 
 fn default_role() -> String {
     "assistant".to_string()
-}
-
-/// Output from the PreCompact hook.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PreCompactOutput {
-    /// Whether any content was auto-captured.
-    pub captured: bool,
-    /// List of captured memories.
-    pub captures: Vec<CapturedMemory>,
-    /// Suggested summary additions.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub summary_additions: Option<String>,
 }
 
 /// A memory that was auto-captured.
@@ -79,13 +61,10 @@ struct CaptureCandidate {
 }
 
 impl PreCompactHandler {
-    /// Creates a new PreCompact handler.
+    /// Creates a new `PreCompact` handler.
     #[must_use]
-    pub fn new(config: SubcogConfig) -> Self {
-        Self {
-            config,
-            capture: None,
-        }
+    pub const fn new() -> Self {
+        Self { capture: None }
     }
 
     /// Sets the capture service.
@@ -101,22 +80,22 @@ impl PreCompactHandler {
 
         // Analyze the full context
         if !input.context.is_empty() {
-            candidates.extend(self.extract_from_text(&input.context));
+            candidates.extend(Self::extract_from_text(&input.context));
         }
 
         // Analyze individual sections
         for section in &input.sections {
             if section.role == "assistant" {
-                candidates.extend(self.extract_from_text(&section.content));
+                candidates.extend(Self::extract_from_text(&section.content));
             }
         }
 
         // Deduplicate similar candidates
-        self.deduplicate_candidates(candidates)
+        Self::deduplicate_candidates(candidates)
     }
 
     /// Extracts potential memories from text.
-    fn extract_from_text(&self, text: &str) -> Vec<CaptureCandidate> {
+    fn extract_from_text(text: &str) -> Vec<CaptureCandidate> {
         let mut candidates = Vec::new();
 
         // Split into paragraphs or logical sections
@@ -169,7 +148,7 @@ impl PreCompactHandler {
     }
 
     /// Removes duplicate/similar candidates.
-    fn deduplicate_candidates(&self, mut candidates: Vec<CaptureCandidate>) -> Vec<CaptureCandidate> {
+    fn deduplicate_candidates(mut candidates: Vec<CaptureCandidate>) -> Vec<CaptureCandidate> {
         // Sort by confidence descending
         candidates.sort_by(|a, b| {
             b.confidence
@@ -204,10 +183,9 @@ impl PreCompactHandler {
     }
 
     /// Performs the actual capture of candidates.
-    fn capture_candidates(&self, candidates: Vec<CaptureCandidate>) -> Result<Vec<CapturedMemory>> {
-        let capture = match &self.capture {
-            Some(c) => c,
-            None => return Ok(Vec::new()),
+    fn capture_candidates(&self, candidates: Vec<CaptureCandidate>) -> Vec<CapturedMemory> {
+        let Some(capture) = &self.capture else {
+            return Vec::new();
         };
 
         let mut captured = Vec::new();
@@ -226,22 +204,17 @@ impl PreCompactHandler {
                 skip_security_check: false,
             };
 
-            match capture.capture(request) {
-                Ok(result) => {
-                    captured.push(CapturedMemory {
-                        memory_id: result.memory_id.as_str().to_string(),
-                        namespace: candidate.namespace.as_str().to_string(),
-                        confidence: candidate.confidence,
-                    });
-                }
-                Err(_) => {
-                    // Log error but continue with other candidates
-                    continue;
-                }
+            if let Ok(result) = capture.capture(request) {
+                captured.push(CapturedMemory {
+                    memory_id: result.memory_id.as_str().to_string(),
+                    namespace: candidate.namespace.as_str().to_string(),
+                    confidence: candidate.confidence,
+                });
             }
+            // Errors are silently ignored, continue with other candidates
         }
 
-        Ok(captured)
+        captured
     }
 }
 
@@ -321,7 +294,7 @@ fn calculate_section_confidence(section: &str) -> f32 {
 
 impl Default for PreCompactHandler {
     fn default() -> Self {
-        Self::new(SubcogConfig::default())
+        Self::new()
     }
 }
 
@@ -332,26 +305,62 @@ impl HookHandler for PreCompactHandler {
 
     #[instrument(skip(self, input), fields(hook = "PreCompact"))]
     fn handle(&self, input: &str) -> Result<String> {
-        let parsed: PreCompactInput = serde_json::from_str(input).unwrap_or_else(|_| {
-            PreCompactInput {
+        let parsed: PreCompactInput =
+            serde_json::from_str(input).unwrap_or_else(|_| PreCompactInput {
                 context: input.to_string(),
                 ..Default::default()
-            }
-        });
+            });
 
         // Analyze content for capture candidates
         let candidates = self.analyze_content(&parsed);
 
         // Capture the candidates
-        let captured = self.capture_candidates(candidates)?;
+        let captured = self.capture_candidates(candidates);
 
-        let output = PreCompactOutput {
-            captured: !captured.is_empty(),
-            captures: captured,
-            summary_additions: None,
+        // Build metadata
+        let metadata = serde_json::json!({
+            "captured": !captured.is_empty(),
+            "captures": captured.iter().map(|c| serde_json::json!({
+                "memory_id": c.memory_id,
+                "namespace": c.namespace,
+                "confidence": c.confidence
+            })).collect::<Vec<_>>()
+        });
+
+        // Build context message about captured memories
+        let context_message = if captured.is_empty() {
+            None
+        } else {
+            let mut lines = vec![
+                "**Subcog Pre-Compact Auto-Capture**\n".to_string(),
+                format!(
+                    "Captured {} memories before context compaction:\n",
+                    captured.len()
+                ),
+            ];
+            for c in &captured {
+                lines.push(format!(
+                    "- `{}`: {} (confidence: {:.0}%)",
+                    c.namespace,
+                    c.memory_id,
+                    c.confidence * 100.0
+                ));
+            }
+            Some(lines.join("\n"))
         };
 
-        serde_json::to_string(&output).map_err(|e| crate::Error::OperationFailed {
+        // Build Claude Code hook response format
+        let mut response = serde_json::json!({
+            "continue": true,
+            "metadata": metadata
+        });
+
+        // Add context if we captured anything
+        if let Some(ctx) = context_message {
+            response["context"] = serde_json::Value::String(ctx);
+        }
+
+        serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
             operation: "serialize_output".to_string(),
             cause: e.to_string(),
         })
@@ -397,13 +406,16 @@ mod tests {
         assert!(contains_pattern_language("Best practice is to..."));
         assert!(contains_pattern_language("You should always check..."));
         // Use text that truly has no pattern-related words
-        assert!(!contains_pattern_language("Hello world, this is regular code"));
+        assert!(!contains_pattern_language(
+            "Hello world, this is regular code"
+        ));
     }
 
     #[test]
     fn test_calculate_confidence() {
         let short_text = "Short";
-        let medium_text = "This is a medium length text that contains some words. It has multiple sentences.";
+        let medium_text =
+            "This is a medium length text that contains some words. It has multiple sentences.";
         let long_text = "This is a much longer text that contains many words and sentences. It should have higher confidence. The text goes on and on with more information. Here is even more content to make it longer.";
 
         let short_conf = calculate_section_confidence(short_text);
@@ -420,9 +432,17 @@ mod tests {
         let result = handler.handle("{}");
 
         assert!(result.is_ok());
-        let output: PreCompactOutput = serde_json::from_str(&result.unwrap()).unwrap();
-        assert!(!output.captured);
-        assert!(output.captures.is_empty());
+        let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        // Claude Code hook format
+        assert_eq!(
+            response.get("continue"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        let metadata = response.get("metadata").unwrap();
+        assert_eq!(
+            metadata.get("captured"),
+            Some(&serde_json::Value::Bool(false))
+        );
     }
 
     #[test]
@@ -430,7 +450,6 @@ mod tests {
         let handler = PreCompactHandler::default();
         let input = PreCompactInput {
             context: "We decided to use PostgreSQL for the database. This was a key architectural decision.\n\nTIL that connection pooling is important for performance.".to_string(),
-            summary: None,
             sections: vec![],
         };
 

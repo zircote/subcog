@@ -1,9 +1,8 @@
 //! Stop hook handler.
 
 use super::HookHandler;
-use crate::config::SubcogConfig;
-use crate::services::SyncService;
 use crate::Result;
+use crate::services::SyncService;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::instrument;
 
@@ -11,8 +10,6 @@ use tracing::instrument;
 ///
 /// Performs session analysis and sync at session end.
 pub struct StopHandler {
-    /// Configuration.
-    config: SubcogConfig,
     /// Sync service.
     sync: Option<SyncService>,
     /// Whether to auto-sync on stop.
@@ -22,9 +19,8 @@ pub struct StopHandler {
 impl StopHandler {
     /// Creates a new handler.
     #[must_use]
-    pub fn new(config: SubcogConfig) -> Self {
+    pub const fn new() -> Self {
         Self {
-            config,
             sync: None,
             auto_sync: true,
         }
@@ -45,6 +41,7 @@ impl StopHandler {
     }
 
     /// Generates a session summary.
+    #[allow(clippy::cast_possible_truncation)]
     fn generate_summary(&self, input: &serde_json::Value) -> SessionSummary {
         // Extract session info
         let session_id = input
@@ -55,35 +52,34 @@ impl StopHandler {
 
         let start_time = input
             .get("start_time")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
 
         let end_time = current_timestamp();
         let duration_seconds = end_time.saturating_sub(start_time);
 
         // Count interactions (from transcript if available)
+        // Safe cast: interaction counts are always small
         let interaction_count = input
             .get("interaction_count")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0) as usize;
 
         // Count memories captured during session
+        // Safe cast: memory counts are always small
         let memories_captured = input
             .get("memories_captured")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0) as usize;
 
         // Count tools used
         let tools_used = input
             .get("tools_used")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.len())
-            .unwrap_or(0);
+            .map_or(0, std::vec::Vec::len);
 
         SessionSummary {
             session_id,
-            start_time,
-            end_time,
             duration_seconds,
             interaction_count,
             memories_captured,
@@ -126,7 +122,7 @@ fn current_timestamp() -> u64 {
 
 impl Default for StopHandler {
     fn default() -> Self {
-        Self::new(SubcogConfig::default())
+        Self::new()
     }
 }
 
@@ -138,9 +134,8 @@ impl HookHandler for StopHandler {
     #[instrument(skip(self, input), fields(hook = "Stop"))]
     fn handle(&self, input: &str) -> Result<String> {
         // Parse input as JSON
-        let input_json: serde_json::Value = serde_json::from_str(input).unwrap_or_else(|_| {
-            serde_json::json!({})
-        });
+        let input_json: serde_json::Value =
+            serde_json::from_str(input).unwrap_or_else(|_| serde_json::json!({}));
 
         // Generate session summary
         let summary = self.generate_summary(&input_json);
@@ -148,8 +143,8 @@ impl HookHandler for StopHandler {
         // Perform sync if enabled
         let sync_result = self.perform_sync();
 
-        // Build response
-        let mut response = serde_json::json!({
+        // Build metadata
+        let mut metadata = serde_json::json!({
             "session_id": summary.session_id,
             "duration_seconds": summary.duration_seconds,
             "interaction_count": summary.interaction_count,
@@ -158,8 +153,8 @@ impl HookHandler for StopHandler {
         });
 
         // Add sync results if performed
-        if let Some(sync) = sync_result {
-            response["sync"] = serde_json::json!({
+        if let Some(sync) = &sync_result {
+            metadata["sync"] = serde_json::json!({
                 "performed": true,
                 "success": sync.success,
                 "pushed": sync.pushed,
@@ -167,18 +162,51 @@ impl HookHandler for StopHandler {
                 "error": sync.error
             });
         } else {
-            response["sync"] = serde_json::json!({
+            metadata["sync"] = serde_json::json!({
                 "performed": false
             });
         }
 
-        // Add session analysis hints
+        // Build context message for session summary
+        let mut context_lines = vec![
+            "**Subcog Session Summary**\n".to_string(),
+            format!("Session: `{}`", summary.session_id),
+            format!("Duration: {} seconds", summary.duration_seconds),
+            format!("Interactions: {}", summary.interaction_count),
+            format!("Memories captured: {}", summary.memories_captured),
+            format!("Tools used: {}", summary.tools_used),
+        ];
+
+        // Add sync status
+        if let Some(sync) = &sync_result {
+            if sync.success {
+                context_lines.push(format!(
+                    "\n**Sync**: ✓ {} pushed, {} pulled",
+                    sync.pushed, sync.pulled
+                ));
+            } else {
+                context_lines.push(format!(
+                    "\n**Sync**: ✗ Failed - {}",
+                    sync.error.as_deref().unwrap_or("Unknown error")
+                ));
+            }
+        }
+
+        // Add hints if no memories were captured
         if summary.memories_captured == 0 && summary.interaction_count > 5 {
-            response["hints"] = serde_json::json!([
+            metadata["hints"] = serde_json::json!([
                 "Consider capturing key decisions made during this session",
                 "Use 'subcog capture' to save important learnings"
             ]);
+            context_lines.push("\n**Tip**: No memories were captured this session. Consider using `subcog_capture` to save important decisions and learnings.".to_string());
         }
+
+        // Build Claude Code hook response format
+        let response = serde_json::json!({
+            "continue": true,
+            "context": context_lines.join("\n"),
+            "metadata": metadata
+        });
 
         serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
             operation: "serialize_response".to_string(),
@@ -192,10 +220,6 @@ impl HookHandler for StopHandler {
 struct SessionSummary {
     /// Session identifier.
     session_id: String,
-    /// Start timestamp.
-    start_time: u64,
-    /// End timestamp.
-    end_time: u64,
     /// Duration in seconds.
     duration_seconds: u64,
     /// Number of interactions.
@@ -261,28 +285,44 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        assert!(response.get("session_id").is_some());
-        assert!(response.get("sync").is_some());
+        // Claude Code hook format
+        assert_eq!(
+            response.get("continue"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert!(response.get("context").is_some());
+        let metadata = response.get("metadata").unwrap();
+        assert!(metadata.get("session_id").is_some());
+        assert!(metadata.get("sync").is_some());
     }
 
     #[test]
     fn test_handle_with_hints() {
         let handler = StopHandler::default();
 
-        let input = r#"{"session_id": "test-session", "interaction_count": 10, "memories_captured": 0}"#;
+        let input =
+            r#"{"session_id": "test-session", "interaction_count": 10, "memories_captured": 0}"#;
 
         let result = handler.handle(input);
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        // Should have hints when no memories captured but many interactions
-        assert!(response.get("hints").is_some());
+        // Claude Code hook format
+        assert_eq!(
+            response.get("continue"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        // Hints should be in metadata
+        let metadata = response.get("metadata").unwrap();
+        assert!(metadata.get("hints").is_some());
+        // Context should contain tip
+        let context = response.get("context").unwrap().as_str().unwrap();
+        assert!(context.contains("Tip"));
     }
 
     #[test]
     fn test_auto_sync_disabled() {
-        let handler = StopHandler::default()
-            .with_auto_sync(false);
+        let handler = StopHandler::default().with_auto_sync(false);
 
         let sync_result = handler.perform_sync();
         assert!(sync_result.is_none());
@@ -290,8 +330,7 @@ mod tests {
 
     #[test]
     fn test_configuration() {
-        let handler = StopHandler::default()
-            .with_auto_sync(true);
+        let handler = StopHandler::default().with_auto_sync(true);
 
         assert!(handler.auto_sync);
     }
@@ -306,7 +345,16 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        // Should handle gracefully with defaults
-        assert_eq!(response.get("session_id"), Some(&serde_json::Value::String("unknown".to_string())));
+        // Claude Code hook format
+        assert_eq!(
+            response.get("continue"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        // Session ID should be in metadata with default "unknown"
+        let metadata = response.get("metadata").unwrap();
+        assert_eq!(
+            metadata.get("session_id"),
+            Some(&serde_json::Value::String("unknown".to_string()))
+        );
     }
 }
