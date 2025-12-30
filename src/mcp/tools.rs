@@ -3,7 +3,7 @@
 //! Provides tool handlers for the Model Context Protocol.
 
 use crate::models::{CaptureRequest, Domain, Namespace, SearchFilter, SearchMode};
-use crate::services::{CaptureService, RecallService};
+use crate::services::{CaptureService, RecallService, SyncService};
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -118,6 +118,96 @@ impl ToolRegistry {
             },
         );
 
+        // Consolidate tool (uses sampling)
+        tools.insert(
+            "subcog_consolidate".to_string(),
+            ToolDefinition {
+                name: "subcog_consolidate".to_string(),
+                description: "Consolidate related memories using LLM to merge and summarize. Uses MCP sampling to request LLM completion.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "namespace": {
+                            "type": "string",
+                            "description": "Namespace to consolidate",
+                            "enum": ["decisions", "patterns", "learnings", "context", "tech-debt", "apis", "config", "security", "performance", "testing"]
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Optional query to filter memories for consolidation"
+                        },
+                        "strategy": {
+                            "type": "string",
+                            "description": "Consolidation strategy: merge (combine similar), summarize (create summary), dedupe (remove duplicates)",
+                            "enum": ["merge", "summarize", "dedupe"],
+                            "default": "merge"
+                        },
+                        "dry_run": {
+                            "type": "boolean",
+                            "description": "If true, show what would be consolidated without making changes",
+                            "default": false
+                        }
+                    },
+                    "required": ["namespace"]
+                }),
+            },
+        );
+
+        // Enrich tool (uses sampling)
+        tools.insert(
+            "subcog_enrich".to_string(),
+            ToolDefinition {
+                name: "subcog_enrich".to_string(),
+                description: "Enrich a memory with better structure, tags, and context using LLM. Uses MCP sampling to request LLM completion.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "memory_id": {
+                            "type": "string",
+                            "description": "ID of the memory to enrich"
+                        },
+                        "enrich_tags": {
+                            "type": "boolean",
+                            "description": "Generate or improve tags",
+                            "default": true
+                        },
+                        "enrich_structure": {
+                            "type": "boolean",
+                            "description": "Restructure content for clarity",
+                            "default": true
+                        },
+                        "add_context": {
+                            "type": "boolean",
+                            "description": "Add inferred context and rationale",
+                            "default": false
+                        }
+                    },
+                    "required": ["memory_id"]
+                }),
+            },
+        );
+
+        // Sync tool
+        tools.insert(
+            "subcog_sync".to_string(),
+            ToolDefinition {
+                name: "subcog_sync".to_string(),
+                description: "Sync memories with git remote (push, fetch, or full sync)".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "direction": {
+                            "type": "string",
+                            "description": "Sync direction: push (upload), fetch (download), full (both)",
+                            "enum": ["push", "fetch", "full"],
+                            "default": "full"
+                        }
+                    },
+                    "required": []
+                }),
+            },
+        );
+
         Self { tools }
     }
 
@@ -144,6 +234,9 @@ impl ToolRegistry {
             "subcog_recall" => self.execute_recall(arguments),
             "subcog_status" => self.execute_status(arguments),
             "subcog_namespaces" => self.execute_namespaces(arguments),
+            "subcog_consolidate" => self.execute_consolidate(arguments),
+            "subcog_enrich" => self.execute_enrich(arguments),
+            "subcog_sync" => self.execute_sync(arguments),
             _ => Err(Error::InvalidInput(format!("Unknown tool: {name}"))),
         }
     }
@@ -186,8 +279,7 @@ impl ToolRegistry {
         let mode = args
             .mode
             .as_deref()
-            .map(parse_search_mode)
-            .unwrap_or(SearchMode::Hybrid);
+            .map_or(SearchMode::Hybrid, parse_search_mode);
 
         let mut filter = SearchFilter::new();
         if let Some(ns) = &args.namespace {
@@ -273,6 +365,154 @@ impl ToolRegistry {
             is_error: false,
         })
     }
+
+    /// Executes the consolidate tool.
+    /// Returns a sampling request for the LLM to perform consolidation.
+    fn execute_consolidate(&self, arguments: Value) -> Result<ToolResult> {
+        let args: ConsolidateArgs =
+            serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+        let namespace = parse_namespace(&args.namespace);
+        let strategy = args.strategy.as_deref().unwrap_or("merge");
+        let dry_run = args.dry_run.unwrap_or(false);
+
+        // Fetch memories for consolidation
+        let service = RecallService::default();
+        let filter = SearchFilter::new().with_namespace(namespace.clone());
+        let query = args.query.as_deref().unwrap_or("*");
+        let result = service.search(query, SearchMode::Hybrid, &filter, 50)?;
+
+        if result.memories.is_empty() {
+            return Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: format!("No memories found in namespace '{}' to consolidate.", args.namespace),
+                }],
+                is_error: false,
+            });
+        }
+
+        // Build context for sampling request
+        let memories_text: String = result
+            .memories
+            .iter()
+            .enumerate()
+            .map(|(i, hit)| format!("{}. [ID: {}] {}", i + 1, hit.memory.id, hit.memory.content))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        let sampling_prompt = match strategy {
+            "merge" => format!(
+                "Analyze these {} memories from the '{}' namespace and identify groups that should be merged:\n\n{}\n\nFor each group, provide:\n1. IDs to merge\n2. Merged content\n3. Rationale",
+                result.memories.len(), args.namespace, memories_text
+            ),
+            "summarize" => format!(
+                "Create a comprehensive summary of these {} memories from the '{}' namespace:\n\n{}\n\nProvide a structured summary that captures key themes, decisions, and patterns.",
+                result.memories.len(), args.namespace, memories_text
+            ),
+            "dedupe" => format!(
+                "Identify duplicate or near-duplicate memories from these {} entries in the '{}' namespace:\n\n{}\n\nFor each duplicate set, identify which to keep and which to remove.",
+                result.memories.len(), args.namespace, memories_text
+            ),
+            _ => format!(
+                "Analyze these {} memories from the '{}' namespace:\n\n{}",
+                result.memories.len(), args.namespace, memories_text
+            ),
+        };
+
+        // Return sampling request
+        Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: if dry_run {
+                    format!(
+                        "DRY RUN: Would consolidate {} memories using '{}' strategy.\n\nSampling prompt:\n{}",
+                        result.memories.len(), strategy, sampling_prompt
+                    )
+                } else {
+                    format!(
+                        "SAMPLING_REQUEST\n\nstrategy: {}\nnamespace: {}\nmemory_count: {}\n\nprompt: {}",
+                        strategy, args.namespace, result.memories.len(), sampling_prompt
+                    )
+                },
+            }],
+            is_error: false,
+        })
+    }
+
+    /// Executes the enrich tool.
+    /// Returns a sampling request for the LLM to enrich a memory.
+    fn execute_enrich(&self, arguments: Value) -> Result<ToolResult> {
+        let args: EnrichArgs =
+            serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+        let enrich_tags = args.enrich_tags.unwrap_or(true);
+        let enrich_structure = args.enrich_structure.unwrap_or(true);
+        let add_context = args.add_context.unwrap_or(false);
+
+        // For now, return a sampling request template
+        // In full implementation, would fetch the memory by ID first
+        let mut enrichments = Vec::new();
+        if enrich_tags {
+            enrichments.push("- Generate relevant tags for searchability");
+        }
+        if enrich_structure {
+            enrichments.push("- Restructure content for clarity (add context, rationale, consequences)");
+        }
+        if add_context {
+            enrichments.push("- Infer and add missing context or rationale");
+        }
+
+        let sampling_prompt = format!(
+            "Enrich the memory with ID '{}'.\n\nRequested enrichments:\n{}\n\nProvide the enriched version with:\n1. Improved content structure\n2. Suggested tags (if requested)\n3. Inferred namespace (if content suggests different category)",
+            args.memory_id,
+            enrichments.join("\n")
+        );
+
+        Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!(
+                    "SAMPLING_REQUEST\n\nmemory_id: {}\nenrich_tags: {}\nenrich_structure: {}\nadd_context: {}\n\nprompt: {}",
+                    args.memory_id, enrich_tags, enrich_structure, add_context, sampling_prompt
+                ),
+            }],
+            is_error: false,
+        })
+    }
+
+    /// Executes the sync tool.
+    fn execute_sync(&self, arguments: Value) -> Result<ToolResult> {
+        let args: SyncArgs =
+            serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+        let direction = args.direction.as_deref().unwrap_or("full");
+
+        let service = SyncService::default();
+        let result = match direction {
+            "push" => service.push(),
+            "fetch" => service.fetch(),
+            _ => service.sync(),
+        };
+
+        match result {
+            Ok(sync_result) => Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: format!(
+                        "Sync completed!\n\nDirection: {}\nPushed: {}\nPulled: {}\nConflicts: {}",
+                        direction,
+                        sync_result.pushed,
+                        sync_result.pulled,
+                        sync_result.conflicts
+                    ),
+                }],
+                is_error: false,
+            }),
+            Err(e) => Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: format!("Sync failed: {}", e),
+                }],
+                is_error: true,
+            }),
+        }
+    }
 }
 
 impl Default for ToolRegistry {
@@ -338,6 +578,30 @@ struct RecallArgs {
     limit: Option<usize>,
 }
 
+/// Arguments for the consolidate tool.
+#[derive(Debug, Deserialize)]
+struct ConsolidateArgs {
+    namespace: String,
+    query: Option<String>,
+    strategy: Option<String>,
+    dry_run: Option<bool>,
+}
+
+/// Arguments for the enrich tool.
+#[derive(Debug, Deserialize)]
+struct EnrichArgs {
+    memory_id: String,
+    enrich_tags: Option<bool>,
+    enrich_structure: Option<bool>,
+    add_context: Option<bool>,
+}
+
+/// Arguments for the sync tool.
+#[derive(Debug, Deserialize)]
+struct SyncArgs {
+    direction: Option<String>,
+}
+
 /// Parses a namespace string to Namespace enum.
 fn parse_namespace(s: &str) -> Namespace {
     match s.to_lowercase().as_str() {
@@ -355,7 +619,7 @@ fn parse_namespace(s: &str) -> Namespace {
     }
 }
 
-/// Parses a search mode string to SearchMode enum.
+/// Parses a search mode string to `SearchMode` enum.
 fn parse_search_mode(s: &str) -> SearchMode {
     match s.to_lowercase().as_str() {
         "vector" => SearchMode::Vector,
@@ -395,10 +659,12 @@ mod tests {
 
         let capture = registry.get_tool("subcog_capture").unwrap();
         assert!(capture.description.contains("memory"));
-        assert!(capture.input_schema["required"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("content")));
+        assert!(
+            capture.input_schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("content"))
+        );
     }
 
     #[test]

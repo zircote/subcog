@@ -127,7 +127,7 @@ impl McpServer {
             Ok(req) => {
                 let result = self.dispatch_method(&req.method, req.params);
                 self.format_response(req.id, result)
-            }
+            },
             Err(e) => self.format_error(None, -32700, &format!("Parse error: {e}")),
         }
     }
@@ -154,7 +154,8 @@ impl McpServer {
             "capabilities": {
                 "tools": {},
                 "resources": {},
-                "prompts": {}
+                "prompts": {},
+                "sampling": {}
             },
             "serverInfo": {
                 "name": SERVER_NAME,
@@ -190,7 +191,10 @@ impl McpServer {
             .and_then(|v| v.as_str())
             .ok_or((-32602, "Missing tool name".to_string()))?;
 
-        let arguments = params.get("arguments").cloned().unwrap_or(serde_json::json!({}));
+        let arguments = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or(serde_json::json!({}));
 
         match self.tools.execute(name, arguments) {
             Ok(result) => Ok(serde_json::json!({
@@ -277,7 +281,10 @@ impl McpServer {
             .and_then(|v| v.as_str())
             .ok_or((-32602, "Missing prompt name".to_string()))?;
 
-        let arguments = params.get("arguments").cloned().unwrap_or(serde_json::json!({}));
+        let arguments = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or(serde_json::json!({}));
 
         match self.prompts.get_prompt_messages(name, &arguments) {
             Some(messages) => {
@@ -292,7 +299,7 @@ impl McpServer {
                     .collect();
 
                 Ok(serde_json::json!({ "messages": msgs }))
-            }
+            },
             None => Err((-32602, format!("Unknown prompt: {name}"))),
         }
     }
@@ -308,7 +315,7 @@ impl McpServer {
                     error: None,
                 };
                 serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string())
-            }
+            },
             Err((code, message)) => self.format_error(id, code, &message),
         }
     }
@@ -341,8 +348,9 @@ type DispatchResult = std::result::Result<Value, (i32, String)>;
 /// JSON-RPC request.
 #[derive(Debug, Deserialize)]
 struct JsonRpcRequest {
-    #[allow(dead_code)]
-    jsonrpc: String,
+    /// JSON-RPC version (required by protocol but not used in code).
+    #[serde(rename = "jsonrpc")]
+    _jsonrpc: String,
     id: Option<Value>,
     method: String,
     params: Option<Value>,
@@ -381,7 +389,9 @@ mod tests {
 
     #[test]
     fn test_with_transport() {
-        let server = McpServer::new().with_transport(Transport::Http).with_port(8080);
+        let server = McpServer::new()
+            .with_transport(Transport::Http)
+            .with_port(8080);
         assert_eq!(server.transport, Transport::Http);
         assert_eq!(server.port, 8080);
     }
@@ -441,8 +451,7 @@ mod tests {
     #[test]
     fn test_handle_read_resource() {
         let server = McpServer::new();
-        let request =
-            r#"{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"subcog://help"}}"#;
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"subcog://help"}}"#;
         let response = server.handle_request(request);
 
         assert!(response.contains("contents"));
