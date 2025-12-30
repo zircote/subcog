@@ -37,6 +37,93 @@ pub struct LlmConfig {
     pub base_url: Option<String>,
 }
 
+/// Configuration for search intent detection.
+#[derive(Debug, Clone)]
+pub struct SearchIntentConfig {
+    /// Whether search intent detection is enabled.
+    pub enabled: bool,
+    /// Whether to use LLM for intent classification.
+    pub use_llm: bool,
+    /// Timeout for LLM classification in milliseconds.
+    pub llm_timeout_ms: u64,
+    /// Minimum confidence threshold for memory injection.
+    pub min_confidence: f32,
+    /// Base memory count for adaptive injection.
+    pub base_count: usize,
+    /// Maximum memory count for adaptive injection.
+    pub max_count: usize,
+    /// Maximum tokens for injected memories.
+    pub max_tokens: usize,
+}
+
+impl Default for SearchIntentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            use_llm: true,
+            llm_timeout_ms: 200,
+            min_confidence: 0.5,
+            base_count: 5,
+            max_count: 15,
+            max_tokens: 4000,
+        }
+    }
+}
+
+impl SearchIntentConfig {
+    /// Creates a new configuration.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Loads configuration from environment variables.
+    #[must_use]
+    pub fn from_env() -> Self {
+        let mut config = Self::default();
+
+        if let Ok(v) = std::env::var("SUBCOG_SEARCH_INTENT_ENABLED") {
+            config.enabled = v.to_lowercase() == "true" || v == "1";
+        }
+        if let Ok(v) = std::env::var("SUBCOG_SEARCH_INTENT_USE_LLM") {
+            config.use_llm = v.to_lowercase() == "true" || v == "1";
+        }
+        if let Ok(v) = std::env::var("SUBCOG_SEARCH_INTENT_LLM_TIMEOUT_MS") {
+            if let Ok(ms) = v.parse::<u64>() {
+                config.llm_timeout_ms = ms;
+            }
+        }
+        if let Ok(v) = std::env::var("SUBCOG_SEARCH_INTENT_MIN_CONFIDENCE") {
+            if let Ok(conf) = v.parse::<f32>() {
+                config.min_confidence = conf.clamp(0.0, 1.0);
+            }
+        }
+
+        config
+    }
+
+    /// Sets whether LLM is enabled.
+    #[must_use]
+    pub const fn with_use_llm(mut self, use_llm: bool) -> Self {
+        self.use_llm = use_llm;
+        self
+    }
+
+    /// Sets the LLM timeout in milliseconds.
+    #[must_use]
+    pub const fn with_llm_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.llm_timeout_ms = timeout_ms;
+        self
+    }
+
+    /// Sets the minimum confidence threshold.
+    #[must_use]
+    pub const fn with_min_confidence(mut self, confidence: f32) -> Self {
+        self.min_confidence = confidence;
+        self
+    }
+}
+
 /// Available LLM providers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LlmProvider {

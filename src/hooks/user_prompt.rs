@@ -4,12 +4,17 @@
 
 use super::HookHandler;
 use super::search_context::{AdaptiveContextConfig, MemoryContext, SearchContextBuilder};
-use super::search_intent::{SearchIntent, detect_search_intent};
+use super::search_intent::{
+    SearchIntent, detect_search_intent, detect_search_intent_hybrid,
+    detect_search_intent_with_timeout,
+};
 use crate::Result;
+use crate::config::SearchIntentConfig;
+use crate::llm::LlmProvider;
 use crate::models::Namespace;
 use crate::services::RecallService;
 use regex::Regex;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use tracing::instrument;
 
 /// Handles `UserPromptSubmit` hook events.
@@ -24,6 +29,10 @@ pub struct UserPromptHandler {
     context_config: AdaptiveContextConfig,
     /// Optional recall service for memory retrieval.
     recall_service: Option<RecallService>,
+    /// Optional LLM provider for enhanced intent classification.
+    llm_provider: Option<Arc<dyn LlmProvider>>,
+    /// Configuration for search intent detection.
+    search_intent_config: SearchIntentConfig,
 }
 
 /// Signal patterns for memory capture detection.
@@ -114,6 +123,8 @@ impl UserPromptHandler {
             search_intent_threshold: 0.5,
             context_config: AdaptiveContextConfig::default(),
             recall_service: None,
+            llm_provider: None,
+            search_intent_config: SearchIntentConfig::default(),
         }
     }
 
@@ -145,6 +156,20 @@ impl UserPromptHandler {
         self
     }
 
+    /// Sets the LLM provider for enhanced intent classification.
+    #[must_use]
+    pub fn with_llm_provider(mut self, provider: Arc<dyn LlmProvider>) -> Self {
+        self.llm_provider = Some(provider);
+        self
+    }
+
+    /// Sets the search intent configuration.
+    #[must_use]
+    pub const fn with_search_intent_config(mut self, config: SearchIntentConfig) -> Self {
+        self.search_intent_config = config;
+        self
+    }
+
     /// Builds memory context from a search intent using the `SearchContextBuilder`.
     fn build_memory_context(&self, intent: &SearchIntent) -> MemoryContext {
         let mut builder = SearchContextBuilder::new().with_config(self.context_config.clone());
@@ -160,12 +185,46 @@ impl UserPromptHandler {
     }
 
     /// Detects search intent from the prompt.
+    ///
+    /// Uses LLM-based classification when an LLM provider is configured,
+    /// otherwise falls back to keyword-based detection.
     fn detect_search_intent(&self, prompt: &str) -> Option<SearchIntent> {
-        let intent = detect_search_intent(prompt)?;
+        let intent = self.classify_intent(prompt);
+
         if intent.confidence >= self.search_intent_threshold {
             Some(intent)
         } else {
             None
+        }
+    }
+
+    /// Classifies intent using the appropriate detection method.
+    fn classify_intent(&self, prompt: &str) -> SearchIntent {
+        self.llm_provider.as_ref().map_or_else(
+            || self.classify_without_llm(prompt),
+            |provider| {
+                detect_search_intent_hybrid(
+                    Some(provider.as_ref()),
+                    prompt,
+                    &self.search_intent_config,
+                )
+            },
+        )
+    }
+
+    /// Classifies intent without an LLM provider.
+    fn classify_without_llm(&self, prompt: &str) -> SearchIntent {
+        if self.search_intent_config.use_llm {
+            // LLM enabled in config but no provider - use timeout-based detection
+            // which will fall back to keyword detection
+            detect_search_intent_with_timeout::<crate::llm::AnthropicClient>(
+                None,
+                prompt,
+                &self.search_intent_config,
+            )
+        } else {
+            // Keyword-only detection
+            detect_search_intent(prompt).unwrap_or_default()
         }
     }
 
