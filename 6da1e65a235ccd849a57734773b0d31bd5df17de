@@ -3,6 +3,11 @@ created_at: 1767000236
 id: 91a98e6261364a98
 namespace: learnings
 status: active
+tags:
+- config-based-metrics
+- metrics-push
+- without-env-variables
+- feature-improvement
 updated_at: 1767000236
 ---
 Config-based metrics push now works without env variables
