@@ -5,10 +5,10 @@ namespace: decisions
 status: active
 tags:
 - github-actions
-- sha-pinned-actions
-- heredoc-variable-expansion
-- homebrew-formula-escaping
-- cross-repo-docs-deploy
+- workflow-fixes
+- sha-pinned-action-versions
+- homebrew-formula-heredoc
+- docs-deploy-pr
 updated_at: 1767059214
 ---
 Fixed GitHub workflows for subcog project:
