@@ -7,7 +7,8 @@ tags:
 - code-review
 - security-findings
 - resilience-issues
-- performance-issues
+- performance-bottlenecks
+- architecture-duplication
 updated_at: 1767043026
 ---
 MAXALL Deep-Clean Code Review completed for subcog codebase. 12 parallel specialist agents identified 94 total findings:
