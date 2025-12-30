@@ -18,108 +18,173 @@ impl PromptRegistry {
     pub fn new() -> Self {
         let mut prompts = HashMap::new();
 
-        // Tutorial prompt
-        prompts.insert(
-            "subcog_tutorial".to_string(),
-            PromptDefinition {
-                name: "subcog_tutorial".to_string(),
-                description: Some(
-                    "Interactive tutorial for learning Subcog memory system".to_string(),
-                ),
-                arguments: vec![
-                    PromptArgument {
-                        name: "familiarity".to_string(),
-                        description: Some("Your familiarity level with memory systems".to_string()),
-                        required: false,
-                    },
-                    PromptArgument {
-                        name: "focus".to_string(),
-                        description: Some("Topic to focus on".to_string()),
-                        required: false,
-                    },
-                ],
-            },
-        );
-
-        // Capture assistant prompt
-        prompts.insert(
-            "subcog_capture_assistant".to_string(),
-            PromptDefinition {
-                name: "subcog_capture_assistant".to_string(),
-                description: Some(
-                    "Help decide what to capture and which namespace to use".to_string(),
-                ),
-                arguments: vec![PromptArgument {
-                    name: "context".to_string(),
-                    description: Some(
-                        "The current context or conversation to analyze for memories".to_string(),
-                    ),
-                    required: true,
-                }],
-            },
-        );
-
-        // Memory review prompt
-        prompts.insert(
-            "subcog_review".to_string(),
-            PromptDefinition {
-                name: "subcog_review".to_string(),
-                description: Some("Review and analyze existing memories for a project".to_string()),
-                arguments: vec![
-                    PromptArgument {
-                        name: "namespace".to_string(),
-                        description: Some("Optional namespace to focus on".to_string()),
-                        required: false,
-                    },
-                    PromptArgument {
-                        name: "action".to_string(),
-                        description: Some(
-                            "Action: summarize, consolidate, archive, or cleanup".to_string(),
-                        ),
-                        required: false,
-                    },
-                ],
-            },
-        );
-
-        // Decision documentation prompt
-        prompts.insert(
-            "subcog_document_decision".to_string(),
-            PromptDefinition {
-                name: "subcog_document_decision".to_string(),
-                description: Some(
-                    "Help document an architectural or design decision properly".to_string(),
-                ),
-                arguments: vec![
-                    PromptArgument {
-                        name: "decision".to_string(),
-                        description: Some("Brief description of the decision".to_string()),
-                        required: true,
-                    },
-                    PromptArgument {
-                        name: "alternatives".to_string(),
-                        description: Some("Alternatives that were considered".to_string()),
-                        required: false,
-                    },
-                ],
-            },
-        );
-
-        // Search refinement prompt
-        prompts.insert(
-            "subcog_search_help".to_string(),
-            PromptDefinition {
-                name: "subcog_search_help".to_string(),
-                description: Some("Help craft effective memory search queries".to_string()),
-                arguments: vec![PromptArgument {
-                    name: "goal".to_string(),
-                    description: Some("What you're trying to find or accomplish".to_string()),
-                    required: true,
-                }],
-            },
-        );
+        // Register all prompts
+        for prompt in Self::all_prompts() {
+            prompts.insert(prompt.name.clone(), prompt);
+        }
 
         Self { prompts }
+    }
+
+    /// Returns all prompt definitions.
+    fn all_prompts() -> Vec<PromptDefinition> {
+        vec![
+            Self::tutorial_prompt(),
+            Self::capture_assistant_prompt(),
+            Self::review_prompt(),
+            Self::document_decision_prompt(),
+            Self::search_help_prompt(),
+            Self::browse_prompt(),
+            Self::list_prompt(),
+        ]
+    }
+
+    fn tutorial_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "subcog_tutorial".to_string(),
+            description: Some("Interactive tutorial for learning Subcog memory system".to_string()),
+            arguments: vec![
+                PromptArgument {
+                    name: "familiarity".to_string(),
+                    description: Some("Your familiarity level with memory systems".to_string()),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "focus".to_string(),
+                    description: Some("Topic to focus on".to_string()),
+                    required: false,
+                },
+            ],
+        }
+    }
+
+    fn capture_assistant_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "subcog_capture_assistant".to_string(),
+            description: Some("Help decide what to capture and which namespace to use".to_string()),
+            arguments: vec![PromptArgument {
+                name: "context".to_string(),
+                description: Some(
+                    "The current context or conversation to analyze for memories".to_string(),
+                ),
+                required: true,
+            }],
+        }
+    }
+
+    fn review_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "subcog_review".to_string(),
+            description: Some("Review and analyze existing memories for a project".to_string()),
+            arguments: vec![
+                PromptArgument {
+                    name: "namespace".to_string(),
+                    description: Some("Optional namespace to focus on".to_string()),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "action".to_string(),
+                    description: Some(
+                        "Action: summarize, consolidate, archive, or cleanup".to_string(),
+                    ),
+                    required: false,
+                },
+            ],
+        }
+    }
+
+    fn document_decision_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "subcog_document_decision".to_string(),
+            description: Some(
+                "Help document an architectural or design decision properly".to_string(),
+            ),
+            arguments: vec![
+                PromptArgument {
+                    name: "decision".to_string(),
+                    description: Some("Brief description of the decision".to_string()),
+                    required: true,
+                },
+                PromptArgument {
+                    name: "alternatives".to_string(),
+                    description: Some("Alternatives that were considered".to_string()),
+                    required: false,
+                },
+            ],
+        }
+    }
+
+    fn search_help_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "subcog_search_help".to_string(),
+            description: Some("Help craft effective memory search queries".to_string()),
+            arguments: vec![PromptArgument {
+                name: "goal".to_string(),
+                description: Some("What you're trying to find or accomplish".to_string()),
+                required: true,
+            }],
+        }
+    }
+
+    fn browse_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "subcog_browse".to_string(),
+            description: Some(
+                "Interactive memory browser with faceted discovery and filtering".to_string(),
+            ),
+            arguments: vec![
+                PromptArgument {
+                    name: "filter".to_string(),
+                    description: Some(
+                        "Filter expression: ns:X, tag:X, tag:X,Y (OR), -tag:X (exclude), since:Nd, source:X, status:X".to_string(),
+                    ),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "view".to_string(),
+                    description: Some(
+                        "View mode: dashboard (default), tags, namespaces, memories".to_string(),
+                    ),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "top".to_string(),
+                    description: Some("Number of items per facet (default: 10)".to_string()),
+                    required: false,
+                },
+            ],
+        }
+    }
+
+    fn list_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "subcog_list".to_string(),
+            description: Some(
+                "List memories in formatted table with namespace/tag summary".to_string(),
+            ),
+            arguments: vec![
+                PromptArgument {
+                    name: "filter".to_string(),
+                    description: Some(
+                        "Filter expression: ns:X, tag:X, since:Nd (same syntax as subcog_browse)"
+                            .to_string(),
+                    ),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "format".to_string(),
+                    description: Some(
+                        "Output format: table (default), compact, detailed".to_string(),
+                    ),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "limit".to_string(),
+                    description: Some("Maximum memories to list (default: 50)".to_string()),
+                    required: false,
+                },
+            ],
+        }
     }
 
     /// Returns all prompt definitions.
@@ -143,6 +208,8 @@ impl PromptRegistry {
             "subcog_review" => Some(self.generate_review_prompt(arguments)),
             "subcog_document_decision" => Some(self.generate_decision_prompt(arguments)),
             "subcog_search_help" => Some(self.generate_search_help_prompt(arguments)),
+            "subcog_browse" => Some(self.generate_browse_prompt(arguments)),
+            "subcog_list" => Some(self.generate_list_prompt(arguments)),
             _ => None,
         }
     }
@@ -296,6 +363,97 @@ impl PromptRegistry {
                 },
             },
         ]
+    }
+
+    /// Generates the browse prompt (discovery dashboard).
+    fn generate_browse_prompt(&self, arguments: &Value) -> Vec<PromptMessage> {
+        let filter = arguments
+            .get("filter")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let view = arguments
+            .get("view")
+            .and_then(|v| v.as_str())
+            .unwrap_or("dashboard");
+
+        let top = arguments
+            .get("top")
+            .and_then(|v| v.as_str())
+            .unwrap_or("10");
+
+        let mut prompt = String::from(
+            "Show me a memory browser dashboard.\n\n**IMPORTANT**: Use the `subcog_recall` tool to fetch memories with server-side filtering:\n",
+        );
+
+        if filter.is_empty() {
+            prompt.push_str("```json\n{ \"query\": \"*\", \"limit\": 100, \"detail\": \"medium\" }\n```\n\n");
+            prompt.push_str("No filters applied - show the full dashboard with:\n");
+        } else {
+            prompt.push_str(&format!(
+                "```json\n{{ \"query\": \"*\", \"filter\": \"{filter}\", \"limit\": 100, \"detail\": \"medium\" }}\n```\n\n"
+            ));
+        }
+
+        prompt.push_str(&format!(
+            "View mode: {view}\nShow top {top} items per facet.\n\n"
+        ));
+
+        prompt.push_str(BROWSE_DASHBOARD_INSTRUCTIONS);
+
+        vec![
+            PromptMessage {
+                role: "user".to_string(),
+                content: PromptContent::Text { text: prompt },
+            },
+            PromptMessage {
+                role: "assistant".to_string(),
+                content: PromptContent::Text {
+                    text: BROWSE_SYSTEM_RESPONSE.to_string(),
+                },
+            },
+        ]
+    }
+
+    /// Generates the list prompt (formatted inventory).
+    fn generate_list_prompt(&self, arguments: &Value) -> Vec<PromptMessage> {
+        let filter = arguments
+            .get("filter")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let format = arguments
+            .get("format")
+            .and_then(|v| v.as_str())
+            .unwrap_or("table");
+
+        let limit = arguments
+            .get("limit")
+            .and_then(|v| v.as_str())
+            .unwrap_or("50");
+
+        let mut prompt = String::from(
+            "List memories from Subcog.\n\n**IMPORTANT**: Use the `subcog_recall` tool to fetch memories with server-side filtering:\n",
+        );
+
+        if filter.is_empty() {
+            prompt.push_str(&format!(
+                "```json\n{{ \"query\": \"*\", \"limit\": {limit}, \"detail\": \"medium\" }}\n```\n\n"
+            ));
+        } else {
+            prompt.push_str(&format!(
+                "```json\n{{ \"query\": \"*\", \"filter\": \"{filter}\", \"limit\": {limit}, \"detail\": \"medium\" }}\n```\n\n"
+            ));
+        }
+
+        prompt.push_str(&format!("Format: {format}\n\n"));
+
+        prompt.push_str(LIST_FORMAT_INSTRUCTIONS);
+
+        vec![PromptMessage {
+            role: "user".to_string(),
+            content: PromptContent::Text { text: prompt },
+        }]
     }
 }
 
@@ -594,6 +752,108 @@ I'll help you craft effective search queries. Subcog supports:
 
 Let me suggest some queries for your goal...
 "#;
+
+const BROWSE_DASHBOARD_INSTRUCTIONS: &str = r"
+## Dashboard Layout
+
+Present the data in this format:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  SUBCOG MEMORY BROWSER                           {count} memories│
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  NAMESPACES                          TAGS (top N)               │
+│  ───────────                         ──────────────             │
+│  {namespace} [{count}] {bar}         {tag} [{count}] {bar}      │
+│  ...                                 ...                        │
+│                                                                 │
+│  TIME                                STATUS                     │
+│  ────                                ──────                     │
+│  today     [{count}]                 active   [{count}]         │
+│  this week [{count}]                 archived [{count}]         │
+│  ...                                                            │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Filter Syntax Reference
+
+| Filter | Meaning | Example |
+|--------|---------|---------|
+| `ns:X` | namespace equals | `ns:decisions` |
+| `tag:X` | has tag | `tag:rust` |
+| `tag:X,Y` | has any tag (OR) | `tag:rust,mcp` |
+| `tag:X tag:Y` | has all tags (AND) | `tag:rust tag:error` |
+| `-tag:X` | exclude tag | `-tag:test` |
+| `tag:*X` | tag wildcard | `tag:*-testing` |
+| `since:Nd` | created in last N days | `since:7d` |
+| `source:X` | source matches | `source:src/*` |
+| `status:X` | status equals | `status:archived` |
+
+Show example filter commands the user can use to drill down.
+";
+
+const BROWSE_SYSTEM_RESPONSE: &str = r"
+I'll create a memory browser dashboard for you. Let me fetch the memories using `subcog_recall`.
+
+I'll call the tool with the specified filter to get server-side filtered results, then compute:
+1. Namespace distribution with counts
+2. Tag frequency (top N most common)
+3. Time-based grouping (today, this week, this month, older)
+4. Status breakdown (active, archived)
+
+I'll present this as a visual dashboard with ASCII bar charts showing relative proportions.
+";
+
+const LIST_FORMAT_INSTRUCTIONS: &str = r"
+## URN Format
+
+Rich URN encodes scope, namespace, and ID:
+```
+subcog://{scope}/{namespace}/{id}
+```
+Examples:
+- `subcog://project/decisions/abc123...` - project-scoped decision
+- `subcog://org/acme/patterns/def456...` - org-scoped pattern
+- `subcog://acme/myrepo/learnings/ghi789...` - repo-scoped learning
+
+## Output Formats
+
+### Table Format (default)
+Present results directly from `subcog_recall` output. Each line shows:
+```
+{n}. subcog://{scope}/{namespace}/{id} | {score} [{tags}]
+   {content_summary}
+```
+
+Group by namespace with counts when helpful.
+
+### Compact Format
+```
+subcog://{scope}/{namespace}/{id} [{tags}]
+```
+
+### Detailed Format
+```
+### subcog://{scope}/{namespace}/{id}
+- **Score**: {score}
+- **Tags**: tag1, tag2
+- **Source**: {source}
+- **Content**: {full_content}
+```
+
+## Filter Syntax
+
+- `ns:decisions` - filter by namespace
+- `tag:rust` - filter by tag
+- `tag:rust,mcp` - OR filter (must have ANY)
+- `tag:rust tag:error` - AND filter (must have ALL)
+- `-tag:test` - exclude tag
+- `since:7d` - time filter
+- `source:src/*` - source pattern
+- `status:active` - status filter
+";
 
 #[cfg(test)]
 mod tests {

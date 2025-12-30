@@ -7,20 +7,22 @@
 //! - `subcog://help` - Help index
 //! - `subcog://help/{topic}` - Topic-specific help
 //!
-//! ## Memory Resources (Domain-Scoped)
-//! - `subcog://_` - All memories (aggregate across all domains)
-//! - `subcog://_/{namespace}` - All memories filtered by namespace
-//! - `subcog://project` - Project-scoped memories
-//! - `subcog://project/{namespace}` - Project memories by namespace
-//! - `subcog://org` - Organization-scoped memories
-//! - `subcog://org/{namespace}` - Org memories by namespace
-//! - `subcog://global` - Global/user-scoped memories
-//! - `subcog://global/{namespace}` - Global memories by namespace
+//! ## Memory Resources
+//! - `subcog://_` - All memories across all domains
+//! - `subcog://_/{namespace}` - All memories in a namespace (e.g., `subcog://_/learnings`)
 //! - `subcog://memory/{id}` - Get a specific memory by ID
+//!
+//! ## Domain-Scoped Resources (future)
+//! - `subcog://project/_` - Project-scoped memories only
+//! - `subcog://org/{org}/_` - Organization-scoped memories
+//! - `subcog://global/_` - Global memories
+//!
+//! For advanced filtering and discovery, use the `subcog_browse` prompt
+//! which supports filtering by namespace, tags, time, source, and status.
 
-use crate::models::Domain;
+use crate::Namespace;
 use crate::services::RecallService;
-use crate::{Error, Namespace, Result, SearchFilter, SearchMode};
+use crate::{Error, Result, SearchFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -131,6 +133,12 @@ impl ResourceHandler {
     }
 
     /// Lists all available resources.
+    ///
+    /// Returns resources organized by type:
+    /// - Help topics
+    /// - Memory browsing patterns
+    ///
+    /// For advanced filtering, use the `subcog_browse` prompt.
     #[must_use]
     pub fn list_resources(&self) -> Vec<ResourceDefinition> {
         let mut resources: Vec<ResourceDefinition> = self
@@ -144,49 +152,23 @@ impl ResourceHandler {
             })
             .collect();
 
-        // Add aggregate "_" resource first (wildcard for all domains)
+        // All memories across all domains
         resources.push(ResourceDefinition {
             uri: "subcog://_".to_string(),
             name: "All Memories".to_string(),
-            description: Some("Browse all memories across all domains".to_string()),
+            description: Some("All memories across all domains".to_string()),
             mime_type: Some("application/json".to_string()),
         });
 
-        // Add namespace-specific aggregate resources
+        // Namespace-scoped patterns
         for ns in Namespace::user_namespaces() {
+            let ns_str = ns.as_str();
             resources.push(ResourceDefinition {
-                uri: format!("subcog://_/{}", ns.as_str()),
-                name: format!("All {} Memories", ns.as_str()),
-                description: Some(format!(
-                    "Browse all {} memories across all domains",
-                    ns.as_str()
-                )),
+                uri: format!("subcog://_/{ns_str}"),
+                name: format!("{ns_str} memories"),
+                description: Some(format!("All memories in {ns_str} namespace")),
                 mime_type: Some("application/json".to_string()),
             });
-        }
-
-        // Add domain-scoped memory resources
-        for domain in &["project", "org", "global"] {
-            resources.push(ResourceDefinition {
-                uri: format!("subcog://{domain}"),
-                name: format!("{} Memories", capitalize(domain)),
-                description: Some(format!("Browse all {domain}-scoped memories")),
-                mime_type: Some("application/json".to_string()),
-            });
-
-            // Add namespace-specific resources under each domain
-            for ns in Namespace::user_namespaces() {
-                resources.push(ResourceDefinition {
-                    uri: format!("subcog://{domain}/{}", ns.as_str()),
-                    name: format!("{} {} Memories", capitalize(domain), ns.as_str()),
-                    description: Some(format!(
-                        "Browse {}-scoped memories in the {} namespace",
-                        domain,
-                        ns.as_str()
-                    )),
-                    mime_type: Some("application/json".to_string()),
-                });
-            }
         }
 
         resources
@@ -197,15 +179,12 @@ impl ResourceHandler {
     /// Supported URI patterns:
     /// - `subcog://help` - Help index
     /// - `subcog://help/{topic}` - Help topic
-    /// - `subcog://_` - All memories (aggregate)
-    /// - `subcog://_/{namespace}` - All memories by namespace
-    /// - `subcog://project` - Project-scoped memories
-    /// - `subcog://project/{namespace}` - Project memories by namespace
-    /// - `subcog://org` - Organization-scoped memories
-    /// - `subcog://org/{namespace}` - Org memories by namespace
-    /// - `subcog://global` - Global/user-scoped memories
-    /// - `subcog://global/{namespace}` - Global memories by namespace
-    /// - `subcog://memory/{id}` - Specific memory by ID
+    /// - `subcog://_` - All memories across all domains
+    /// - `subcog://_/{namespace}` - All memories in a namespace
+    /// - `subcog://memory/{id}` - Get specific memory by ID
+    /// - `subcog://project/_` - Project-scoped memories (alias for `subcog://_`)
+    ///
+    /// For advanced filtering, use the `subcog_browse` prompt instead.
     ///
     /// # Errors
     ///
@@ -226,10 +205,11 @@ impl ResourceHandler {
 
         match parts[0] {
             "help" => self.get_help_resource(uri, &parts),
-            "_" | "project" | "org" | "global" => self.get_domain_memories_resource(uri, &parts),
+            "_" => self.get_all_memories_resource(uri, &parts),
+            "project" => self.get_all_memories_resource(uri, &parts), // Alias for now
             "memory" => self.get_memory_resource(uri, &parts),
             _ => Err(Error::InvalidInput(format!(
-                "Unknown resource type: {}. Valid: help, _, project, org, global, memory",
+                "Unknown resource type: {}. Valid: _, help, memory, project",
                 parts[0]
             ))),
         }
@@ -261,72 +241,48 @@ impl ResourceHandler {
         })
     }
 
-    /// Gets domain-scoped memories resource.
+    /// Gets all memories resource with optional namespace filter.
     ///
     /// URI patterns:
-    /// - `subcog://project` - All project memories
-    /// - `subcog://project/{namespace}` - Project memories filtered by namespace
-    /// - `subcog://org` - All org memories
-    /// - `subcog://org/{namespace}` - Org memories filtered by namespace
-    /// - `subcog://global` - All global memories
-    /// - `subcog://global/{namespace}` - Global memories filtered by namespace
-    fn get_domain_memories_resource(&self, uri: &str, parts: &[&str]) -> Result<ResourceContent> {
+    /// - `subcog://_` - All memories across all domains
+    /// - `subcog://_/{namespace}` - All memories in a namespace
+    /// - `subcog://project/_` - Alias for `subcog://_` (project-scoped, future domain filter)
+    ///
+    /// For advanced filtering, use the `subcog_browse` prompt.
+    fn get_all_memories_resource(&self, uri: &str, parts: &[&str]) -> Result<ResourceContent> {
         let recall = self.recall_service.as_ref().ok_or_else(|| {
             Error::InvalidInput("Memory browsing requires RecallService".to_string())
         })?;
 
-        let domain_scope = parts[0]; // "_", "project", "org", or "global"
-
-        // Build filter with domain scope
-        let mut filter = SearchFilter::new();
-
-        // Apply domain filter based on scope
-        // "_" = no domain filter (aggregate across all domains)
-        if domain_scope != "_" {
-            let domain = match domain_scope {
-                "project" => {
-                    // Project scope: filter to current repository context
-                    // In a real implementation, this would use the current git repo context
-                    Domain::new() // For now, no additional filter
-                },
-                "org" => {
-                    // Org scope: filter to organization-level memories
-                    Domain::new()
-                },
-                "global" => {
-                    // Global scope: user-wide memories (no domain restriction)
-                    Domain::new()
-                },
-                _ => Domain::new(),
-            };
-            filter = filter.with_domain(domain);
-        }
-
-        // Apply optional namespace filter
-        let namespace_str = if parts.len() > 1 {
-            let ns_str = parts[1];
-            let ns = Namespace::parse(ns_str)
-                .ok_or_else(|| Error::InvalidInput(format!("Unknown namespace: {ns_str}")))?;
-            filter = filter.with_namespace(ns);
-            Some(ns_str)
+        // Parse namespace filter from URI
+        // subcog://_ -> no filter
+        // subcog://_/learnings -> filter by namespace
+        // subcog://project/_ -> no filter (legacy)
+        let namespace_filter = if parts[0] == "_" && parts.len() >= 2 {
+            Some(parts[1])
         } else {
             None
         };
 
-        // List memories with filters
-        let results = recall.list_all(&filter, 100)?;
+        // Build filter
+        let mut filter = SearchFilter::new();
+        if let Some(ns_str) = namespace_filter {
+            let ns = Namespace::parse(ns_str)
+                .ok_or_else(|| Error::InvalidInput(format!("Unknown namespace: {ns_str}")))?;
+            filter = filter.with_namespace(ns);
+        }
 
-        // Format as JSON
+        let results = recall.list_all(&filter, 500)?;
+
+        // Bare minimum for informed selection: id, ns, tags, uri
         let memories: Vec<serde_json::Value> = results
             .memories
             .iter()
             .map(|hit| {
                 serde_json::json!({
                     "id": hit.memory.id.as_str(),
-                    "namespace": hit.memory.namespace.as_str(),
-                    "domain": hit.memory.domain.to_string(),
-                    "content": truncate_content(&hit.memory.content, 200),
-                    "score": hit.score,
+                    "ns": hit.memory.namespace.as_str(),
+                    "tags": hit.memory.tags,
                     "uri": format!("subcog://memory/{}", hit.memory.id.as_str()),
                 })
             })
@@ -334,9 +290,6 @@ impl ResourceHandler {
 
         let response = serde_json::json!({
             "count": memories.len(),
-            "total": results.total_count,
-            "scope": domain_scope,
-            "namespace": namespace_str,
             "memories": memories,
         });
 
@@ -348,8 +301,13 @@ impl ResourceHandler {
         })
     }
 
-    /// Gets a specific memory by ID.
+    /// Gets a specific memory by ID with full content (cross-domain lookup).
+    ///
+    /// This is the targeted fetch endpoint - returns complete memory data.
+    /// Use `subcog://memory/{id}` for cross-domain lookups when ID is known.
     fn get_memory_resource(&self, uri: &str, parts: &[&str]) -> Result<ResourceContent> {
+        use crate::models::MemoryId;
+
         if parts.len() < 2 {
             return Err(Error::InvalidInput(
                 "Memory ID required: subcog://memory/{id}".to_string(),
@@ -361,26 +319,30 @@ impl ResourceHandler {
             Error::InvalidInput("Memory browsing requires RecallService".to_string())
         })?;
 
-        // Search for the specific memory by ID (use ID as query)
-        let filter = SearchFilter::new();
-        let results = recall.search(memory_id, SearchMode::Text, &filter, 10)?;
-
-        // Find exact match by ID
-        let hit = results
-            .memories
-            .iter()
-            .find(|hit| hit.memory.id.as_str() == memory_id)
+        // Direct fetch by ID - returns full content
+        let memory = recall
+            .get_by_id(&MemoryId::new(memory_id))?
             .ok_or_else(|| Error::InvalidInput(format!("Memory not found: {memory_id}")))?;
 
+        self.format_memory_response(uri, &memory)
+    }
+
+    /// Formats a memory as a JSON response.
+    fn format_memory_response(
+        &self,
+        uri: &str,
+        memory: &crate::models::Memory,
+    ) -> Result<ResourceContent> {
         let response = serde_json::json!({
-            "id": hit.memory.id.as_str(),
-            "namespace": hit.memory.namespace.as_str(),
-            "content": hit.memory.content,
-            "score": hit.score,
-            "tags": hit.memory.tags,
-            "source": hit.memory.source,
-            "created_at": hit.memory.created_at,
-            "updated_at": hit.memory.updated_at,
+            "id": memory.id.as_str(),
+            "namespace": memory.namespace.as_str(),
+            "domain": memory.domain.to_string(),
+            "content": memory.content,
+            "tags": memory.tags,
+            "source": memory.source,
+            "status": memory.status.as_str(),
+            "created_at": memory.created_at,
+            "updated_at": memory.updated_at,
         });
 
         Ok(ResourceContent {
@@ -407,7 +369,9 @@ impl ResourceHandler {
             .push_str("1. **Capture**: Use `subcog_capture` tool with `namespace` and `content`\n");
         index.push_str("2. **Search**: Use `subcog_recall` tool with `query` parameter\n");
         index.push_str("3. **Status**: Use `subcog_status` tool\n");
-        index.push_str("4. **Browse**: Access `subcog://memories` resource\n");
+        index.push_str(
+            "4. **Browse**: Use `subcog_browse` prompt or `subcog://project/_` resource\n",
+        );
 
         index
     }
@@ -533,9 +497,31 @@ Once configured, these tools are available:
 |----------|-------------|
 | `subcog://help` | Help index |
 | `subcog://help/{topic}` | Topic-specific help |
-| `subcog://memories` | List all memories |
-| `subcog://memories/{namespace}` | List by namespace |
+| `subcog://project/_` | List all memories |
 | `subcog://memory/{id}` | Get specific memory |
+
+## Available MCP Prompts
+
+| Prompt | Description |
+|--------|-------------|
+| `subcog_browse` | Interactive memory browser with faceted discovery |
+| `subcog_list` | Formatted memory listing with filtering |
+| `subcog_tutorial` | Interactive learning guide |
+| `subcog_capture_assistant` | Help decide what to capture |
+| `subcog_review` | Review and consolidate memories |
+| `subcog_search_help` | Craft effective search queries |
+
+## Filter Syntax (for browse/list)
+
+```
+ns:decisions          # filter by namespace
+tag:rust              # filter by tag
+tag:rust,mcp          # OR (any tag)
+tag:rust tag:error    # AND (all tags)
+-tag:test             # exclude tag
+since:7d              # last 7 days
+source:src/*          # source path
+```
 "#;
 
 const HELP_CONCEPTS: &str = r"
@@ -746,9 +732,10 @@ Traditional keyword search with BM25 ranking:
 
 Access memories directly via MCP resources:
 
-- `subcog://memories` - List all memories
-- `subcog://memories/{namespace}` - List by namespace (e.g., `subcog://memories/decisions`)
+- `subcog://project/_` - List all memories
 - `subcog://memory/{id}` - Get specific memory by ID
+
+For advanced filtering by namespace, tags, time, etc., use the `subcog_browse` prompt.
 
 ## Understanding Scores
 
@@ -826,10 +813,10 @@ Access memories directly without search:
 
 | Resource URI | Returns |
 |--------------|---------|
-| `subcog://memories` | All memories (JSON) |
-| `subcog://memories/decisions` | All decisions |
-| `subcog://memories/patterns` | All patterns |
+| `subcog://project/_` | All memories (JSON) |
 | `subcog://memory/{id}` | Specific memory by ID |
+
+For filtering by namespace, tags, time, etc., use the `subcog_browse` prompt.
 
 ## Status Check
 
@@ -1016,24 +1003,6 @@ Default: `all-MiniLM-L6-v2` (384 dimensions)
 
 The embedding model is used for semantic similarity search in vector mode.
 "#;
-
-/// Truncates content to a maximum length with ellipsis.
-fn truncate_content(content: &str, max_len: usize) -> String {
-    if content.len() <= max_len {
-        content.to_string()
-    } else {
-        format!("{}...", &content[..max_len.saturating_sub(3)])
-    }
-}
-
-/// Capitalizes the first character of a string.
-fn capitalize(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-    }
-}
 
 #[cfg(test)]
 mod tests {

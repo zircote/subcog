@@ -3,8 +3,7 @@
 //! Implements a JSON-RPC based MCP server over stdio or HTTP transport.
 
 use crate::mcp::{PromptRegistry, ResourceHandler, ToolRegistry};
-use crate::services::RecallService;
-use crate::storage::index::SqliteBackend;
+use crate::services::ServiceContainer;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -57,22 +56,13 @@ impl McpServer {
     }
 
     /// Tries to initialize `ResourceHandler` with `RecallService`.
+    ///
+    /// Uses domain-scoped index (project-local `.subcog/index.db`).
     fn try_init_resources() -> ResourceHandler {
-        let data_dir = directories::BaseDirs::new().map_or_else(
-            || std::path::PathBuf::from(".").join(".subcog"),
-            |b| b.data_local_dir().join("subcog"),
-        );
-
-        // Ensure directory exists
-        if std::fs::create_dir_all(&data_dir).is_err() {
-            return ResourceHandler::new();
-        }
-
-        let db_path = data_dir.join("index.db");
-        SqliteBackend::new(&db_path).map_or_else(
-            |_| ResourceHandler::new(),
-            |backend| ResourceHandler::with_recall(RecallService::with_index(backend)),
-        )
+        // Use ServiceContainer for domain-scoped index access
+        ServiceContainer::from_current_dir()
+            .and_then(|services| services.recall())
+            .map_or_else(|_| ResourceHandler::new(), ResourceHandler::with_recall)
     }
 
     /// Sets the transport type.

@@ -2,8 +2,10 @@
 //!
 //! Provides tool handlers for the Model Context Protocol.
 
-use crate::models::{CaptureRequest, Domain, Namespace, SearchFilter, SearchMode};
-use crate::services::ServiceContainer;
+use crate::models::{
+    CaptureRequest, DetailLevel, Domain, MemoryStatus, Namespace, SearchFilter, SearchMode,
+};
+use crate::services::{parse_filter_query, ServiceContainer};
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -28,6 +30,7 @@ impl ToolRegistry {
         tools.insert("subcog_consolidate".to_string(), Self::consolidate_tool());
         tools.insert("subcog_enrich".to_string(), Self::enrich_tool());
         tools.insert("subcog_sync".to_string(), Self::sync_tool());
+        tools.insert("subcog_reindex".to_string(), Self::reindex_tool());
 
         Self { tools }
     }
@@ -77,15 +80,24 @@ impl ToolRegistry {
                         "type": "string",
                         "description": "The search query"
                     },
+                    "filter": {
+                        "type": "string",
+                        "description": "Filter query using GitHub-style syntax: ns:decisions tag:rust -tag:test since:7d source:src/*"
+                    },
                     "namespace": {
                         "type": "string",
-                        "description": "Optional: Filter by namespace",
+                        "description": "Optional: Filter by namespace (deprecated, use filter instead)",
                         "enum": ["decisions", "patterns", "learnings", "context", "tech-debt", "apis", "config", "security", "performance", "testing"]
                     },
                     "mode": {
                         "type": "string",
                         "description": "Search mode: hybrid (default), vector, text",
                         "enum": ["hybrid", "vector", "text"]
+                    },
+                    "detail": {
+                        "type": "string",
+                        "description": "Detail level: light (frontmatter only), medium (+ summary), everything (full content). Default: medium",
+                        "enum": ["light", "medium", "everything"]
                     },
                     "limit": {
                         "type": "integer",
@@ -212,6 +224,24 @@ impl ToolRegistry {
         }
     }
 
+    /// Defines the reindex tool.
+    fn reindex_tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "subcog_reindex".to_string(),
+            description: "Rebuild the search index from git notes. Use when index is out of sync with stored memories.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to git repository (default: current directory)"
+                    }
+                },
+                "required": []
+            }),
+        }
+    }
+
     /// Returns all tool definitions.
     #[must_use]
     pub fn list_tools(&self) -> Vec<&ToolDefinition> {
@@ -238,6 +268,7 @@ impl ToolRegistry {
             "subcog_consolidate" => self.execute_consolidate(arguments),
             "subcog_enrich" => self.execute_enrich(arguments),
             "subcog_sync" => self.execute_sync(arguments),
+            "subcog_reindex" => self.execute_reindex(arguments),
             _ => Err(Error::InvalidInput(format!("Unknown tool: {name}"))),
         }
     }
@@ -258,7 +289,7 @@ impl ToolRegistry {
             skip_security_check: false,
         };
 
-        let services = ServiceContainer::get()?;
+        let services = ServiceContainer::from_current_dir()?;
         let result = services.capture().capture(request)?;
 
         Ok(ToolResult {
@@ -282,31 +313,70 @@ impl ToolRegistry {
             .as_deref()
             .map_or(SearchMode::Hybrid, parse_search_mode);
 
-        let mut filter = SearchFilter::new();
+        let detail = args
+            .detail
+            .as_deref()
+            .and_then(DetailLevel::parse)
+            .unwrap_or_default();
+
+        // Build filter from the filter query string
+        let mut filter = if let Some(filter_query) = &args.filter {
+            parse_filter_query(filter_query)
+        } else {
+            SearchFilter::new()
+        };
+
+        // Support legacy namespace parameter (deprecated but still works)
         if let Some(ns) = &args.namespace {
             filter = filter.with_namespace(parse_namespace(ns));
         }
 
         let limit = args.limit.unwrap_or(10).min(50);
 
-        let services = ServiceContainer::get()?;
-        let result = services
-            .recall()
-            .search(&args.query, mode, &filter, limit)?;
+        let services = ServiceContainer::from_current_dir()?;
+        let recall = services.recall()?;
+
+        // Use list_all for wildcard queries or filter-only queries
+        // Use search for actual text queries
+        let result = if args.query == "*" || args.query.is_empty() {
+            recall.list_all(&filter, limit)?
+        } else {
+            recall.search(&args.query, mode, &filter, limit)?
+        };
+
+        // Build filter description for output
+        let filter_desc = build_filter_description(&filter);
 
         let mut output = format!(
-            "Found {} memories (searched in {}ms using {} mode)\n\n",
-            result.total_count, result.execution_time_ms, result.mode
+            "Found {} memories (searched in {}ms using {} mode, detail: {}{})\n\n",
+            result.total_count, result.execution_time_ms, result.mode, detail, filter_desc
         );
 
         for (i, hit) in result.memories.iter().enumerate() {
+            // Format content based on detail level
+            let content_display = format_content_for_detail(&hit.memory.content, detail);
+
+            let tags_display = if hit.memory.tags.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", hit.memory.tags.join(", "))
+            };
+
+            // Build rich URN: subcog://{scope}/{namespace}/{id}
+            // Scope: project (default), org/{name}, or global
+            let scope = hit.memory.domain.to_scope_string();
+            let urn = format!(
+                "subcog://{}/{}/{}",
+                scope, hit.memory.namespace, hit.memory.id
+            );
+
             output.push_str(&format!(
-                "{}. [{}] {}\n   Score: {:.2}\n   ID: {}\n\n",
+                "{}. {} | {:.2}{}{}\n\n",
                 i + 1,
-                hit.memory.namespace,
-                truncate(&hit.memory.content, 100),
+                urn,
                 hit.score,
-                hit.memory.id
+                tags_display,
+                content_display,
             ));
         }
 
@@ -380,12 +450,11 @@ impl ToolRegistry {
         let dry_run = args.dry_run.unwrap_or(false);
 
         // Fetch memories for consolidation
-        let services = ServiceContainer::get()?;
+        let services = ServiceContainer::from_current_dir()?;
         let filter = SearchFilter::new().with_namespace(namespace);
         let query = args.query.as_deref().unwrap_or("*");
-        let result = services
-            .recall()
-            .search(query, SearchMode::Hybrid, &filter, 50)?;
+        let recall = services.recall()?;
+        let result = recall.search(query, SearchMode::Hybrid, &filter, 50)?;
 
         if result.memories.is_empty() {
             return Ok(ToolResult {
@@ -507,7 +576,7 @@ impl ToolRegistry {
 
         let direction = args.direction.as_deref().unwrap_or("full");
 
-        let services = ServiceContainer::get()?;
+        let services = ServiceContainer::from_current_dir()?;
         let result = match direction {
             "push" => services.sync().push(),
             "fetch" => services.sync().fetch(),
@@ -527,6 +596,38 @@ impl ToolRegistry {
             Err(e) => Ok(ToolResult {
                 content: vec![ToolContent::Text {
                     text: format!("Sync failed: {e}"),
+                }],
+                is_error: true,
+            }),
+        }
+    }
+
+    /// Executes the reindex tool.
+    fn execute_reindex(&self, arguments: Value) -> Result<ToolResult> {
+        let args: ReindexArgs =
+            serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+        // Use provided repo path or current directory
+        let repo_path = args.repo_path.map_or_else(
+            || std::env::current_dir().unwrap_or_else(|_| ".".into()),
+            std::path::PathBuf::from,
+        );
+
+        let services = ServiceContainer::for_repo(&repo_path, None)?;
+        match services.reindex() {
+            Ok(count) => Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: format!(
+                        "Reindex completed successfully!\n\nMemories indexed: {}\nRepository: {}",
+                        count,
+                        repo_path.display()
+                    ),
+                }],
+                is_error: false,
+            }),
+            Err(e) => Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: format!("Reindex failed: {e}"),
                 }],
                 is_error: true,
             }),
@@ -592,8 +693,10 @@ struct CaptureArgs {
 #[derive(Debug, Deserialize)]
 struct RecallArgs {
     query: String,
+    filter: Option<String>,
     namespace: Option<String>,
     mode: Option<String>,
+    detail: Option<String>,
     limit: Option<usize>,
 }
 
@@ -619,6 +722,12 @@ struct EnrichArgs {
 #[derive(Debug, Deserialize)]
 struct SyncArgs {
     direction: Option<String>,
+}
+
+/// Arguments for the reindex tool.
+#[derive(Debug, Deserialize)]
+struct ReindexArgs {
+    repo_path: Option<String>,
 }
 
 /// Parses a namespace string to Namespace enum.
@@ -653,6 +762,63 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         format!("{}...", &s[..max_len.saturating_sub(3)])
+    }
+}
+
+/// Formats content based on detail level.
+fn format_content_for_detail(content: &str, detail: DetailLevel) -> String {
+    if content.is_empty() {
+        return String::new();
+    }
+    match detail {
+        DetailLevel::Light => String::new(),
+        DetailLevel::Medium => format!("\n   {}", truncate(content, 200)),
+        DetailLevel::Everything => format!("\n   {content}"),
+    }
+}
+
+/// Builds a human-readable description of the active filters.
+fn build_filter_description(filter: &SearchFilter) -> String {
+    let mut parts = Vec::new();
+
+    if !filter.namespaces.is_empty() {
+        let ns_list: Vec<_> = filter.namespaces.iter().map(Namespace::as_str).collect();
+        parts.push(format!("ns:{}", ns_list.join(",")));
+    }
+
+    if !filter.tags.is_empty() {
+        for tag in &filter.tags {
+            parts.push(format!("tag:{tag}"));
+        }
+    }
+
+    if !filter.tags_any.is_empty() {
+        parts.push(format!("tag:{}", filter.tags_any.join(",")));
+    }
+
+    if !filter.excluded_tags.is_empty() {
+        for tag in &filter.excluded_tags {
+            parts.push(format!("-tag:{tag}"));
+        }
+    }
+
+    if let Some(ref pattern) = filter.source_pattern {
+        parts.push(format!("source:{pattern}"));
+    }
+
+    if !filter.statuses.is_empty() {
+        let status_list: Vec<_> = filter.statuses.iter().map(MemoryStatus::as_str).collect();
+        parts.push(format!("status:{}", status_list.join(",")));
+    }
+
+    if filter.created_after.is_some() {
+        parts.push("since:active".to_string());
+    }
+
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(", filter: {}", parts.join(" "))
     }
 }
 
