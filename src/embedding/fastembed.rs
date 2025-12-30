@@ -3,7 +3,7 @@
 use super::Embedder;
 use crate::Result;
 
-/// FastEmbed embedder using all-MiniLM-L6-v2.
+/// `FastEmbed` embedder using all-MiniLM-L6-v2.
 pub struct FastEmbedEmbedder {
     dimensions: usize,
 }
@@ -12,7 +12,7 @@ impl FastEmbedEmbedder {
     /// Default embedding dimensions for all-MiniLM-L6-v2.
     pub const DEFAULT_DIMENSIONS: usize = 384;
 
-    /// Creates a new FastEmbed embedder.
+    /// Creates a new `FastEmbed` embedder.
     #[must_use]
     pub const fn new() -> Self {
         Self {

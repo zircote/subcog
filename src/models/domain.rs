@@ -104,7 +104,7 @@ impl Domain {
 
     /// Returns true if this is a global domain (no restrictions).
     #[must_use]
-    pub fn is_global(&self) -> bool {
+    pub const fn is_global(&self) -> bool {
         self.organization.is_none() && self.project.is_none() && self.repository.is_none()
     }
 }

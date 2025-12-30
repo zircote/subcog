@@ -13,13 +13,15 @@ impl SecretDetector {
     }
 
     /// Checks if content contains secrets.
-    pub fn contains_secrets(&self, _content: &str) -> bool {
+    #[must_use] 
+    pub const fn contains_secrets(&self, _content: &str) -> bool {
         // TODO: Implement secret detection
         false
     }
 
     /// Returns detected secret types.
-    pub fn detect(&self, _content: &str) -> Vec<SecretMatch> {
+    #[must_use] 
+    pub const fn detect(&self, _content: &str) -> Vec<SecretMatch> {
         // TODO: Implement detection
         Vec::new()
     }

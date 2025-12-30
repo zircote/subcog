@@ -1,15 +1,15 @@
-//! OpenAI client.
+//! `OpenAI` client.
 
 use super::{CaptureAnalysis, LlmProvider};
 use crate::Result;
 
-/// OpenAI LLM client.
+/// `OpenAI` LLM client.
 pub struct OpenAiClient {
     // TODO: Add API client
 }
 
 impl OpenAiClient {
-    /// Creates a new OpenAI client.
+    /// Creates a new `OpenAI` client.
     #[must_use]
     pub const fn new() -> Self {
         Self {}

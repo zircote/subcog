@@ -3,7 +3,7 @@
 use super::HookHandler;
 use crate::Result;
 
-/// Handles PreCompact hook events.
+/// Handles `PreCompact` hook events.
 ///
 /// Auto-captures memories before context compaction.
 pub struct PreCompactHandler;

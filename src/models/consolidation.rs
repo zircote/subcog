@@ -118,7 +118,7 @@ impl RetentionScore {
         );
 
         // Weighted average: importance > recency > frequency
-        let score = importance * 0.5 + recency * 0.3 + access_frequency * 0.2;
+        let score = access_frequency.mul_add(0.2, importance.mul_add(0.5, recency * 0.3));
 
         Self {
             score,

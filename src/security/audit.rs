@@ -15,7 +15,7 @@ impl AuditLogger {
     }
 
     /// Logs an audit event.
-    pub fn log(&self, _event: &MemoryEvent) {
+    pub const fn log(&self, _event: &MemoryEvent) {
         // TODO: Implement audit logging
     }
 }

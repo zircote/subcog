@@ -2,6 +2,7 @@
 
 /// Feature flags for controlling optional subcog features.
 #[derive(Debug, Clone, Default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct FeatureFlags {
     /// Enable secret detection and filtering.
     pub secrets_filter: bool,

@@ -1,12 +1,12 @@
-//! Redis-based index backend using RediSearch.
+//! Redis-based index backend using `RediSearch`.
 //!
-//! Provides full-text search using Redis with the RediSearch module.
+//! Provides full-text search using Redis with the `RediSearch` module.
 
 use crate::models::{Memory, MemoryId, SearchFilter};
 use crate::storage::traits::IndexBackend;
 use crate::{Error, Result};
 
-/// Redis-based index backend using RediSearch.
+/// Redis-based index backend using `RediSearch`.
 pub struct RedisBackend {
     /// Redis connection URL.
     connection_url: String,

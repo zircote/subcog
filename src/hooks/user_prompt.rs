@@ -3,7 +3,7 @@
 use super::HookHandler;
 use crate::Result;
 
-/// Handles UserPromptSubmit hook events.
+/// Handles `UserPromptSubmit` hook events.
 ///
 /// Detects signals for memory capture in user prompts.
 pub struct UserPromptHandler;

@@ -13,6 +13,7 @@ impl ContentRedactor {
     }
 
     /// Redacts sensitive content.
+    #[must_use] 
     pub fn redact(&self, content: &str) -> String {
         // TODO: Implement redaction
         content.to_string()

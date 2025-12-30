@@ -1,6 +1,6 @@
-//! SQLite + FTS5 index backend.
+//! `SQLite` + FTS5 index backend.
 //!
-//! Provides full-text search using SQLite's FTS5 extension.
+//! Provides full-text search using `SQLite`'s FTS5 extension.
 
 use crate::models::{Memory, MemoryId, SearchFilter};
 use crate::storage::traits::IndexBackend;
@@ -8,12 +8,12 @@ use crate::{Error, Result};
 
 /// SQLite-based index backend with FTS5.
 pub struct SqliteBackend {
-    /// Path to the SQLite database.
+    /// Path to the `SQLite` database.
     db_path: std::path::PathBuf,
 }
 
 impl SqliteBackend {
-    /// Creates a new SQLite backend.
+    /// Creates a new `SQLite` backend.
     #[must_use]
     pub fn new(db_path: impl Into<std::path::PathBuf>) -> Self {
         Self {
@@ -21,7 +21,7 @@ impl SqliteBackend {
         }
     }
 
-    /// Creates an in-memory SQLite backend (useful for testing).
+    /// Creates an in-memory `SQLite` backend (useful for testing).
     #[must_use]
     pub fn in_memory() -> Self {
         Self {
