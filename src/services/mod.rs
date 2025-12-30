@@ -30,7 +30,7 @@ mod topic_index;
 
 pub use capture::CaptureService;
 pub use consolidation::ConsolidationService;
-pub use context::ContextBuilderService;
+pub use context::{ContextBuilderService, MemoryStatistics};
 pub use enrichment::{EnrichmentResult, EnrichmentService, EnrichmentStats};
 pub use query_parser::parse_filter_query;
 pub use recall::RecallService;
