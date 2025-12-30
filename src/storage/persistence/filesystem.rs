@@ -218,18 +218,27 @@ impl PersistenceBackend for FilesystemBackend {
                 cause: e.to_string(),
             })?;
 
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "json") {
-                if let Some(stem) = path.file_stem() {
-                    if let Some(id_str) = stem.to_str() {
-                        ids.push(MemoryId::new(id_str));
-                    }
-                }
+            if let Some(id) = extract_memory_id_from_path(&entry.path()) {
+                ids.push(id);
             }
         }
 
         Ok(ids)
     }
+}
+
+/// Extracts a memory ID from a JSON file path.
+fn extract_memory_id_from_path(path: &Path) -> Option<MemoryId> {
+    // Check if it's a JSON file
+    if path.extension().is_none_or(|ext| ext != "json") {
+        return None;
+    }
+
+    // Get the file stem (name without extension) and convert to string
+    let stem = path.file_stem()?;
+    let id_str = stem.to_str()?;
+
+    Some(MemoryId::new(id_str))
 }
 
 #[cfg(test)]
@@ -245,8 +254,8 @@ mod tests {
             namespace: Namespace::Decisions,
             domain: Domain::new(),
             status: MemoryStatus::Active,
-            created_at: 1234567890,
-            updated_at: 1234567890,
+            created_at: 1_234_567_890,
+            updated_at: 1_234_567_890,
             embedding: None,
             tags: vec!["test".to_string()],
             source: Some("test.rs".to_string()),
@@ -349,11 +358,11 @@ mod tests {
         backend.store(&memory).unwrap();
 
         memory.content = "Updated content".to_string();
-        memory.updated_at = 9999999999;
+        memory.updated_at = 9_999_999_999;
         backend.store(&memory).unwrap();
 
         let retrieved = backend.get(&MemoryId::new("update_test")).unwrap().unwrap();
         assert_eq!(retrieved.content, "Updated content");
-        assert_eq!(retrieved.updated_at, 9999999999);
+        assert_eq!(retrieved.updated_at, 9_999_999_999);
     }
 }

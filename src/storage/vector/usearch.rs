@@ -23,7 +23,7 @@ pub struct UsearchBackend {
     index_path: PathBuf,
     /// Embedding dimensions.
     dimensions: usize,
-    /// In-memory vector storage: memory_id -> embedding.
+    /// In-memory vector storage: `memory_id` -> embedding.
     vectors: HashMap<String, Vec<f32>>,
     /// Whether the index has been modified since last save.
     dirty: bool,
@@ -63,7 +63,7 @@ impl UsearchBackend {
 
     /// Returns the index path.
     #[must_use]
-    pub fn index_path(&self) -> &PathBuf {
+    pub const fn index_path(&self) -> &PathBuf {
         &self.index_path
     }
 
@@ -161,7 +161,7 @@ impl UsearchBackend {
         }
 
         // Cosine similarity ranges from -1 to 1, normalize to 0 to 1
-        (dot_product / (norm_a * norm_b) + 1.0) / 2.0
+        f32::midpoint(dot_product / (norm_a * norm_b), 1.0)
     }
 
     /// Validates embedding dimensions.

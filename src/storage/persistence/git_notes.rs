@@ -40,14 +40,14 @@ impl GitNotesBackend {
     #[must_use]
     pub fn with_notes_ref(mut self, notes_ref: impl Into<String>) -> Self {
         let ref_str = notes_ref.into();
-        self.notes_ref = ref_str.clone();
+        self.notes_ref.clone_from(&ref_str);
         self.notes_manager = NotesManager::new(&self.repo_path).with_notes_ref(ref_str);
         self
     }
 
     /// Returns the repository path.
     #[must_use]
-    pub fn repo_path(&self) -> &PathBuf {
+    pub const fn repo_path(&self) -> &PathBuf {
         &self.repo_path
     }
 
@@ -68,10 +68,8 @@ impl GitNotesBackend {
         let notes = self.notes_manager.list()?;
 
         for (commit_id, content) in notes {
-            if let Ok((metadata, _)) = YamlFrontMatterParser::parse(&content) {
-                if let Some(id) = metadata.get("id").and_then(|v| v.as_str()) {
-                    self.id_mapping.insert(id.to_string(), commit_id);
-                }
+            if let Some(id) = extract_memory_id_from_content(&content) {
+                self.id_mapping.insert(id, commit_id);
             }
         }
 
@@ -125,12 +123,12 @@ impl GitNotesBackend {
 
         let created_at = metadata
             .get("created_at")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
 
         let updated_at = metadata
             .get("updated_at")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(created_at);
 
         let tags: Vec<String> = metadata
@@ -163,6 +161,15 @@ impl GitNotesBackend {
     }
 }
 
+/// Extracts memory ID from note content.
+fn extract_memory_id_from_content(content: &str) -> Option<String> {
+    let (metadata, _) = YamlFrontMatterParser::parse(content).ok()?;
+    metadata
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
+
 /// Parses a namespace string to Namespace enum.
 fn parse_namespace(s: &str) -> Namespace {
     match s.to_lowercase().as_str() {
@@ -180,7 +187,7 @@ fn parse_namespace(s: &str) -> Namespace {
     }
 }
 
-/// Parses a status string to MemoryStatus enum.
+/// Parses a status string to `MemoryStatus` enum.
 fn parse_status(s: &str) -> MemoryStatus {
     match s.to_lowercase().as_str() {
         "active" => MemoryStatus::Active,
@@ -239,19 +246,7 @@ impl PersistenceBackend for GitNotesBackend {
         // First check our mapping
         if !self.id_mapping.contains_key(id.as_str()) {
             // Try to find by scanning all notes
-            let notes = self.notes_manager.list()?;
-
-            for (_, content) in notes {
-                if let Ok((metadata, _)) = YamlFrontMatterParser::parse(&content) {
-                    if let Some(note_id) = metadata.get("id").and_then(|v| v.as_str()) {
-                        if note_id == id.as_str() {
-                            return Self::deserialize_memory(&content).map(Some);
-                        }
-                    }
-                }
-            }
-
-            return Ok(None);
+            return self.find_memory_by_scanning(id);
         }
 
         // Get from HEAD (simplified - in production we'd use the actual commit ID)
@@ -265,7 +260,7 @@ impl PersistenceBackend for GitNotesBackend {
                 } else {
                     Ok(None)
                 }
-            }
+            },
             None => Ok(None),
         }
     }
@@ -285,14 +280,42 @@ impl PersistenceBackend for GitNotesBackend {
         let mut ids = Vec::new();
 
         for (_, content) in notes {
-            if let Ok((metadata, _)) = YamlFrontMatterParser::parse(&content) {
-                if let Some(id) = metadata.get("id").and_then(|v| v.as_str()) {
-                    ids.push(MemoryId::new(id));
-                }
+            if let Some(id) = extract_memory_id_from_content(&content) {
+                ids.push(MemoryId::new(&id));
             }
         }
 
         Ok(ids)
+    }
+}
+
+impl GitNotesBackend {
+    /// Finds a memory by scanning all notes.
+    fn find_memory_by_scanning(&self, id: &MemoryId) -> Result<Option<Memory>> {
+        let notes = self.notes_manager.list()?;
+
+        for (_, content) in notes {
+            if let Some(memory) = try_deserialize_if_matching(&content, id) {
+                return Ok(Some(memory));
+            }
+        }
+
+        Ok(None)
+    }
+}
+
+/// Attempts to deserialize a note if it matches the given ID.
+fn try_deserialize_if_matching(content: &str, id: &MemoryId) -> Option<Memory> {
+    let (metadata, _) = YamlFrontMatterParser::parse(content).ok()?;
+    let note_id = metadata
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(String::from)?;
+
+    if note_id == id.as_str() {
+        GitNotesBackend::deserialize_memory(content).ok()
+    } else {
+        None
     }
 }
 
@@ -325,8 +348,8 @@ mod tests {
             namespace: Namespace::Decisions,
             domain: Domain::for_repository("zircote", "subcog"),
             status: MemoryStatus::Active,
-            created_at: 1234567890,
-            updated_at: 1234567890,
+            created_at: 1_234_567_890,
+            updated_at: 1_234_567_890,
             embedding: None,
             tags: vec!["database".to_string(), "architecture".to_string()],
             source: Some("src/main.rs".to_string()),
@@ -354,7 +377,7 @@ mod tests {
 
     #[test]
     fn test_deserialize_memory() {
-        let content = r#"---
+        let content = r"---
 id: test_123
 namespace: decisions
 domain: zircote/subcog
@@ -365,7 +388,7 @@ tags:
   - rust
   - memory
 ---
-This is the memory content."#;
+This is the memory content.";
 
         let memory = GitNotesBackend::deserialize_memory(content).unwrap();
         assert_eq!(memory.id.as_str(), "test_123");
