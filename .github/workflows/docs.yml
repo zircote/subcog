@@ -14,7 +14,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 concurrency:
   group: docs
@@ -80,7 +81,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: zircote/zircote.github.io
-          token: ${{ secrets.DOCS_DEPLOY_TOKEN }}
+          token: ${{ github.token }}
           path: site
 
       - name: Create branch and update docs
@@ -134,7 +135,7 @@ jobs:
       - name: Create Pull Request
         if: steps.update.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ secrets.DOCS_DEPLOY_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ steps.update.outputs.branch }}
           SOURCE_SHA: ${{ github.sha }}
         run: |
