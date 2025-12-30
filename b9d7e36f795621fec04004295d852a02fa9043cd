@@ -6,8 +6,8 @@ status: active
 tags:
 - cli-metrics
 - async-push
-- pushgateway
-- prometheus
+- prometheus-pushgateway
+- monitoring
 updated_at: 1766999913
 ---
 CLI metrics now work with async push to Pushgateway
