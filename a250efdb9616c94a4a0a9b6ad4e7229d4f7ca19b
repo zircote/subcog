@@ -6,8 +6,8 @@ status: active
 tags:
 - mcp-first-capture
 - sessionstart-hook
-- mcp-subcog-memory-capture
-- visual-blocks-urn-id
+- rule-0-guidance
+- stop-hook-skip
 updated_at: 1767033906
 ---
 MCP-first capture flow validated. SessionStart hook now injects RULE 0 at top of guidance, instructing to call mcp__subcog__memory.capture BEFORE outputting visual blocks. This ensures blocks have full URN with ID, which Stop hook recognizes as already-saved and skips.
