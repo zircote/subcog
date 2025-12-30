@@ -3,6 +3,12 @@ created_at: 1767040248
 id: 1767040248830747000
 namespace: decisions
 status: active
+tags:
+- memory-capture-enforcement
+- cli-integration
+- user-prompt-handler
+- duplicate-code-removal
+- clippy-raw-string-fix
 updated_at: 1767040248
 ---
 Completed Memory Capture Enforcement CLI integration (SPEC-2025-12-29-002):
