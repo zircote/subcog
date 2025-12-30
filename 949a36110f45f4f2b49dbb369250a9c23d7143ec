@@ -5,9 +5,9 @@ namespace: progress
 status: active
 tags:
 - rust
-- namespace-enum-update
+- namespace-update
 - retention-scoring
-- blockers-progress
+- blockers-and-progress
 - tests-updated
 updated_at: 1767032008
 ---
