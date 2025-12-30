@@ -5,10 +5,10 @@ namespace: decisions
 status: active
 tags:
 - help-namespace
-- embedded-help-content
+- compile-time-help
 - help-indexing
-- recall-weight-multiplier
-- first-run-tutorial-detection
+- recall-weighting
+- mcp-tutorial-integration
 updated_at: 1767039120
 ---
 System Help Memories Implementation (SPEC-2025-12-29-001) completed successfully across 5 phases:
