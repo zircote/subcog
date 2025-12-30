@@ -3,9 +3,11 @@
 #![allow(clippy::expect_used)]
 
 use super::HookHandler;
+use super::search_context::{AdaptiveContextConfig, MemoryContext, SearchContextBuilder};
 use super::search_intent::{SearchIntent, detect_search_intent};
 use crate::Result;
 use crate::models::Namespace;
+use crate::services::RecallService;
 use regex::Regex;
 use std::sync::LazyLock;
 use tracing::instrument;
@@ -18,6 +20,10 @@ pub struct UserPromptHandler {
     confidence_threshold: f32,
     /// Minimum confidence threshold for search intent injection.
     search_intent_threshold: f32,
+    /// Configuration for adaptive context injection.
+    context_config: AdaptiveContextConfig,
+    /// Optional recall service for memory retrieval.
+    recall_service: Option<RecallService>,
 }
 
 /// Signal patterns for memory capture detection.
@@ -102,10 +108,12 @@ pub struct CaptureSignal {
 impl UserPromptHandler {
     /// Creates a new handler.
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             confidence_threshold: 0.6,
             search_intent_threshold: 0.5,
+            context_config: AdaptiveContextConfig::default(),
+            recall_service: None,
         }
     }
 
@@ -121,6 +129,34 @@ impl UserPromptHandler {
     pub const fn with_search_intent_threshold(mut self, threshold: f32) -> Self {
         self.search_intent_threshold = threshold;
         self
+    }
+
+    /// Sets the adaptive context configuration.
+    #[must_use]
+    pub const fn with_context_config(mut self, config: AdaptiveContextConfig) -> Self {
+        self.context_config = config;
+        self
+    }
+
+    /// Sets the recall service for memory retrieval.
+    #[must_use]
+    pub fn with_recall_service(mut self, service: RecallService) -> Self {
+        self.recall_service = Some(service);
+        self
+    }
+
+    /// Builds memory context from a search intent using the `SearchContextBuilder`.
+    fn build_memory_context(&self, intent: &SearchIntent) -> MemoryContext {
+        let mut builder = SearchContextBuilder::new().with_config(self.context_config.clone());
+
+        if let Some(ref recall) = self.recall_service {
+            builder = builder.with_recall_service(recall);
+        }
+
+        // Build context, falling back to empty on error
+        builder
+            .build_context(intent)
+            .unwrap_or_else(|_| MemoryContext::empty())
     }
 
     /// Detects search intent from the prompt.
@@ -319,28 +355,33 @@ impl HookHandler for UserPromptHandler {
         // Detect search intent for proactive memory surfacing
         let search_intent = self.detect_search_intent(prompt);
 
-        // Add search intent to metadata if detected
-        if let Some(ref intent) = search_intent {
+        // Build memory context and add to metadata if search intent detected
+        let memory_context = if let Some(ref intent) = search_intent {
+            let ctx = self.build_memory_context(intent);
             metadata["search_intent"] = serde_json::json!({
-                "detected": true,
-                "intent_type": intent.intent_type.as_str(),
+                "detected": ctx.search_intent_detected,
+                "intent_type": ctx.intent_type,
                 "confidence": intent.confidence,
-                "topics": intent.topics,
+                "topics": ctx.topics,
                 "keywords": intent.keywords,
                 "source": intent.source.as_str()
             });
+            metadata["memory_context"] =
+                serde_json::to_value(&ctx).unwrap_or(serde_json::Value::Null);
+            Some(ctx)
         } else {
             metadata["search_intent"] = serde_json::json!({
                 "detected": false
             });
-        }
+            None
+        };
 
         // Build context message for capture suggestions
         let context_message =
             build_capture_context(should_capture, content.as_ref(), &signals, &mut metadata);
 
         // Build search intent context (if detected)
-        let search_context = search_intent.as_ref().map(build_search_intent_context);
+        let search_context = memory_context.as_ref().map(build_memory_context_text);
 
         // Build Claude Code hook response format
         let mut response = serde_json::json!({
@@ -432,29 +473,41 @@ fn truncate_for_display(content: &str, max_len: usize) -> String {
     }
 }
 
-/// Builds context message for search intent.
-fn build_search_intent_context(intent: &SearchIntent) -> String {
-    let mut lines = vec!["**Subcog Search Intent Detected**\n".to_string()];
+/// Builds context message from memory context.
+fn build_memory_context_text(ctx: &MemoryContext) -> String {
+    let mut lines = vec!["**Subcog Memory Context**\n".to_string()];
 
-    lines.push(format!(
-        "Intent type: **{}** (confidence: {:.0}%)\n",
-        intent.intent_type.as_str(),
-        intent.confidence * 100.0
-    ));
-
-    if !intent.topics.is_empty() {
-        lines.push(format!("Topics: {}\n", intent.topics.join(", ")));
+    if let Some(ref intent_type) = ctx.intent_type {
+        lines.push(format!("Intent type: **{intent_type}**\n"));
     }
 
-    lines.push(
-        "\n**Reminder**: Consider using `subcog_recall` to retrieve relevant memories.".to_string(),
-    );
+    if !ctx.topics.is_empty() {
+        lines.push(format!("Topics: {}\n", ctx.topics.join(", ")));
+    }
 
-    // Suggest resources based on topics
-    if !intent.topics.is_empty() {
+    // Show injected memories if any
+    if !ctx.injected_memories.is_empty() {
+        lines.push("\n**Relevant memories**:".to_string());
+        for memory in ctx.injected_memories.iter().take(5) {
+            lines.push(format!(
+                "- [{}] {}: {}",
+                memory.namespace,
+                memory.id,
+                truncate_for_display(&memory.content_preview, 80)
+            ));
+        }
+    }
+
+    // Show reminder if present
+    if let Some(ref reminder) = ctx.reminder {
+        lines.push(format!("\n**Reminder**: {reminder}"));
+    }
+
+    // Suggest resources
+    if !ctx.suggested_resources.is_empty() {
         lines.push("\n**Suggested resources**:".to_string());
-        for topic in intent.topics.iter().take(3) {
-            lines.push(format!("- `subcog://topics/{topic}`"));
+        for resource in ctx.suggested_resources.iter().take(4) {
+            lines.push(format!("- `{resource}`"));
         }
     }
 
