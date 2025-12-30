@@ -4,9 +4,9 @@ id: learnings-1766998618523915000
 namespace: learnings
 status: active
 tags:
-- rust-rewrite
+- rust
 - performance-improvement
-- small-binary
+- small-binary-size
 - fast-startup
 - local-embeddings
 updated_at: 1766998618
