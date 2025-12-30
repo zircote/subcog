@@ -2,7 +2,7 @@
 
 use super::HookHandler;
 use crate::Result;
-use crate::services::ContextBuilderService;
+use crate::services::{ContextBuilderService, MemoryStatistics};
 use tracing::instrument;
 
 /// Handles `SessionStart` hook events.
@@ -40,6 +40,8 @@ struct SessionContext {
     token_estimate: usize,
     /// Whether context was truncated.
     was_truncated: bool,
+    /// Memory statistics for the project.
+    statistics: Option<MemoryStatistics>,
 }
 
 impl SessionStartHandler {
@@ -78,6 +80,7 @@ impl SessionStartHandler {
     fn build_session_context(&self, session_id: &str, cwd: &str) -> Result<SessionContext> {
         let mut context_parts = Vec::new();
         let mut memory_count = 0;
+        let mut statistics: Option<MemoryStatistics> = None;
 
         // Add session header
         context_parts.push(format!(
@@ -96,6 +99,13 @@ impl SessionStartHandler {
             if !context.is_empty() {
                 context_parts.push(context);
                 memory_count += 1; // Approximate
+            }
+
+            // Get memory statistics for dynamic context
+            if let Ok(stats) = builder.get_statistics() {
+                memory_count = stats.total_count;
+                add_statistics_if_present(&mut context_parts, &stats);
+                statistics = Some(stats);
             }
         }
 
@@ -120,23 +130,73 @@ impl SessionStartHandler {
             memory_count,
             token_estimate,
             was_truncated: token_estimate > max_tokens,
+            statistics,
         })
+    }
+
+    /// Formats memory statistics for context injection.
+    fn format_statistics(stats: &MemoryStatistics) -> String {
+        let mut parts = vec!["## Project Memory Summary".to_string()];
+        parts.push(format!("\n**Total memories**: {}", stats.total_count));
+
+        // Namespace breakdown
+        if !stats.namespace_counts.is_empty() {
+            parts.push("\n**By namespace**:".to_string());
+            let mut sorted: Vec<_> = stats.namespace_counts.iter().collect();
+            sorted.sort_by(|a, b| b.1.cmp(a.1));
+            for (ns, count) in sorted.iter().take(6) {
+                parts.push(format!("- `{ns}`: {count}"));
+            }
+        }
+
+        // Top tags
+        if !stats.top_tags.is_empty() {
+            parts.push("\n**Top tags**:".to_string());
+            let tag_list: Vec<String> = stats
+                .top_tags
+                .iter()
+                .take(8)
+                .map(|(tag, count)| format!("`{tag}` ({count})"))
+                .collect();
+            parts.push(tag_list.join(", "));
+        }
+
+        // Recent topics
+        if !stats.recent_topics.is_empty() {
+            parts.push("\n**Recent topics**:".to_string());
+            for topic in stats.recent_topics.iter().take(5) {
+                parts.push(format!("- {topic}"));
+            }
+        }
+
+        // Proactive nudge
+        parts.push("\n**Tip**: Use `mcp__plugin_subcog_subcog__subcog_recall` to search for relevant memories when these topics come up in conversation.".to_string());
+
+        parts.join("\n")
     }
 
     /// Returns standard guidance text.
     fn standard_guidance() -> String {
         r#"## Subcog Memory Protocol
 
-You have access to subcog, a persistent memory system. Use the following MCP tools:
+You have access to subcog, a persistent memory system. MCP tools are available with the prefix `mcp__plugin_subcog_subcog__`.
+
+### Available Tools
+| Short Name | Full MCP Tool Name |
+|------------|-------------------|
+| `subcog_capture` | `mcp__plugin_subcog_subcog__subcog_capture` |
+| `subcog_recall` | `mcp__plugin_subcog_subcog__subcog_recall` |
+| `subcog_status` | `mcp__plugin_subcog_subcog__subcog_status` |
+| `subcog_namespaces` | `mcp__plugin_subcog_subcog__subcog_namespaces` |
 
 ### Capture Memories
 When the user makes a decision, discovers a pattern, or learns something important:
-- Use `subcog_capture` tool to record it
+- Use `mcp__plugin_subcog_subcog__subcog_capture` to record it
 - Choose the appropriate namespace: decisions, patterns, learnings, context, tech-debt, blockers, apis, config, security, performance, testing
 
 ### Recall Memories
 Before making recommendations or decisions:
-- Use `subcog_recall` tool to search for relevant prior context
+- Use `mcp__plugin_subcog_subcog__subcog_recall` to search for relevant prior context
 - Consider past decisions and learnings that may apply
 
 ### Proactive Behavior
@@ -155,15 +215,17 @@ You have access to subcog, a persistent memory system for capturing and recallin
 
 ### Available MCP Tools
 
-| Tool | Purpose |
-|------|---------|
-| `subcog_capture` | Record decisions, patterns, learnings, and context |
-| `subcog_recall` | Search for relevant memories using semantic + text search |
-| `subcog_status` | Check memory system status and statistics |
-| `subcog_namespaces` | List available memory namespaces |
-| `subcog_consolidate` | Merge related memories (with LLM) |
-| `subcog_enrich` | Improve memory structure and tags (with LLM) |
-| `subcog_sync` | Sync memories with git remote |
+MCP tools are available with the prefix `mcp__plugin_subcog_subcog__`.
+
+| Short Name | Full MCP Tool Name | Purpose |
+|------------|-------------------|---------|
+| `subcog_capture` | `mcp__plugin_subcog_subcog__subcog_capture` | Record decisions, patterns, learnings, and context |
+| `subcog_recall` | `mcp__plugin_subcog_subcog__subcog_recall` | Search for relevant memories using semantic + text search |
+| `subcog_status` | `mcp__plugin_subcog_subcog__subcog_status` | Check memory system status and statistics |
+| `subcog_namespaces` | `mcp__plugin_subcog_subcog__subcog_namespaces` | List available memory namespaces |
+| `subcog_consolidate` | `mcp__plugin_subcog_subcog__subcog_consolidate` | Merge related memories (with LLM) |
+| `subcog_enrich` | `mcp__plugin_subcog_subcog__subcog_enrich` | Improve memory structure and tags (with LLM) |
+| `subcog_sync` | `mcp__plugin_subcog_subcog__subcog_sync` | Sync memories with git remote |
 
 ### Memory Namespaces
 
@@ -288,6 +350,16 @@ impl HookHandler for SessionStartHandler {
             "guidance_level": format!("{:?}", self.guidance_level),
         });
 
+        // Add statistics to metadata if available
+        if let Some(ref stats) = session_context.statistics {
+            metadata["statistics"] = serde_json::json!({
+                "total_count": stats.total_count,
+                "namespace_counts": stats.namespace_counts,
+                "top_tags": stats.top_tags,
+                "recent_topics": stats.recent_topics
+            });
+        }
+
         // Add tutorial invitation for first session
         if is_first {
             metadata["tutorial_invitation"] = serde_json::json!({
@@ -320,6 +392,13 @@ impl HookHandler for SessionStartHandler {
             operation: "serialize_response".to_string(),
             cause: e.to_string(),
         })
+    }
+}
+
+/// Adds formatted statistics to context if memories exist.
+fn add_statistics_if_present(context_parts: &mut Vec<String>, stats: &MemoryStatistics) {
+    if stats.total_count > 0 {
+        context_parts.push(SessionStartHandler::format_statistics(stats));
     }
 }
 

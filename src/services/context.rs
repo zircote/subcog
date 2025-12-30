@@ -5,6 +5,20 @@
 use crate::Result;
 use crate::models::{Memory, Namespace, SearchFilter, SearchMode};
 use crate::services::RecallService;
+use std::collections::HashMap;
+
+/// Statistics about memories in the system.
+#[derive(Debug, Clone, Default)]
+pub struct MemoryStatistics {
+    /// Total memory count.
+    pub total_count: usize,
+    /// Count per namespace.
+    pub namespace_counts: HashMap<String, usize>,
+    /// Most common tags (top 10).
+    pub top_tags: Vec<(String, usize)>,
+    /// Recent topics extracted from memories.
+    pub recent_topics: Vec<String>,
+}
 
 /// Service for building context for AI assistants.
 pub struct ContextBuilderService {
@@ -143,6 +157,56 @@ impl ContextBuilderService {
         // Rough estimation: ~4 characters per token for English text
         text.len() / 4
     }
+
+    /// Gets memory statistics for session context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if statistics gathering fails.
+    pub fn get_statistics(&self) -> Result<MemoryStatistics> {
+        let recall = match &self.recall {
+            Some(r) => r,
+            None => return Ok(MemoryStatistics::default()),
+        };
+
+        // Search for all memories (broad query)
+        let result = recall.search("*", SearchMode::Text, &SearchFilter::new(), 100)?;
+
+        let mut namespace_counts: HashMap<String, usize> = HashMap::new();
+        let mut tag_counts: HashMap<String, usize> = HashMap::new();
+        let mut topics: Vec<String> = Vec::new();
+
+        for hit in &result.memories {
+            let memory = &hit.memory;
+
+            // Count namespaces
+            *namespace_counts
+                .entry(memory.namespace.as_str().to_string())
+                .or_insert(0) += 1;
+
+            // Count tags
+            for tag in &memory.tags {
+                *tag_counts.entry(tag.clone()).or_insert(0) += 1;
+            }
+
+            // Extract topics (first few words of content)
+            if let Some(topic) = extract_topic(&memory.content) {
+                add_topic_if_unique(&mut topics, topic);
+            }
+        }
+
+        // Sort tags by count
+        let mut top_tags: Vec<(String, usize)> = tag_counts.into_iter().collect();
+        top_tags.sort_by(|a, b| b.1.cmp(&a.1));
+        top_tags.truncate(10);
+
+        Ok(MemoryStatistics {
+            total_count: result.memories.len(),
+            namespace_counts,
+            top_tags,
+            recent_topics: topics,
+        })
+    }
 }
 
 impl Default for ContextBuilderService {
@@ -173,6 +237,34 @@ fn truncate_content(content: &str, max_len: usize) -> String {
         content.to_string()
     } else {
         format!("{}...", &content[..max_len - 3])
+    }
+}
+
+/// Adds a topic to the list if it's unique and list has space.
+fn add_topic_if_unique(topics: &mut Vec<String>, topic: String) {
+    if !topics.contains(&topic) && topics.len() < 10 {
+        topics.push(topic);
+    }
+}
+
+/// Extracts a topic summary from memory content.
+fn extract_topic(content: &str) -> Option<String> {
+    // Get first meaningful words (skip common prefixes)
+    let words: Vec<&str> = content
+        .split_whitespace()
+        .filter(|w| w.len() > 2)
+        .take(5)
+        .collect();
+
+    if words.is_empty() {
+        return None;
+    }
+
+    let topic = words.join(" ");
+    if topic.len() > 50 {
+        Some(format!("{}...", &topic[..47]))
+    } else {
+        Some(topic)
     }
 }
 
