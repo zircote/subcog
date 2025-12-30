@@ -36,6 +36,11 @@ impl PromptRegistry {
             Self::search_help_prompt(),
             Self::browse_prompt(),
             Self::list_prompt(),
+            // Phase 4: Intent-aware prompts
+            Self::intent_search_prompt(),
+            Self::query_suggest_prompt(),
+            Self::context_capture_prompt(),
+            Self::discover_prompt(),
         ]
     }
 
@@ -187,6 +192,96 @@ impl PromptRegistry {
         }
     }
 
+    // Phase 4: Intent-aware prompts
+
+    fn intent_search_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "subcog_intent_search".to_string(),
+            description: Some(
+                "Search memories with automatic intent detection and query refinement".to_string(),
+            ),
+            arguments: vec![
+                PromptArgument {
+                    name: "query".to_string(),
+                    description: Some("Natural language query to search for".to_string()),
+                    required: true,
+                },
+                PromptArgument {
+                    name: "context".to_string(),
+                    description: Some(
+                        "Current working context (file, task) for relevance boosting".to_string(),
+                    ),
+                    required: false,
+                },
+            ],
+        }
+    }
+
+    fn query_suggest_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "subcog_query_suggest".to_string(),
+            description: Some(
+                "Get query suggestions based on memory topics and current context".to_string(),
+            ),
+            arguments: vec![
+                PromptArgument {
+                    name: "topic".to_string(),
+                    description: Some("Topic area to explore".to_string()),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "namespace".to_string(),
+                    description: Some("Namespace to focus suggestions on".to_string()),
+                    required: false,
+                },
+            ],
+        }
+    }
+
+    fn context_capture_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "subcog_context_capture".to_string(),
+            description: Some(
+                "Analyze conversation context and suggest memories to capture".to_string(),
+            ),
+            arguments: vec![
+                PromptArgument {
+                    name: "conversation".to_string(),
+                    description: Some("Recent conversation or code changes to analyze".to_string()),
+                    required: true,
+                },
+                PromptArgument {
+                    name: "threshold".to_string(),
+                    description: Some(
+                        "Confidence threshold for suggestions (default: 0.7)".to_string(),
+                    ),
+                    required: false,
+                },
+            ],
+        }
+    }
+
+    fn discover_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "subcog_discover".to_string(),
+            description: Some(
+                "Discover related memories and topics through exploratory navigation".to_string(),
+            ),
+            arguments: vec![
+                PromptArgument {
+                    name: "start".to_string(),
+                    description: Some("Starting point: memory ID, topic, or keyword".to_string()),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "depth".to_string(),
+                    description: Some("How many hops to explore (default: 2)".to_string()),
+                    required: false,
+                },
+            ],
+        }
+    }
+
     /// Returns all prompt definitions.
     #[must_use]
     pub fn list_prompts(&self) -> Vec<&PromptDefinition> {
@@ -210,6 +305,11 @@ impl PromptRegistry {
             "subcog_search_help" => Some(self.generate_search_help_prompt(arguments)),
             "subcog_browse" => Some(self.generate_browse_prompt(arguments)),
             "subcog_list" => Some(self.generate_list_prompt(arguments)),
+            // Phase 4: Intent-aware prompts
+            "subcog_intent_search" => Some(self.generate_intent_search_prompt(arguments)),
+            "subcog_query_suggest" => Some(self.generate_query_suggest_prompt(arguments)),
+            "subcog_context_capture" => Some(self.generate_context_capture_prompt(arguments)),
+            "subcog_discover" => Some(self.generate_discover_prompt(arguments)),
             _ => None,
         }
     }
@@ -456,6 +556,152 @@ impl PromptRegistry {
             role: "user".to_string(),
             content: PromptContent::Text { text: prompt },
         }]
+    }
+
+    // Phase 4: Intent-aware prompt generators
+
+    /// Generates the intent search prompt.
+    fn generate_intent_search_prompt(&self, arguments: &Value) -> Vec<PromptMessage> {
+        let query = arguments
+            .get("query")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let context = arguments
+            .get("context")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let mut prompt = format!("Search for memories related to: **{query}**\n\n");
+
+        if !context.is_empty() {
+            prompt.push_str(&format!("Current context: {context}\n\n"));
+        }
+
+        prompt.push_str(INTENT_SEARCH_INSTRUCTIONS);
+
+        vec![
+            PromptMessage {
+                role: "user".to_string(),
+                content: PromptContent::Text { text: prompt },
+            },
+            PromptMessage {
+                role: "assistant".to_string(),
+                content: PromptContent::Text {
+                    text: INTENT_SEARCH_RESPONSE.to_string(),
+                },
+            },
+        ]
+    }
+
+    /// Generates the query suggest prompt.
+    fn generate_query_suggest_prompt(&self, arguments: &Value) -> Vec<PromptMessage> {
+        let topic = arguments
+            .get("topic")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let namespace = arguments
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let mut prompt = String::from("Help me explore my memory collection.\n\n");
+
+        if !topic.is_empty() {
+            prompt.push_str(&format!("Topic area: **{topic}**\n"));
+        }
+
+        if !namespace.is_empty() {
+            prompt.push_str(&format!("Focus namespace: **{namespace}**\n"));
+        }
+
+        prompt.push('\n');
+        prompt.push_str(QUERY_SUGGEST_INSTRUCTIONS);
+
+        vec![
+            PromptMessage {
+                role: "user".to_string(),
+                content: PromptContent::Text { text: prompt },
+            },
+            PromptMessage {
+                role: "assistant".to_string(),
+                content: PromptContent::Text {
+                    text: QUERY_SUGGEST_RESPONSE.to_string(),
+                },
+            },
+        ]
+    }
+
+    /// Generates the context capture prompt.
+    fn generate_context_capture_prompt(&self, arguments: &Value) -> Vec<PromptMessage> {
+        let conversation = arguments
+            .get("conversation")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let threshold = arguments
+            .get("threshold")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0.7");
+
+        let prompt = format!(
+            "Analyze this conversation/context and suggest memories to capture:\n\n\
+            ---\n{conversation}\n---\n\n\
+            Confidence threshold: {threshold}\n\n\
+            {CONTEXT_CAPTURE_INSTRUCTIONS}"
+        );
+
+        vec![
+            PromptMessage {
+                role: "user".to_string(),
+                content: PromptContent::Text { text: prompt },
+            },
+            PromptMessage {
+                role: "assistant".to_string(),
+                content: PromptContent::Text {
+                    text: CONTEXT_CAPTURE_RESPONSE.to_string(),
+                },
+            },
+        ]
+    }
+
+    /// Generates the discover prompt.
+    fn generate_discover_prompt(&self, arguments: &Value) -> Vec<PromptMessage> {
+        let start = arguments
+            .get("start")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let depth = arguments
+            .get("depth")
+            .and_then(|v| v.as_str())
+            .unwrap_or("2");
+
+        let mut prompt = String::from("Explore related memories and topics.\n\n");
+
+        if start.is_empty() {
+            prompt
+                .push_str("No starting point specified - show an overview of available topics.\n");
+        } else {
+            prompt.push_str(&format!("Starting point: **{start}**\n"));
+        }
+
+        prompt.push_str(&format!("Exploration depth: {depth} hops\n\n"));
+        prompt.push_str(DISCOVER_INSTRUCTIONS);
+
+        vec![
+            PromptMessage {
+                role: "user".to_string(),
+                content: PromptContent::Text { text: prompt },
+            },
+            PromptMessage {
+                role: "assistant".to_string(),
+                content: PromptContent::Text {
+                    text: DISCOVER_RESPONSE.to_string(),
+                },
+            },
+        ]
     }
 }
 
@@ -857,6 +1103,166 @@ subcog://{scope}/{namespace}/{id} [{tags}]
 - `status:active` - status filter
 ";
 
+// Phase 4: Intent-aware prompt constants
+
+const INTENT_SEARCH_INSTRUCTIONS: &str = r#"
+## Intent-Aware Search
+
+I'll analyze your query to determine the best search approach:
+
+**Intent Detection**:
+1. **Factual lookup**: "What was the decision about X?" → Direct search
+2. **Exploration**: "How do we handle X?" → Broader semantic search
+3. **Troubleshooting**: "Why is X failing?" → Include patterns, learnings
+4. **Context gathering**: "What do we know about X?" → Multi-namespace search
+
+**Search Strategy**:
+- Use `subcog_recall` with appropriate mode based on intent
+- Apply namespace filters when intent is clear
+- Include related terms for broader exploration
+
+**Tools to use**:
+```json
+{ "query": "<refined_query>", "mode": "hybrid", "limit": 10, "detail": "medium" }
+```
+
+For troubleshooting queries, also check:
+- `ns:learnings` for past debugging insights
+- `ns:patterns` for established approaches
+- `ns:decisions` for architectural context
+"#;
+
+const INTENT_SEARCH_RESPONSE: &str = r"
+I'll analyze your query to understand your intent and craft the most effective search strategy.
+
+Let me:
+1. Identify the type of information you're looking for
+2. Determine relevant namespaces to search
+3. Refine the query for optimal results
+4. Search using the appropriate mode
+
+I'll call `subcog_recall` with the refined query and present the results organized by relevance.
+";
+
+const QUERY_SUGGEST_INSTRUCTIONS: &str = r#"
+## Query Suggestions
+
+Help the user discover what's in their memory collection.
+
+**Exploration Strategies**:
+1. **Topic-based**: Use `subcog://topics` resource to see available topics
+2. **Namespace-based**: List what's in each namespace
+3. **Tag-based**: Find common tags and their distributions
+4. **Time-based**: See recent vs. older memories
+
+**Resources to use**:
+- Read `subcog://topics` for topic overview
+- Use `subcog_recall` with `*` query to browse all
+- Apply `ns:X` filter to explore specific namespaces
+
+**Suggested queries based on common needs**:
+- "What decisions have we made about <topic>?"
+- "Show me patterns for <domain>"
+- "What did we learn from <issue>?"
+- "Context for <feature>"
+"#;
+
+const QUERY_SUGGEST_RESPONSE: &str = r"
+I'll help you explore your memory collection. Let me:
+
+1. Check available topics using the `subcog://topics` resource
+2. Analyze namespace distribution
+3. Identify frequently tagged concepts
+4. Suggest relevant queries for your focus area
+
+Based on what I find, I'll provide:
+- Specific search queries to try
+- Namespaces worth exploring
+- Related topics you might not have considered
+";
+
+const CONTEXT_CAPTURE_INSTRUCTIONS: &str = r#"
+## Context-Aware Capture Analysis
+
+Analyze the provided context to identify capture-worthy content.
+
+**Capture Signals to look for**:
+- Decision language: "let's use", "we decided", "going with"
+- Pattern language: "always", "never", "when X do Y", "the pattern is"
+- Learning language: "TIL", "gotcha", "realized", "the issue was"
+- Context language: "because", "constraint", "requirement", "the reason"
+
+**For each suggestion, provide**:
+```
+Namespace: <appropriate namespace>
+Content: <memory text>
+Tags: <comma-separated tags>
+Confidence: <0.0-1.0>
+Rationale: <why this should be captured>
+```
+
+**Filtering rules**:
+- Only suggest if confidence >= threshold
+- Skip purely mechanical/trivial content
+- Prefer actionable insights over raw observations
+- Dedupe against what might already exist
+"#;
+
+const CONTEXT_CAPTURE_RESPONSE: &str = r"
+I'll analyze the conversation to identify valuable memories worth capturing.
+
+For each potential memory, I'll:
+1. Classify the type (decision, pattern, learning, context)
+2. Extract the key insight
+3. Suggest appropriate tags
+4. Estimate confidence level
+5. Explain why it's worth capturing
+
+I'll filter suggestions below your confidence threshold and focus on actionable, reusable knowledge.
+";
+
+const DISCOVER_INSTRUCTIONS: &str = r"
+## Memory Discovery & Navigation
+
+Explore the memory graph through related topics and connections.
+
+**Discovery modes**:
+1. **From topic**: Find memories about a specific topic, then show related topics
+2. **From memory**: Given a memory ID, find semantically similar memories
+3. **Overview**: Show top topics across namespaces
+
+**Resources to use**:
+- `subcog://topics` for topic listing
+- `subcog://topics/{topic}` for specific topic drill-down
+- `subcog://search?q=X` for similarity exploration
+
+**Visualization**:
+Present discoveries as a navigable tree:
+```
+Starting Point: {topic or memory}
+├─ Direct Matches (N memories)
+│   ├─ memory1: {summary}
+│   └─ memory2: {summary}
+└─ Related Topics
+    ├─ {related_topic_1} (M memories)
+    └─ {related_topic_2} (K memories)
+```
+
+For each hop, show 3-5 most relevant items.
+";
+
+const DISCOVER_RESPONSE: &str = r"
+I'll explore your memory collection to find connections and related topics.
+
+Starting with your specified point (or an overview if none given), I'll:
+1. Find directly matching memories
+2. Identify related topics based on tags and content
+3. Navigate to connected concepts
+4. Present a navigable tree of discoveries
+
+Each hop shows the most relevant items, up to your specified depth. I'll highlight interesting connections between seemingly unrelated topics.
+";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -946,5 +1352,126 @@ mod tests {
                 assert!(!text.is_empty());
             }
         }
+    }
+
+    // Phase 4: Intent-aware prompt tests
+
+    #[test]
+    fn test_intent_search_prompt() {
+        let registry = PromptRegistry::new();
+
+        let prompt = registry.get_prompt("subcog_intent_search").unwrap();
+        assert_eq!(prompt.name, "subcog_intent_search");
+        assert!(prompt.description.is_some());
+
+        let args = serde_json::json!({
+            "query": "authentication handling",
+            "context": "working on login flow"
+        });
+
+        let messages = registry
+            .get_prompt_messages("subcog_intent_search", &args)
+            .unwrap();
+
+        assert_eq!(messages.len(), 2);
+        if let PromptContent::Text { text } = &messages[0].content {
+            assert!(text.contains("authentication handling"));
+            assert!(text.contains("login flow"));
+        }
+    }
+
+    #[test]
+    fn test_query_suggest_prompt() {
+        let registry = PromptRegistry::new();
+
+        let prompt = registry.get_prompt("subcog_query_suggest").unwrap();
+        assert_eq!(prompt.name, "subcog_query_suggest");
+
+        let args = serde_json::json!({
+            "topic": "error handling",
+            "namespace": "patterns"
+        });
+
+        let messages = registry
+            .get_prompt_messages("subcog_query_suggest", &args)
+            .unwrap();
+
+        assert_eq!(messages.len(), 2);
+        if let PromptContent::Text { text } = &messages[0].content {
+            assert!(text.contains("error handling"));
+            assert!(text.contains("patterns"));
+        }
+    }
+
+    #[test]
+    fn test_context_capture_prompt() {
+        let registry = PromptRegistry::new();
+
+        let prompt = registry.get_prompt("subcog_context_capture").unwrap();
+        assert_eq!(prompt.name, "subcog_context_capture");
+
+        let args = serde_json::json!({
+            "conversation": "We decided to use PostgreSQL because it has better JSON support.",
+            "threshold": "0.8"
+        });
+
+        let messages = registry
+            .get_prompt_messages("subcog_context_capture", &args)
+            .unwrap();
+
+        assert_eq!(messages.len(), 2);
+        if let PromptContent::Text { text } = &messages[0].content {
+            assert!(text.contains("PostgreSQL"));
+            assert!(text.contains("0.8"));
+        }
+    }
+
+    #[test]
+    fn test_discover_prompt() {
+        let registry = PromptRegistry::new();
+
+        let prompt = registry.get_prompt("subcog_discover").unwrap();
+        assert_eq!(prompt.name, "subcog_discover");
+
+        let args = serde_json::json!({
+            "start": "authentication",
+            "depth": "3"
+        });
+
+        let messages = registry
+            .get_prompt_messages("subcog_discover", &args)
+            .unwrap();
+
+        assert_eq!(messages.len(), 2);
+        if let PromptContent::Text { text } = &messages[0].content {
+            assert!(text.contains("authentication"));
+            assert!(text.contains('3'));
+        }
+    }
+
+    #[test]
+    fn test_discover_prompt_no_start() {
+        let registry = PromptRegistry::new();
+
+        let args = serde_json::json!({});
+
+        let messages = registry
+            .get_prompt_messages("subcog_discover", &args)
+            .unwrap();
+
+        if let PromptContent::Text { text } = &messages[0].content {
+            assert!(text.contains("overview"));
+        }
+    }
+
+    #[test]
+    fn test_all_phase4_prompts_registered() {
+        let registry = PromptRegistry::new();
+
+        // Verify all Phase 4 prompts are registered
+        assert!(registry.get_prompt("subcog_intent_search").is_some());
+        assert!(registry.get_prompt("subcog_query_suggest").is_some());
+        assert!(registry.get_prompt("subcog_context_capture").is_some());
+        assert!(registry.get_prompt("subcog_discover").is_some());
     }
 }
