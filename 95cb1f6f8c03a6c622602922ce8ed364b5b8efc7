@@ -3,6 +3,12 @@ created_at: 1767029448
 id: decisions-1767029448609097000
 namespace: decisions
 status: active
+tags:
+- rmcp-crate
+- mcp-server
+- json-rpc
+- stdio-transport
+- native-rust
 updated_at: 1767029448
 ---
 rmcp crate chosen for MCP server implementation: built-in JSON-RPC handling, stdio transport, tool/resource/prompt support, subscription support. Benefits: standards-compliant, reduced boilerplate, active development. Native Rust implementation superior to Python equivalent. This is ADR-009.
