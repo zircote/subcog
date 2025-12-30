@@ -3,6 +3,11 @@ created_at: 1766999985
 id: 7738390b5d5fb21a
 namespace: patterns
 status: active
+tags:
+- pattern-3
+- metrics-dashboard
+- dashboard-test
+- metrics-testing
 updated_at: 1766999985
 ---
 Pattern 3 for metrics dashboard test
