@@ -70,9 +70,18 @@ mod implementation {
         /// Builds a deadpool config from tokio-postgres config.
         fn build_pool_config(config: &tokio_postgres::Config) -> Config {
             let mut cfg = Config::new();
-            cfg.host = config.get_hosts().first().map(|h| match h {
-                tokio_postgres::config::Host::Tcp(s) => s.clone(),
-                tokio_postgres::config::Host::Unix(p) => p.to_string_lossy().to_string(),
+            cfg.host = config.get_hosts().first().map(|h| {
+                #[cfg(unix)]
+                match h {
+                    tokio_postgres::config::Host::Tcp(s) => s.clone(),
+                    tokio_postgres::config::Host::Unix(p) => p.to_string_lossy().to_string(),
+                }
+                #[cfg(not(unix))]
+                match h {
+                    tokio_postgres::config::Host::Tcp(s) => s.clone(),
+                    // Unix sockets not available on Windows
+                    _ => "localhost".to_string(),
+                }
             });
             cfg.port = config.get_ports().first().copied();
             cfg.user = config.get_user().map(String::from);
