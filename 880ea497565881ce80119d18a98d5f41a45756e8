@@ -8,6 +8,7 @@ tags:
 - pr-based-deployments
 - github-actions
 - deployment-audit-trail
+- prevent-direct-pushes
 updated_at: 1767059249
 ---
 Cross-repository deployments should always use PRs instead of direct pushes:
