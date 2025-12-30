@@ -67,6 +67,16 @@ impl OpenAiClient {
         Ok(())
     }
 
+    /// Checks if the model is a GPT-5 family model.
+    ///
+    /// GPT-5 models use `max_completion_tokens` instead of `max_tokens`
+    /// and only support temperature=1 (default).
+    fn is_gpt5_model(&self) -> bool {
+        self.model.starts_with("gpt-5")
+            || self.model.starts_with("o1")
+            || self.model.starts_with("o3")
+    }
+
     /// Makes a request to the `OpenAI` API.
     fn request(&self, messages: Vec<ChatMessage>) -> Result<String> {
         self.validate()?;
@@ -79,11 +89,24 @@ impl OpenAiClient {
                 cause: "API key not configured".to_string(),
             })?;
 
-        let request = ChatCompletionRequest {
-            model: self.model.clone(),
-            messages,
-            max_tokens: Some(1024),
-            temperature: Some(0.7),
+        // GPT-5/o1/o3 models use max_completion_tokens and don't support temperature
+        // GPT-4 and earlier use max_tokens and support temperature
+        let request = if self.is_gpt5_model() {
+            ChatCompletionRequest {
+                model: self.model.clone(),
+                messages,
+                max_tokens: None,
+                max_completion_tokens: Some(1024),
+                temperature: None, // GPT-5 only supports default (1)
+            }
+        } else {
+            ChatCompletionRequest {
+                model: self.model.clone(),
+                messages,
+                max_tokens: Some(1024),
+                max_completion_tokens: None,
+                temperature: Some(0.7),
+            }
         };
 
         let response = self
@@ -99,9 +122,11 @@ impl OpenAiClient {
             })?;
 
         if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().unwrap_or_default();
             return Err(Error::OperationFailed {
                 operation: "openai_request".to_string(),
-                cause: format!("API returned status: {}", response.status()),
+                cause: format!("API returned status: {status} - {body}"),
             });
         }
 
@@ -195,8 +220,12 @@ Respond in JSON format with these fields:
 struct ChatCompletionRequest {
     model: String,
     messages: Vec<ChatMessage>,
+    /// Token limit for GPT-4 and earlier models.
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
+    /// Token limit for GPT-5/o1/o3 models.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_completion_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
 }
@@ -271,5 +300,34 @@ mod tests {
         let client = OpenAiClient::new().with_api_key("test-key");
         let result = client.validate();
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_gpt5_model_detection() {
+        // GPT-5 models
+        let client = OpenAiClient::new().with_model("gpt-5-mini");
+        assert!(client.is_gpt5_model());
+
+        let client = OpenAiClient::new().with_model("gpt-5");
+        assert!(client.is_gpt5_model());
+
+        let client = OpenAiClient::new().with_model("o1-preview");
+        assert!(client.is_gpt5_model());
+
+        let client = OpenAiClient::new().with_model("o3-mini");
+        assert!(client.is_gpt5_model());
+
+        // GPT-4 and earlier models
+        let client = OpenAiClient::new().with_model("gpt-4o");
+        assert!(!client.is_gpt5_model());
+
+        let client = OpenAiClient::new().with_model("gpt-4o-mini");
+        assert!(!client.is_gpt5_model());
+
+        let client = OpenAiClient::new().with_model("gpt-4-turbo");
+        assert!(!client.is_gpt5_model());
+
+        let client = OpenAiClient::new().with_model("gpt-3.5-turbo");
+        assert!(!client.is_gpt5_model());
     }
 }

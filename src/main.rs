@@ -108,6 +108,32 @@ enum Commands {
     /// Run consolidation.
     Consolidate,
 
+    /// Rebuild search index from git notes.
+    Reindex {
+        /// Path to the git repository (default: current directory).
+        #[arg(short, long)]
+        repo: Option<PathBuf>,
+    },
+
+    /// Enrich memories with LLM-generated tags.
+    Enrich {
+        /// Enrich all memories (those without tags).
+        #[arg(long)]
+        all: bool,
+
+        /// Update all memories, even those with existing tags.
+        #[arg(long)]
+        update_all: bool,
+
+        /// Enrich a specific memory by ID.
+        #[arg(long)]
+        id: Option<String>,
+
+        /// Show what would be changed without applying.
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Manage configuration.
     Config {
         /// Show current configuration.
@@ -200,6 +226,15 @@ fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Consolidate => cmd_consolidate(),
 
+        Commands::Reindex { repo } => cmd_reindex(repo),
+
+        Commands::Enrich {
+            all,
+            update_all,
+            id,
+            dry_run,
+        } => cmd_enrich(&config, all, update_all, id, dry_run),
+
         Commands::Config { show, set } => cmd_config(config, show, set),
 
         Commands::Serve { transport, port } => cmd_serve(transport, port),
@@ -209,10 +244,15 @@ fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Loads configuration.
-fn load_config(_path: Option<&str>) -> Result<SubcogConfig, Box<dyn std::error::Error>> {
-    // For now, use default config
-    // TODO: Load from file if path provided
-    Ok(SubcogConfig::default())
+fn load_config(path: Option<&str>) -> Result<SubcogConfig, Box<dyn std::error::Error>> {
+    // If a path is provided, load from that file
+    if let Some(config_path) = path {
+        return SubcogConfig::load_from_file(std::path::Path::new(config_path))
+            .map_err(std::convert::Into::into);
+    }
+
+    // Otherwise, load from default location
+    Ok(SubcogConfig::load_default())
 }
 
 /// Parses namespace string.
@@ -250,7 +290,10 @@ fn cmd_capture(
     tags: Option<String>,
     source: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let service = CaptureService::default();
+    // Get repo path so captures are stored to git notes
+    let cwd = std::env::current_dir()?;
+    let config = subcog::config::Config::new().with_repo_path(&cwd);
+    let service = CaptureService::new(config);
 
     let tag_list = tags
         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
@@ -277,20 +320,6 @@ fn cmd_capture(
     Ok(())
 }
 
-/// Get the data directory for subcog storage.
-fn get_data_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("SUBCOG_DATA_DIR") {
-        PathBuf::from(dir)
-    } else if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home).join(".subcog")
-    } else if let Ok(home) = std::env::var("USERPROFILE") {
-        // Windows fallback
-        PathBuf::from(home).join(".subcog")
-    } else {
-        PathBuf::from(".subcog")
-    }
-}
-
 /// Recall command.
 fn cmd_recall(
     query: String,
@@ -298,13 +327,11 @@ fn cmd_recall(
     namespace: Option<String>,
     limit: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Set up SQLite index backend
-    let data_dir = get_data_dir();
-    std::fs::create_dir_all(&data_dir)?;
-    let db_path = data_dir.join("index.db");
+    use subcog::services::ServiceContainer;
 
-    let index = SqliteBackend::new(&db_path)?;
-    let service = RecallService::with_index(index);
+    // Use domain-scoped index (project-local .subcog/index.db)
+    let services = ServiceContainer::from_current_dir()?;
+    let service = services.recall()?;
 
     let mut filter = SearchFilter::new();
     if let Some(ns) = namespace {
@@ -415,6 +442,202 @@ fn cmd_consolidate() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Reindex command.
+fn cmd_reindex(repo: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
+    use subcog::services::ServiceContainer;
+
+    // Use provided repo path or current directory
+    let repo_path = repo.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
+
+    println!("Reindexing memories from git notes...");
+    println!("Repository: {}", repo_path.display());
+    println!();
+
+    let services = ServiceContainer::for_repo(&repo_path, None)?;
+    match services.reindex() {
+        Ok(count) => {
+            println!("Reindex completed successfully!");
+            println!("Memories indexed: {count}");
+        },
+        Err(e) => {
+            eprintln!("Reindex failed: {e}");
+            return Err(e.into());
+        },
+    }
+
+    Ok(())
+}
+
+/// Enrich command.
+fn cmd_enrich(
+    config: &SubcogConfig,
+    all: bool,
+    update_all: bool,
+    id: Option<String>,
+    dry_run: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use subcog::config::LlmProvider;
+    use subcog::llm::{AnthropicClient, LmStudioClient, OllamaClient, OpenAiClient};
+    use subcog::services::EnrichmentService;
+
+    // Get repository path
+    let cwd = std::env::current_dir()?;
+
+    // Create the appropriate LLM client based on config
+    let llm_config = &config.llm;
+    println!(
+        "Using LLM provider: {:?}{}",
+        llm_config.provider,
+        llm_config
+            .model
+            .as_ref()
+            .map_or(String::new(), |m| format!(" (model: {m})"))
+    );
+
+    // Build enrichment service with configured provider
+    match llm_config.provider {
+        LlmProvider::OpenAi => {
+            let mut client = OpenAiClient::new();
+            if let Some(ref model) = llm_config.model {
+                client = client.with_model(model);
+            }
+            if let Some(ref base_url) = llm_config.base_url {
+                client = client.with_endpoint(base_url);
+            }
+            run_enrichment(
+                EnrichmentService::new(client, &cwd),
+                all,
+                update_all,
+                id,
+                dry_run,
+                &cwd,
+            )
+        },
+        LlmProvider::Anthropic => {
+            let mut client = AnthropicClient::new();
+            if let Some(ref model) = llm_config.model {
+                client = client.with_model(model);
+            }
+            run_enrichment(
+                EnrichmentService::new(client, &cwd),
+                all,
+                update_all,
+                id,
+                dry_run,
+                &cwd,
+            )
+        },
+        LlmProvider::Ollama => {
+            let mut client = OllamaClient::new();
+            if let Some(ref model) = llm_config.model {
+                client = client.with_model(model);
+            }
+            if let Some(ref base_url) = llm_config.base_url {
+                client = client.with_endpoint(base_url);
+            }
+            run_enrichment(
+                EnrichmentService::new(client, &cwd),
+                all,
+                update_all,
+                id,
+                dry_run,
+                &cwd,
+            )
+        },
+        LlmProvider::LmStudio => {
+            let mut client = LmStudioClient::new();
+            if let Some(ref model) = llm_config.model {
+                client = client.with_model(model);
+            }
+            if let Some(ref base_url) = llm_config.base_url {
+                client = client.with_endpoint(base_url);
+            }
+            run_enrichment(
+                EnrichmentService::new(client, &cwd),
+                all,
+                update_all,
+                id,
+                dry_run,
+                &cwd,
+            )
+        },
+    }
+}
+
+/// Runs the enrichment operation with the given service.
+fn run_enrichment<P: subcog::llm::LlmProvider>(
+    service: subcog::services::EnrichmentService<P>,
+    all: bool,
+    update_all: bool,
+    id: Option<String>,
+    dry_run: bool,
+    cwd: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use subcog::services::ServiceContainer;
+
+    if let Some(memory_id) = id {
+        // Enrich a single memory
+        println!("Enriching memory: {memory_id}");
+        match service.enrich_one(&memory_id, dry_run) {
+            Ok(result) => {
+                if result.applied {
+                    println!("Enriched with tags: {:?}", result.new_tags);
+                } else {
+                    println!("Would enrich with tags: {:?}", result.new_tags);
+                }
+            },
+            Err(e) => {
+                eprintln!("Enrichment failed: {e}");
+                return Err(e.into());
+            },
+        }
+    } else if all || update_all {
+        // Enrich all memories
+        println!("Enriching memories...");
+        if update_all {
+            println!("Mode: Update all (including those with existing tags)");
+        } else {
+            println!("Mode: Enrich only (memories without tags)");
+        }
+        if dry_run {
+            println!("Dry run: No changes will be applied");
+        }
+        println!();
+
+        match service.enrich_all(dry_run, update_all) {
+            Ok(stats) => {
+                println!();
+                println!("{}", stats.summary());
+
+                // Trigger reindex if changes were made
+                if !dry_run && (stats.enriched > 0 || stats.updated > 0) {
+                    println!();
+                    println!("Reindexing to update search index...");
+                    let services = ServiceContainer::for_repo(cwd, None)?;
+                    match services.reindex() {
+                        Ok(count) => println!("Reindexed {count} memories"),
+                        Err(e) => eprintln!("Reindex failed: {e}"),
+                    }
+                }
+            },
+            Err(e) => {
+                eprintln!("Enrichment failed: {e}");
+                return Err(e.into());
+            },
+        }
+    } else {
+        println!("Usage:");
+        println!("  subcog enrich --all          Enrich memories without tags");
+        println!("  subcog enrich --update-all   Update all memories (regenerate tags)");
+        println!("  subcog enrich --id <ID>      Enrich a specific memory");
+        println!();
+        println!("Options:");
+        println!("  --dry-run    Show what would be changed without applying");
+    }
+
+    Ok(())
+}
+
 /// Config command.
 fn cmd_config(
     config: SubcogConfig,
@@ -438,6 +661,17 @@ fn cmd_config(
         println!("  LLM Features: {}", config.features.llm_features);
         println!("  Auto-Capture: {}", config.features.auto_capture);
         println!("  Consolidation: {}", config.features.consolidation);
+        println!();
+        println!("LLM Configuration:");
+        println!("  Provider: {:?}", config.llm.provider);
+        println!(
+            "  Model: {}",
+            config.llm.model.as_deref().unwrap_or("(default)")
+        );
+        println!(
+            "  Base URL: {}",
+            config.llm.base_url.as_deref().unwrap_or("(default)")
+        );
     } else {
         println!("Use --show to display configuration");
         println!("Use --set KEY=VALUE to set a value");
@@ -469,7 +703,15 @@ fn cmd_hook(event: HookEvent) -> Result<(), Box<dyn std::error::Error>> {
 
     // Try to initialize services for hooks (may fail if no data dir)
     let recall_service = try_init_recall_service();
-    let capture_service = CaptureService::default();
+
+    // Get repo path so captures are stored to git notes
+    let cwd = std::env::current_dir().ok();
+    let capture_config = cwd
+        .as_ref()
+        .map_or_else(subcog::config::Config::default, |p| {
+            subcog::config::Config::new().with_repo_path(p)
+        });
+    let capture_service = CaptureService::new(capture_config);
     let sync_service = SyncService::default();
 
     let response = match event {

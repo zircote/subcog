@@ -60,8 +60,8 @@ pub use config::{FeatureFlags, SubcogConfig};
 pub use embedding::Embedder;
 pub use llm::LlmProvider;
 pub use models::{
-    CaptureRequest, CaptureResult, Domain, Memory, MemoryId, MemoryStatus, Namespace, SearchFilter,
-    SearchMode, SearchResult,
+    CaptureRequest, CaptureResult, DetailLevel, Domain, Memory, MemoryId, MemoryStatus, Namespace,
+    SearchFilter, SearchMode, SearchResult,
 };
 pub use services::{
     CaptureService, ConsolidationService, ContextBuilderService, RecallService, SyncService,
