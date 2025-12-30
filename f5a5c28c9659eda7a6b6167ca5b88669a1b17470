@@ -6,9 +6,9 @@ status: active
 tags:
 - event-bus
 - tokio-broadcast
-- async-communication
-- loose-coupling
+- cross-component-communication
 - eventual-consistency
+- adr-004
 updated_at: 1767029448
 ---
 Event bus for cross-component communication using tokio broadcast channels. Components subscribe to MemoryEvent variants (MemoryCaptured, SearchCompleted, SyncCompleted) and react asynchronously. Benefits: loose coupling, easy addition of handlers, centralized event logging, testable in isolation. Trade-offs: eventual consistency (async), debugging event chains. This is ADR-004.
