@@ -62,4 +62,11 @@ pub trait IndexBackend: Send + Sync {
     ///
     /// Returns an error if the operation fails.
     fn list_all(&self, filter: &SearchFilter, limit: usize) -> Result<Vec<(MemoryId, f32)>>;
+
+    /// Retrieves a memory by ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    fn get_memory(&self, id: &MemoryId) -> Result<Option<Memory>>;
 }

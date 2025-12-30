@@ -5,7 +5,7 @@
 use crate::models::{Memory, MemoryId, SearchFilter};
 use crate::storage::traits::IndexBackend;
 use crate::{Error, Result};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -80,7 +80,8 @@ impl SqliteBackend {
                 domain TEXT,
                 status TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
-                tags TEXT
+                tags TEXT,
+                source TEXT
             )",
             [],
         )
@@ -88,6 +89,9 @@ impl SqliteBackend {
             operation: "create_memories_table".to_string(),
             cause: e.to_string(),
         })?;
+
+        // Add source column if it doesn't exist (for migration)
+        let _ = conn.execute("ALTER TABLE memories ADD COLUMN source TEXT", []);
 
         // Create FTS5 virtual table for full-text search (standalone, not synced with memories)
         conn.execute(
@@ -149,6 +153,45 @@ impl SqliteBackend {
             }
         }
 
+        // Tag filtering (AND logic - must have ALL tags)
+        // Use ',tag,' pattern with wrapped column to match whole tags only
+        for tag in &filter.tags {
+            conditions.push(format!("(',' || m.tags || ',') LIKE ?{param_idx}"));
+            param_idx += 1;
+            params.push(format!("%,{tag},%"));
+        }
+
+        // Tag filtering (OR logic - must have ANY tag)
+        if !filter.tags_any.is_empty() {
+            let or_conditions: Vec<String> = filter
+                .tags_any
+                .iter()
+                .map(|tag| {
+                    let cond = format!("(',' || m.tags || ',') LIKE ?{param_idx}");
+                    param_idx += 1;
+                    params.push(format!("%,{tag},%"));
+                    cond
+                })
+                .collect();
+            conditions.push(format!("({})", or_conditions.join(" OR ")));
+        }
+
+        // Excluded tags (NOT LIKE) - match whole tags only
+        for tag in &filter.excluded_tags {
+            conditions.push(format!("(',' || m.tags || ',') NOT LIKE ?{param_idx}"));
+            param_idx += 1;
+            params.push(format!("%,{tag},%"));
+        }
+
+        // Source pattern (glob-style converted to SQL LIKE)
+        if let Some(ref pattern) = filter.source_pattern {
+            // Convert glob pattern to SQL LIKE pattern: * -> %, ? -> _
+            let sql_pattern = pattern.replace('*', "%").replace('?', "_");
+            conditions.push(format!("m.source LIKE ?{param_idx}"));
+            param_idx += 1;
+            params.push(sql_pattern);
+        }
+
         if let Some(after) = filter.created_after {
             conditions.push(format!("m.created_at >= ?{param_idx}"));
             param_idx += 1;
@@ -183,15 +226,16 @@ impl IndexBackend for SqliteBackend {
 
         // Insert or replace in main table
         conn.execute(
-            "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags, source)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 memory.id.as_str(),
                 memory.namespace.as_str(),
                 domain_str,
                 memory.status.as_str(),
                 memory.created_at,
-                tags_str
+                tags_str,
+                memory.source.as_deref()
             ],
         )
         .map_err(|e| Error::OperationFailed {
@@ -412,6 +456,122 @@ impl IndexBackend for SqliteBackend {
         }
 
         Ok(results)
+    }
+
+    fn get_memory(&self, id: &MemoryId) -> Result<Option<Memory>> {
+        use crate::models::{Domain, MemoryStatus, Namespace};
+
+        let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
+            operation: "lock_connection".to_string(),
+            cause: e.to_string(),
+        })?;
+
+        // Join memories and memories_fts to get full memory data
+        let mut stmt = conn
+            .prepare(
+                "SELECT m.id, m.namespace, m.domain, m.status, m.created_at, m.tags, f.content
+                 FROM memories m
+                 JOIN memories_fts f ON m.id = f.id
+                 WHERE m.id = ?1",
+            )
+            .map_err(|e| Error::OperationFailed {
+                operation: "prepare_get_memory".to_string(),
+                cause: e.to_string(),
+            })?;
+
+        let result: std::result::Result<Option<_>, _> = stmt
+            .query_row(params![id.as_str()], |row| {
+                let id_str: String = row.get(0)?;
+                let namespace_str: String = row.get(1)?;
+                let domain_str: Option<String> = row.get(2)?;
+                let status_str: String = row.get(3)?;
+                let created_at: i64 = row.get(4)?;
+                let tags_str: Option<String> = row.get(5)?;
+                let content: String = row.get(6)?;
+
+                Ok((
+                    id_str,
+                    namespace_str,
+                    domain_str,
+                    status_str,
+                    created_at,
+                    tags_str,
+                    content,
+                ))
+            })
+            .optional();
+
+        let result = result.map_err(|e| Error::OperationFailed {
+            operation: "get_memory".to_string(),
+            cause: e.to_string(),
+        })?;
+
+        let Some((id_str, namespace_str, domain_str, status_str, created_at, tags_str, content)) =
+            result
+        else {
+            return Ok(None);
+        };
+
+        // Parse namespace
+        let namespace = Namespace::parse(&namespace_str).unwrap_or_default();
+
+        // Parse domain
+        let domain = domain_str.map_or_else(Domain::new, |d: String| {
+            if d.is_empty() || d == "global" {
+                Domain::new()
+            } else {
+                let parts: Vec<&str> = d.split('/').collect();
+                match parts.len() {
+                    1 => Domain {
+                        organization: Some(parts[0].to_string()),
+                        project: None,
+                        repository: None,
+                    },
+                    2 => Domain {
+                        organization: Some(parts[0].to_string()),
+                        project: None,
+                        repository: Some(parts[1].to_string()),
+                    },
+                    _ => Domain::new(),
+                }
+            }
+        });
+
+        // Parse status
+        let status = match status_str.to_lowercase().as_str() {
+            "active" => MemoryStatus::Active,
+            "archived" => MemoryStatus::Archived,
+            "superseded" => MemoryStatus::Superseded,
+            "pending" => MemoryStatus::Pending,
+            "deleted" => MemoryStatus::Deleted,
+            _ => MemoryStatus::Active,
+        };
+
+        // Parse tags
+        let tags: Vec<String> = tags_str
+            .map(|t: String| {
+                t.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        #[allow(clippy::cast_sign_loss)]
+        let created_at_u64 = created_at as u64;
+
+        Ok(Some(Memory {
+            id: MemoryId::new(id_str),
+            content,
+            namespace,
+            domain,
+            status,
+            created_at: created_at_u64,
+            updated_at: created_at_u64,
+            embedding: None,
+            tags,
+            source: None,
+        }))
     }
 }
 

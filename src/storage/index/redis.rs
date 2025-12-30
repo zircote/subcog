@@ -4,7 +4,7 @@
 
 #[cfg(feature = "redis")]
 mod implementation {
-    use crate::models::{Memory, MemoryId, Namespace, SearchFilter};
+    use crate::models::{Memory, MemoryId, MemoryStatus, Namespace, SearchFilter};
     use crate::storage::traits::IndexBackend;
     use crate::{Error, Result};
     use redis::{Client, Commands, Connection};
@@ -287,6 +287,58 @@ mod implementation {
             }
         }
 
+        fn get_memory(&self, id: &MemoryId) -> Result<Option<Memory>> {
+            use crate::models::{Domain, Namespace};
+
+            let mut conn = self.get_connection()?;
+            let key = format!("mem:{}", id.as_str());
+
+            // Get all fields from hash
+            let result: redis::RedisResult<std::collections::HashMap<String, String>> =
+                conn.hgetall(&key);
+
+            match result {
+                Ok(fields) if fields.is_empty() => Ok(None),
+                Ok(fields) => {
+                    let content = fields.get("content").cloned().unwrap_or_default();
+                    let namespace_str = fields.get("namespace").cloned().unwrap_or_default();
+                    let domain_str = fields.get("domain").cloned();
+                    let status_str = fields.get("status").cloned().unwrap_or_default();
+                    let tags_str = fields.get("tags").cloned();
+                    let created_at: u64 = fields
+                        .get("created_at")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    let updated_at: u64 = fields
+                        .get("updated_at")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(created_at);
+
+                    let namespace = Namespace::parse(&namespace_str).unwrap_or_default();
+                    let domain = domain_str.map_or_else(Domain::new, |_| Domain::new());
+                    let status = parse_memory_status(&status_str);
+                    let tags = parse_tags_string(tags_str);
+
+                    Ok(Some(Memory {
+                        id: id.clone(),
+                        content,
+                        namespace,
+                        domain,
+                        status,
+                        created_at,
+                        updated_at,
+                        embedding: None,
+                        tags,
+                        source: None,
+                    }))
+                },
+                Err(e) => Err(Error::OperationFailed {
+                    operation: "redis_get_memory".to_string(),
+                    cause: e.to_string(),
+                }),
+            }
+        }
+
         fn clear(&mut self) -> Result<()> {
             let mut conn = self.get_connection()?;
 
@@ -363,6 +415,28 @@ mod implementation {
 
         results
     }
+
+    /// Parses a status string to `MemoryStatus`.
+    fn parse_memory_status(s: &str) -> MemoryStatus {
+        match s.to_lowercase().as_str() {
+            "active" => MemoryStatus::Active,
+            "archived" => MemoryStatus::Archived,
+            "superseded" => MemoryStatus::Superseded,
+            "pending" => MemoryStatus::Pending,
+            "deleted" => MemoryStatus::Deleted,
+            _ => MemoryStatus::Active,
+        }
+    }
+
+    /// Parses a comma-separated tags string.
+    fn parse_tags_string(tags_str: Option<String>) -> Vec<String> {
+        tags_str.map_or_else(Vec::new, |t| {
+            t.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+    }
 }
 
 #[cfg(feature = "redis")]
@@ -416,6 +490,10 @@ mod stub {
         }
 
         fn list_all(&self, _filter: &SearchFilter, _limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+            Err(Error::FeatureNotEnabled("redis".to_string()))
+        }
+
+        fn get_memory(&self, _id: &MemoryId) -> Result<Option<Memory>> {
             Err(Error::FeatureNotEnabled("redis".to_string()))
         }
 

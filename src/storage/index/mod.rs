@@ -1,7 +1,11 @@
 //! Index backend implementations.
 
+mod domain;
 mod sqlite;
 
+pub use domain::{
+    DomainIndexConfig, DomainIndexManager, DomainScope, OrgIndexConfig, find_repo_root,
+};
 pub use sqlite::SqliteBackend;
 
 // Redis backend available with feature flag

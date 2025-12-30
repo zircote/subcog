@@ -468,6 +468,11 @@ mod implementation {
             self.block_on(self.list_all_async(filter, limit))
         }
 
+        fn get_memory(&self, _id: &MemoryId) -> Result<Option<Memory>> {
+            // TODO: Implement PostgreSQL get_memory when needed
+            Ok(None)
+        }
+
         fn clear(&mut self) -> Result<()> {
             self.block_on(self.clear_async())
         }
@@ -525,6 +530,10 @@ mod stub {
         }
 
         fn list_all(&self, _filter: &SearchFilter, _limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+
+        fn get_memory(&self, _id: &MemoryId) -> Result<Option<Memory>> {
             Err(Error::FeatureNotEnabled("postgres".to_string()))
         }
 
