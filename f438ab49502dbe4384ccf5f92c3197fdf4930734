@@ -4,6 +4,12 @@ domain: user
 id: 1767059313254647000
 namespace: patterns
 status: active
+tags:
+- cross-repo-deployments
+- pr-based-deployments
+- github-actions
+- audit-trail
+- prevent-direct-pushes
 updated_at: 1767059313
 ---
 Cross-repository deployments should always use PRs instead of direct pushes:
