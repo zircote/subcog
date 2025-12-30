@@ -1,6 +1,6 @@
-//! SQLite + FTS5 index backend.
+//! `SQLite` + FTS5 index backend.
 //!
-//! Provides full-text search using SQLite's FTS5 extension.
+//! Provides full-text search using `SQLite`'s FTS5 extension.
 
 use crate::models::{Memory, MemoryId, SearchFilter};
 use crate::storage::traits::IndexBackend;
@@ -11,14 +11,14 @@ use std::sync::Mutex;
 
 /// SQLite-based index backend with FTS5.
 pub struct SqliteBackend {
-    /// Connection to the SQLite database.
+    /// Connection to the `SQLite` database.
     conn: Mutex<Connection>,
-    /// Path to the SQLite database (None for in-memory).
+    /// Path to the `SQLite` database (None for in-memory).
     db_path: Option<PathBuf>,
 }
 
 impl SqliteBackend {
-    /// Creates a new SQLite backend.
+    /// Creates a new `SQLite` backend.
     ///
     /// # Errors
     ///
@@ -39,7 +39,7 @@ impl SqliteBackend {
         Ok(backend)
     }
 
-    /// Creates an in-memory SQLite backend (useful for testing).
+    /// Creates an in-memory `SQLite` backend (useful for testing).
     ///
     /// # Errors
     ///
@@ -271,10 +271,9 @@ impl IndexBackend for SqliteBackend {
             "SELECT f.id, bm25(memories_fts) as score
              FROM memories_fts f
              JOIN memories m ON f.id = m.id
-             WHERE memories_fts MATCH ?1 {}
+             WHERE memories_fts MATCH ?1 {filter_clause}
              ORDER BY score
-             LIMIT ?{}",
-            filter_clause, next_param
+             LIMIT ?{next_param}"
         );
 
         let mut stmt = conn.prepare(&sql).map_err(|e| Error::OperationFailed {
@@ -295,7 +294,7 @@ impl IndexBackend for SqliteBackend {
         let rows = stmt
             .query_map(
                 rusqlite::params_from_iter(
-                    std::iter::once(fts_query.clone())
+                    std::iter::once(fts_query)
                         .chain(filter_params.into_iter())
                         .chain(std::iter::once(limit.to_string())),
                 ),
@@ -352,6 +351,63 @@ impl IndexBackend for SqliteBackend {
 
         Ok(())
     }
+
+    fn list_all(&self, filter: &SearchFilter, limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+        let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
+            operation: "lock_connection".to_string(),
+            cause: e.to_string(),
+        })?;
+
+        // Build filter clause (starting at parameter 1, no FTS query)
+        let (filter_clause, filter_params, next_param) =
+            self.build_filter_clause_numbered(filter, 1);
+
+        // Query all memories without FTS MATCH, ordered by updated_at desc
+        let sql = format!(
+            "SELECT m.id, 1.0 as score
+             FROM memories m
+             WHERE 1=1 {filter_clause}
+             ORDER BY m.updated_at DESC
+             LIMIT ?{next_param}"
+        );
+
+        let mut stmt = conn.prepare(&sql).map_err(|e| Error::OperationFailed {
+            operation: "prepare_list_all".to_string(),
+            cause: e.to_string(),
+        })?;
+
+        let mut results = Vec::new();
+
+        let rows = stmt
+            .query_map(
+                rusqlite::params_from_iter(
+                    filter_params
+                        .into_iter()
+                        .chain(std::iter::once(limit.to_string())),
+                ),
+                |row| {
+                    let id: String = row.get(0)?;
+                    let score: f64 = row.get(1)?;
+                    Ok((id, score))
+                },
+            )
+            .map_err(|e| Error::OperationFailed {
+                operation: "list_all".to_string(),
+                cause: e.to_string(),
+            })?;
+
+        for row in rows {
+            let (id, score) = row.map_err(|e| Error::OperationFailed {
+                operation: "read_list_row".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            #[allow(clippy::cast_possible_truncation)]
+            results.push((MemoryId::new(id), score as f32));
+        }
+
+        Ok(results)
+    }
 }
 
 #[cfg(test)]
@@ -366,8 +422,8 @@ mod tests {
             namespace,
             domain: Domain::new(),
             status: MemoryStatus::Active,
-            created_at: 1234567890,
-            updated_at: 1234567890,
+            created_at: 1_234_567_890,
+            updated_at: 1_234_567_890,
             embedding: None,
             tags: vec!["test".to_string()],
             source: None,
@@ -380,16 +436,15 @@ mod tests {
 
         let memory1 = create_test_memory("id1", "Rust programming language", Namespace::Decisions);
         let memory2 = create_test_memory("id2", "Python scripting", Namespace::Learnings);
-        let memory3 = create_test_memory("id3", "Rust ownership and borrowing", Namespace::Patterns);
+        let memory3 =
+            create_test_memory("id3", "Rust ownership and borrowing", Namespace::Patterns);
 
         backend.index(&memory1).unwrap();
         backend.index(&memory2).unwrap();
         backend.index(&memory3).unwrap();
 
         // Search for "Rust"
-        let results = backend
-            .search("Rust", &SearchFilter::new(), 10)
-            .unwrap();
+        let results = backend.search("Rust", &SearchFilter::new(), 10).unwrap();
 
         assert_eq!(results.len(), 2);
         let ids: Vec<_> = results.iter().map(|(id, _)| id.as_str()).collect();
@@ -423,9 +478,7 @@ mod tests {
         backend.index(&memory).unwrap();
 
         // Verify it exists
-        let results = backend
-            .search("content", &SearchFilter::new(), 10)
-            .unwrap();
+        let results = backend.search("content", &SearchFilter::new(), 10).unwrap();
         assert_eq!(results.len(), 1);
 
         // Remove it
@@ -433,9 +486,7 @@ mod tests {
         assert!(removed);
 
         // Verify it's gone
-        let results = backend
-            .search("content", &SearchFilter::new(), 10)
-            .unwrap();
+        let results = backend.search("content", &SearchFilter::new(), 10).unwrap();
         assert!(results.is_empty());
     }
 
@@ -452,9 +503,7 @@ mod tests {
 
         backend.clear().unwrap();
 
-        let results = backend
-            .search("content", &SearchFilter::new(), 10)
-            .unwrap();
+        let results = backend.search("content", &SearchFilter::new(), 10).unwrap();
         assert!(results.is_empty());
     }
 
@@ -470,9 +519,7 @@ mod tests {
 
         backend.reindex(&memories).unwrap();
 
-        let results = backend
-            .search("memory", &SearchFilter::new(), 10)
-            .unwrap();
+        let results = backend.search("memory", &SearchFilter::new(), 10).unwrap();
         assert_eq!(results.len(), 3);
     }
 
@@ -480,7 +527,8 @@ mod tests {
     fn test_update_index() {
         let mut backend = SqliteBackend::in_memory().unwrap();
 
-        let mut memory = create_test_memory("update_test", "original content", Namespace::Decisions);
+        let mut memory =
+            create_test_memory("update_test", "original content", Namespace::Decisions);
         backend.index(&memory).unwrap();
 
         // Update the memory

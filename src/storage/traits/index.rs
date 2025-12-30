@@ -53,4 +53,13 @@ pub trait IndexBackend: Send + Sync {
     ///
     /// Returns an error if the clear operation fails.
     fn clear(&mut self) -> Result<()>;
+
+    /// Lists all indexed memories, optionally filtered.
+    ///
+    /// Unlike `search`, this doesn't require a query and returns all entries.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    fn list_all(&self, filter: &SearchFilter, limit: usize) -> Result<Vec<(MemoryId, f32)>>;
 }
