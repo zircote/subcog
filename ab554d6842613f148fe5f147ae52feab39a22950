@@ -3,6 +3,12 @@ created_at: 1767059214
 id: 1767059214750004000
 namespace: decisions
 status: active
+tags:
+- github-actions
+- sha-pinned-actions
+- heredoc-variable-expansion
+- homebrew-formula-escaping
+- cross-repo-docs-deploy
 updated_at: 1767059214
 ---
 Fixed GitHub workflows for subcog project:
