@@ -8,6 +8,7 @@
 
 mod post_tool_use;
 mod pre_compact;
+mod search_context;
 mod search_intent;
 mod session_start;
 mod stop;
@@ -15,6 +16,9 @@ mod user_prompt;
 
 pub use post_tool_use::PostToolUseHandler;
 pub use pre_compact::PreCompactHandler;
+pub use search_context::{
+    AdaptiveContextConfig, InjectedMemory, MemoryContext, NamespaceWeights, SearchContextBuilder,
+};
 pub use search_intent::{DetectionSource, SearchIntent, SearchIntentType, detect_search_intent};
 pub use session_start::SessionStartHandler;
 pub use stop::StopHandler;
