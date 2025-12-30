@@ -71,6 +71,7 @@ impl RecallService {
     /// Lists all memories, optionally filtered by namespace.
     ///
     /// Unlike `search`, this doesn't require a query and returns all matching memories.
+    /// Returns minimal metadata (id, namespace) without content - details via drill-down.
     ///
     /// # Errors
     ///
@@ -86,14 +87,20 @@ impl RecallService {
 
         let results = index.list_all(filter, limit)?;
 
-        // Convert to SearchHits
+        // Fetch memory to get namespace. Content cleared - details via drill-down.
         let memories: Vec<SearchHit> = results
             .into_iter()
-            .map(|(id, score)| SearchHit {
-                memory: create_placeholder_memory(id),
-                score,
-                vector_score: None,
-                bm25_score: None,
+            .filter_map(|(id, score)| {
+                index.get_memory(&id).ok().flatten().map(|mut memory| {
+                    // Clear content for lightweight response
+                    memory.content = String::new();
+                    SearchHit {
+                        memory,
+                        score,
+                        vector_score: None,
+                        bm25_score: None,
+                    }
+                })
             })
             .collect();
 
@@ -122,17 +129,19 @@ impl RecallService {
 
         let results = index.search(query, filter, limit)?;
 
-        // Convert to SearchHits - we need to fetch the actual memories
-        // For now, create placeholder memories since we don't have full memory store
-        let hits: Vec<SearchHit> = results
-            .into_iter()
-            .map(|(id, score)| SearchHit {
-                memory: create_placeholder_memory(id),
+        // Convert to SearchHits - fetch full memories from index
+        let mut hits = Vec::with_capacity(results.len());
+        for (id, score) in results {
+            let memory = index
+                .get_memory(&id)?
+                .unwrap_or_else(|| create_placeholder_memory(id));
+            hits.push(SearchHit {
+                memory,
                 score,
                 vector_score: None,
                 bm25_score: Some(score),
-            })
-            .collect();
+            });
+        }
 
         Ok(hits)
     }
@@ -226,14 +235,20 @@ impl RecallService {
         results
     }
 
-    /// Retrieves a memory by ID.
+    /// Retrieves a memory by ID with full content.
+    ///
+    /// Use this for targeted fetch when full content is needed.
     ///
     /// # Errors
     ///
-    /// Returns an error if the memory cannot be found.
-    pub const fn get_by_id(&self, _id: &MemoryId) -> Result<Option<Memory>> {
-        // Would need persistence backend to implement
-        Ok(None)
+    /// Returns an error if the index is not available.
+    pub fn get_by_id(&self, id: &MemoryId) -> Result<Option<Memory>> {
+        let index = self.index.as_ref().ok_or_else(|| Error::OperationFailed {
+            operation: "get_by_id".to_string(),
+            cause: "No index backend configured".to_string(),
+        })?;
+
+        index.get_memory(id)
     }
 
     /// Retrieves recent memories.
