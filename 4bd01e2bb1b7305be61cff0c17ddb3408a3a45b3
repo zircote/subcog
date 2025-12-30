@@ -3,6 +3,12 @@ created_at: 1767029486
 id: performance-1767029486928570000
 namespace: performance
 status: active
+tags:
+- n2-duplicate-detection
+- lsh-approximate-matching
+- n-plus-one-queries
+- parallel-embedding-generation
+- hnsw-index
 updated_at: 1767029486
 ---
 Performance anti-patterns identified in code review: (1) O(n²) duplicate detection - fix with batch loading + LSH for approximate matching, (2) N+1 queries in context building and recall - fix with batch get operations, (3) Sequential embedding generation - parallelize with rayon or tokio, (4) Linear vector search O(n) - must use actual HNSW index for O(log n). Always profile before declaring performance acceptable.
