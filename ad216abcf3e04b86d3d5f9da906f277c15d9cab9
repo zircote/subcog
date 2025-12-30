@@ -6,8 +6,8 @@ status: active
 tags:
 - pattern-3
 - metrics-dashboard
-- dashboard-test
-- metrics-testing
+- dashboard-testing
+- test-pattern
 updated_at: 1766999985
 ---
 Pattern 3 for metrics dashboard test
