@@ -13,7 +13,7 @@ impl PiiDetector {
     }
 
     /// Checks if content contains PII.
-    #[must_use] 
+    #[must_use]
     pub const fn contains_pii(&self, _content: &str) -> bool {
         // TODO: Implement PII detection
         false
