@@ -349,16 +349,23 @@ impl HookHandler for PreCompactHandler {
             Some(lines.join("\n"))
         };
 
-        // Build Claude Code hook response format
-        let mut response = serde_json::json!({
-            "continue": true,
-            "metadata": metadata
-        });
-
-        // Add context if we captured anything
-        if let Some(ctx) = context_message {
-            response["context"] = serde_json::Value::String(ctx);
-        }
+        // Build Claude Code hook response format per specification
+        // See: https://docs.anthropic.com/en/docs/claude-code/hooks
+        let response = context_message.map_or_else(
+            || serde_json::json!({}),
+            |ctx| {
+                // Embed metadata as XML comment for debugging
+                let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
+                let context_with_metadata =
+                    format!("{ctx}\n\n<!-- subcog-metadata: {metadata_str} -->");
+                serde_json::json!({
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreCompact",
+                        "additionalContext": context_with_metadata
+                    }
+                })
+            },
+        );
 
         serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
             operation: "serialize_output".to_string(),
@@ -433,16 +440,8 @@ mod tests {
 
         assert!(result.is_ok());
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        // Claude Code hook format
-        assert_eq!(
-            response.get("continue"),
-            Some(&serde_json::Value::Bool(true))
-        );
-        let metadata = response.get("metadata").unwrap();
-        assert_eq!(
-            metadata.get("captured"),
-            Some(&serde_json::Value::Bool(false))
-        );
+        // Claude Code hook format - empty response when nothing captured
+        assert!(response.as_object().unwrap().is_empty());
     }
 
     #[test]

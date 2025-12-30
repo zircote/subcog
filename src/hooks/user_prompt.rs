@@ -364,13 +364,8 @@ impl HookHandler for UserPromptHandler {
             .unwrap_or("");
 
         if prompt.is_empty() {
-            let response = serde_json::json!({
-                "continue": true,
-                "metadata": {
-                    "signals": [],
-                    "should_capture": false
-                }
-            });
+            // Empty response when no prompt
+            let response = serde_json::json!({});
             return serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
                 operation: "serialize_response".to_string(),
                 cause: e.to_string(),
@@ -442,12 +437,6 @@ impl HookHandler for UserPromptHandler {
         // Build search intent context (if detected)
         let search_context = memory_context.as_ref().map(build_memory_context_text);
 
-        // Build Claude Code hook response format
-        let mut response = serde_json::json!({
-            "continue": true,
-            "metadata": metadata
-        });
-
         // Combine context messages
         let combined_context = match (context_message, search_context) {
             (Some(capture), Some(search)) => Some(format!("{capture}\n\n---\n\n{search}")),
@@ -456,10 +445,23 @@ impl HookHandler for UserPromptHandler {
             (None, None) => None,
         };
 
-        // Add context only if we have a suggestion
-        if let Some(ctx) = combined_context {
-            response["context"] = serde_json::Value::String(ctx);
-        }
+        // Build Claude Code hook response format per specification
+        // See: https://docs.anthropic.com/en/docs/claude-code/hooks
+        let response = combined_context.map_or_else(
+            || serde_json::json!({}),
+            |ctx| {
+                // Embed metadata as XML comment for debugging
+                let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
+                let context_with_metadata =
+                    format!("{ctx}\n\n<!-- subcog-metadata: {metadata_str} -->");
+                serde_json::json!({
+                    "hookSpecificOutput": {
+                        "hookEventName": "UserPromptSubmit",
+                        "additionalContext": context_with_metadata
+                    }
+                })
+            },
+        );
 
         serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
             operation: "serialize_response".to_string(),
@@ -593,18 +595,20 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        // Claude Code hook format
+        // Claude Code hook format - should have hookSpecificOutput
+        let hook_output = response.get("hookSpecificOutput").unwrap();
         assert_eq!(
-            response.get("continue"),
-            Some(&serde_json::Value::Bool(true))
+            hook_output.get("hookEventName"),
+            Some(&serde_json::Value::String("UserPromptSubmit".to_string()))
         );
-        let metadata = response.get("metadata").unwrap();
-        assert_eq!(
-            metadata.get("should_capture"),
-            Some(&serde_json::Value::Bool(true))
-        );
-        // Should have context with capture suggestion
-        assert!(response.get("context").is_some());
+        // Should have additionalContext with capture suggestion
+        let context = hook_output
+            .get("additionalContext")
+            .unwrap()
+            .as_str()
+            .unwrap();
+        assert!(context.contains("Subcog Capture Suggestion"));
+        assert!(context.contains("subcog-metadata"));
     }
 
     #[test]
@@ -675,16 +679,8 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        // Claude Code hook format
-        assert_eq!(
-            response.get("continue"),
-            Some(&serde_json::Value::Bool(true))
-        );
-        let metadata = response.get("metadata").unwrap();
-        assert_eq!(
-            metadata.get("should_capture"),
-            Some(&serde_json::Value::Bool(false))
-        );
+        // Claude Code hook format - empty response for empty prompt
+        assert!(response.as_object().unwrap().is_empty());
     }
 
     #[test]
@@ -730,38 +726,37 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        let metadata = response.get("metadata").unwrap();
+        // Claude Code hook format - should have hookSpecificOutput with context
+        let hook_output = response.get("hookSpecificOutput").unwrap();
+        assert_eq!(
+            hook_output.get("hookEventName"),
+            Some(&serde_json::Value::String("UserPromptSubmit".to_string()))
+        );
 
-        // Should have search_intent in metadata
-        let search_intent = metadata.get("search_intent").unwrap();
-        assert_eq!(
-            search_intent.get("detected"),
-            Some(&serde_json::Value::Bool(true))
-        );
-        assert_eq!(
-            search_intent.get("intent_type"),
-            Some(&serde_json::Value::String("howto".to_string()))
-        );
+        // Metadata embedded in additionalContext as XML comment
+        let context = hook_output
+            .get("additionalContext")
+            .unwrap()
+            .as_str()
+            .unwrap();
+        assert!(context.contains("subcog-metadata"));
+        assert!(context.contains("search_intent"));
+        assert!(context.contains("\"detected\":true"));
+        assert!(context.contains("\"intent_type\":\"howto\""));
     }
 
     #[test]
     fn test_search_intent_no_detection() {
         let handler = UserPromptHandler::default();
 
-        // Test with a prompt that doesn't have search intent
+        // Test with a prompt that doesn't have search intent or capture signals
         let input = r#"{"prompt": "I finished the task."}"#;
         let result = handler.handle(input);
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        let metadata = response.get("metadata").unwrap();
-
-        // Should have search_intent in metadata but detected=false
-        let search_intent = metadata.get("search_intent").unwrap();
-        assert_eq!(
-            search_intent.get("detected"),
-            Some(&serde_json::Value::Bool(false))
-        );
+        // Claude Code hook format - no context means empty response
+        assert!(response.as_object().unwrap().is_empty());
     }
 
     #[test]
@@ -774,14 +769,8 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        let metadata = response.get("metadata").unwrap();
-
-        // Should NOT detect because confidence won't meet 0.9 threshold
-        let search_intent = metadata.get("search_intent").unwrap();
-        assert_eq!(
-            search_intent.get("detected"),
-            Some(&serde_json::Value::Bool(false))
-        );
+        // Claude Code hook format - high threshold means no detection, so empty response
+        assert!(response.as_object().unwrap().is_empty());
     }
 
     #[test]
@@ -793,12 +782,18 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        let metadata = response.get("metadata").unwrap();
+        // Claude Code hook format - should have hookSpecificOutput with context
+        let hook_output = response.get("hookSpecificOutput").unwrap();
+        let context = hook_output
+            .get("additionalContext")
+            .unwrap()
+            .as_str()
+            .unwrap();
 
-        let search_intent = metadata.get("search_intent").unwrap();
-        let topics = search_intent.get("topics").unwrap().as_array().unwrap();
-
-        // Should extract topics like "database", "connection", "configure"
-        assert!(!topics.is_empty());
+        // Should have topics in metadata embedded as XML comment
+        assert!(context.contains("subcog-metadata"));
+        assert!(context.contains("\"topics\""));
+        // Topics like "database", "connection" should be extracted
+        assert!(context.contains("database") || context.contains("connection"));
     }
 }

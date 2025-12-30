@@ -201,11 +201,20 @@ impl HookHandler for StopHandler {
             context_lines.push("\n**Tip**: No memories were captured this session. Consider using `subcog_capture` to save important decisions and learnings.".to_string());
         }
 
-        // Build Claude Code hook response format
+        // Build Claude Code hook response format per specification
+        // See: https://docs.anthropic.com/en/docs/claude-code/hooks
+        // Embed metadata as XML comment for debugging
+        let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
+        let context_with_metadata = format!(
+            "{}\n\n<!-- subcog-metadata: {} -->",
+            context_lines.join("\n"),
+            metadata_str
+        );
         let response = serde_json::json!({
-            "continue": true,
-            "context": context_lines.join("\n"),
-            "metadata": metadata
+            "hookSpecificOutput": {
+                "hookEventName": "Stop",
+                "additionalContext": context_with_metadata
+            }
         });
 
         serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
@@ -285,15 +294,23 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        // Claude Code hook format
+        // Claude Code hook format - should have hookSpecificOutput
+        let hook_output = response.get("hookSpecificOutput").unwrap();
         assert_eq!(
-            response.get("continue"),
-            Some(&serde_json::Value::Bool(true))
+            hook_output.get("hookEventName"),
+            Some(&serde_json::Value::String("Stop".to_string()))
         );
-        assert!(response.get("context").is_some());
-        let metadata = response.get("metadata").unwrap();
-        assert!(metadata.get("session_id").is_some());
-        assert!(metadata.get("sync").is_some());
+        // Should have additionalContext with session summary and metadata embedded
+        let context = hook_output
+            .get("additionalContext")
+            .unwrap()
+            .as_str()
+            .unwrap();
+        assert!(context.contains("Subcog Session Summary"));
+        assert!(context.contains("test-session"));
+        assert!(context.contains("subcog-metadata"));
+        assert!(context.contains("\"session_id\""));
+        assert!(context.contains("\"sync\""));
     }
 
     #[test]
@@ -307,17 +324,17 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        // Claude Code hook format
-        assert_eq!(
-            response.get("continue"),
-            Some(&serde_json::Value::Bool(true))
-        );
-        // Hints should be in metadata
-        let metadata = response.get("metadata").unwrap();
-        assert!(metadata.get("hints").is_some());
+        // Claude Code hook format - should have hookSpecificOutput
+        let hook_output = response.get("hookSpecificOutput").unwrap();
+        let context = hook_output
+            .get("additionalContext")
+            .unwrap()
+            .as_str()
+            .unwrap();
         // Context should contain tip
-        let context = response.get("context").unwrap().as_str().unwrap();
         assert!(context.contains("Tip"));
+        // Hints should be in embedded metadata
+        assert!(context.contains("\"hints\""));
     }
 
     #[test]
@@ -345,16 +362,14 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        // Claude Code hook format
-        assert_eq!(
-            response.get("continue"),
-            Some(&serde_json::Value::Bool(true))
-        );
-        // Session ID should be in metadata with default "unknown"
-        let metadata = response.get("metadata").unwrap();
-        assert_eq!(
-            metadata.get("session_id"),
-            Some(&serde_json::Value::String("unknown".to_string()))
-        );
+        // Claude Code hook format - should have hookSpecificOutput
+        let hook_output = response.get("hookSpecificOutput").unwrap();
+        let context = hook_output
+            .get("additionalContext")
+            .unwrap()
+            .as_str()
+            .unwrap();
+        // Session ID should be in embedded metadata with default "unknown"
+        assert!(context.contains("\"session_id\":\"unknown\""));
     }
 }
