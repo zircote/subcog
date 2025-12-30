@@ -3,6 +3,12 @@ created_at: 1767029470
 id: learnings-1767029470998191000
 namespace: learnings
 status: active
+tags:
+- rust
+- async-vs-sync
+- tokio-runtime
+- reqwest-async
+- trait-abstraction
 updated_at: 1767029470
 ---
 Async vs Sync trade-offs in Rust: Tokio enabled but most operations kept synchronous for MVP simplicity. reqwest async HTTP client works well with tokio runtime. Future async migration path clear via trait abstractions. Decision: start with sync operations when complexity isn't justified, but design traits to allow async migration.
