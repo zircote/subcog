@@ -4,10 +4,10 @@ id: 5c76fe24d3345c07
 namespace: patterns
 status: active
 tags:
-- test-pattern-1
+- test-pattern
 - dashboard-verification
-- pattern-testing
-- quality-assurance
+- pattern-1
+- dashboard-testing
 updated_at: 1766999606
 ---
 Test pattern 1 for dashboard verification
