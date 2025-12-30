@@ -3,6 +3,12 @@ created_at: 1767035994
 id: 1767035994388242000
 namespace: learnings
 status: active
+tags:
+- prompt-registry
+- prompt-arguments
+- prompt-execution
+- mcp-server-integration
+- limited-extensibility
 updated_at: 1767035994
 ---
 MCP Prompts Architecture in Subcog
