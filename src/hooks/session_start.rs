@@ -296,12 +296,25 @@ impl HookHandler for SessionStartHandler {
             });
         }
 
-        // Build Claude Code hook response format
-        let response = serde_json::json!({
-            "continue": true,
-            "context": session_context.content,
-            "metadata": metadata
-        });
+        // Build Claude Code hook response format per specification
+        // See: https://docs.anthropic.com/en/docs/claude-code/hooks
+        let response = if session_context.content.is_empty() {
+            // Empty response when no context to inject
+            serde_json::json!({})
+        } else {
+            // Embed metadata as XML comment for debugging
+            let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
+            let context_with_metadata = format!(
+                "{}\n\n<!-- subcog-metadata: {} -->",
+                session_context.content, metadata_str
+            );
+            serde_json::json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "SessionStart",
+                    "additionalContext": context_with_metadata
+                }
+            })
+        };
 
         serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
             operation: "serialize_response".to_string(),
@@ -339,16 +352,21 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        // Claude Code hook format
+        // Claude Code hook format - should have hookSpecificOutput
+        let hook_output = response.get("hookSpecificOutput").unwrap();
         assert_eq!(
-            response.get("continue"),
-            Some(&serde_json::Value::Bool(true))
+            hook_output.get("hookEventName"),
+            Some(&serde_json::Value::String("SessionStart".to_string()))
         );
-        assert!(response.get("context").is_some());
-        assert!(response.get("metadata").is_some());
-        // Metadata contains memory_count
-        let metadata = response.get("metadata").unwrap();
-        assert!(metadata.get("memory_count").is_some());
+        // Should have additionalContext with session info and metadata embedded
+        let context = hook_output
+            .get("additionalContext")
+            .unwrap()
+            .as_str()
+            .unwrap();
+        assert!(context.contains("Subcog Memory Context"));
+        assert!(context.contains("test-session-123"));
+        assert!(context.contains("subcog-metadata"));
     }
 
     #[test]

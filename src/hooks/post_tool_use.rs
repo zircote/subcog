@@ -182,14 +182,8 @@ impl HookHandler for PostToolUseHandler {
 
         // Check if we should look up memories for this tool
         if !self.should_lookup(tool_name) {
-            let response = serde_json::json!({
-                "continue": true,
-                "metadata": {
-                    "memories": [],
-                    "lookup_performed": false,
-                    "reason": "Tool does not warrant memory lookup"
-                }
-            });
+            // Empty response when no memory lookup needed
+            let response = serde_json::json!({});
             return serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
                 operation: "serialize_response".to_string(),
                 cause: e.to_string(),
@@ -200,14 +194,8 @@ impl HookHandler for PostToolUseHandler {
         let query = match self.extract_query(tool_name, tool_input) {
             Some(q) if !q.is_empty() => q,
             _ => {
-                let response = serde_json::json!({
-                    "continue": true,
-                    "metadata": {
-                        "memories": [],
-                        "lookup_performed": false,
-                        "reason": "Could not extract query from tool input"
-                    }
-                });
+                // Empty response when no query to search
+                let response = serde_json::json!({});
                 return serde_json::to_string(&response).map_err(|e| {
                     crate::Error::OperationFailed {
                         operation: "serialize_response".to_string(),
@@ -240,10 +228,13 @@ impl HookHandler for PostToolUseHandler {
             "tool_name": tool_name
         });
 
-        // Build context message with related memories
-        let context_message = if memories.is_empty() {
-            None
+        // Build Claude Code hook response format per specification
+        // See: https://docs.anthropic.com/en/docs/claude-code/hooks
+        let response = if memories.is_empty() {
+            // Empty response when no related memories
+            serde_json::json!({})
         } else {
+            // Build context message with related memories
             let mut lines = vec!["**Related Subcog Memories**\n".to_string()];
             for m in &memories {
                 lines.push(format!(
@@ -253,19 +244,20 @@ impl HookHandler for PostToolUseHandler {
                     m.content
                 ));
             }
-            Some(lines.join("\n"))
+            let context = lines.join("\n");
+
+            // Embed metadata as XML comment for debugging
+            let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
+            let context_with_metadata =
+                format!("{context}\n\n<!-- subcog-metadata: {metadata_str} -->");
+
+            serde_json::json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": context_with_metadata
+                }
+            })
         };
-
-        // Build Claude Code hook response format
-        let mut response = serde_json::json!({
-            "continue": true,
-            "metadata": metadata
-        });
-
-        // Add context only if we have related memories
-        if let Some(ctx) = context_message {
-            response["context"] = serde_json::Value::String(ctx);
-        }
 
         serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
             operation: "serialize_response".to_string(),
@@ -359,16 +351,8 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        // Claude Code hook format
-        assert_eq!(
-            response.get("continue"),
-            Some(&serde_json::Value::Bool(true))
-        );
-        let metadata = response.get("metadata").unwrap();
-        assert_eq!(
-            metadata.get("lookup_performed"),
-            Some(&serde_json::Value::Bool(false))
-        );
+        // Claude Code hook format - empty response for non-contextual tools
+        assert!(response.as_object().unwrap().is_empty());
     }
 
     #[test]
@@ -381,14 +365,9 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        // Claude Code hook format
-        assert_eq!(
-            response.get("continue"),
-            Some(&serde_json::Value::Bool(true))
-        );
-        // Metadata contains memories
-        let metadata = response.get("metadata").unwrap();
-        assert!(metadata.get("memories").is_some());
+        // Without recall service, no memories found - empty response
+        // (memories would be returned in hookSpecificOutput.additionalContext if found)
+        assert!(response.as_object().unwrap().is_empty());
     }
 
     #[test]
