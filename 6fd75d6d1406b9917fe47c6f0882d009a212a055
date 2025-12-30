@@ -7,7 +7,8 @@ tags:
 - memory-capture-failure
 - session-protocol-violation
 - retrospective-capture
-- process-integration-gap
+- lost-real-time-context
+- capture-workflow-integration
 updated_at: 1767039140
 ---
 BLOCKER: Failed to capture memories during System Help Memories implementation (SPEC-2025-12-29-001)
