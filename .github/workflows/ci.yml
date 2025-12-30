@@ -162,6 +162,35 @@ jobs:
       - name: Check MSRV
         run: cargo check --all-features
 
+  bench:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # master
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bench-
+
+      - name: Compile benchmarks
+        run: cargo build --benches --all-features
+
+      - name: Run benchmarks (quick validation)
+        run: cargo bench --bench search_intent -- --test
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
@@ -206,7 +235,7 @@ jobs:
   all-checks-pass:
     name: All Checks Pass
     if: always()
-    needs: [fmt, clippy, test, doc, deny, msrv]
+    needs: [fmt, clippy, test, doc, deny, msrv, bench]
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs passed
@@ -217,13 +246,15 @@ jobs:
           DOC_RESULT: ${{ needs.doc.result }}
           DENY_RESULT: ${{ needs.deny.result }}
           MSRV_RESULT: ${{ needs.msrv.result }}
+          BENCH_RESULT: ${{ needs.bench.result }}
         run: |
           if [[ "$FMT_RESULT" != "success" ]] || \
              [[ "$CLIPPY_RESULT" != "success" ]] || \
              [[ "$TEST_RESULT" != "success" ]] || \
              [[ "$DOC_RESULT" != "success" ]] || \
              [[ "$DENY_RESULT" != "success" ]] || \
-             [[ "$MSRV_RESULT" != "success" ]]; then
+             [[ "$MSRV_RESULT" != "success" ]] || \
+             [[ "$BENCH_RESULT" != "success" ]]; then
             echo "One or more jobs failed"
             exit 1
           fi
