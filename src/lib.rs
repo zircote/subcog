@@ -61,7 +61,9 @@ pub use models::{
     CaptureRequest, CaptureResult, Domain, Memory, MemoryId, MemoryStatus, Namespace, SearchFilter,
     SearchMode, SearchResult,
 };
-pub use services::{CaptureService, ConsolidationService, ContextBuilderService, RecallService, SyncService};
+pub use services::{
+    CaptureService, ConsolidationService, ContextBuilderService, RecallService, SyncService,
+};
 pub use storage::{CompositeStorage, IndexBackend, PersistenceBackend, VectorBackend};
 
 /// Error type for subcog operations.
@@ -76,6 +78,8 @@ pub enum Error {
         /// The underlying cause.
         cause: String,
     },
+    /// Feature not yet implemented.
+    NotImplemented(String),
 }
 
 impl fmt::Display for Error {
@@ -84,6 +88,9 @@ impl fmt::Display for Error {
             Self::InvalidInput(msg) => write!(f, "invalid input: {msg}"),
             Self::OperationFailed { operation, cause } => {
                 write!(f, "operation '{operation}' failed: {cause}")
+            },
+            Self::NotImplemented(feature) => {
+                write!(f, "not implemented: {feature}")
             },
         }
     }
@@ -223,7 +230,9 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::InvalidInput(msg) => assert!(msg.contains("zero")),
-            Error::OperationFailed { .. } => unreachable!("Expected InvalidInput error"),
+            Error::OperationFailed { .. } | Error::NotImplemented(_) => {
+                unreachable!("Expected InvalidInput error")
+            },
         }
     }
 

@@ -2,7 +2,7 @@
 //!
 //! This module provides a three-layer storage architecture:
 //! - **Persistence**: Authoritative storage (Git Notes, PostgreSQL, Filesystem)
-//! - **Index**: Full-text search (SQLite + FTS5, PostgreSQL, RediSearch)
+//! - **Index**: Full-text search (`SQLite` + FTS5, PostgreSQL, `RediSearch`)
 //! - **Vector**: Embedding similarity search (usearch, pgvector, Redis)
 
 pub mod index;

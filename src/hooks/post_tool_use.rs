@@ -3,7 +3,7 @@
 use super::HookHandler;
 use crate::Result;
 
-/// Handles PostToolUse hook events.
+/// Handles `PostToolUse` hook events.
 ///
 /// Surfaces related memories after tool usage.
 pub struct PostToolUseHandler;

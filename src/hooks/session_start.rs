@@ -3,7 +3,7 @@
 use super::HookHandler;
 use crate::Result;
 
-/// Handles SessionStart hook events.
+/// Handles `SessionStart` hook events.
 ///
 /// Injects relevant context at the start of a Claude Code session.
 pub struct SessionStartHandler;

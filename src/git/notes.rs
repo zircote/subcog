@@ -1,6 +1,6 @@
 //! Git notes CRUD operations.
 
-use crate::Result;
+use crate::{Error, Result};
 use std::path::Path;
 
 /// Manages git notes operations.
@@ -34,8 +34,11 @@ impl NotesManager {
     ///
     /// Returns an error if the note cannot be added.
     pub fn add(&self, _commit: &str, _content: &str) -> Result<()> {
-        // TODO: Implement git notes add
-        todo!("NotesManager::add not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "NotesManager::add to {} in {}",
+            self.notes_ref,
+            self.repo_path.display()
+        )))
     }
 
     /// Gets a note from a commit.
@@ -44,8 +47,11 @@ impl NotesManager {
     ///
     /// Returns an error if the note cannot be retrieved.
     pub fn get(&self, _commit: &str) -> Result<Option<String>> {
-        // TODO: Implement git notes show
-        todo!("NotesManager::get not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "NotesManager::get from {} in {}",
+            self.notes_ref,
+            self.repo_path.display()
+        )))
     }
 
     /// Removes a note from a commit.
@@ -54,8 +60,11 @@ impl NotesManager {
     ///
     /// Returns an error if the note cannot be removed.
     pub fn remove(&self, _commit: &str) -> Result<bool> {
-        // TODO: Implement git notes remove
-        todo!("NotesManager::remove not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "NotesManager::remove from {} in {}",
+            self.notes_ref,
+            self.repo_path.display()
+        )))
     }
 
     /// Lists all notes.
@@ -64,7 +73,10 @@ impl NotesManager {
     ///
     /// Returns an error if notes cannot be listed.
     pub fn list(&self) -> Result<Vec<(String, String)>> {
-        // TODO: Implement git notes list
-        todo!("NotesManager::list not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "NotesManager::list from {} in {}",
+            self.notes_ref,
+            self.repo_path.display()
+        )))
     }
 }

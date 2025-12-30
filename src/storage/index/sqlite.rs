@@ -1,19 +1,19 @@
-//! SQLite + FTS5 index backend.
+//! `SQLite` + FTS5 index backend.
 //!
-//! Provides full-text search using SQLite's FTS5 extension.
+//! Provides full-text search using `SQLite`'s FTS5 extension.
 
 use crate::models::{Memory, MemoryId, SearchFilter};
 use crate::storage::traits::IndexBackend;
-use crate::Result;
+use crate::{Error, Result};
 
 /// SQLite-based index backend with FTS5.
 pub struct SqliteBackend {
-    /// Path to the SQLite database.
+    /// Path to the `SQLite` database.
     db_path: std::path::PathBuf,
 }
 
 impl SqliteBackend {
-    /// Creates a new SQLite backend.
+    /// Creates a new `SQLite` backend.
     #[must_use]
     pub fn new(db_path: impl Into<std::path::PathBuf>) -> Self {
         Self {
@@ -21,7 +21,7 @@ impl SqliteBackend {
         }
     }
 
-    /// Creates an in-memory SQLite backend (useful for testing).
+    /// Creates an in-memory `SQLite` backend (useful for testing).
     #[must_use]
     pub fn in_memory() -> Self {
         Self {
@@ -32,13 +32,17 @@ impl SqliteBackend {
 
 impl IndexBackend for SqliteBackend {
     fn index(&mut self, _memory: &Memory) -> Result<()> {
-        // TODO: Implement FTS5 indexing
-        todo!("SqliteBackend::index not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "SqliteBackend::index for {}",
+            self.db_path.display()
+        )))
     }
 
     fn remove(&mut self, _id: &MemoryId) -> Result<bool> {
-        // TODO: Implement FTS5 removal
-        todo!("SqliteBackend::remove not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "SqliteBackend::remove for {}",
+            self.db_path.display()
+        )))
     }
 
     fn search(
@@ -47,12 +51,16 @@ impl IndexBackend for SqliteBackend {
         _filter: &SearchFilter,
         _limit: usize,
     ) -> Result<Vec<(MemoryId, f32)>> {
-        // TODO: Implement FTS5 search
-        todo!("SqliteBackend::search not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "SqliteBackend::search for {}",
+            self.db_path.display()
+        )))
     }
 
     fn clear(&mut self) -> Result<()> {
-        // TODO: Implement FTS5 clear
-        todo!("SqliteBackend::clear not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "SqliteBackend::clear for {}",
+            self.db_path.display()
+        )))
     }
 }

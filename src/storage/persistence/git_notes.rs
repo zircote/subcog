@@ -5,7 +5,7 @@
 
 use crate::models::{Memory, MemoryId};
 use crate::storage::traits::PersistenceBackend;
-use crate::Result;
+use crate::{Error, Result};
 
 /// Git notes-based persistence backend.
 pub struct GitNotesBackend {
@@ -35,22 +35,34 @@ impl GitNotesBackend {
 
 impl PersistenceBackend for GitNotesBackend {
     fn store(&mut self, _memory: &Memory) -> Result<()> {
-        // TODO: Implement git notes storage
-        todo!("GitNotesBackend::store not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "GitNotesBackend::store to {} in {}",
+            self.notes_ref,
+            self.repo_path.display()
+        )))
     }
 
     fn get(&self, _id: &MemoryId) -> Result<Option<Memory>> {
-        // TODO: Implement git notes retrieval
-        todo!("GitNotesBackend::get not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "GitNotesBackend::get from {} in {}",
+            self.notes_ref,
+            self.repo_path.display()
+        )))
     }
 
     fn delete(&mut self, _id: &MemoryId) -> Result<bool> {
-        // TODO: Implement git notes deletion
-        todo!("GitNotesBackend::delete not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "GitNotesBackend::delete from {} in {}",
+            self.notes_ref,
+            self.repo_path.display()
+        )))
     }
 
     fn list_ids(&self) -> Result<Vec<MemoryId>> {
-        // TODO: Implement git notes listing
-        todo!("GitNotesBackend::list_ids not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "GitNotesBackend::list_ids from {} in {}",
+            self.notes_ref,
+            self.repo_path.display()
+        )))
     }
 }

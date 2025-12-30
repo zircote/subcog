@@ -1,6 +1,6 @@
 //! Git remote operations.
 
-use crate::Result;
+use crate::{Error, Result};
 use std::path::Path;
 
 /// Manages git remote operations for notes.
@@ -24,8 +24,10 @@ impl RemoteManager {
     ///
     /// Returns an error if the fetch fails.
     pub fn fetch(&self, _remote: &str) -> Result<usize> {
-        // TODO: Implement git fetch for notes
-        todo!("RemoteManager::fetch not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "RemoteManager::fetch for {}",
+            self.repo_path.display()
+        )))
     }
 
     /// Pushes notes to a remote.
@@ -34,7 +36,9 @@ impl RemoteManager {
     ///
     /// Returns an error if the push fails.
     pub fn push(&self, _remote: &str) -> Result<usize> {
-        // TODO: Implement git push for notes
-        todo!("RemoteManager::push not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "RemoteManager::push for {}",
+            self.repo_path.display()
+        )))
     }
 }

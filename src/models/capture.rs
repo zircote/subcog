@@ -74,7 +74,7 @@ pub struct CaptureResult {
 impl CaptureResult {
     /// Creates a new capture result.
     #[must_use]
-    pub fn new(memory_id: MemoryId, urn: String) -> Self {
+    pub const fn new(memory_id: MemoryId, urn: String) -> Self {
         Self {
             memory_id,
             urn,

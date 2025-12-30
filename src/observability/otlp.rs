@@ -1,6 +1,6 @@
 //! OTLP exporter.
 
-/// OpenTelemetry Protocol exporter.
+/// `OpenTelemetry` Protocol exporter.
 pub struct OtlpExporter;
 
 impl OtlpExporter {
