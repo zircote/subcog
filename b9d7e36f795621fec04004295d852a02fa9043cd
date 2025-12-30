@@ -3,6 +3,11 @@ created_at: 1766999913
 id: 61ba56d309167401
 namespace: learnings
 status: active
+tags:
+- cli-metrics
+- async-push
+- pushgateway
+- prometheus
 updated_at: 1766999913
 ---
 CLI metrics now work with async push to Pushgateway
