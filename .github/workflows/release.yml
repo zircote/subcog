@@ -283,7 +283,7 @@ jobs:
         run: |
           cd homebrew-tap
 
-          cat > Formula/subcog.rb << 'FORMULA'
+          cat > Formula/subcog.rb << EOF
           class Subcog < Formula
             desc "A persistent memory system for AI coding assistants"
             homepage "https://github.com/zircote/subcog"
@@ -310,10 +310,10 @@ jobs:
             end
 
             test do
-              system "#{bin}/subcog", "--version"
+              system "\#{bin}/subcog", "--version"
             end
           end
-          FORMULA
+          EOF
 
           echo "Generated formula:"
           cat Formula/subcog.rb
