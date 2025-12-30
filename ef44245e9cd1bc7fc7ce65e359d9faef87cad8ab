@@ -5,7 +5,7 @@ namespace: patterns
 status: active
 tags:
 - rust
-- service-container-pattern
+- service-container
 - dependency-injection
 - async-first
 - database-migrations
