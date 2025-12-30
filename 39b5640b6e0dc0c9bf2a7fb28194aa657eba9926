@@ -1,0 +1,11 @@
+---
+created_at: 1767134761
+domain: project
+id: prompt_test-prompt_1767134771
+namespace: prompts
+prompt_name: test-prompt
+status: active
+tags: []
+updated_at: 1767134771
+---
+{"name":"test-prompt","description":"","content":"Hello {{name}}","variables":[{"name":"name","description":null,"default":null,"required":true}],"tags":[],"author":null,"usage_count":1,"created_at":1767134761,"updated_at":1767134771}
