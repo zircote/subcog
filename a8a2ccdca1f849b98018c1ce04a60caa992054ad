@@ -7,7 +7,7 @@ tags:
 - redis
 - session-caching
 - in-memory-performance
-- architecture-decision
+- session-store
 updated_at: 1766992761
 ---
 We chose Redis for session caching due to its in-memory performance
