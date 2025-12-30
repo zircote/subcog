@@ -3,6 +3,11 @@ created_at: 1767032773
 id: 1767032773780673000
 namespace: progress
 status: active
+tags:
+- transcript-parsing
+- stop-hook
+- auto-capture-memory-blocks
+- subcog-marker-parsing
 updated_at: 1767032773
 ---
 Implemented transcript parsing in Stop hook for auto-capturing memory blocks. Changes: (1) Added transcript field to SessionSummary struct, (2) Created ParsedMemoryBlock struct for parsed blocks, (3) Implemented parse_memory_blocks() function at src/hooks/stop.rs:230-299 that finds ▶ subcog:// markers and extracts domain/namespace/id/content, (4) Added capture logic in handle() at lines 467-523 - blocks WITH ID hash are skipped (already saved via MCP), blocks WITHOUT ID hash are captured. Protocol: visual blocks without full URN get auto-captured by hooks at session end. Added 8 new tests. All 877+ tests pass.
