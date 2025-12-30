@@ -6,7 +6,7 @@ status: active
 tags:
 - test-capture
 - blockers-namespace
-- hooks-parsing-issue
+- hooks-parsing
 - transcript-parsing
 - memory-blocks
 updated_at: 1767031866
