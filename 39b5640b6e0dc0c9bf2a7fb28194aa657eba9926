@@ -1,0 +1,21 @@
+---
+created_at: 1767135489
+domain: global
+id: decisions_96886eda-f6e2-4145-87a5-57c2b0cca26b
+namespace: decisions
+status: active
+tags:
+- prompts
+- storage
+- architecture
+- domain-scope
+updated_at: 1767135489
+---
+**Prompt Storage by Domain Scope**
+
+Prompts are stored in the persistence backend configured for each domain:
+- **Project scope**: Git notes (repo-specific, travels with the codebase)
+- **User scope**: Local storage (SQLite/filesystem in ~/.config/subcog or similar)
+- **Org scope**: Shared storage (PostgreSQL or organizational backend)
+
+This aligns with the three-layer storage architecture where different domains may have different persistence backends. The PromptService must route save/get/list/delete operations to the appropriate backend based on domain scope.
