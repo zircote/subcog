@@ -3,6 +3,11 @@ created_at: 1767039120
 id: 1767039120657765000
 namespace: learnings
 status: active
+tags:
+- mcp-prompts-vs-tools
+- prompt-arguments
+- tool-input-schema
+- schema-validation
 updated_at: 1767039120
 ---
 Learning: MCP prompts vs tools architecture difference
