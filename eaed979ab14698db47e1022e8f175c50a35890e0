@@ -8,7 +8,6 @@ tags:
 - cli-integration
 - user-prompt-handler
 - duplicate-code-removal
-- clippy-raw-string-fix
 updated_at: 1767040248
 ---
 Completed Memory Capture Enforcement CLI integration (SPEC-2025-12-29-002):
