@@ -2,18 +2,21 @@
 project_id: SPEC-2025-12-30-001
 project_name: "Proactive Memory Surfacing: Search Intent Detection & MCP Resources"
 slug: issue-15-memory-surfacing
-status: approved
+status: completed
 created: 2025-12-30T12:00:00Z
 approved: 2025-12-30T17:13:14Z
 approved_by: "Robert Allen <zircote@gmail.com>"
-started: null
-completed: null
+started: 2025-12-30T17:30:00Z
+completed: 2025-12-30T23:50:00Z
+final_effort: "1 day, 77 tasks, 388 tests"
+outcome: success
 expires: 2026-03-30T12:00:00Z
 superseded_by: null
 tags: [memory, search-intent, mcp, hooks, llm, user-experience]
 stakeholders: []
 github_issue: 15
 github_subissues: [16, 17, 18, 19, 20, 21]
+github_related: [24]
 ---
 
 # Proactive Memory Surfacing: Search Intent Detection & MCP Resources
