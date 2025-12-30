@@ -1,9 +1,14 @@
 //! MCP resource handlers.
 //!
 //! Provides resource access for the Model Context Protocol.
-//! Resources are accessed via URN scheme: subcog://help/{category}
+//! Resources are accessed via URN scheme:
+//! - `subcog://help/{category}` - Help documentation
+//! - `subcog://memories` - List all memories
+//! - `subcog://memories/{namespace}` - List memories by namespace
+//! - `subcog://memory/{id}` - Get a specific memory
 
-use crate::{Error, Result};
+use crate::services::RecallService;
+use crate::{Error, Namespace, Result, SearchFilter, SearchMode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -11,6 +16,8 @@ use std::collections::HashMap;
 pub struct ResourceHandler {
     /// Help content by category.
     help_content: HashMap<String, HelpCategory>,
+    /// Optional recall service for memory browsing.
+    recall_service: Option<RecallService>,
 }
 
 impl ResourceHandler {
@@ -36,7 +43,8 @@ impl ResourceHandler {
             HelpCategory {
                 name: "concepts".to_string(),
                 title: "Core Concepts".to_string(),
-                description: "Understanding namespaces, domains, URNs, and memory lifecycle".to_string(),
+                description: "Understanding namespaces, domains, URNs, and memory lifecycle"
+                    .to_string(),
                 content: HELP_CONCEPTS.to_string(),
             },
         );
@@ -96,13 +104,25 @@ impl ResourceHandler {
             },
         );
 
-        Self { help_content }
+        Self {
+            help_content,
+            recall_service: None,
+        }
+    }
+
+    /// Creates a resource handler with a recall service for memory browsing.
+    #[must_use]
+    pub fn with_recall(recall_service: RecallService) -> Self {
+        let mut handler = Self::new();
+        handler.recall_service = Some(recall_service);
+        handler
     }
 
     /// Lists all available resources.
     #[must_use]
     pub fn list_resources(&self) -> Vec<ResourceDefinition> {
-        self.help_content
+        let mut resources: Vec<ResourceDefinition> = self
+            .help_content
             .values()
             .map(|cat| ResourceDefinition {
                 uri: format!("subcog://help/{}", cat.name),
@@ -110,16 +130,42 @@ impl ResourceHandler {
                 description: Some(cat.description.clone()),
                 mime_type: Some("text/markdown".to_string()),
             })
-            .collect()
+            .collect();
+
+        // Add memory browsing resources
+        resources.push(ResourceDefinition {
+            uri: "subcog://memories".to_string(),
+            name: "All Memories".to_string(),
+            description: Some("Browse all stored memories".to_string()),
+            mime_type: Some("application/json".to_string()),
+        });
+
+        // Add namespace-specific memory resources
+        for ns in Namespace::all() {
+            resources.push(ResourceDefinition {
+                uri: format!("subcog://memories/{}", ns.as_str()),
+                name: format!("{} Memories", ns.as_str()),
+                description: Some(format!("Browse memories in the {} namespace", ns.as_str())),
+                mime_type: Some("application/json".to_string()),
+            });
+        }
+
+        resources
     }
 
     /// Gets a resource by URI.
+    ///
+    /// Supported URI patterns:
+    /// - `subcog://help` - Help index
+    /// - `subcog://help/{category}` - Help category
+    /// - `subcog://memories` - All memories
+    /// - `subcog://memories/{namespace}` - Memories by namespace
+    /// - `subcog://memory/{id}` - Specific memory by ID
     ///
     /// # Errors
     ///
     /// Returns an error if the resource is not found.
     pub fn get_resource(&self, uri: &str) -> Result<ResourceContent> {
-        // Parse URI: subcog://help/{category}
         let uri = uri.trim();
 
         if !uri.starts_with("subcog://") {
@@ -129,10 +175,23 @@ impl ResourceHandler {
         let path = &uri["subcog://".len()..];
         let parts: Vec<&str> = path.split('/').collect();
 
-        if parts.is_empty() || parts[0] != "help" {
-            return Err(Error::InvalidInput(format!("Unknown resource path: {path}")));
+        if parts.is_empty() {
+            return Err(Error::InvalidInput("Empty resource path".to_string()));
         }
 
+        match parts[0] {
+            "help" => self.get_help_resource(uri, &parts),
+            "memories" => self.get_memories_resource(uri, &parts),
+            "memory" => self.get_memory_resource(uri, &parts),
+            _ => Err(Error::InvalidInput(format!(
+                "Unknown resource type: {}",
+                parts[0]
+            ))),
+        }
+    }
+
+    /// Gets a help resource.
+    fn get_help_resource(&self, uri: &str, parts: &[&str]) -> Result<ResourceContent> {
         if parts.len() == 1 {
             // Return help index
             return Ok(ResourceContent {
@@ -157,6 +216,100 @@ impl ResourceHandler {
         })
     }
 
+    /// Gets memories resource (list all or by namespace).
+    fn get_memories_resource(&self, uri: &str, parts: &[&str]) -> Result<ResourceContent> {
+        let recall = self.recall_service.as_ref().ok_or_else(|| {
+            Error::InvalidInput("Memory browsing requires RecallService".to_string())
+        })?;
+
+        // Build filter with optional namespace
+        let mut filter = SearchFilter::new();
+        let namespace_str = if parts.len() > 1 {
+            let ns_str = parts[1];
+            let ns = Namespace::parse(ns_str)
+                .ok_or_else(|| Error::InvalidInput(format!("Unknown namespace: {ns_str}")))?;
+            filter = filter.with_namespace(ns);
+            Some(ns_str)
+        } else {
+            None
+        };
+
+        // List all memories (with optional namespace filter)
+        let results = recall.list_all(&filter, 100)?;
+
+        // Format as JSON
+        let memories: Vec<serde_json::Value> = results
+            .memories
+            .iter()
+            .map(|hit| {
+                serde_json::json!({
+                    "id": hit.memory.id.as_str(),
+                    "namespace": hit.memory.namespace.as_str(),
+                    "content": truncate_content(&hit.memory.content, 200),
+                    "score": hit.score,
+                    "uri": format!("subcog://memory/{}", hit.memory.id.as_str()),
+                })
+            })
+            .collect();
+
+        let response = serde_json::json!({
+            "count": memories.len(),
+            "total": results.total_count,
+            "namespace": namespace_str,
+            "memories": memories,
+        });
+
+        Ok(ResourceContent {
+            uri: uri.to_string(),
+            mime_type: Some("application/json".to_string()),
+            text: Some(serde_json::to_string_pretty(&response).unwrap_or_default()),
+            blob: None,
+        })
+    }
+
+    /// Gets a specific memory by ID.
+    fn get_memory_resource(&self, uri: &str, parts: &[&str]) -> Result<ResourceContent> {
+        if parts.len() < 2 {
+            return Err(Error::InvalidInput(
+                "Memory ID required: subcog://memory/{id}".to_string(),
+            ));
+        }
+
+        let memory_id = parts[1];
+        let recall = self.recall_service.as_ref().ok_or_else(|| {
+            Error::InvalidInput("Memory browsing requires RecallService".to_string())
+        })?;
+
+        // Search for the specific memory by ID (use ID as query)
+        let filter = SearchFilter::new();
+        let results = recall.search(memory_id, SearchMode::Text, &filter, 10)?;
+
+        // Find exact match by ID
+        let hit = results
+            .memories
+            .iter()
+            .find(|hit| hit.memory.id.as_str() == memory_id)
+            .ok_or_else(|| Error::InvalidInput(format!("Memory not found: {memory_id}")))?;
+
+        let response = serde_json::json!({
+            "id": hit.memory.id.as_str(),
+            "namespace": hit.memory.namespace.as_str(),
+            "content": hit.memory.content,
+            "score": hit.score,
+            "tags": hit.memory.tags,
+            "source": hit.memory.source,
+            "created_at": hit.memory.created_at,
+            "updated_at": hit.memory.updated_at,
+        });
+
+        Ok(ResourceContent {
+            uri: uri.to_string(),
+            mime_type: Some("application/json".to_string()),
+            text: Some(serde_json::to_string_pretty(&response).unwrap_or_default()),
+            blob: None,
+        })
+    }
+
     /// Gets the help index listing all categories.
     fn get_help_index(&self) -> String {
         let mut index = "# Subcog Help\n\nWelcome to Subcog, the persistent memory system for AI coding assistants.\n\n## Available Topics\n\n".to_string();
@@ -169,7 +322,9 @@ impl ResourceHandler {
         }
 
         index.push_str("\n## Quick Start\n\n");
-        index.push_str("1. Capture a decision: `subcog capture --namespace decisions \"Use PostgreSQL\"`\n");
+        index.push_str(
+            "1. Capture a decision: `subcog capture --namespace decisions \"Use PostgreSQL\"`\n",
+        );
         index.push_str("2. Search memories: `subcog recall \"database choice\"`\n");
         index.push_str("3. Check status: `subcog status`\n");
 
@@ -229,6 +384,7 @@ pub struct HelpCategory {
 }
 
 // Help content constants
+// Note: Use r"..."# for strings containing quotes, r"..." for those without
 
 const HELP_SETUP: &str = r#"
 ## Installation
@@ -287,7 +443,7 @@ For Claude Desktop, add to `~/.config/claude/claude_desktop_config.json`:
 ```
 "#;
 
-const HELP_CONCEPTS: &str = r#"
+const HELP_CONCEPTS: &str = r"
 ## Namespaces
 
 Memories are organized into namespaces:
@@ -333,7 +489,7 @@ urn:subcog:zircote:subcog:decisions:decisions_abc123
 3. **Superseded**: Replaced by newer memory
 4. **Pending**: Awaiting review
 5. **Deleted**: Marked for cleanup
-"#;
+";
 
 const HELP_CAPTURE: &str = r#"
 ## Basic Capture
@@ -545,7 +701,7 @@ subcog status  # Rebuilds index
 GitHub: https://github.com/zircote/subcog/issues
 "#;
 
-const HELP_ADVANCED: &str = r#"
+const HELP_ADVANCED: &str = r"
 ## LLM Integration
 
 Configure an LLM provider for enhanced features:
@@ -607,7 +763,16 @@ cache:
   max_entries: 1000
   ttl_seconds: 3600
 ```
-"#;
+";
+
+/// Truncates content to a maximum length with ellipsis.
+fn truncate_content(content: &str, max_len: usize) -> String {
+    if content.len() <= max_len {
+        content.to_string()
+    } else {
+        format!("{}...", &content[..max_len.saturating_sub(3)])
+    }
+}
 
 #[cfg(test)]
 mod tests {

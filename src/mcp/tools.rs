@@ -3,7 +3,7 @@
 //! Provides tool handlers for the Model Context Protocol.
 
 use crate::models::{CaptureRequest, Domain, Namespace, SearchFilter, SearchMode};
-use crate::services::{CaptureService, RecallService, SyncService};
+use crate::services::ServiceContainer;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -21,194 +21,195 @@ impl ToolRegistry {
     pub fn new() -> Self {
         let mut tools = HashMap::new();
 
-        // Capture tool
-        tools.insert(
-            "subcog_capture".to_string(),
-            ToolDefinition {
-                name: "subcog_capture".to_string(),
-                description: "Capture a memory (decision, learning, pattern, etc.) for future recall"
-                    .to_string(),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "content": {
-                            "type": "string",
-                            "description": "The memory content to capture"
-                        },
-                        "namespace": {
-                            "type": "string",
-                            "description": "Memory category: decisions, patterns, learnings, context, tech-debt, apis, config, security, performance, testing",
-                            "enum": ["decisions", "patterns", "learnings", "context", "tech-debt", "apis", "config", "security", "performance", "testing"]
-                        },
-                        "tags": {
-                            "type": "array",
-                            "items": { "type": "string" },
-                            "description": "Optional tags for categorization"
-                        },
-                        "source": {
-                            "type": "string",
-                            "description": "Optional source reference (file path, URL)"
-                        }
-                    },
-                    "required": ["content", "namespace"]
-                }),
-            },
-        );
-
-        // Recall tool
-        tools.insert(
-            "subcog_recall".to_string(),
-            ToolDefinition {
-                name: "subcog_recall".to_string(),
-                description: "Search for relevant memories using semantic and text search".to_string(),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The search query"
-                        },
-                        "namespace": {
-                            "type": "string",
-                            "description": "Optional: Filter by namespace",
-                            "enum": ["decisions", "patterns", "learnings", "context", "tech-debt", "apis", "config", "security", "performance", "testing"]
-                        },
-                        "mode": {
-                            "type": "string",
-                            "description": "Search mode: hybrid (default), vector, text",
-                            "enum": ["hybrid", "vector", "text"]
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of results (default: 10)",
-                            "minimum": 1,
-                            "maximum": 50
-                        }
-                    },
-                    "required": ["query"]
-                }),
-            },
-        );
-
-        // Status tool
-        tools.insert(
-            "subcog_status".to_string(),
-            ToolDefinition {
-                name: "subcog_status".to_string(),
-                description: "Get memory system status and statistics".to_string(),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }),
-            },
-        );
-
-        // Namespaces tool
-        tools.insert(
-            "subcog_namespaces".to_string(),
-            ToolDefinition {
-                name: "subcog_namespaces".to_string(),
-                description: "List available memory namespaces and their descriptions".to_string(),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }),
-            },
-        );
-
-        // Consolidate tool (uses sampling)
-        tools.insert(
-            "subcog_consolidate".to_string(),
-            ToolDefinition {
-                name: "subcog_consolidate".to_string(),
-                description: "Consolidate related memories using LLM to merge and summarize. Uses MCP sampling to request LLM completion.".to_string(),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "namespace": {
-                            "type": "string",
-                            "description": "Namespace to consolidate",
-                            "enum": ["decisions", "patterns", "learnings", "context", "tech-debt", "apis", "config", "security", "performance", "testing"]
-                        },
-                        "query": {
-                            "type": "string",
-                            "description": "Optional query to filter memories for consolidation"
-                        },
-                        "strategy": {
-                            "type": "string",
-                            "description": "Consolidation strategy: merge (combine similar), summarize (create summary), dedupe (remove duplicates)",
-                            "enum": ["merge", "summarize", "dedupe"],
-                            "default": "merge"
-                        },
-                        "dry_run": {
-                            "type": "boolean",
-                            "description": "If true, show what would be consolidated without making changes",
-                            "default": false
-                        }
-                    },
-                    "required": ["namespace"]
-                }),
-            },
-        );
-
-        // Enrich tool (uses sampling)
-        tools.insert(
-            "subcog_enrich".to_string(),
-            ToolDefinition {
-                name: "subcog_enrich".to_string(),
-                description: "Enrich a memory with better structure, tags, and context using LLM. Uses MCP sampling to request LLM completion.".to_string(),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "memory_id": {
-                            "type": "string",
-                            "description": "ID of the memory to enrich"
-                        },
-                        "enrich_tags": {
-                            "type": "boolean",
-                            "description": "Generate or improve tags",
-                            "default": true
-                        },
-                        "enrich_structure": {
-                            "type": "boolean",
-                            "description": "Restructure content for clarity",
-                            "default": true
-                        },
-                        "add_context": {
-                            "type": "boolean",
-                            "description": "Add inferred context and rationale",
-                            "default": false
-                        }
-                    },
-                    "required": ["memory_id"]
-                }),
-            },
-        );
-
-        // Sync tool
-        tools.insert(
-            "subcog_sync".to_string(),
-            ToolDefinition {
-                name: "subcog_sync".to_string(),
-                description: "Sync memories with git remote (push, fetch, or full sync)".to_string(),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "direction": {
-                            "type": "string",
-                            "description": "Sync direction: push (upload), fetch (download), full (both)",
-                            "enum": ["push", "fetch", "full"],
-                            "default": "full"
-                        }
-                    },
-                    "required": []
-                }),
-            },
-        );
+        tools.insert("subcog_capture".to_string(), Self::capture_tool());
+        tools.insert("subcog_recall".to_string(), Self::recall_tool());
+        tools.insert("subcog_status".to_string(), Self::status_tool());
+        tools.insert("subcog_namespaces".to_string(), Self::namespaces_tool());
+        tools.insert("subcog_consolidate".to_string(), Self::consolidate_tool());
+        tools.insert("subcog_enrich".to_string(), Self::enrich_tool());
+        tools.insert("subcog_sync".to_string(), Self::sync_tool());
 
         Self { tools }
+    }
+
+    /// Defines the capture tool.
+    fn capture_tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "subcog_capture".to_string(),
+            description: "Capture a memory (decision, learning, pattern, etc.) for future recall"
+                .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "The memory content to capture"
+                    },
+                    "namespace": {
+                        "type": "string",
+                        "description": "Memory category: decisions, patterns, learnings, context, tech-debt, apis, config, security, performance, testing",
+                        "enum": ["decisions", "patterns", "learnings", "context", "tech-debt", "apis", "config", "security", "performance", "testing"]
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional tags for categorization"
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": "Optional source reference (file path, URL)"
+                    }
+                },
+                "required": ["content", "namespace"]
+            }),
+        }
+    }
+
+    /// Defines the recall tool.
+    fn recall_tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "subcog_recall".to_string(),
+            description: "Search for relevant memories using semantic and text search".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query"
+                    },
+                    "namespace": {
+                        "type": "string",
+                        "description": "Optional: Filter by namespace",
+                        "enum": ["decisions", "patterns", "learnings", "context", "tech-debt", "apis", "config", "security", "performance", "testing"]
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "Search mode: hybrid (default), vector, text",
+                        "enum": ["hybrid", "vector", "text"]
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results (default: 10)",
+                        "minimum": 1,
+                        "maximum": 50
+                    }
+                },
+                "required": ["query"]
+            }),
+        }
+    }
+
+    /// Defines the status tool.
+    fn status_tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "subcog_status".to_string(),
+            description: "Get memory system status and statistics".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        }
+    }
+
+    /// Defines the namespaces tool.
+    fn namespaces_tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "subcog_namespaces".to_string(),
+            description: "List available memory namespaces and their descriptions".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        }
+    }
+
+    /// Defines the consolidate tool.
+    fn consolidate_tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "subcog_consolidate".to_string(),
+            description: "Consolidate related memories using LLM to merge and summarize. Uses MCP sampling to request LLM completion.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "namespace": {
+                        "type": "string",
+                        "description": "Namespace to consolidate",
+                        "enum": ["decisions", "patterns", "learnings", "context", "tech-debt", "apis", "config", "security", "performance", "testing"]
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional query to filter memories for consolidation"
+                    },
+                    "strategy": {
+                        "type": "string",
+                        "description": "Consolidation strategy: merge (combine similar), summarize (create summary), dedupe (remove duplicates)",
+                        "enum": ["merge", "summarize", "dedupe"],
+                        "default": "merge"
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "If true, show what would be consolidated without making changes",
+                        "default": false
+                    }
+                },
+                "required": ["namespace"]
+            }),
+        }
+    }
+
+    /// Defines the enrich tool.
+    fn enrich_tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "subcog_enrich".to_string(),
+            description: "Enrich a memory with better structure, tags, and context using LLM. Uses MCP sampling to request LLM completion.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "memory_id": {
+                        "type": "string",
+                        "description": "ID of the memory to enrich"
+                    },
+                    "enrich_tags": {
+                        "type": "boolean",
+                        "description": "Generate or improve tags",
+                        "default": true
+                    },
+                    "enrich_structure": {
+                        "type": "boolean",
+                        "description": "Restructure content for clarity",
+                        "default": true
+                    },
+                    "add_context": {
+                        "type": "boolean",
+                        "description": "Add inferred context and rationale",
+                        "default": false
+                    }
+                },
+                "required": ["memory_id"]
+            }),
+        }
+    }
+
+    /// Defines the sync tool.
+    fn sync_tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "subcog_sync".to_string(),
+            description: "Sync memories with git remote (push, fetch, or full sync)".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "direction": {
+                        "type": "string",
+                        "description": "Sync direction: push (upload), fetch (download), full (both)",
+                        "enum": ["push", "fetch", "full"],
+                        "default": "full"
+                    }
+                },
+                "required": []
+            }),
+        }
     }
 
     /// Returns all tool definitions.
@@ -257,8 +258,8 @@ impl ToolRegistry {
             skip_security_check: false,
         };
 
-        let service = CaptureService::default();
-        let result = service.capture(request)?;
+        let services = ServiceContainer::get()?;
+        let result = services.capture().capture(request)?;
 
         Ok(ToolResult {
             content: vec![ToolContent::Text {
@@ -288,8 +289,10 @@ impl ToolRegistry {
 
         let limit = args.limit.unwrap_or(10).min(50);
 
-        let service = RecallService::default();
-        let result = service.search(&args.query, mode, &filter, limit)?;
+        let services = ServiceContainer::get()?;
+        let result = services
+            .recall()
+            .search(&args.query, mode, &filter, limit)?;
 
         let mut output = format!(
             "Found {} memories (searched in {}ms using {} mode)\n\n",
@@ -377,15 +380,20 @@ impl ToolRegistry {
         let dry_run = args.dry_run.unwrap_or(false);
 
         // Fetch memories for consolidation
-        let service = RecallService::default();
-        let filter = SearchFilter::new().with_namespace(namespace.clone());
+        let services = ServiceContainer::get()?;
+        let filter = SearchFilter::new().with_namespace(namespace);
         let query = args.query.as_deref().unwrap_or("*");
-        let result = service.search(query, SearchMode::Hybrid, &filter, 50)?;
+        let result = services
+            .recall()
+            .search(query, SearchMode::Hybrid, &filter, 50)?;
 
         if result.memories.is_empty() {
             return Ok(ToolResult {
                 content: vec![ToolContent::Text {
-                    text: format!("No memories found in namespace '{}' to consolidate.", args.namespace),
+                    text: format!(
+                        "No memories found in namespace '{}' to consolidate.",
+                        args.namespace
+                    ),
                 }],
                 is_error: false,
             });
@@ -403,19 +411,27 @@ impl ToolRegistry {
         let sampling_prompt = match strategy {
             "merge" => format!(
                 "Analyze these {} memories from the '{}' namespace and identify groups that should be merged:\n\n{}\n\nFor each group, provide:\n1. IDs to merge\n2. Merged content\n3. Rationale",
-                result.memories.len(), args.namespace, memories_text
+                result.memories.len(),
+                args.namespace,
+                memories_text
             ),
             "summarize" => format!(
                 "Create a comprehensive summary of these {} memories from the '{}' namespace:\n\n{}\n\nProvide a structured summary that captures key themes, decisions, and patterns.",
-                result.memories.len(), args.namespace, memories_text
+                result.memories.len(),
+                args.namespace,
+                memories_text
             ),
             "dedupe" => format!(
                 "Identify duplicate or near-duplicate memories from these {} entries in the '{}' namespace:\n\n{}\n\nFor each duplicate set, identify which to keep and which to remove.",
-                result.memories.len(), args.namespace, memories_text
+                result.memories.len(),
+                args.namespace,
+                memories_text
             ),
             _ => format!(
                 "Analyze these {} memories from the '{}' namespace:\n\n{}",
-                result.memories.len(), args.namespace, memories_text
+                result.memories.len(),
+                args.namespace,
+                memories_text
             ),
         };
 
@@ -425,12 +441,17 @@ impl ToolRegistry {
                 text: if dry_run {
                     format!(
                         "DRY RUN: Would consolidate {} memories using '{}' strategy.\n\nSampling prompt:\n{}",
-                        result.memories.len(), strategy, sampling_prompt
+                        result.memories.len(),
+                        strategy,
+                        sampling_prompt
                     )
                 } else {
                     format!(
                         "SAMPLING_REQUEST\n\nstrategy: {}\nnamespace: {}\nmemory_count: {}\n\nprompt: {}",
-                        strategy, args.namespace, result.memories.len(), sampling_prompt
+                        strategy,
+                        args.namespace,
+                        result.memories.len(),
+                        sampling_prompt
                     )
                 },
             }],
@@ -455,7 +476,8 @@ impl ToolRegistry {
             enrichments.push("- Generate relevant tags for searchability");
         }
         if enrich_structure {
-            enrichments.push("- Restructure content for clarity (add context, rationale, consequences)");
+            enrichments
+                .push("- Restructure content for clarity (add context, rationale, consequences)");
         }
         if add_context {
             enrichments.push("- Infer and add missing context or rationale");
@@ -485,11 +507,11 @@ impl ToolRegistry {
 
         let direction = args.direction.as_deref().unwrap_or("full");
 
-        let service = SyncService::default();
+        let services = ServiceContainer::get()?;
         let result = match direction {
-            "push" => service.push(),
-            "fetch" => service.fetch(),
-            _ => service.sync(),
+            "push" => services.sync().push(),
+            "fetch" => services.sync().fetch(),
+            _ => services.sync().sync(),
         };
 
         match result {
@@ -497,17 +519,14 @@ impl ToolRegistry {
                 content: vec![ToolContent::Text {
                     text: format!(
                         "Sync completed!\n\nDirection: {}\nPushed: {}\nPulled: {}\nConflicts: {}",
-                        direction,
-                        sync_result.pushed,
-                        sync_result.pulled,
-                        sync_result.conflicts
+                        direction, sync_result.pushed, sync_result.pulled, sync_result.conflicts
                     ),
                 }],
                 is_error: false,
             }),
             Err(e) => Ok(ToolResult {
                 content: vec![ToolContent::Text {
-                    text: format!("Sync failed: {}", e),
+                    text: format!("Sync failed: {e}"),
                 }],
                 is_error: true,
             }),

@@ -160,9 +160,13 @@ impl PromptRegistry {
             .unwrap_or("overview");
 
         let intro = match familiarity {
-            "advanced" => "I see you're experienced with memory systems. Let me show you Subcog's advanced features.",
-            "intermediate" => "Great, you have some familiarity with memory systems. Let me explain Subcog's key concepts.",
-            _ => "Welcome to Subcog! I'll guide you through the basics of the memory system."
+            "advanced" => {
+                "I see you're experienced with memory systems. Let me show you Subcog's advanced features."
+            },
+            "intermediate" => {
+                "Great, you have some familiarity with memory systems. Let me explain Subcog's key concepts."
+            },
+            _ => "Welcome to Subcog! I'll guide you through the basics of the memory system.",
         };
 
         let focus_content = match focus {
@@ -179,15 +183,14 @@ impl PromptRegistry {
                 role: "user".to_string(),
                 content: PromptContent::Text {
                     text: format!(
-                        "I'd like to learn about Subcog. My familiarity level is '{}' and I want to focus on '{}'.",
-                        familiarity, focus
+                        "I'd like to learn about Subcog. My familiarity level is '{familiarity}' and I want to focus on '{focus}'."
                     ),
                 },
             },
             PromptMessage {
                 role: "assistant".to_string(),
                 content: PromptContent::Text {
-                    text: format!("{}\n\n{}", intro, focus_content),
+                    text: format!("{intro}\n\n{focus_content}"),
                 },
             },
         ]
@@ -205,8 +208,7 @@ impl PromptRegistry {
                 role: "user".to_string(),
                 content: PromptContent::Text {
                     text: format!(
-                        "Please analyze this context and suggest what memories to capture:\n\n{}",
-                        context
+                        "Please analyze this context and suggest what memories to capture:\n\n{context}"
                     ),
                 },
             },
@@ -235,8 +237,7 @@ impl PromptRegistry {
             role: "user".to_string(),
             content: PromptContent::Text {
                 text: format!(
-                    "Please {} the memories in the '{}' namespace. Help me understand what we have and identify any gaps or improvements.",
-                    action, namespace
+                    "Please {action} the memories in the '{namespace}' namespace. Help me understand what we have and identify any gaps or improvements."
                 ),
             },
         }]
@@ -277,18 +278,14 @@ impl PromptRegistry {
 
     /// Generates the search help prompt.
     fn generate_search_help_prompt(&self, arguments: &Value) -> Vec<PromptMessage> {
-        let goal = arguments
-            .get("goal")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let goal = arguments.get("goal").and_then(|v| v.as_str()).unwrap_or("");
 
         vec![
             PromptMessage {
                 role: "user".to_string(),
                 content: PromptContent::Text {
                     text: format!(
-                        "I'm trying to find memories related to: {}\n\nHelp me craft effective search queries.",
-                        goal
+                        "I'm trying to find memories related to: {goal}\n\nHelp me craft effective search queries."
                     ),
                 },
             },
@@ -363,6 +360,7 @@ pub enum PromptContent {
 }
 
 // Tutorial content
+// Note: These strings contain double quotes, so we use r"..."# syntax
 
 const TUTORIAL_OVERVIEW: &str = r#"
 ## What is Subcog?
@@ -536,7 +534,7 @@ For Claude Desktop:
 ```
 "#;
 
-const TUTORIAL_BEST_PRACTICES: &str = r#"
+const TUTORIAL_BEST_PRACTICES: &str = r"
 ## Best Practices
 
 ### Capture Discipline
@@ -563,9 +561,9 @@ const TUTORIAL_BEST_PRACTICES: &str = r#"
 1. **Enable hooks** - let Subcog work automatically
 2. **Check context** - review what's being injected
 3. **Sync regularly** - keep memories backed up
-"#;
+";
 
-const CAPTURE_ASSISTANT_SYSTEM: &str = r#"
+const CAPTURE_ASSISTANT_SYSTEM: &str = r"
 I'll analyze the context and suggest memories to capture. For each suggestion, I'll provide:
 
 1. **Content**: The memory text to capture
@@ -574,7 +572,7 @@ I'll analyze the context and suggest memories to capture. For each suggestion, I
 4. **Rationale**: Why this should be captured
 
 Let me analyze the context you provided...
-"#;
+";
 
 const SEARCH_HELP_SYSTEM: &str = r#"
 I'll help you craft effective search queries. Subcog supports:
