@@ -3,6 +3,11 @@ created_at: 1767031596
 id: 1767031596886832000
 namespace: learnings
 status: active
+tags:
+- hooks-no-transcript-access
+- visual-markers-ignored
+- stop-hook-final-summary-only
+- client-side-mcp-capture
 updated_at: 1767031596
 ---
 Hooks don't parse assistant output for memory blocks. The `▶ subcog://` markers in responses are visual-only - no hook has transcript access to auto-capture them. Stop hook only captures `final_summary` from structured JSON input. Fix options: (1) Stop hook parses `transcript` field if Claude Code provides it, (2) New PostAssistantMessage hook, (3) Client-side parsing by Claude Code calling MCP capture. Currently users must manually capture via MCP tools.
