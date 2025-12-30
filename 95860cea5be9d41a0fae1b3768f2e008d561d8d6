@@ -3,6 +3,12 @@ created_at: 1766998600
 id: learnings-1766998600793480000
 namespace: learnings
 status: active
+tags:
+- service-container
+- shared-backend-access
+- arc-rwlock
+- from-shared-constructor
+- architecture-decision
 updated_at: 1766998600
 ---
 ServiceContainer pattern with Arc<RwLock<>> for shared backend access emerged as a need during implementation - not planned upfront. Services that need shared access to storage backends should use from_shared() constructors. Plan for shared backend access from the start in future projects.
