@@ -4,7 +4,7 @@
 
 use crate::models::{MemoryId, SearchFilter};
 use crate::storage::traits::VectorBackend;
-use crate::Result;
+use crate::{Error, Result};
 
 /// usearch-based vector backend.
 pub struct UsearchBackend {
@@ -34,13 +34,17 @@ impl VectorBackend for UsearchBackend {
     }
 
     fn upsert(&mut self, _id: &MemoryId, _embedding: &[f32]) -> Result<()> {
-        // TODO: Implement usearch upsert
-        todo!("UsearchBackend::upsert not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "UsearchBackend::upsert for {}",
+            self.index_path.display()
+        )))
     }
 
     fn remove(&mut self, _id: &MemoryId) -> Result<bool> {
-        // TODO: Implement usearch removal
-        todo!("UsearchBackend::remove not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "UsearchBackend::remove for {}",
+            self.index_path.display()
+        )))
     }
 
     fn search(
@@ -49,17 +53,23 @@ impl VectorBackend for UsearchBackend {
         _filter: &SearchFilter,
         _limit: usize,
     ) -> Result<Vec<(MemoryId, f32)>> {
-        // TODO: Implement usearch search
-        todo!("UsearchBackend::search not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "UsearchBackend::search for {}",
+            self.index_path.display()
+        )))
     }
 
     fn count(&self) -> Result<usize> {
-        // TODO: Implement usearch count
-        todo!("UsearchBackend::count not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "UsearchBackend::count for {}",
+            self.index_path.display()
+        )))
     }
 
     fn clear(&mut self) -> Result<()> {
-        // TODO: Implement usearch clear
-        todo!("UsearchBackend::clear not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "UsearchBackend::clear for {}",
+            self.index_path.display()
+        )))
     }
 }

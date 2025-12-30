@@ -1,7 +1,7 @@
 //! Memory recall (search) service.
 
-use crate::models::{SearchFilter, SearchMode, SearchResult};
 use crate::Result;
+use crate::models::{SearchFilter, SearchMode, SearchResult};
 
 /// Service for searching and retrieving memories.
 pub struct RecallService {

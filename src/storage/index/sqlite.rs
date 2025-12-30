@@ -4,7 +4,7 @@
 
 use crate::models::{Memory, MemoryId, SearchFilter};
 use crate::storage::traits::IndexBackend;
-use crate::Result;
+use crate::{Error, Result};
 
 /// SQLite-based index backend with FTS5.
 pub struct SqliteBackend {
@@ -32,13 +32,17 @@ impl SqliteBackend {
 
 impl IndexBackend for SqliteBackend {
     fn index(&mut self, _memory: &Memory) -> Result<()> {
-        // TODO: Implement FTS5 indexing
-        todo!("SqliteBackend::index not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "SqliteBackend::index for {}",
+            self.db_path.display()
+        )))
     }
 
     fn remove(&mut self, _id: &MemoryId) -> Result<bool> {
-        // TODO: Implement FTS5 removal
-        todo!("SqliteBackend::remove not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "SqliteBackend::remove for {}",
+            self.db_path.display()
+        )))
     }
 
     fn search(
@@ -47,12 +51,16 @@ impl IndexBackend for SqliteBackend {
         _filter: &SearchFilter,
         _limit: usize,
     ) -> Result<Vec<(MemoryId, f32)>> {
-        // TODO: Implement FTS5 search
-        todo!("SqliteBackend::search not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "SqliteBackend::search for {}",
+            self.db_path.display()
+        )))
     }
 
     fn clear(&mut self) -> Result<()> {
-        // TODO: Implement FTS5 clear
-        todo!("SqliteBackend::clear not yet implemented")
+        Err(Error::NotImplemented(format!(
+            "SqliteBackend::clear for {}",
+            self.db_path.display()
+        )))
     }
 }

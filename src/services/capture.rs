@@ -1,7 +1,7 @@
 //! Memory capture service.
 
-use crate::models::{CaptureRequest, CaptureResult};
 use crate::Result;
+use crate::models::{CaptureRequest, CaptureResult};
 
 /// Service for capturing new memories.
 pub struct CaptureService {

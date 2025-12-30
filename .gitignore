@@ -106,3 +106,9 @@ junit.xml
 
 # Project specific
 *.local
+
+# FastEmbed model cache
+.fastembed_cache/
+
+# Observability logs
+observability/
