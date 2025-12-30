@@ -3,6 +3,11 @@ created_at: 1767007871
 id: ce44d370fa045398
 namespace: learnings
 status: active
+tags:
+- learnings
+- embedding-generation
+- embedding-test
+- nlp-embeddings
 updated_at: 1767007871
 ---
 Test embedding generation
