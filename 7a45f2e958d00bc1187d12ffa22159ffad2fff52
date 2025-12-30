@@ -4,10 +4,10 @@ id: dc365fa2800ba542
 namespace: patterns
 status: active
 tags:
-- test-pattern
-- pattern-2
+- test-pattern-2
 - dashboard-verification
-- dashboard-testing
+- dashboard-test
+- qa-patterns
 updated_at: 1766999606
 ---
 Test pattern 2 for dashboard verification
