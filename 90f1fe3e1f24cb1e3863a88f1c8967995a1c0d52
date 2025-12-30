@@ -3,7 +3,11 @@ created_at: 1766992923
 id: 1dd6ccfa6b85103f
 namespace: learnings
 status: active
-tags: security,validation
+tags:
+- input-validation
+- service-boundaries
+- injection-attacks
+- api-security
 updated_at: 1766992923
 ---
 Always validate input at service boundaries to prevent injection attacks
