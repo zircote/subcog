@@ -3,6 +3,11 @@ created_at: 1766999606
 id: 6f5c86ed27d372fd
 namespace: patterns
 status: active
+tags:
+- test-pattern
+- pattern-5
+- dashboard-verification
+- dashboard-testing
 updated_at: 1766999606
 ---
 Test pattern 5 for dashboard verification
