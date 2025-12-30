@@ -3,7 +3,11 @@ created_at: 1766992763
 id: 4952b08a3e50d78e
 namespace: patterns
 status: active
-tags: api,pagination
+tags:
+- cursor-based-pagination
+- pagination
+- api-design
+- scalability
 updated_at: 1766992763
 ---
 The API should return paginated results with cursor-based pagination for scalability
