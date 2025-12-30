@@ -196,9 +196,9 @@ impl HookHandler for StopHandler {
         if summary.memories_captured == 0 && summary.interaction_count > 5 {
             metadata["hints"] = serde_json::json!([
                 "Consider capturing key decisions made during this session",
-                "Use 'subcog capture' to save important learnings"
+                "Use 'mcp__plugin_subcog_subcog__subcog_capture' to save important learnings"
             ]);
-            context_lines.push("\n**Tip**: No memories were captured this session. Consider using `subcog_capture` to save important decisions and learnings.".to_string());
+            context_lines.push("\n**Tip**: No memories were captured this session. Consider using `mcp__plugin_subcog_subcog__subcog_capture` to save important decisions and learnings.".to_string());
         }
 
         // Build Claude Code hook response format per specification

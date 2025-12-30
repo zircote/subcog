@@ -483,7 +483,7 @@ impl PromptRegistry {
             .unwrap_or("10");
 
         let mut prompt = String::from(
-            "Show me a memory browser dashboard.\n\n**IMPORTANT**: Use the `subcog_recall` tool to fetch memories with server-side filtering:\n",
+            "Show me a memory browser dashboard.\n\n**IMPORTANT**: Use the `mcp__plugin_subcog_subcog__subcog_recall` tool to fetch memories with server-side filtering:\n",
         );
 
         if filter.is_empty() {
@@ -535,7 +535,7 @@ impl PromptRegistry {
             .unwrap_or("50");
 
         let mut prompt = String::from(
-            "List memories from Subcog.\n\n**IMPORTANT**: Use the `subcog_recall` tool to fetch memories with server-side filtering:\n",
+            "List memories from Subcog.\n\n**IMPORTANT**: Use the `mcp__plugin_subcog_subcog__subcog_recall` tool to fetch memories with server-side filtering:\n",
         );
 
         if filter.is_empty() {
@@ -1043,7 +1043,7 @@ Show example filter commands the user can use to drill down.
 ";
 
 const BROWSE_SYSTEM_RESPONSE: &str = r"
-I'll create a memory browser dashboard for you. Let me fetch the memories using `subcog_recall`.
+I'll create a memory browser dashboard for you. Let me fetch the memories using `mcp__plugin_subcog_subcog__subcog_recall`.
 
 I'll call the tool with the specified filter to get server-side filtered results, then compute:
 1. Namespace distribution with counts
@@ -1117,7 +1117,7 @@ I'll analyze your query to determine the best search approach:
 4. **Context gathering**: "What do we know about X?" → Multi-namespace search
 
 **Search Strategy**:
-- Use `subcog_recall` with appropriate mode based on intent
+- Use `mcp__plugin_subcog_subcog__subcog_recall` with appropriate mode based on intent
 - Apply namespace filters when intent is clear
 - Include related terms for broader exploration
 
@@ -1141,7 +1141,7 @@ Let me:
 3. Refine the query for optimal results
 4. Search using the appropriate mode
 
-I'll call `subcog_recall` with the refined query and present the results organized by relevance.
+I'll call `mcp__plugin_subcog_subcog__subcog_recall` with the refined query and present the results organized by relevance.
 ";
 
 const QUERY_SUGGEST_INSTRUCTIONS: &str = r#"
@@ -1157,7 +1157,7 @@ Help the user discover what's in their memory collection.
 
 **Resources to use**:
 - Read `subcog://topics` for topic overview
-- Use `subcog_recall` with `*` query to browse all
+- Use `mcp__plugin_subcog_subcog__subcog_recall` with `*` query to browse all
 - Apply `ns:X` filter to explore specific namespaces
 
 **Suggested queries based on common needs**:
