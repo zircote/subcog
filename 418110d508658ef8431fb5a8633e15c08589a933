@@ -3,6 +3,12 @@ created_at: 1766998618
 id: learnings-1766998618628579000
 namespace: learnings
 status: active
+tags:
+- sqlite
+- fts5
+- full-text-search
+- query-escaping
+- sql-injection
 updated_at: 1766998618
 ---
 SQLite FTS5 requires query escaping for special characters to prevent SQL injection. Characters like quotes, parentheses need escaping. This was not in original spec but emerged during implementation. Always sanitize user input for full-text search queries.
