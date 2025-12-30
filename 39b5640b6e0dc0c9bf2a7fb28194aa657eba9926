@@ -1,39 +1,11 @@
 ---
-created_at: 1767131827
-domain: global
-id: decisions_d31fc21f-82ac-4fe8-980d-7ebe50280c95
-namespace: decisions
+created_at: 1767134761
+domain: project
+id: prompt_test-prompt_1767134761
+namespace: prompts
+prompt_name: test-prompt
 status: active
-tags:
-- prompt-management
-- phase-1
-- phase-2
-- implementation
-- rust
-updated_at: 1767131827
+tags: []
+updated_at: 1767134761
 ---
-Implemented User Prompt Management Phase 1 & 2 for subcog:
-
-**Phase 1: Foundation (Complete)**
-- Added `Namespace::Prompts` variant to `src/models/domain.rs`
-- Created `src/models/prompt.rs` with:
-  - `PromptTemplate` struct with builder pattern
-  - `PromptVariable` struct for variable definitions
-  - `extract_variables()` function using `LazyLock<Regex>`
-  - `substitute_variables()` with generic `BuildHasher` support
-  - `validate_prompt_content()` for content validation
-
-**Phase 2: File Parsing (Complete)**
-- Created `src/services/prompt_parser.rs` with:
-  - `PromptFormat` enum: Markdown, Yaml, Json, PlainText
-  - `PromptParser` with `from_file()`, `from_stdin()`, `parse()`, `serialize()`
-  - Format auto-detection from file extension
-  - Markdown with YAML front matter support (reuses `YamlFrontMatterParser`)
-  - Variable merging: explicit definitions take precedence over extracted
-  - Roundtrip serialization tests passing
-
-**Key Design Decisions:**
-- Used `LazyLock<Regex>` instead of `lazy_static!` for static patterns
-- `PromptFormat::Markdown` as default for unknown extensions
-- Generic `BuildHasher` in `substitute_variables()` for flexibility
-- Helper function `serialize_variable_to_json()` to avoid excessive nesting (clippy)
+{"name":"test-prompt","description":"","content":"Hello {{name}}","variables":[{"name":"name","description":null,"default":null,"required":true}],"tags":[],"author":null,"usage_count":0,"created_at":1767134761,"updated_at":1767134761}
