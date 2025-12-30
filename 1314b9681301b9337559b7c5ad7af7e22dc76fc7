@@ -1,0 +1,19 @@
+---
+created_at: 1767067352
+id: 1767067352695992000
+namespace: progress
+status: active
+updated_at: 1767067352
+---
+Subcog core implementation completed. All stubs replaced with working code:
+
+Services: CaptureService, RecallService, SyncService, ContextBuilderService, ConsolidationService
+Storage: Git notes backend, SQLite+FTS5 index, usearch vector backend, Filesystem persistence
+Hooks: All 5 Claude Code hooks implemented (SessionStart, UserPromptSubmit, PostToolUse, PreCompact, Stop)
+LLM: OpenAI, Anthropic, Ollama, LM Studio clients
+Security: Secret detection, PII detection, content redaction, audit logging
+MCP: Server with rmcp, tool handlers, resource handlers, prompt templates
+CLI: Full clap-based interface with all subcommands
+
+Test results: 237 library tests + 11 integration tests + 4 doc tests
+Code changes: 41 files, 13,429 insertions, 588 deletions
