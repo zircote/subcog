@@ -3,6 +3,11 @@ created_at: 1767059249
 id: 1767059249461211000
 namespace: patterns
 status: active
+tags:
+- cross-repo-deployments
+- pr-based-deployments
+- github-actions
+- deployment-audit-trail
 updated_at: 1767059249
 ---
 Cross-repository deployments should always use PRs instead of direct pushes:
