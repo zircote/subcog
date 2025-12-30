@@ -57,14 +57,21 @@ chrono = { version = "0.4", features = ["serde"] }
 regex = "1.11"
 once_cell = "1.20"
 
-# HTTP client for LLM APIs
-reqwest = { version = "0.12", features = ["json", "blocking"] }
+# HTTP client for LLM APIs (using rustls instead of native-tls to avoid openssl)
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
 
 # Directories for config/data paths
 directories = "6.0"
 
 # Environment variables
 dotenvy = "0.15"
+
+# Redis client (optional)
+redis = { version = "0.28", features = ["tokio-comp", "connection-manager"], optional = true }
+
+# PostgreSQL client (optional)
+tokio-postgres = { version = "0.7", optional = true }
+deadpool-postgres = { version = "0.14", optional = true }
 
 [dev-dependencies]
 # Testing
@@ -126,7 +133,7 @@ redundant_pub_crate = "allow"
 [features]
 default = []
 # Optional backend features
-postgres = []
-redis = []
+postgres = ["dep:tokio-postgres", "dep:deadpool-postgres"]
+redis = ["dep:redis"]
 # All features enabled
 full = ["postgres", "redis"]
