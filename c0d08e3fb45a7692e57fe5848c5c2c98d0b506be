@@ -3,6 +3,11 @@ created_at: 1766998601
 id: patterns-1766998601075740000
 namespace: patterns
 status: active
+tags:
+- feature-tiering
+- graceful-degradation
+- llm-opt-in
+- zero-external-deps
 updated_at: 1766998601
 ---
 Feature tier system: Tier 1 (Core) - always available, zero external dependencies. Tier 2 (Enhanced) - opt-in, no external services. Tier 3 (LLM-Powered) - requires LLM provider. Users should not be forced to configure LLM just for basic capture/search. Design features with explicit opt-in and graceful degradation.
