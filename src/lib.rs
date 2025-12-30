@@ -35,6 +35,8 @@
 #![forbid(unsafe_code)]
 // Allow todo! in stub implementations during development
 #![allow(clippy::todo)]
+// Allow multiple crate versions from transitive dependencies
+#![allow(clippy::multiple_crate_versions)]
 
 use std::error::Error as StdError;
 use std::fmt;
@@ -85,6 +87,8 @@ pub enum Error {
     },
     /// Feature not yet implemented.
     NotImplemented(String),
+    /// Feature not enabled (requires feature flag).
+    FeatureNotEnabled(String),
 }
 
 impl fmt::Display for Error {
@@ -93,13 +97,19 @@ impl fmt::Display for Error {
             Self::InvalidInput(msg) => write!(f, "invalid input: {msg}"),
             Self::OperationFailed { operation, cause } => {
                 write!(f, "operation '{operation}' failed: {cause}")
-            }
+            },
             Self::ContentBlocked { reason } => {
                 write!(f, "content blocked: {reason}")
-            }
+            },
             Self::NotImplemented(feature) => {
                 write!(f, "not implemented: {feature}")
-            }
+            },
+            Self::FeatureNotEnabled(feature) => {
+                write!(
+                    f,
+                    "feature not enabled: {feature} (compile with --features {feature})"
+                )
+            },
         }
     }
 }
@@ -238,9 +248,12 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::InvalidInput(msg) => assert!(msg.contains("zero")),
-            Error::OperationFailed { .. } | Error::NotImplemented(_) | Error::ContentBlocked { .. } => {
+            Error::OperationFailed { .. }
+            | Error::NotImplemented(_)
+            | Error::ContentBlocked { .. }
+            | Error::FeatureNotEnabled(_) => {
                 unreachable!("Expected InvalidInput error")
-            }
+            },
         }
     }
 
