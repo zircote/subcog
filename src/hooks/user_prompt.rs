@@ -505,7 +505,7 @@ fn build_capture_context(
             top_signal.namespace.as_str()
         ));
         lines.push(format!("> {}", truncate_for_display(content_str, 200)));
-        lines.push("\nUse `subcog_capture` tool to save this memory.".to_string());
+        lines.push("\nUse `mcp__plugin_subcog_subcog__subcog_capture` tool to save this memory.".to_string());
     } else {
         lines.push(format!(
             "Detected {} signal (confidence: {:.0}%):\n",
@@ -518,7 +518,7 @@ fn build_capture_context(
             top_signal.namespace.as_str()
         ));
         lines.push(
-            "Use `subcog_capture` tool or ask: \"Should I save this to subcog?\"".to_string(),
+            "Use `mcp__plugin_subcog_subcog__subcog_capture` tool or ask: \"Should I save this to subcog?\"".to_string(),
         );
     }
 
