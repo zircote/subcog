@@ -3,6 +3,7 @@
 #![allow(clippy::expect_used)]
 
 use super::HookHandler;
+use super::search_intent::{SearchIntent, detect_search_intent};
 use crate::Result;
 use crate::models::Namespace;
 use regex::Regex;
@@ -11,10 +12,12 @@ use tracing::instrument;
 
 /// Handles `UserPromptSubmit` hook events.
 ///
-/// Detects signals for memory capture in user prompts.
+/// Detects signals for memory capture in user prompts and search intent.
 pub struct UserPromptHandler {
     /// Minimum confidence threshold for capture.
     confidence_threshold: f32,
+    /// Minimum confidence threshold for search intent injection.
+    search_intent_threshold: f32,
 }
 
 /// Signal patterns for memory capture detection.
@@ -102,14 +105,32 @@ impl UserPromptHandler {
     pub const fn new() -> Self {
         Self {
             confidence_threshold: 0.6,
+            search_intent_threshold: 0.5,
         }
     }
 
-    /// Sets the confidence threshold.
+    /// Sets the confidence threshold for capture.
     #[must_use]
     pub const fn with_confidence_threshold(mut self, threshold: f32) -> Self {
         self.confidence_threshold = threshold;
         self
+    }
+
+    /// Sets the confidence threshold for search intent injection.
+    #[must_use]
+    pub const fn with_search_intent_threshold(mut self, threshold: f32) -> Self {
+        self.search_intent_threshold = threshold;
+        self
+    }
+
+    /// Detects search intent from the prompt.
+    fn detect_search_intent(&self, prompt: &str) -> Option<SearchIntent> {
+        let intent = detect_search_intent(prompt)?;
+        if intent.confidence >= self.search_intent_threshold {
+            Some(intent)
+        } else {
+            None
+        }
     }
 
     /// Detects capture signals in the prompt.
@@ -295,9 +316,31 @@ impl HookHandler for UserPromptHandler {
             "confidence_threshold": self.confidence_threshold
         });
 
+        // Detect search intent for proactive memory surfacing
+        let search_intent = self.detect_search_intent(prompt);
+
+        // Add search intent to metadata if detected
+        if let Some(ref intent) = search_intent {
+            metadata["search_intent"] = serde_json::json!({
+                "detected": true,
+                "intent_type": intent.intent_type.as_str(),
+                "confidence": intent.confidence,
+                "topics": intent.topics,
+                "keywords": intent.keywords,
+                "source": intent.source.as_str()
+            });
+        } else {
+            metadata["search_intent"] = serde_json::json!({
+                "detected": false
+            });
+        }
+
         // Build context message for capture suggestions
         let context_message =
             build_capture_context(should_capture, content.as_ref(), &signals, &mut metadata);
+
+        // Build search intent context (if detected)
+        let search_context = search_intent.as_ref().map(build_search_intent_context);
 
         // Build Claude Code hook response format
         let mut response = serde_json::json!({
@@ -305,8 +348,16 @@ impl HookHandler for UserPromptHandler {
             "metadata": metadata
         });
 
+        // Combine context messages
+        let combined_context = match (context_message, search_context) {
+            (Some(capture), Some(search)) => Some(format!("{capture}\n\n---\n\n{search}")),
+            (Some(capture), None) => Some(capture),
+            (None, Some(search)) => Some(search),
+            (None, None) => None,
+        };
+
         // Add context only if we have a suggestion
-        if let Some(ctx) = context_message {
+        if let Some(ctx) = combined_context {
             response["context"] = serde_json::Value::String(ctx);
         }
 
@@ -379,6 +430,35 @@ fn truncate_for_display(content: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &content[..max_len.saturating_sub(3)])
     }
+}
+
+/// Builds context message for search intent.
+fn build_search_intent_context(intent: &SearchIntent) -> String {
+    let mut lines = vec!["**Subcog Search Intent Detected**\n".to_string()];
+
+    lines.push(format!(
+        "Intent type: **{}** (confidence: {:.0}%)\n",
+        intent.intent_type.as_str(),
+        intent.confidence * 100.0
+    ));
+
+    if !intent.topics.is_empty() {
+        lines.push(format!("Topics: {}\n", intent.topics.join(", ")));
+    }
+
+    lines.push(
+        "\n**Reminder**: Consider using `subcog_recall` to retrieve relevant memories.".to_string(),
+    );
+
+    // Suggest resources based on topics
+    if !intent.topics.is_empty() {
+        lines.push("\n**Suggested resources**:".to_string());
+        for topic in intent.topics.iter().take(3) {
+            lines.push(format!("- `subcog://topics/{topic}`"));
+        }
+    }
+
+    lines.join("\n")
 }
 
 #[cfg(test)]
@@ -526,5 +606,87 @@ mod tests {
             "This is a longer prompt with more context.",
         );
         assert!(high >= low);
+    }
+
+    #[test]
+    fn test_search_intent_detection_in_handle() {
+        let handler = UserPromptHandler::default();
+
+        // Test with a clear search intent prompt
+        let input = r#"{"prompt": "How do I implement authentication in this project?"}"#;
+        let result = handler.handle(input);
+        assert!(result.is_ok());
+
+        let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        let metadata = response.get("metadata").unwrap();
+
+        // Should have search_intent in metadata
+        let search_intent = metadata.get("search_intent").unwrap();
+        assert_eq!(
+            search_intent.get("detected"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            search_intent.get("intent_type"),
+            Some(&serde_json::Value::String("howto".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_search_intent_no_detection() {
+        let handler = UserPromptHandler::default();
+
+        // Test with a prompt that doesn't have search intent
+        let input = r#"{"prompt": "I finished the task."}"#;
+        let result = handler.handle(input);
+        assert!(result.is_ok());
+
+        let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        let metadata = response.get("metadata").unwrap();
+
+        // Should have search_intent in metadata but detected=false
+        let search_intent = metadata.get("search_intent").unwrap();
+        assert_eq!(
+            search_intent.get("detected"),
+            Some(&serde_json::Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn test_search_intent_threshold() {
+        let handler = UserPromptHandler::default().with_search_intent_threshold(0.9);
+
+        // Test with a prompt that would normally detect intent
+        let input = r#"{"prompt": "how to"}"#;
+        let result = handler.handle(input);
+        assert!(result.is_ok());
+
+        let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        let metadata = response.get("metadata").unwrap();
+
+        // Should NOT detect because confidence won't meet 0.9 threshold
+        let search_intent = metadata.get("search_intent").unwrap();
+        assert_eq!(
+            search_intent.get("detected"),
+            Some(&serde_json::Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn test_search_intent_topics_extraction() {
+        let handler = UserPromptHandler::default();
+
+        let input = r#"{"prompt": "How do I configure the database connection?"}"#;
+        let result = handler.handle(input);
+        assert!(result.is_ok());
+
+        let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        let metadata = response.get("metadata").unwrap();
+
+        let search_intent = metadata.get("search_intent").unwrap();
+        let topics = search_intent.get("topics").unwrap().as_array().unwrap();
+
+        // Should extract topics like "database", "connection", "configure"
+        assert!(!topics.is_empty());
     }
 }
