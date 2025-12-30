@@ -3,6 +3,12 @@ created_at: 1767067352
 id: 1767067352695992000
 namespace: progress
 status: active
+tags:
+- subcog-core-complete
+- services-implemented
+- storage-backends
+- llm-integrations
+- security-and-audit
 updated_at: 1767067352
 ---
 Subcog core implementation completed. All stubs replaced with working code:
