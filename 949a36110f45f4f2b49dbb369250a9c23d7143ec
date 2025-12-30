@@ -3,6 +3,12 @@ created_at: 1767032008
 id: 1767032008940737000
 namespace: progress
 status: active
+tags:
+- rust
+- namespace-enum-update
+- retention-scoring
+- blockers-progress
+- tests-updated
 updated_at: 1767032008
 ---
 Added Blockers and Progress namespaces to subcog. Changes: (1) Added enum variants to Namespace in src/models/domain.rs:33-36, (2) Updated all(), as_str(), parse() methods, (3) Added retention scoring in src/services/consolidation.rs - Blockers=0.8 (high importance for blocking issues), Progress=0.5 (lower for transient tracking), (4) Updated test count 11→13. All 866 tests pass.
