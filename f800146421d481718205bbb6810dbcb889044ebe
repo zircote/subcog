@@ -3,6 +3,11 @@ created_at: 1767031549
 id: 1767031549239861000
 namespace: decisions
 status: active
+tags:
+- mcp-sampling
+- llm-delegation
+- sampling-provider
+- thread-safe-peer-access
 updated_at: 1767031549
 ---
 MCP Sampling for LLM delegation: SamplingProvider uses rmcp's peer.create_message() to delegate LLM operations to the MCP host (Claude) instead of external APIs. Design: (1) SamplingProvider stores Arc<RwLock<Option<Peer<RoleServer>>>> for thread-safe peer access, (2) Peer auto-configured from RequestContext on first tool call in call_tool(), (3) Implements LlmProvider trait with complete() and analyze_for_capture() methods, (4) Shared across HTTP handler clones via clone(). Benefits: zero API key configuration when running as MCP server, leverages host's model capabilities. Trade-offs: requires MCP connection, dependent on host supporting sampling capability.
