@@ -56,7 +56,8 @@ src/
 │   ├── recall.rs            # RecallService (search)
 │   ├── sync.rs              # SyncService
 │   ├── consolidation.rs     # ConsolidationService
-│   └── context.rs           # ContextBuilderService
+│   ├── context.rs           # ContextBuilderService
+│   └── topic_index.rs       # TopicIndexService (topic → memory map)
 │
 ├── git/                      # Git operations
 │   ├── notes.rs             # Git notes CRUD
@@ -78,7 +79,9 @@ src/
 ├── hooks/                    # Claude Code hooks
 │   ├── mod.rs               # HookHandler trait
 │   ├── session_start.rs     # Context injection
-│   ├── user_prompt.rs       # Signal detection
+│   ├── user_prompt.rs       # Signal detection + search intent
+│   ├── search_intent.rs     # Search intent detection (6 types)
+│   ├── search_context.rs    # Adaptive context building
 │   ├── post_tool_use.rs     # Related memory surfacing
 │   ├── pre_compact.rs       # Auto-capture before compaction
 │   └── stop.rs              # Session analysis, sync
@@ -117,6 +120,9 @@ src/
 
 tests/
 └── integration_test.rs      # Integration tests
+
+benches/
+└── search_intent.rs         # Performance benchmarks
 
 docs/spec/active/2025-12-28-subcog-rust-rewrite/
 ├── README.md                # Spec overview
@@ -197,6 +203,85 @@ subcog hook post-tool-use
 subcog hook pre-compact
 subcog hook stop
 ```
+
+## Proactive Memory Surfacing
+
+The proactive memory surfacing system automatically detects search intent in user prompts and injects relevant memories into the context. This enables the AI assistant to leverage prior decisions, patterns, and learnings without explicit recall commands.
+
+### Search Intent Detection
+
+When a user prompt is processed, the system detects one of six intent types:
+
+| Intent Type | Trigger Patterns | Example |
+|-------------|-----------------|---------|
+| **HowTo** | "how do I...", "how to...", "implement...", "create..." | "How do I implement authentication?" |
+| **Location** | "where is...", "find...", "locate..." | "Where is the database config?" |
+| **Explanation** | "what is...", "explain...", "describe..." | "What is the ServiceContainer?" |
+| **Comparison** | "difference between...", "vs", "compare..." | "PostgreSQL vs SQLite?" |
+| **Troubleshoot** | "error...", "fix...", "not working...", "debug..." | "Why is this test failing?" |
+| **General** | "search...", "show me..." | "Search for recent decisions" |
+
+Detection uses a hybrid approach:
+1. **Keyword detection**: Fast pattern matching (<10ms)
+2. **LLM classification**: Enhanced accuracy with 200ms timeout
+3. **Hybrid mode**: Combines both for best results
+
+### Adaptive Memory Injection
+
+Based on detected intent confidence:
+
+| Confidence | Memory Count | Behavior |
+|------------|--------------|----------|
+| ≥ 0.8 (high) | 15 memories | Full context injection |
+| ≥ 0.5 (medium) | 10 memories | Standard injection |
+| < 0.5 (low) | 5 memories | Minimal injection |
+
+Namespace weights are applied based on intent type:
+- **HowTo**: Prioritizes `patterns`, `learnings`
+- **Troubleshoot**: Prioritizes `blockers`, `learnings`
+- **Explanation/Location**: Prioritizes `decisions`, `context`
+- **Comparison**: Prioritizes `decisions`, `patterns`
+
+### MCP Resources
+
+New MCP resources for topic-based access:
+
+```
+subcog://topics              # List all topics with memory counts
+subcog://topics/{topic}      # Get memories for a specific topic
+subcog://namespaces          # List all namespaces
+subcog://namespaces/{ns}     # Get memories in a namespace
+```
+
+### MCP Prompts
+
+New prompts for context-aware operations:
+
+| Prompt | Description |
+|--------|-------------|
+| `search_with_context` | Search with intent-aware weighting |
+| `research_topic` | Deep-dive into a topic with related memories |
+| `capture_decision` | Capture with guided namespace selection |
+
+### Configuration
+
+Environment variables for search intent:
+
+```bash
+SUBCOG_SEARCH_INTENT_ENABLED=true       # Enable/disable detection
+SUBCOG_SEARCH_INTENT_USE_LLM=true       # Enable LLM classification
+SUBCOG_SEARCH_INTENT_LLM_TIMEOUT_MS=200 # LLM timeout in milliseconds
+SUBCOG_SEARCH_INTENT_MIN_CONFIDENCE=0.5 # Minimum confidence threshold
+```
+
+### Graceful Degradation
+
+The system degrades gracefully when components are unavailable:
+
+- **LLM unavailable**: Falls back to keyword-only detection
+- **Embeddings down**: Falls back to text search (BM25)
+- **Index down**: Skips memory injection, continues processing
+- **Low confidence**: Reduces memory count, may skip injection
 
 ## Code Style Requirements
 
