@@ -3,6 +3,11 @@ created_at: 1767005684
 id: 3bfdd7514479a7cf
 namespace: learnings
 status: active
+tags:
+- cli
+- test-capture
+- command-line
+- terminal-testing
 updated_at: 1767005684
 ---
 Test capture from CLI
