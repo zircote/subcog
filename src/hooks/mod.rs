@@ -19,7 +19,10 @@ pub use pre_compact::PreCompactHandler;
 pub use search_context::{
     AdaptiveContextConfig, InjectedMemory, MemoryContext, NamespaceWeights, SearchContextBuilder,
 };
-pub use search_intent::{DetectionSource, SearchIntent, SearchIntentType, detect_search_intent};
+pub use search_intent::{
+    DetectionSource, SearchIntent, SearchIntentType, classify_intent_with_llm,
+    detect_search_intent, detect_search_intent_hybrid, detect_search_intent_with_timeout,
+};
 pub use session_start::SessionStartHandler;
 pub use stop::StopHandler;
 pub use user_prompt::UserPromptHandler;
