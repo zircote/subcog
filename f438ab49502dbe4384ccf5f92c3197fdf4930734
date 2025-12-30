@@ -6,10 +6,10 @@ namespace: patterns
 status: active
 tags:
 - cross-repo-deployments
-- pr-based-deployments
-- github-actions
-- audit-trail
-- prevent-direct-pushes
+- pull-request-deployments
+- github-actions-pattern
+- deployment-review-audit
+- automated-workflow-safety
 updated_at: 1767059313
 ---
 Cross-repository deployments should always use PRs instead of direct pushes:
