@@ -30,25 +30,20 @@ jobs:
         include:
           - target: x86_64-apple-darwin
             os: macos-latest
-            suffix: ''
           - target: aarch64-apple-darwin
             os: macos-latest
-            suffix: ''
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            suffix: ''
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            suffix: ''
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            suffix: ''
     steps:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
@@ -65,6 +60,7 @@ jobs:
           sudo apt-get install -y musl-tools
 
       - name: Build binary
+        shell: bash
         env:
           TARGET: ${{ matrix.target }}
         run: |
@@ -75,6 +71,7 @@ jobs:
 
       - name: Determine version
         id: version
+        shell: bash
         env:
           REF_NAME: ${{ github.ref_name }}
           INPUT_VERSION: ${{ inputs.version }}
@@ -96,7 +93,7 @@ jobs:
           ARCHIVE_NAME="subcog-${VERSION}-${TARGET}.tar.gz"
 
           mkdir -p dist
-          cp "target/${TARGET}/release/${BINARY_NAME}${{ matrix.suffix }}" dist/
+          cp "target/${TARGET}/release/${BINARY_NAME}" dist/
           cp README.md LICENSE dist/ 2>/dev/null || true
 
           cd dist
@@ -146,6 +143,7 @@ jobs:
 
       - name: Determine version
         id: version
+        shell: bash
         env:
           REF_NAME: ${{ github.ref_name }}
           INPUT_VERSION: ${{ inputs.version }}
@@ -153,12 +151,11 @@ jobs:
           if [[ -n "$INPUT_VERSION" ]]; then
             VERSION="$INPUT_VERSION"
             TAG="v${VERSION}"
-            # Create tag if needed
+            # Ensure the corresponding tag already exists
             if ! git rev-parse "$TAG" >/dev/null 2>&1; then
-              git config user.name "github-actions[bot]"
-              git config user.email "github-actions[bot]@users.noreply.github.com"
-              git tag -a "$TAG" -m "Release $TAG"
-              git push origin "$TAG"
+              echo "Error: Expected tag '$TAG' for version '$VERSION' does not exist."
+              echo "Please create the tag (e.g., 'git tag -a $TAG -m \"Release $TAG\"' && git push origin $TAG') before running this workflow."
+              exit 1
             fi
           else
             TAG="$REF_NAME"
@@ -208,6 +205,7 @@ jobs:
     steps:
       - name: Get release info
         id: release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.release.outputs.version }}
@@ -221,10 +219,38 @@ jobs:
           DARWIN_ARM64_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/subcog-${VERSION}-aarch64-apple-darwin.tar.gz"
           LINUX_AMD64_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/subcog-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
 
-          # Download and calculate SHA256
-          curl -sSL "$DARWIN_AMD64_URL" -o darwin-amd64.tar.gz
-          curl -sSL "$DARWIN_ARM64_URL" -o darwin-arm64.tar.gz
-          curl -sSL "$LINUX_AMD64_URL" -o linux-amd64.tar.gz
+          # Function to download with retry logic
+          retry_download() {
+            url="$1"
+            output="$2"
+            max_attempts=5
+            delay=5
+
+            attempt=1
+            while [ "$attempt" -le "$max_attempts" ]; do
+              if curl -fSL "$url" -o "$output"; then
+                return 0
+              fi
+
+              echo "Download of $url failed (attempt $attempt/$max_attempts)."
+
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "Retrying in ${delay}s..."
+                sleep "$delay"
+                delay=$((delay * 2))
+              fi
+
+              attempt=$((attempt + 1))
+            done
+
+            echo "Failed to download $url after $max_attempts attempts."
+            exit 1
+          }
+
+          # Download and calculate SHA256 (with retries to handle propagation delays)
+          retry_download "$DARWIN_AMD64_URL" darwin-amd64.tar.gz
+          retry_download "$DARWIN_ARM64_URL" darwin-arm64.tar.gz
+          retry_download "$LINUX_AMD64_URL" linux-amd64.tar.gz
 
           DARWIN_AMD64_SHA=$(shasum -a 256 darwin-amd64.tar.gz | cut -d' ' -f1)
           DARWIN_ARM64_SHA=$(shasum -a 256 darwin-arm64.tar.gz | cut -d' ' -f1)
@@ -245,6 +271,7 @@ jobs:
           path: homebrew-tap
 
       - name: Update formula
+        shell: bash
         env:
           VERSION: ${{ steps.release.outputs.version }}
           DARWIN_AMD64_URL: ${{ steps.release.outputs.darwin_amd64_url }}
@@ -256,7 +283,7 @@ jobs:
         run: |
           cd homebrew-tap
 
-          cat > Formula/subcog.rb << FORMULA
+          cat > Formula/subcog.rb << 'FORMULA'
           class Subcog < Formula
             desc "A persistent memory system for AI coding assistants"
             homepage "https://github.com/zircote/subcog"
@@ -292,9 +319,9 @@ jobs:
           cat Formula/subcog.rb
 
       - name: Commit and push
+        shell: bash
         env:
           VERSION: ${{ steps.release.outputs.version }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           cd homebrew-tap
 
@@ -303,9 +330,11 @@ jobs:
             exit 0
           fi
 
-          git remote set-url origin "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/zircote/homebrew-tap.git"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/subcog.rb
-          git commit -m "subcog ${VERSION}"
-          git push
+          git commit -m "chore(formula): bump subcog to ${VERSION}"
+          if ! git push; then
+            echo "Failed to push Homebrew tap changes. Please check for conflicts, branch protection rules, or permission issues." >&2
+            exit 1
+          fi
