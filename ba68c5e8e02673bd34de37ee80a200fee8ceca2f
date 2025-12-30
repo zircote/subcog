@@ -6,8 +6,8 @@ status: active
 tags:
 - cli
 - test-capture
-- command-line
-- terminal-testing
+- command-line-test
+- capture-notes
 updated_at: 1767005684
 ---
 Test capture from CLI
