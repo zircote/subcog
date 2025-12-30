@@ -1,0 +1,23 @@
+{
+  "name": "subcog",
+  "version": "0.1.0",
+  "description": "Persistent memory system for AI coding assistants. Captures decisions, learnings, and context from coding sessions and surfaces them when relevant.",
+  "author": {
+    "name": "Robert Allen",
+    "email": "zircote@gmail.com",
+    "url": "https://github.com/zircote"
+  },
+  "homepage": "https://github.com/zircote/subcog",
+  "repository": "https://github.com/zircote/subcog",
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "persistence",
+    "context",
+    "git-notes",
+    "vector-search",
+    "mcp",
+    "claude-code",
+    "semantic-search"
+  ]
+}
