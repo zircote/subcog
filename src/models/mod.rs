@@ -14,4 +14,4 @@ pub use consolidation::{EdgeType, MemoryTier, RetentionScore};
 pub use domain::{Domain, MemoryStatus, Namespace};
 pub use events::MemoryEvent;
 pub use memory::{Memory, MemoryId, MemoryResult};
-pub use search::{SearchFilter, SearchHit, SearchMode, SearchResult};
+pub use search::{DetailLevel, SearchFilter, SearchHit, SearchMode, SearchResult};

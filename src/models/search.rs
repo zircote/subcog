@@ -15,6 +15,60 @@ pub enum SearchMode {
     Hybrid,
 }
 
+/// Level of detail to include in search results.
+///
+/// Controls response size and token usage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DetailLevel {
+    /// Frontmatter only: id, namespace, domain, tags, score.
+    /// No content included.
+    Light,
+    /// Frontmatter + summary: truncated content (~200 chars).
+    #[default]
+    Medium,
+    /// Full memory content and all metadata.
+    Everything,
+}
+
+impl DetailLevel {
+    /// Returns the level as a string slice.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Light => "light",
+            Self::Medium => "medium",
+            Self::Everything => "everything",
+        }
+    }
+
+    /// Parses a detail level from a string.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "light" | "minimal" | "frontmatter" => Some(Self::Light),
+            "medium" | "summary" | "default" => Some(Self::Medium),
+            "everything" | "full" | "all" => Some(Self::Everything),
+            _ => None,
+        }
+    }
+
+    /// Returns the content truncation length for this level.
+    #[must_use]
+    pub const fn content_length(&self) -> Option<usize> {
+        match self {
+            Self::Light => Some(0),    // No content
+            Self::Medium => Some(200), // Summary
+            Self::Everything => None,  // Full content
+        }
+    }
+}
+
+impl fmt::Display for DetailLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 impl SearchMode {
     /// Returns the mode as a string slice.
     #[must_use]
@@ -42,8 +96,14 @@ pub struct SearchFilter {
     pub domains: Vec<Domain>,
     /// Filter by statuses.
     pub statuses: Vec<MemoryStatus>,
-    /// Filter by tags (AND logic).
+    /// Filter by tags (AND logic - must have ALL).
     pub tags: Vec<String>,
+    /// Filter by tags (OR logic - must have ANY).
+    pub tags_any: Vec<String>,
+    /// Exclude memories with these tags.
+    pub excluded_tags: Vec<String>,
+    /// Filter by source pattern (glob-style).
+    pub source_pattern: Option<String>,
     /// Minimum creation timestamp.
     pub created_after: Option<u64>,
     /// Maximum creation timestamp.
@@ -61,6 +121,9 @@ impl SearchFilter {
             domains: Vec::new(),
             statuses: Vec::new(),
             tags: Vec::new(),
+            tags_any: Vec::new(),
+            excluded_tags: Vec::new(),
+            source_pattern: None,
             created_after: None,
             created_before: None,
             min_score: None,
@@ -88,10 +151,52 @@ impl SearchFilter {
         self
     }
 
+    /// Adds a tag filter (AND logic - must have ALL).
+    #[must_use]
+    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
+        self.tags.push(tag.into());
+        self
+    }
+
+    /// Adds a tag filter (OR logic - must have ANY).
+    #[must_use]
+    pub fn with_tag_any(mut self, tag: impl Into<String>) -> Self {
+        self.tags_any.push(tag.into());
+        self
+    }
+
+    /// Adds an excluded tag filter.
+    #[must_use]
+    pub fn with_excluded_tag(mut self, tag: impl Into<String>) -> Self {
+        self.excluded_tags.push(tag.into());
+        self
+    }
+
+    /// Sets the source pattern filter (glob-style).
+    #[must_use]
+    pub fn with_source_pattern(mut self, pattern: impl Into<String>) -> Self {
+        self.source_pattern = Some(pattern.into());
+        self
+    }
+
     /// Sets the minimum score threshold.
     #[must_use]
     pub const fn with_min_score(mut self, score: f32) -> Self {
         self.min_score = Some(score);
+        self
+    }
+
+    /// Sets the `created_after` filter.
+    #[must_use]
+    pub const fn with_created_after(mut self, timestamp: u64) -> Self {
+        self.created_after = Some(timestamp);
+        self
+    }
+
+    /// Sets the `created_before` filter.
+    #[must_use]
+    pub const fn with_created_before(mut self, timestamp: u64) -> Self {
+        self.created_before = Some(timestamp);
         self
     }
 
@@ -102,6 +207,9 @@ impl SearchFilter {
             && self.domains.is_empty()
             && self.statuses.is_empty()
             && self.tags.is_empty()
+            && self.tags_any.is_empty()
+            && self.excluded_tags.is_empty()
+            && self.source_pattern.is_none()
             && self.created_after.is_none()
             && self.created_before.is_none()
             && self.min_score.is_none()

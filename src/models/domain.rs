@@ -165,6 +165,21 @@ impl Domain {
     pub const fn is_global(&self) -> bool {
         self.organization.is_none() && self.project.is_none() && self.repository.is_none()
     }
+
+    /// Returns the scope string for URN construction.
+    ///
+    /// - `"project"` for project-scoped (org + repo)
+    /// - `"org/{name}"` for organization-scoped
+    /// - `"global"` for global domain
+    #[must_use]
+    pub fn to_scope_string(&self) -> String {
+        match (&self.organization, &self.repository) {
+            (Some(org), Some(repo)) => format!("{org}/{repo}"),
+            (Some(org), None) => format!("org/{org}"),
+            (None, Some(repo)) => repo.clone(),
+            (None, None) => "project".to_string(),
+        }
+    }
 }
 
 impl fmt::Display for Domain {
