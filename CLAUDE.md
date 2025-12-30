@@ -586,6 +586,8 @@ The following hooks run automatically on file save:
 
 ## Specification Documents
 
+### Active Specifications
+
 Full specification in `docs/spec/active/2025-12-28-subcog-rust-rewrite/`:
 
 - [REQUIREMENTS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/REQUIREMENTS.md) - Product requirements
@@ -594,3 +596,22 @@ Full specification in `docs/spec/active/2025-12-28-subcog-rust-rewrite/`:
 - [DECISIONS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/DECISIONS.md) - Architecture decision records
 - [PROGRESS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/PROGRESS.md) - Implementation progress
 - always run `make ci` before commiting or declaring success ensuring all gates pass
+
+### Completed Specifications
+
+- **[Proactive Memory Surfacing](docs/spec/completed/2025-12-30-issue-15-memory-surfacing/)** (2025-12-30)
+  - **Issues**: [#15](https://github.com/zircote/subcog/issues/15), [#24](https://github.com/zircote/subcog/issues/24)
+  - **PR**: [#23](https://github.com/zircote/subcog/pull/23)
+  - **Outcome**: Success - All 77 tasks delivered, 388 tests passing
+  - **Features**:
+    - Search intent detection (6 types: HowTo, Location, Explanation, Comparison, Troubleshoot, General)
+    - Hybrid detection (keyword <10ms + optional LLM <200ms)
+    - Namespace weighting for intent-specific prioritization
+    - 3 new MCP resources (search, topics, topics/{topic})
+    - 6 new MCP prompts (intent_search, query_suggest, discover, generate_decision, generate_tutorial, context_capture)
+    - Hook response format fixes (all 5 hooks now compliant with Claude Code spec)
+  - **Key Learnings**:
+    - Rust `map_or_else` preferred over `if let Some(...)` per clippy::option_if_let_else
+    - Claude Code hook format: `{hookSpecificOutput: {hookEventName, additionalContext}}`
+    - HashSet deduplication requires `mut` AND `.insert()` call
+    - Graceful degradation testing critical for production readiness
