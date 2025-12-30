@@ -2,15 +2,12 @@
 //!
 //! Builds context for Claude Code hooks, selecting the most relevant memories.
 
-use crate::config::Config;
+use crate::Result;
 use crate::models::{Memory, Namespace, SearchFilter, SearchMode};
 use crate::services::RecallService;
-use crate::Result;
 
 /// Service for building context for AI assistants.
 pub struct ContextBuilderService {
-    /// Configuration.
-    config: Config,
     /// Recall service for searching memories.
     recall: Option<RecallService>,
 }
@@ -18,18 +15,14 @@ pub struct ContextBuilderService {
 impl ContextBuilderService {
     /// Creates a new context builder service.
     #[must_use]
-    pub fn new(config: Config) -> Self {
-        Self {
-            config,
-            recall: None,
-        }
+    pub const fn new() -> Self {
+        Self { recall: None }
     }
 
     /// Creates a context builder with a recall service.
     #[must_use]
-    pub fn with_recall(config: Config, recall: RecallService) -> Self {
+    pub const fn with_recall(recall: RecallService) -> Self {
         Self {
-            config,
             recall: Some(recall),
         }
     }
@@ -91,10 +84,13 @@ impl ContextBuilderService {
     pub fn build_query_context(&self, query: &str, max_tokens: usize) -> Result<String> {
         let max_chars = max_tokens * 4;
 
-        let recall = self.recall.as_ref().ok_or_else(|| crate::Error::OperationFailed {
-            operation: "build_query_context".to_string(),
-            cause: "No recall service configured".to_string(),
-        })?;
+        let recall = self
+            .recall
+            .as_ref()
+            .ok_or_else(|| crate::Error::OperationFailed {
+                operation: "build_query_context".to_string(),
+                cause: "No recall service configured".to_string(),
+            })?;
 
         // Search for relevant memories
         let result = recall.search(query, SearchMode::Hybrid, &SearchFilter::new(), 10)?;
@@ -127,7 +123,11 @@ impl ContextBuilderService {
     }
 
     /// Gets relevant memories for a namespace.
-    fn get_relevant_memories(&self, namespace: Namespace, limit: usize) -> Result<Option<Vec<Memory>>> {
+    const fn get_relevant_memories(
+        &self,
+        _namespace: Namespace,
+        _limit: usize,
+    ) -> Result<Option<Vec<Memory>>> {
         // Without a recall service, return None
         if self.recall.is_none() {
             return Ok(None);
@@ -139,7 +139,7 @@ impl ContextBuilderService {
 
     /// Estimates the token count for a string.
     #[must_use]
-    pub fn estimate_tokens(text: &str) -> usize {
+    pub const fn estimate_tokens(text: &str) -> usize {
         // Rough estimation: ~4 characters per token for English text
         text.len() / 4
     }
@@ -147,7 +147,7 @@ impl ContextBuilderService {
 
 impl Default for ContextBuilderService {
     fn default() -> Self {
-        Self::new(Config::default())
+        Self::new()
     }
 }
 
@@ -185,25 +185,18 @@ fn truncate_context(context: &str, max_chars: usize) -> String {
     // Try to truncate at a section boundary
     let truncated = &context[..max_chars];
     if let Some(last_section) = truncated.rfind("\n##") {
-        format!("{}\n\n_[Context truncated due to token limit]_", &context[..last_section])
+        format!(
+            "{}\n\n_[Context truncated due to token limit]_",
+            &context[..last_section]
+        )
     } else if let Some(last_newline) = truncated.rfind('\n') {
-        format!("{}\n\n_[Context truncated due to token limit]_", &context[..last_newline])
+        format!(
+            "{}\n\n_[Context truncated due to token limit]_",
+            &context[..last_newline]
+        )
     } else {
         format!("{}...", &context[..max_chars - 3])
     }
-}
-
-/// Context for a session.
-#[derive(Debug, Clone)]
-pub struct SessionContext {
-    /// The formatted context string.
-    pub content: String,
-    /// Number of memories included.
-    pub memory_count: usize,
-    /// Estimated token count.
-    pub token_estimate: usize,
-    /// Whether context was truncated.
-    pub was_truncated: bool,
 }
 
 #[cfg(test)]
@@ -230,7 +223,8 @@ mod tests {
         let short = "Short text";
         assert_eq!(truncate_content(short, 100), short);
 
-        let long = "This is a longer text that should be truncated because it exceeds the maximum length";
+        let long =
+            "This is a longer text that should be truncated because it exceeds the maximum length";
         let truncated = truncate_content(long, 30);
         assert!(truncated.ends_with("..."));
         assert!(truncated.len() <= 30);
@@ -238,7 +232,8 @@ mod tests {
 
     #[test]
     fn test_truncate_context() {
-        let context = "## Section 1\nContent 1\n\n## Section 2\nContent 2\n\n## Section 3\nContent 3";
+        let context =
+            "## Section 1\nContent 1\n\n## Section 2\nContent 2\n\n## Section 3\nContent 3";
 
         // Should fit without truncation
         let result = truncate_context(context, 1000);

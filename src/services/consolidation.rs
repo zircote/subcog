@@ -2,31 +2,27 @@
 //!
 //! Manages memory lifecycle, clustering, and archival.
 
-use crate::config::SubcogConfig;
+use crate::Result;
 use crate::models::{EdgeType, Memory, MemoryStatus, MemoryTier, Namespace, RetentionScore};
 use crate::storage::traits::PersistenceBackend;
-use crate::Result;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Service for consolidating and managing memory lifecycle.
 pub struct ConsolidationService<P: PersistenceBackend> {
-    /// Configuration.
-    config: SubcogConfig,
     /// Persistence backend for memory storage.
     persistence: P,
-    /// Access counts for memories (memory_id -> count).
+    /// Access counts for memories (`memory_id` -> count).
     access_counts: HashMap<String, u32>,
-    /// Last access times (memory_id -> timestamp).
+    /// Last access times (`memory_id` -> timestamp).
     last_access: HashMap<String, u64>,
 }
 
 impl<P: PersistenceBackend> ConsolidationService<P> {
     /// Creates a new consolidation service.
     #[must_use]
-    pub fn new(config: SubcogConfig, persistence: P) -> Self {
+    pub fn new(persistence: P) -> Self {
         Self {
-            config,
             persistence,
             access_counts: HashMap::new(),
             last_access: HashMap::new(),
@@ -85,7 +81,13 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     fn calculate_retention_score(&self, memory_id: &str, now: u64) -> RetentionScore {
         // Access frequency: normalized by max observed accesses
         let access_count = self.access_counts.get(memory_id).copied().unwrap_or(0);
-        let max_accesses = self.access_counts.values().max().copied().unwrap_or(1).max(1);
+        let max_accesses = self
+            .access_counts
+            .values()
+            .max()
+            .copied()
+            .unwrap_or(1)
+            .max(1);
         let access_frequency = (access_count as f32) / (max_accesses as f32);
 
         // Recency: decay over time (30 days = 0.5 score)
@@ -100,10 +102,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     }
 
     /// Detects potential contradictions between memories.
-    fn detect_contradictions(
-        &self,
-        memory_ids: &[crate::models::MemoryId],
-    ) -> Result<usize> {
+    fn detect_contradictions(&self, memory_ids: &[crate::models::MemoryId]) -> Result<usize> {
         let mut contradiction_count = 0;
         let mut namespace_memories: HashMap<Namespace, Vec<&crate::models::MemoryId>> =
             HashMap::new();
@@ -120,7 +119,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
 
         // Check for potential contradictions within each namespace
         // This is a simple heuristic - real implementation would use LLM
-        for (_, ids) in &namespace_memories {
+        for ids in namespace_memories.values() {
             if ids.len() > 10 {
                 // Flag potential contradictions when many memories in same namespace
                 contradiction_count += ids.len() / 10;
@@ -140,26 +139,25 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         source_id: &crate::models::MemoryId,
         target_id: &crate::models::MemoryId,
     ) -> Result<Memory> {
-        let source = self.persistence.get(source_id)?.ok_or_else(|| {
-            crate::Error::OperationFailed {
-                operation: "merge_memories".to_string(),
-                cause: format!("Source memory not found: {}", source_id.as_str()),
-            }
-        })?;
+        let source =
+            self.persistence
+                .get(source_id)?
+                .ok_or_else(|| crate::Error::OperationFailed {
+                    operation: "merge_memories".to_string(),
+                    cause: format!("Source memory not found: {}", source_id.as_str()),
+                })?;
 
-        let target = self.persistence.get(target_id)?.ok_or_else(|| {
-            crate::Error::OperationFailed {
-                operation: "merge_memories".to_string(),
-                cause: format!("Target memory not found: {}", target_id.as_str()),
-            }
-        })?;
+        let target =
+            self.persistence
+                .get(target_id)?
+                .ok_or_else(|| crate::Error::OperationFailed {
+                    operation: "merge_memories".to_string(),
+                    cause: format!("Target memory not found: {}", target_id.as_str()),
+                })?;
 
         // Create merged memory
         let now = current_timestamp();
-        let merged_content = format!(
-            "{}\n\n---\n\n{}",
-            target.content, source.content
-        );
+        let merged_content = format!("{}\n\n---\n\n{}", target.content, source.content);
 
         // Combine tags
         let mut merged_tags = target.tags.clone();
@@ -202,7 +200,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     /// # Errors
     ///
     /// Returns an error if linking fails.
-    pub fn link_memories(
+    pub const fn link_memories(
         &self,
         _from_id: &crate::models::MemoryId,
         _to_id: &crate::models::MemoryId,
@@ -238,7 +236,7 @@ pub struct ConsolidationStats {
 impl ConsolidationStats {
     /// Returns true if no work was done.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.processed == 0 && self.archived == 0 && self.merged == 0 && self.contradictions == 0
     }
 
@@ -313,8 +311,7 @@ mod tests {
             |d| d.path().to_path_buf(),
         );
         let backend = FilesystemBackend::new(&path);
-        let config = SubcogConfig::default();
-        let mut service = ConsolidationService::new(config, backend);
+        let mut service = ConsolidationService::new(backend);
 
         service.record_access("memory_1");
         service.record_access("memory_1");
@@ -332,8 +329,7 @@ mod tests {
             |d| d.path().to_path_buf(),
         );
         let backend = FilesystemBackend::new(&path);
-        let config = SubcogConfig::default();
-        let mut service = ConsolidationService::new(config, backend);
+        let mut service = ConsolidationService::new(backend);
 
         // No access - should be cold/archive
         let tier = service.get_suggested_tier("unknown_memory");
@@ -357,8 +353,7 @@ mod tests {
             |d| d.path().to_path_buf(),
         );
         let backend = FilesystemBackend::new(&path);
-        let config = SubcogConfig::default();
-        let mut service = ConsolidationService::new(config, backend);
+        let mut service = ConsolidationService::new(backend);
 
         let result = service.consolidate();
         assert!(result.is_ok());
@@ -366,7 +361,7 @@ mod tests {
         let stats = result.ok();
         assert!(stats.is_some());
         let stats = stats.as_ref();
-        assert!(stats.map_or(false, |s| s.is_empty()));
+        assert!(stats.is_some_and(super::ConsolidationStats::is_empty));
     }
 
     #[test]
@@ -384,8 +379,7 @@ mod tests {
         let _ = backend.store(&memory1);
         let _ = backend.store(&memory2);
 
-        let config = SubcogConfig::default();
-        let mut service = ConsolidationService::new(config, backend);
+        let mut service = ConsolidationService::new(backend);
 
         let result = service.consolidate();
         assert!(result.is_ok());
@@ -403,8 +397,7 @@ mod tests {
             |d| d.path().to_path_buf(),
         );
         let backend = FilesystemBackend::new(&path);
-        let config = SubcogConfig::default();
-        let service = ConsolidationService::new(config, backend);
+        let service = ConsolidationService::new(backend);
 
         let now = current_timestamp();
         let score = service.calculate_retention_score("test_memory", now);

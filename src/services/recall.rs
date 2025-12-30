@@ -2,8 +2,9 @@
 //!
 //! Searches for memories using hybrid (vector + BM25) search with RRF fusion.
 
-use crate::config::Config;
-use crate::models::{Memory, MemoryId, MemoryStatus, SearchFilter, SearchHit, SearchMode, SearchResult};
+use crate::models::{
+    Memory, MemoryId, MemoryStatus, SearchFilter, SearchHit, SearchMode, SearchResult,
+};
 use crate::storage::index::SqliteBackend;
 use crate::storage::traits::IndexBackend;
 use crate::{Error, Result};
@@ -12,29 +13,21 @@ use std::time::Instant;
 
 /// Service for searching and retrieving memories.
 pub struct RecallService {
-    /// Configuration.
-    config: Config,
-    /// SQLite index backend.
+    /// `SQLite` index backend.
     index: Option<SqliteBackend>,
 }
 
 impl RecallService {
     /// Creates a new recall service.
     #[must_use]
-    pub fn new(config: Config) -> Self {
-        Self {
-            config,
-            index: None,
-        }
+    pub const fn new() -> Self {
+        Self { index: None }
     }
 
     /// Creates a recall service with an index backend.
     #[must_use]
-    pub fn with_index(config: Config, index: SqliteBackend) -> Self {
-        Self {
-            config,
-            index: Some(index),
-        }
+    pub const fn with_index(index: SqliteBackend) -> Self {
+        Self { index: Some(index) }
     }
 
     /// Searches for memories matching a query.
@@ -42,6 +35,7 @@ impl RecallService {
     /// # Errors
     ///
     /// Returns an error if the search fails.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn search(
         &self,
         query: &str,
@@ -62,6 +56,7 @@ impl RecallService {
             SearchMode::Hybrid => self.hybrid_search(query, filter, limit)?,
         };
 
+        // Safe cast: u128 milliseconds will practically never exceed u64::MAX
         let execution_time_ms = start.elapsed().as_millis() as u64;
         let total_count = memories.len();
 
@@ -69,6 +64,46 @@ impl RecallService {
             memories,
             total_count,
             mode,
+            execution_time_ms,
+        })
+    }
+
+    /// Lists all memories, optionally filtered by namespace.
+    ///
+    /// Unlike `search`, this doesn't require a query and returns all matching memories.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the index is not available.
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn list_all(&self, filter: &SearchFilter, limit: usize) -> Result<SearchResult> {
+        let start = Instant::now();
+
+        let index = self.index.as_ref().ok_or_else(|| Error::OperationFailed {
+            operation: "list_all".to_string(),
+            cause: "No index backend configured".to_string(),
+        })?;
+
+        let results = index.list_all(filter, limit)?;
+
+        // Convert to SearchHits
+        let memories: Vec<SearchHit> = results
+            .into_iter()
+            .map(|(id, score)| SearchHit {
+                memory: create_placeholder_memory(id),
+                score,
+                vector_score: None,
+                bm25_score: None,
+            })
+            .collect();
+
+        let execution_time_ms = start.elapsed().as_millis() as u64;
+        let total_count = memories.len();
+
+        Ok(SearchResult {
+            memories,
+            total_count,
+            mode: SearchMode::Text,
             execution_time_ms,
         })
     }
@@ -103,7 +138,7 @@ impl RecallService {
     }
 
     /// Performs vector similarity search.
-    fn vector_search(
+    const fn vector_search(
         &self,
         _query: &str,
         _filter: &SearchFilter,
@@ -133,7 +168,7 @@ impl RecallService {
 
     /// Applies Reciprocal Rank Fusion to combine search results.
     ///
-    /// RRF score = sum(1 / (k + rank_i)) for each ranking
+    /// RRF score = sum(1 / (k + `rank_i`)) for each ranking
     fn rrf_fusion(
         &self,
         text_results: &[SearchHit],
@@ -164,10 +199,8 @@ impl RecallService {
                 .entry(id)
                 .and_modify(|(s, existing)| {
                     *s += rrf_score;
-                    // Merge scores
-                    if let Some(e) = existing {
-                        e.vector_score = hit.vector_score;
-                    }
+                    // Merge vector score into existing hit
+                    merge_vector_score(existing, hit.vector_score);
                 })
                 .or_insert((rrf_score, Some(hit.clone())));
         }
@@ -183,7 +216,11 @@ impl RecallService {
             })
             .collect();
 
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results.truncate(limit);
 
         results
@@ -194,7 +231,7 @@ impl RecallService {
     /// # Errors
     ///
     /// Returns an error if the memory cannot be found.
-    pub fn get_by_id(&self, _id: &MemoryId) -> Result<Option<Memory>> {
+    pub const fn get_by_id(&self, _id: &MemoryId) -> Result<Option<Memory>> {
         // Would need persistence backend to implement
         Ok(None)
     }
@@ -204,20 +241,27 @@ impl RecallService {
     /// # Errors
     ///
     /// Returns an error if retrieval fails.
-    pub fn recent(&self, _limit: usize, _filter: &SearchFilter) -> Result<Vec<Memory>> {
+    pub const fn recent(&self, _limit: usize, _filter: &SearchFilter) -> Result<Vec<Memory>> {
         // Would need persistence backend to implement
         Ok(Vec::new())
     }
 }
 
+/// Merges a vector score into an existing search hit.
+const fn merge_vector_score(existing: &mut Option<SearchHit>, vector_score: Option<f32>) {
+    if let Some(e) = existing {
+        e.vector_score = vector_score;
+    }
+}
+
 impl Default for RecallService {
     fn default() -> Self {
-        Self::new(Config::default())
+        Self::new()
     }
 }
 
 /// Creates a placeholder memory for search results.
-fn create_placeholder_memory(id: MemoryId) -> Memory {
+const fn create_placeholder_memory(id: MemoryId) -> Memory {
     use crate::models::{Domain, Namespace};
 
     Memory {
@@ -282,7 +326,7 @@ mod tests {
             .index(&create_test_memory("id2", "Python scripting"))
             .unwrap();
 
-        let service = RecallService::with_index(Config::default(), index);
+        let service = RecallService::with_index(index);
 
         let result = service.search("Rust", SearchMode::Text, &SearchFilter::new(), 10);
         assert!(result.is_ok());
@@ -345,12 +389,8 @@ mod tests {
 
     #[test]
     fn test_hybrid_search_mode() {
-        let result = RecallService::default().search(
-            "test",
-            SearchMode::Hybrid,
-            &SearchFilter::new(),
-            10,
-        );
+        let result =
+            RecallService::default().search("test", SearchMode::Hybrid, &SearchFilter::new(), 10);
         // Will fail without backend, but tests the path
         assert!(result.is_err());
     }

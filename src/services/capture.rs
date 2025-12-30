@@ -4,7 +4,7 @@
 
 use crate::config::Config;
 use crate::git::{NotesManager, YamlFrontMatterParser};
-use crate::models::{CaptureRequest, CaptureResult, Domain, Memory, MemoryId, MemoryStatus};
+use crate::models::{CaptureRequest, CaptureResult, Memory, MemoryId, MemoryStatus};
 use crate::security::{ContentRedactor, SecretDetector};
 use crate::{Error, Result};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -72,7 +72,7 @@ impl CaptureService {
         // Create memory
         let memory = Memory {
             id: memory_id.clone(),
-            content: content.clone(),
+            content,
             namespace: request.namespace,
             domain: request.domain,
             status: MemoryStatus::Active,
@@ -195,7 +195,7 @@ pub struct ValidationResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::Namespace;
+    use crate::models::{Domain, Namespace};
 
     fn test_config() -> Config {
         Config::default()

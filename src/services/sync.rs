@@ -2,9 +2,9 @@
 //!
 //! Handles syncing memories with git remotes.
 
+use crate::Result;
 use crate::config::Config;
 use crate::git::RemoteManager;
-use crate::Result;
 
 /// Service for synchronizing memories with remote storage.
 pub struct SyncService {
@@ -15,7 +15,7 @@ pub struct SyncService {
 impl SyncService {
     /// Creates a new sync service.
     #[must_use]
-    pub fn new(config: Config) -> Self {
+    pub const fn new(config: Config) -> Self {
         Self { config }
     }
 
@@ -25,22 +25,25 @@ impl SyncService {
     ///
     /// Returns an error if the fetch fails.
     pub fn fetch(&self) -> Result<SyncStats> {
-        let repo_path = self.config.repo_path.as_ref().ok_or_else(|| {
-            crate::Error::OperationFailed {
-                operation: "fetch".to_string(),
-                cause: "No repository path configured".to_string(),
-            }
-        })?;
+        let repo_path =
+            self.config
+                .repo_path
+                .as_ref()
+                .ok_or_else(|| crate::Error::OperationFailed {
+                    operation: "fetch".to_string(),
+                    cause: "No repository path configured".to_string(),
+                })?;
 
         let remote = RemoteManager::new(repo_path);
 
         // Get default remote
-        let remote_name = remote.default_remote()?.ok_or_else(|| {
-            crate::Error::OperationFailed {
-                operation: "fetch".to_string(),
-                cause: "No remote configured".to_string(),
-            }
-        })?;
+        let remote_name =
+            remote
+                .default_remote()?
+                .ok_or_else(|| crate::Error::OperationFailed {
+                    operation: "fetch".to_string(),
+                    cause: "No remote configured".to_string(),
+                })?;
 
         // Fetch from remote
         let pulled = remote.fetch(&remote_name)?;
@@ -58,22 +61,25 @@ impl SyncService {
     ///
     /// Returns an error if the push fails.
     pub fn push(&self) -> Result<SyncStats> {
-        let repo_path = self.config.repo_path.as_ref().ok_or_else(|| {
-            crate::Error::OperationFailed {
-                operation: "push".to_string(),
-                cause: "No repository path configured".to_string(),
-            }
-        })?;
+        let repo_path =
+            self.config
+                .repo_path
+                .as_ref()
+                .ok_or_else(|| crate::Error::OperationFailed {
+                    operation: "push".to_string(),
+                    cause: "No repository path configured".to_string(),
+                })?;
 
         let remote = RemoteManager::new(repo_path);
 
         // Get default remote
-        let remote_name = remote.default_remote()?.ok_or_else(|| {
-            crate::Error::OperationFailed {
-                operation: "push".to_string(),
-                cause: "No remote configured".to_string(),
-            }
-        })?;
+        let remote_name =
+            remote
+                .default_remote()?
+                .ok_or_else(|| crate::Error::OperationFailed {
+                    operation: "push".to_string(),
+                    cause: "No remote configured".to_string(),
+                })?;
 
         // Push to remote
         let pushed = remote.push(&remote_name)?;
@@ -175,7 +181,7 @@ pub struct SyncStats {
 impl SyncStats {
     /// Returns true if the sync was a no-op.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.pushed == 0 && self.pulled == 0 && self.conflicts == 0
     }
 
