@@ -49,8 +49,6 @@ jobs:
             ${{ runner.os }}-cargo-docs-
 
       - name: Build documentation
-        env:
-          RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
         run: cargo doc --no-deps --all-features --document-private-items
 
       - name: Create index redirect
@@ -135,7 +133,7 @@ jobs:
       - name: Create Pull Request
         if: steps.update.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.ZIRCOTE_GH_PAGES_TOKEN }}
           BRANCH: ${{ steps.update.outputs.branch }}
           SOURCE_SHA: ${{ github.sha }}
         run: |
