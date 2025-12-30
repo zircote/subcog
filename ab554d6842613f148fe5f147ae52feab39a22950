@@ -1,0 +1,20 @@
+---
+created_at: 1767059214
+id: 1767059214750004000
+namespace: decisions
+status: active
+updated_at: 1767059214
+---
+Fixed GitHub workflows for subcog project:
+
+1. **ci.yml**: Restored original SHA-pinned action versions (v6.0.1 checkout, v5.0.1 cache, v2.65.7 install-action, v5.5.2 codecov)
+
+2. **release.yml**: Fixed HEREDOC bug - changed `<< 'FORMULA'` to `<< EOF` to allow shell variable expansion for Homebrew formula. Escaped Ruby interpolation `#{bin}` → `\#{bin}`.
+
+3. **docs.yml**: Updated to create PRs to zircote.github.io instead of pushing directly:
+   - Builds rustdoc with nightly toolchain
+   - Creates unique branch per source commit
+   - Opens PR with linked source commit
+   - Uses DOCS_DEPLOY_TOKEN secret for cross-repo access
+
+Key lesson: NEVER change SHA-pinned action versions unless explicitly asked. The user has specific versions for security and reproducibility reasons.
