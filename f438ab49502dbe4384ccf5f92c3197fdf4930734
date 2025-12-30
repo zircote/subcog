@@ -1,0 +1,25 @@
+---
+created_at: 1767059313
+domain: user
+id: 1767059313254647000
+namespace: patterns
+status: active
+updated_at: 1767059313
+---
+Cross-repository deployments should always use PRs instead of direct pushes:
+
+**Rationale:**
+- Allows review before deploying to production
+- Creates audit trail of changes
+- Safer approach for automated workflows
+- Prevents accidental overwrites or conflicts
+- Enables rollback by reverting the PR
+
+**Implementation pattern for GitHub Actions:**
+1. Build artifacts in source repo
+2. Create unique branch in target repo (e.g., `docs/subcog-{commit_sha}`)
+3. Commit changes to that branch
+4. Open PR using `gh pr create`
+5. Include source commit link and automated summary in PR body
+
+This applies to: docs deployments, Homebrew formula updates, any workflow that modifies another repository.
