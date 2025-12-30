@@ -3,6 +3,12 @@ created_at: 1767029471
 id: security-1767029471256443000
 namespace: security
 status: active
+tags:
+- skip-security-check
+- serde-skip-attribute
+- path-traversal-prevention
+- secrets-detection
+- audit-logging-sensitive-data
 updated_at: 1767029471
 ---
 Critical security patterns identified in code review: (1) skip_security_check bypass flags must be #[serde(skip)] to prevent external input bypass, (2) path traversal prevention requires memory ID validation and path canonicalization, (3) secret detection patterns need regular updates for new formats (sk-proj-*, Azure, Vault tokens), (4) audit loggers must never debug-print potentially sensitive content.
