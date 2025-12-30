@@ -8,19 +8,30 @@
 // Allow print_stderr in main binary for CLI output
 #![allow(clippy::print_stderr)]
 #![allow(clippy::print_stdout)]
+// Allow match_same_arms for explicit command handling
+#![allow(clippy::match_same_arms)]
+// Allow unnecessary_wraps for consistent command function signatures
+#![allow(clippy::unnecessary_wraps)]
+// Allow needless_pass_by_value for command functions
+#![allow(clippy::needless_pass_by_value)]
+// Allow option_if_let_else for environment variable fallback chains
+#![allow(clippy::option_if_let_else)]
+// Allow multiple crate versions from transitive dependencies
+#![allow(clippy::multiple_crate_versions)]
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use subcog::{
-    CaptureRequest, CaptureService, Domain, Namespace, RecallService, SearchFilter, SearchMode,
-    SyncService,
-};
-use subcog::storage::index::SqliteBackend;
 use subcog::config::SubcogConfig;
 use subcog::hooks::{
     HookHandler, PostToolUseHandler, PreCompactHandler, SessionStartHandler, StopHandler,
     UserPromptHandler,
+};
+use subcog::storage::index::SqliteBackend;
+use subcog::mcp::{McpServer, Transport};
+use subcog::{
+    CaptureRequest, CaptureService, Domain, Namespace, RecallService, SearchFilter, SearchMode,
+    SyncService,
 };
 
 /// Subcog - A persistent memory system for AI coding assistants.
@@ -159,7 +170,7 @@ fn main() -> ExitCode {
         Err(e) => {
             eprintln!("Error: {e}");
             ExitCode::FAILURE
-        }
+        },
     }
 }
 
@@ -173,26 +184,26 @@ fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             namespace,
             tags,
             source,
-        } => cmd_capture(config, content, namespace, tags, source),
+        } => cmd_capture(content, namespace, tags, source),
 
         Commands::Recall {
             query,
             mode,
             namespace,
             limit,
-        } => cmd_recall(config, query, mode, namespace, limit),
+        } => cmd_recall(query, mode, namespace, limit),
 
-        Commands::Status => cmd_status(config),
+        Commands::Status => cmd_status(),
 
-        Commands::Sync { push, fetch } => cmd_sync(config, push, fetch),
+        Commands::Sync { push, fetch } => cmd_sync(push, fetch),
 
-        Commands::Consolidate => cmd_consolidate(config),
+        Commands::Consolidate => cmd_consolidate(),
 
         Commands::Config { show, set } => cmd_config(config, show, set),
 
-        Commands::Serve { transport, port } => cmd_serve(config, transport, port),
+        Commands::Serve { transport, port } => cmd_serve(transport, port),
 
-        Commands::Hook { event } => cmd_hook(config, event),
+        Commands::Hook { event } => cmd_hook(event),
     }
 }
 
@@ -233,7 +244,6 @@ fn parse_search_mode(s: &str) -> SearchMode {
 
 /// Capture command.
 fn cmd_capture(
-    _config: SubcogConfig,
     content: String,
     namespace: String,
     tags: Option<String>,
@@ -282,7 +292,6 @@ fn get_data_dir() -> PathBuf {
 
 /// Recall command.
 fn cmd_recall(
-    config: SubcogConfig,
     query: String,
     mode: String,
     namespace: Option<String>,
@@ -294,7 +303,7 @@ fn cmd_recall(
     let db_path = data_dir.join("index.db");
 
     let index = SqliteBackend::new(&db_path)?;
-    let service = RecallService::with_index(config.into(), index);
+    let service = RecallService::with_index(index);
 
     let mut filter = SearchFilter::new();
     if let Some(ns) = namespace {
@@ -326,18 +335,18 @@ fn cmd_recall(
             }
 
             println!("Search completed in {}ms", search_result.execution_time_ms);
-        }
+        },
         Err(e) => {
             eprintln!("Search failed: {e}");
             eprintln!("Note: Make sure a storage backend is configured");
-        }
+        },
     }
 
     Ok(())
 }
 
 /// Status command.
-fn cmd_status(_config: SubcogConfig) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_status() -> Result<(), Box<dyn std::error::Error>> {
     println!("Subcog Status");
     println!("=============");
     println!();
@@ -351,11 +360,7 @@ fn cmd_status(_config: SubcogConfig) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Sync command.
-fn cmd_sync(
-    _config: SubcogConfig,
-    push: bool,
-    fetch: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_sync(push: bool, fetch: bool) -> Result<(), Box<dyn std::error::Error>> {
     let service = SyncService::default();
 
     if push && fetch {
@@ -363,38 +368,38 @@ fn cmd_sync(
         match service.sync() {
             Ok(stats) => {
                 println!("Sync completed: {}", stats.summary());
-            }
+            },
             Err(e) => {
                 eprintln!("Sync failed: {e}");
-            }
+            },
         }
     } else if push {
         match service.push() {
             Ok(stats) => {
                 println!("Push completed: {} memories pushed", stats.pushed);
-            }
+            },
             Err(e) => {
                 eprintln!("Push failed: {e}");
-            }
+            },
         }
     } else if fetch {
         match service.fetch() {
             Ok(stats) => {
                 println!("Fetch completed: {} memories pulled", stats.pulled);
-            }
+            },
             Err(e) => {
                 eprintln!("Fetch failed: {e}");
-            }
+            },
         }
     } else {
         // Default to full sync
         match service.sync() {
             Ok(stats) => {
                 println!("Sync completed: {}", stats.summary());
-            }
+            },
             Err(e) => {
                 eprintln!("Sync failed: {e}");
-            }
+            },
         }
     }
 
@@ -402,7 +407,7 @@ fn cmd_sync(
 }
 
 /// Consolidate command.
-fn cmd_consolidate(_config: SubcogConfig) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_consolidate() -> Result<(), Box<dyn std::error::Error>> {
     println!("Consolidation requires a configured storage backend.");
     println!("Configure storage in subcog.toml or use environment variables.");
 
@@ -441,49 +446,47 @@ fn cmd_config(
 }
 
 /// Serve command.
-fn cmd_serve(
-    _config: SubcogConfig,
-    transport: String,
-    port: u16,
-) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Starting MCP server...");
-    println!("Transport: {transport}");
-    if transport == "http" {
-        println!("Port: {port}");
-    }
-    println!();
-    println!("MCP server implementation requires the rmcp crate.");
-    println!("See CLAUDE.md for configuration details.");
+fn cmd_serve(transport: String, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    let transport_type = match transport.as_str() {
+        "http" => Transport::Http,
+        _ => Transport::Stdio,
+    };
+
+    let server = McpServer::new()
+        .with_transport(transport_type)
+        .with_port(port);
+
+    server.start().map_err(|e| e.to_string())?;
 
     Ok(())
 }
 
 /// Hook command.
-fn cmd_hook(config: SubcogConfig, event: HookEvent) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_hook(event: HookEvent) -> Result<(), Box<dyn std::error::Error>> {
     // Read input from stdin as a string
     let input = read_hook_input()?;
 
     let response = match event {
         HookEvent::SessionStart => {
-            let handler = SessionStartHandler::new(config);
+            let handler = SessionStartHandler::new();
             handler.handle(&input)?
-        }
+        },
         HookEvent::UserPromptSubmit => {
-            let handler = UserPromptHandler::new(config);
+            let handler = UserPromptHandler::new();
             handler.handle(&input)?
-        }
+        },
         HookEvent::PostToolUse => {
-            let handler = PostToolUseHandler::new(config);
+            let handler = PostToolUseHandler::new();
             handler.handle(&input)?
-        }
+        },
         HookEvent::PreCompact => {
-            let handler = PreCompactHandler::new(config);
+            let handler = PreCompactHandler::new();
             handler.handle(&input)?
-        }
+        },
         HookEvent::Stop => {
-            let handler = StopHandler::new(config);
+            let handler = StopHandler::new();
             handler.handle(&input)?
-        }
+        },
     };
 
     // Output response (already JSON string)
