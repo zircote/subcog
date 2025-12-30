@@ -1,21 +1,27 @@
 ---
-created_at: 1767135489
+created_at: 1767135580
 domain: global
-id: decisions_96886eda-f6e2-4145-87a5-57c2b0cca26b
+id: decisions_ba4090e3-a90d-4795-af8b-dd35af06d8e2
 namespace: decisions
 status: active
 tags:
 - prompts
-- storage
 - architecture
-- domain-scope
-updated_at: 1767135489
+- urn
+- storage
+- namespaces
+updated_at: 1767135580
 ---
-**Prompt Storage by Domain Scope**
+**Prompts are NOT Memories - Separate Storage Namespace**
 
-Prompts are stored in the persistence backend configured for each domain:
-- **Project scope**: Git notes (repo-specific, travels with the codebase)
-- **User scope**: Local storage (SQLite/filesystem in ~/.config/subcog or similar)
-- **Org scope**: Shared storage (PostgreSQL or organizational backend)
+Prompts are a distinct entity type from memories and must be stored separately:
 
-This aligns with the three-layer storage architecture where different domains may have different persistence backends. The PromptService must route save/get/list/delete operations to the appropriate backend based on domain scope.
+- **Memory URN**: `subcog://{domain}/{namespace}/...` (e.g., `subcog://user/decisions/...`)
+- **Prompt URN**: `subcog://{domain}/_prompts/{prompt-name}` (e.g., `subcog://user/_prompts/code-review`)
+
+The `_prompts` prefix (with underscore) distinguishes prompts from memory namespaces. Prompts should NOT:
+- Go through the memory capture/recall flow
+- Be stored alongside memory categories
+- Use the Namespace enum (decisions, learnings, patterns, etc.)
+
+Prompts have their own CRUD operations (save, get, list, delete, run) and storage path.
