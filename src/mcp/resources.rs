@@ -321,12 +321,12 @@ impl ResourceHandler {
             ));
         }
 
-        index.push_str("\n## Quick Start\n\n");
-        index.push_str(
-            "1. Capture a decision: `subcog capture --namespace decisions \"Use PostgreSQL\"`\n",
-        );
-        index.push_str("2. Search memories: `subcog recall \"database choice\"`\n");
-        index.push_str("3. Check status: `subcog status`\n");
+        index.push_str("\n## Quick Start (MCP Tools)\n\n");
+        index
+            .push_str("1. **Capture**: Use `subcog_capture` tool with `namespace` and `content`\n");
+        index.push_str("2. **Search**: Use `subcog_recall` tool with `query` parameter\n");
+        index.push_str("3. **Status**: Use `subcog_status` tool\n");
+        index.push_str("4. **Browse**: Access `subcog://memories` resource\n");
 
         index
     }
@@ -387,49 +387,13 @@ pub struct HelpCategory {
 // Note: Use r"..."# for strings containing quotes, r"..." for those without
 
 const HELP_SETUP: &str = r#"
-## Installation
+## MCP Server Configuration
 
-Subcog is distributed as a single binary. Install via:
+Subcog exposes tools, resources, and prompts via the Model Context Protocol (MCP).
 
-```bash
-# From crates.io
-cargo install subcog
+### Claude Desktop Setup
 
-# From source
-git clone https://github.com/zircote/subcog
-cd subcog
-cargo install --path .
-```
-
-## Configuration
-
-Create `~/.config/subcog/config.yaml`:
-
-```yaml
-data_dir: ~/.subcog
-features:
-  redact_secrets: true
-  block_secrets: false
-  auto_sync: true
-```
-
-## Claude Code Integration
-
-Add to `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "SessionStart": [{ "command": "subcog hook session-start" }],
-    "UserPromptSubmit": [{ "command": "subcog hook user-prompt-submit" }],
-    "Stop": [{ "command": "subcog hook stop" }]
-  }
-}
-```
-
-## MCP Server
-
-For Claude Desktop, add to `~/.config/claude/claude_desktop_config.json`:
+Add to `~/.config/claude/claude_desktop_config.json`:
 
 ```json
 {
@@ -441,6 +405,56 @@ For Claude Desktop, add to `~/.config/claude/claude_desktop_config.json`:
   }
 }
 ```
+
+### Claude Code Plugin Setup
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "subcog": {
+      "command": "subcog",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+### Configuration File
+
+Create `~/.config/subcog/config.yaml`:
+
+```yaml
+data_dir: ~/.subcog
+features:
+  redact_secrets: true
+  block_secrets: false
+  auto_sync: true
+```
+
+## Available MCP Tools
+
+Once configured, these tools are available:
+
+| Tool | Description |
+|------|-------------|
+| `subcog_capture` | Capture a memory |
+| `subcog_recall` | Search memories |
+| `subcog_status` | Check system status |
+| `subcog_consolidate` | Consolidate memories (LLM) |
+| `subcog_enrich` | Enrich a memory (LLM) |
+| `subcog_sync` | Sync with git remote |
+
+## Available MCP Resources
+
+| Resource | Description |
+|----------|-------------|
+| `subcog://help` | Help index |
+| `subcog://help/{topic}` | Topic-specific help |
+| `subcog://memories` | List all memories |
+| `subcog://memories/{namespace}` | List by namespace |
+| `subcog://memory/{id}` | Get specific memory |
 "#;
 
 const HELP_CONCEPTS: &str = r"
@@ -492,27 +506,54 @@ urn:subcog:zircote:subcog:decisions:decisions_abc123
 ";
 
 const HELP_CAPTURE: &str = r#"
-## Basic Capture
+## Using the subcog_capture Tool
 
-```bash
-subcog capture --namespace decisions "Use PostgreSQL for primary storage"
+### Basic Capture
+
+```json
+{
+  "tool": "subcog_capture",
+  "arguments": {
+    "namespace": "decisions",
+    "content": "Use PostgreSQL for primary storage"
+  }
+}
 ```
 
-## With Tags
+### With Tags
 
-```bash
-subcog capture --namespace patterns \
-  --tags "rust,error-handling" \
-  "Use thiserror for custom error types"
+```json
+{
+  "tool": "subcog_capture",
+  "arguments": {
+    "namespace": "patterns",
+    "content": "Use thiserror for custom error types",
+    "tags": ["rust", "error-handling"]
+  }
+}
 ```
 
-## With Source Reference
+### With Source Reference
 
-```bash
-subcog capture --namespace learnings \
-  --source "src/auth.rs:42" \
-  "JWT validation requires explicit algorithm specification"
+```json
+{
+  "tool": "subcog_capture",
+  "arguments": {
+    "namespace": "learnings",
+    "content": "JWT validation requires explicit algorithm specification",
+    "source": "src/auth.rs:42"
+  }
+}
 ```
+
+## Tool Parameters
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `namespace` | Yes | One of: decisions, patterns, learnings, context, tech-debt, apis, config, security, performance, testing |
+| `content` | Yes | The memory content to capture |
+| `tags` | No | Array of tags for categorization |
+| `source` | No | Source file reference (e.g., "src/auth.rs:42") |
 
 ## Best Practices
 
@@ -521,190 +562,328 @@ subcog capture --namespace learnings \
 3. **Reference Sources**: Link to code or documentation
 4. **Choose Correct Namespace**: Match content to category
 
-## Auto-Capture
+## Namespace Selection Guide
 
-With hooks enabled, subcog can auto-detect and suggest captures:
-
-- Decision language: "we decided to...", "let's use..."
-- Pattern recognition: "always...", "never..."
-- Learning indicators: "TIL", "learned that..."
+| Signal Words | Namespace |
+|--------------|-----------|
+| "decided", "chose", "going with" | `decisions` |
+| "always", "never", "convention" | `patterns` |
+| "TIL", "learned", "discovered" | `learnings` |
+| "because", "constraint" | `context` |
+| "TODO", "FIXME", "temporary" | `tech-debt` |
 "#;
 
 const HELP_SEARCH: &str = r#"
-## Basic Search
+## Using the subcog_recall Tool
 
-```bash
-subcog recall "database storage decision"
+### Basic Search
+
+```json
+{
+  "tool": "subcog_recall",
+  "arguments": {
+    "query": "database storage decision"
+  }
+}
 ```
 
-## Search Modes
+### Search Modes
 
-### Hybrid (Default)
+#### Hybrid (Default)
 Combines vector similarity and BM25 text search with RRF fusion:
 
-```bash
-subcog recall --mode hybrid "authentication patterns"
+```json
+{
+  "tool": "subcog_recall",
+  "arguments": {
+    "query": "authentication patterns",
+    "mode": "hybrid"
+  }
+}
 ```
 
-### Vector Only
+#### Vector Only
 Pure semantic similarity search:
 
-```bash
-subcog recall --mode vector "how to handle errors"
+```json
+{
+  "tool": "subcog_recall",
+  "arguments": {
+    "query": "how to handle errors",
+    "mode": "vector"
+  }
+}
 ```
 
-### Text Only
+#### Text Only
 Traditional keyword search with BM25 ranking:
 
-```bash
-subcog recall --mode text "PostgreSQL"
+```json
+{
+  "tool": "subcog_recall",
+  "arguments": {
+    "query": "PostgreSQL",
+    "mode": "text"
+  }
+}
 ```
 
-## Filtering
+### Filtering by Namespace
 
-### By Namespace
-
-```bash
-subcog recall --namespace decisions "storage"
+```json
+{
+  "tool": "subcog_recall",
+  "arguments": {
+    "query": "storage",
+    "namespace": "decisions"
+  }
+}
 ```
 
-### Limit Results
+### Limiting Results
 
-```bash
-subcog recall --limit 5 "API design"
+```json
+{
+  "tool": "subcog_recall",
+  "arguments": {
+    "query": "API design",
+    "limit": 5
+  }
+}
 ```
+
+## Tool Parameters
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `query` | Yes | - | Natural language search query |
+| `mode` | No | `hybrid` | Search mode: `hybrid`, `vector`, or `text` |
+| `namespace` | No | all | Filter by namespace |
+| `limit` | No | 10 | Maximum results (max: 50) |
+
+## Browsing Memories via Resources
+
+Access memories directly via MCP resources:
+
+- `subcog://memories` - List all memories
+- `subcog://memories/{namespace}` - List by namespace (e.g., `subcog://memories/decisions`)
+- `subcog://memory/{id}` - Get specific memory by ID
 
 ## Understanding Scores
 
-- **Score 0.9+**: Very high relevance
-- **Score 0.7-0.9**: Good relevance
-- **Score 0.5-0.7**: Moderate relevance
-- **Score <0.5**: Low relevance
+| Score Range | Relevance |
+|-------------|-----------|
+| 0.9+ | Very high (likely exact match) |
+| 0.7-0.9 | Good (closely related) |
+| 0.5-0.7 | Moderate (broader context) |
+| <0.5 | Low (tangential) |
 "#;
 
 const HELP_WORKFLOWS: &str = r#"
-## Claude Code Hooks
+## Common MCP Workflows
 
-### SessionStart
+### Session Start: Load Context
 
-Injects relevant context at session start:
-
-```json
-{ "command": "subcog hook session-start" }
-```
-
-### UserPromptSubmit
-
-Detects capture signals in prompts:
+At session start, search for relevant memories based on the current project:
 
 ```json
-{ "command": "subcog hook user-prompt-submit" }
+{
+  "tool": "subcog_recall",
+  "arguments": {
+    "query": "current project context patterns decisions",
+    "limit": 10
+  }
+}
 ```
 
-### PostToolUse
+### During Work: Capture Insights
 
-Surfaces related memories after tool use:
+When you discover something worth remembering:
 
 ```json
-{ "command": "subcog hook post-tool-use" }
+{
+  "tool": "subcog_capture",
+  "arguments": {
+    "namespace": "learnings",
+    "content": "JWT tokens must specify algorithm explicitly to prevent alg:none attacks",
+    "tags": ["security", "jwt", "authentication"]
+  }
+}
 ```
 
-### PreCompact
+### Related Context: Find Similar
 
-Auto-captures before context compaction:
+When working on a topic, find related memories:
 
 ```json
-{ "command": "subcog hook pre-compact" }
+{
+  "tool": "subcog_recall",
+  "arguments": {
+    "query": "authentication security patterns",
+    "mode": "hybrid",
+    "namespace": "patterns"
+  }
+}
 ```
 
-### Stop
+### Session End: Sync Changes
 
-Session summary and sync on exit:
+Sync memories to the git remote:
 
 ```json
-{ "command": "subcog hook stop" }
+{
+  "tool": "subcog_sync",
+  "arguments": {
+    "direction": "full"
+  }
+}
 ```
 
-## MCP Integration
+## Browsing via Resources
 
-Start MCP server:
+Access memories directly without search:
 
-```bash
-# Stdio transport (for Claude Desktop)
-subcog serve
+| Resource URI | Returns |
+|--------------|---------|
+| `subcog://memories` | All memories (JSON) |
+| `subcog://memories/decisions` | All decisions |
+| `subcog://memories/patterns` | All patterns |
+| `subcog://memory/{id}` | Specific memory by ID |
 
-# HTTP transport (for programmatic access)
-subcog serve --transport http --port 3000
+## Status Check
+
+Monitor system health:
+
+```json
+{
+  "tool": "subcog_status",
+  "arguments": {}
+}
 ```
 
-## Git Sync
-
-Sync memories with remote:
-
-```bash
-# Push to remote
-subcog sync --push
-
-# Fetch from remote
-subcog sync --fetch
-
-# Full sync
-subcog sync
-```
+Returns: memory count, index status, sync state, storage backend info.
 "#;
 
 const HELP_TROUBLESHOOTING: &str = r#"
 ## Common Issues
 
-### "No repository configured"
+### Tool Returns Empty Results
 
-Ensure you're in a git repository or set `repo_path` in config.
+If `subcog_recall` returns no results:
+
+1. **Check status**: Use `subcog_status` tool to verify index exists
+2. **Try broader query**: Use simpler search terms
+3. **Check namespace**: Remove namespace filter to search all
+
+```json
+{
+  "tool": "subcog_status",
+  "arguments": {}
+}
+```
+
+### "Secret detected" Error
+
+The `subcog_capture` tool blocked content with potential secrets:
+
+1. Remove the secret from content
+2. Check `~/.config/subcog/config.yaml`:
+   - `block_secrets: false` to allow (not recommended)
+   - `redact_secrets: true` to auto-redact
 
 ### "Index not found"
 
-Run initial indexing:
+Call the status tool to trigger initialization:
 
-```bash
-subcog status  # Will initialize if needed
+```json
+{
+  "tool": "subcog_status",
+  "arguments": {}
+}
 ```
 
-### "Secret detected"
+### Slow Search Performance
 
-Content contains potential secrets. Either:
-1. Remove the secret
-2. Disable blocking: `block_secrets: false`
-3. Enable redaction: `redact_secrets: true`
+1. Reduce `limit` parameter (default 10, max 50)
+2. Use `mode: "text"` for faster keyword-only search
+3. Add `namespace` filter to narrow scope
 
-### Slow Search
-
-1. Ensure SQLite index exists
-2. Check vector index is loaded
-3. Reduce result limit
-
-## Debug Mode
-
-Enable verbose logging:
-
-```bash
-RUST_LOG=debug subcog recall "test"
+```json
+{
+  "tool": "subcog_recall",
+  "arguments": {
+    "query": "specific term",
+    "mode": "text",
+    "namespace": "decisions",
+    "limit": 5
+  }
+}
 ```
 
-## Reset Index
+### Sync Failures
 
-```bash
-rm -rf ~/.subcog/index.db
-subcog status  # Rebuilds index
+Check sync status and retry:
+
+```json
+{
+  "tool": "subcog_sync",
+  "arguments": {
+    "direction": "fetch"
+  }
+}
 ```
+
+If push fails, ensure the git remote is configured and you have write access.
 
 ## Report Issues
 
 GitHub: https://github.com/zircote/subcog/issues
 "#;
 
-const HELP_ADVANCED: &str = r"
-## LLM Integration
+const HELP_ADVANCED: &str = r#"
+## LLM-Powered Tools
 
-Configure an LLM provider for enhanced features:
+These tools require an LLM provider configured in `~/.config/subcog/config.yaml`.
+
+### Memory Consolidation
+
+Merge similar memories using LLM analysis:
+
+```json
+{
+  "tool": "subcog_consolidate",
+  "arguments": {
+    "namespace": "learnings",
+    "strategy": "merge",
+    "dry_run": true
+  }
+}
+```
+
+**Strategies:**
+- `merge` - Combine similar memories into one
+- `summarize` - Create summary of related memories
+- `dedupe` - Remove exact duplicates
+
+### Memory Enrichment
+
+Improve a memory with better structure and tags:
+
+```json
+{
+  "tool": "subcog_enrich",
+  "arguments": {
+    "memory_id": "decisions_abc123",
+    "enrich_tags": true,
+    "enrich_structure": true,
+    "add_context": true
+  }
+}
+```
+
+## LLM Provider Configuration
+
+Configure in `~/.config/subcog/config.yaml`:
 
 ```yaml
 llm:
@@ -713,8 +892,6 @@ llm:
   model: claude-3-haiku-20240307
 ```
 
-### Supported Providers
-
 | Provider | Model | Use Case |
 |----------|-------|----------|
 | Anthropic | claude-3-* | Best quality |
@@ -722,48 +899,42 @@ llm:
 | Ollama | llama3.2 | Local, private |
 | LM Studio | varies | Local, flexible |
 
-## Memory Consolidation
+## Search Optimization
 
-Automatically merge and summarize related memories:
+### Hybrid Search Tuning
 
-```bash
-subcog consolidate
+For precision-focused results:
+
+```json
+{
+  "tool": "subcog_recall",
+  "arguments": {
+    "query": "exact topic",
+    "mode": "text",
+    "limit": 5
+  }
+}
 ```
 
-Options:
-- Merge similar memories
-- Archive old, unused memories
-- Promote frequently accessed memories
+For concept-focused results:
 
-## Custom Embeddings
+```json
+{
+  "tool": "subcog_recall",
+  "arguments": {
+    "query": "general concept or idea",
+    "mode": "vector",
+    "limit": 10
+  }
+}
+```
+
+## Embedding Model
 
 Default: `all-MiniLM-L6-v2` (384 dimensions)
 
-For custom models, implement the `Embedder` trait.
-
-## Performance Tuning
-
-### Index Settings
-
-```yaml
-index:
-  fts5_tokenizer: porter  # or unicode61, ascii
-  vector_dimensions: 384
-  hnsw_ef_construction: 100
-  hnsw_m: 16
-```
-
-### Caching
-
-Enable memory caching for faster repeated queries:
-
-```yaml
-cache:
-  enabled: true
-  max_entries: 1000
-  ttl_seconds: 3600
-```
-";
+The embedding model is used for semantic similarity search in vector mode.
+"#;
 
 /// Truncates content to a maximum length with ellipsis.
 fn truncate_content(content: &str, max_len: usize) -> String {
@@ -805,7 +976,7 @@ mod tests {
 
         let result = handler.get_resource("subcog://help/setup").unwrap();
         assert!(result.text.is_some());
-        assert!(result.text.unwrap().contains("Installation"));
+        assert!(result.text.unwrap().contains("MCP Server Configuration"));
 
         let result = handler.get_resource("subcog://help/concepts").unwrap();
         assert!(result.text.is_some());
