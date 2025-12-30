@@ -2,7 +2,7 @@
 document_type: progress
 project_id: SPEC-2025-12-30-001
 initialized: 2025-12-30T17:30:00Z
-last_updated: 2025-12-30T17:30:00Z
+last_updated: 2025-12-30T18:30:00Z
 ---
 
 # Proactive Memory Surfacing - Implementation Progress
@@ -11,47 +11,47 @@ last_updated: 2025-12-30T17:30:00Z
 
 | Phase | Tasks | Done | Progress |
 |-------|-------|------|----------|
-| Phase 1: Foundation | 11 | 0 | 0% |
+| Phase 1: Foundation | 11 | 11 | 100% |
 | Phase 2: Adaptive Injection | 12 | 0 | 0% |
 | Phase 3: MCP Resources | 16 | 0 | 0% |
 | Phase 4: MCP Prompts | 10 | 0 | 0% |
 | Phase 5: LLM Classification | 12 | 0 | 0% |
 | Phase 6: Polish | 16 | 0 | 0% |
-| **Total** | **77** | **0** | **0%** |
+| **Total** | **77** | **11** | **14%** |
 
 ## Phase 1: Foundation - Search Intent Detection
 
 **GitHub Issue**: #16
-**Status**: pending
+**Status**: done
 
 | Task | Description | Status | Started | Completed |
 |------|-------------|--------|---------|-----------|
-| 1.1 | Define SearchIntentType Enum | pending | - | - |
-| 1.2 | Define SearchIntent Struct | pending | - | - |
-| 1.3 | Implement SEARCH_SIGNALS Constant | pending | - | - |
-| 1.4 | Implement detect_search_intent Method | pending | - | - |
-| 1.5 | Implement Confidence Calculation | pending | - | - |
-| 1.6 | Implement Basic Topic Extraction | pending | - | - |
-| 1.7 | Create search_intent.rs Module | pending | - | - |
-| 1.8 | Integrate with UserPromptHandler | pending | - | - |
-| 1.9 | Unit Tests for Intent Type Detection | pending | - | - |
-| 1.10 | Unit Tests for Confidence Calculation | pending | - | - |
-| 1.11 | Unit Tests for Topic Extraction | pending | - | - |
+| 1.1 | Define SearchIntentType Enum | done | 2025-12-30 | 2025-12-30 |
+| 1.2 | Define SearchIntent Struct | done | 2025-12-30 | 2025-12-30 |
+| 1.3 | Implement SEARCH_SIGNALS Constant | done | 2025-12-30 | 2025-12-30 |
+| 1.4 | Implement detect_search_intent Method | done | 2025-12-30 | 2025-12-30 |
+| 1.5 | Implement Confidence Calculation | done | 2025-12-30 | 2025-12-30 |
+| 1.6 | Implement Basic Topic Extraction | done | 2025-12-30 | 2025-12-30 |
+| 1.7 | Create search_intent.rs Module | done | 2025-12-30 | 2025-12-30 |
+| 1.8 | Integrate with UserPromptHandler | done | 2025-12-30 | 2025-12-30 |
+| 1.9 | Unit Tests for Intent Type Detection | done | 2025-12-30 | 2025-12-30 |
+| 1.10 | Unit Tests for Confidence Calculation | done | 2025-12-30 | 2025-12-30 |
+| 1.11 | Unit Tests for Topic Extraction | done | 2025-12-30 | 2025-12-30 |
 
 ### Phase 1 Deliverables
 
-- [ ] `src/hooks/search_intent.rs` with SearchIntent, SearchIntentType, detection logic
-- [ ] Modified `src/hooks/user_prompt.rs` with integration
-- [ ] Modified `src/hooks/mod.rs` with export
-- [ ] >90% test coverage for new code
+- [x] `src/hooks/search_intent.rs` with SearchIntent, SearchIntentType, detection logic
+- [x] Modified `src/hooks/user_prompt.rs` with integration
+- [x] Modified `src/hooks/mod.rs` with export
+- [x] >90% test coverage for new code (29 unit tests in search_intent, 16 in user_prompt)
 
 ### Phase 1 Exit Criteria
 
-- [ ] All 6 SearchIntentType variants defined and documented
-- [ ] Keyword detection matches all signals in spec
-- [ ] Detection completes in <10ms
-- [ ] All unit tests pass
-- [ ] Clippy passes with no warnings
+- [x] All 6 SearchIntentType variants defined and documented
+- [x] Keyword detection matches all signals in spec (25 patterns)
+- [x] Detection completes in <10ms (sync keyword matching)
+- [x] All unit tests pass (45 total new tests)
+- [x] Clippy passes with no warnings
 
 ---
 
