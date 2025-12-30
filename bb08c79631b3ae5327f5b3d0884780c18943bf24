@@ -6,8 +6,8 @@ status: active
 tags:
 - pattern-1
 - metrics-dashboard
+- test-pattern
 - dashboard-testing
-- metrics-test
 updated_at: 1766999985
 ---
 Pattern 1 for metrics dashboard test
