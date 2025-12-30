@@ -1,0 +1,13 @@
+---
+created_at: 1767106946
+domain: global
+id: decisions_0c50ea3b-d28d-4b16-8773-d78687732f4f
+namespace: decisions
+status: active
+tags:
+- test
+- capture
+- tags
+updated_at: 1767106946
+---
+Test capture with tags - verifying tags are stored to git notes
