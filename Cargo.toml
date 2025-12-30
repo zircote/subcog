@@ -83,6 +83,13 @@ tempfile = "3.14"
 # Async testing
 tokio-test = "0.4"
 
+# Benchmarking
+criterion = { version = "0.6", features = ["html_reports"] }
+
+[[bench]]
+name = "search_intent"
+harness = false
+
 [profile.dev]
 # Faster compile times during development
 debug = 1
