@@ -78,6 +78,11 @@ pub enum Error {
         /// The underlying cause.
         cause: String,
     },
+    /// Content was blocked due to security concerns.
+    ContentBlocked {
+        /// The reason the content was blocked.
+        reason: String,
+    },
     /// Feature not yet implemented.
     NotImplemented(String),
 }
@@ -88,10 +93,13 @@ impl fmt::Display for Error {
             Self::InvalidInput(msg) => write!(f, "invalid input: {msg}"),
             Self::OperationFailed { operation, cause } => {
                 write!(f, "operation '{operation}' failed: {cause}")
-            },
+            }
+            Self::ContentBlocked { reason } => {
+                write!(f, "content blocked: {reason}")
+            }
             Self::NotImplemented(feature) => {
                 write!(f, "not implemented: {feature}")
-            },
+            }
         }
     }
 }
@@ -230,9 +238,9 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::InvalidInput(msg) => assert!(msg.contains("zero")),
-            Error::OperationFailed { .. } | Error::NotImplemented(_) => {
+            Error::OperationFailed { .. } | Error::NotImplemented(_) | Error::ContentBlocked { .. } => {
                 unreachable!("Expected InvalidInput error")
-            },
+            }
         }
     }
 
@@ -266,5 +274,10 @@ mod tests {
             cause: "failed".to_string(),
         };
         assert_eq!(err.to_string(), "operation 'test' failed: failed");
+
+        let err = Error::ContentBlocked {
+            reason: "secrets detected".to_string(),
+        };
+        assert_eq!(err.to_string(), "content blocked: secrets detected");
     }
 }

@@ -26,5 +26,5 @@ pub trait HookHandler: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if handling fails.
-    fn handle(&self, input: &serde_json::Value) -> Result<serde_json::Value>;
+    fn handle(&self, input: &str) -> Result<String>;
 }

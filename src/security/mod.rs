@@ -7,7 +7,7 @@ mod pii;
 mod redactor;
 mod secrets;
 
-pub use audit::AuditLogger;
-pub use pii::PiiDetector;
-pub use redactor::ContentRedactor;
-pub use secrets::SecretDetector;
+pub use audit::{AuditConfig, AuditEntry, AuditLogger, AuditOutcome};
+pub use pii::{PiiDetector, PiiMatch};
+pub use redactor::{ContentRedactor, RedactionConfig, RedactionMode};
+pub use secrets::{SecretDetector, SecretMatch};

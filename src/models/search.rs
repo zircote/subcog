@@ -1,6 +1,7 @@
 //! Search types and filters.
 
 use super::{Domain, Memory, MemoryStatus, Namespace};
+use std::fmt;
 
 /// Search mode for memory recall.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -23,6 +24,12 @@ impl SearchMode {
             Self::Text => "text",
             Self::Hybrid => "hybrid",
         }
+    }
+}
+
+impl fmt::Display for SearchMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 

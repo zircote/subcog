@@ -16,6 +16,10 @@ pub enum Namespace {
     Context,
     /// Technical debts and future improvements.
     TechDebt,
+    /// Blockers and impediments.
+    Blockers,
+    /// Work progress and milestones.
+    Progress,
     /// API endpoints and contracts.
     Apis,
     /// Configuration and environment details.
@@ -26,6 +30,8 @@ pub enum Namespace {
     Performance,
     /// Testing strategies and edge cases.
     Testing,
+    /// Built-in help content (read-only system namespace).
+    Help,
 }
 
 impl Namespace {
@@ -38,6 +44,28 @@ impl Namespace {
             Self::Learnings,
             Self::Context,
             Self::TechDebt,
+            Self::Blockers,
+            Self::Progress,
+            Self::Apis,
+            Self::Config,
+            Self::Security,
+            Self::Performance,
+            Self::Testing,
+            Self::Help,
+        ]
+    }
+
+    /// Returns user-facing namespaces (excludes system namespaces like Help).
+    #[must_use]
+    pub const fn user_namespaces() -> &'static [Self] {
+        &[
+            Self::Decisions,
+            Self::Patterns,
+            Self::Learnings,
+            Self::Context,
+            Self::TechDebt,
+            Self::Blockers,
+            Self::Progress,
             Self::Apis,
             Self::Config,
             Self::Security,
@@ -55,12 +83,21 @@ impl Namespace {
             Self::Learnings => "learnings",
             Self::Context => "context",
             Self::TechDebt => "tech-debt",
+            Self::Blockers => "blockers",
+            Self::Progress => "progress",
             Self::Apis => "apis",
             Self::Config => "config",
             Self::Security => "security",
             Self::Performance => "performance",
             Self::Testing => "testing",
+            Self::Help => "help",
         }
+    }
+
+    /// Returns true if this is a system namespace (read-only).
+    #[must_use]
+    pub const fn is_system(&self) -> bool {
+        matches!(self, Self::Help)
     }
 }
 
