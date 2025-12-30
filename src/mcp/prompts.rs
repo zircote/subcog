@@ -387,7 +387,9 @@ impl PromptRegistry {
         );
 
         if filter.is_empty() {
-            prompt.push_str("```json\n{ \"query\": \"*\", \"limit\": 100, \"detail\": \"medium\" }\n```\n\n");
+            prompt.push_str(
+                "```json\n{ \"query\": \"*\", \"limit\": 100, \"detail\": \"medium\" }\n```\n\n",
+            );
             prompt.push_str("No filters applied - show the full dashboard with:\n");
         } else {
             prompt.push_str(&format!(

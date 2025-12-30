@@ -5,7 +5,7 @@
 use crate::models::{
     CaptureRequest, DetailLevel, Domain, MemoryStatus, Namespace, SearchFilter, SearchMode,
 };
-use crate::services::{parse_filter_query, ServiceContainer};
+use crate::services::{ServiceContainer, parse_filter_query};
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

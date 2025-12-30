@@ -61,24 +61,24 @@ fn parse_token(token: &str, filter: &mut SearchFilter) {
             if let Some(ns) = Namespace::parse(value) {
                 filter.namespaces.push(ns);
             }
-        }
+        },
         "tag" | "tags" => parse_tag_value(value, filter),
         "since" => {
             if let Some(timestamp) = parse_duration_to_timestamp(value) {
                 filter.created_after = Some(timestamp);
             }
-        }
+        },
         "source" | "src" => {
             filter.source_pattern = Some(value.to_string());
-        }
+        },
         "status" => {
             if let Some(status) = parse_status(value) {
                 filter.statuses.push(status);
             }
-        }
+        },
         _ => {
             // Unknown key, ignore
-        }
+        },
     }
 }
 
