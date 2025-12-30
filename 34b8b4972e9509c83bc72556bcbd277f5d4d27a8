@@ -3,6 +3,11 @@ created_at: 1767031952
 id: 1767031952484568000
 namespace: progress
 status: active
+tags:
+- mcp-sampling-provider
+- sampling-protocol
+- llm-delegation
+- create-message-protocol
 updated_at: 1767031952
 ---
 MCP Sampling provider implemented - delegates LLM calls to host via sampling/createMessage protocol.
