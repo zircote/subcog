@@ -1,0 +1,9 @@
+---
+created_at: 1767060796
+domain: user
+id: 1767060796000699000
+namespace: learnings
+status: active
+updated_at: 1767060796
+---
+In collaborative repos, resolve merge conflicts manually rather than using `git reset --hard`. The reset approach assumes single-contributor workflow and could destroy other contributors' uncommitted work or local changes. Proper approach: resolve conflicts file-by-file, or at minimum confirm with the team before discarding local state.
