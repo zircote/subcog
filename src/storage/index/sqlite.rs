@@ -284,10 +284,15 @@ impl IndexBackend for SqliteBackend {
         // Build parameters: query, filter params, limit
         let mut results = Vec::new();
 
-        // FTS5 query - escape special characters
+        // FTS5 query - escape special characters and wrap terms in quotes
+        // FTS5 special chars: - (NOT), * (prefix), " (phrase), : (column)
         let fts_query = query
-            .replace('"', "\"\"")
             .split_whitespace()
+            .map(|term| {
+                // Escape double quotes and wrap each term in quotes for literal matching
+                let escaped = term.replace('"', "\"\"");
+                format!("\"{escaped}\"")
+            })
             .collect::<Vec<_>>()
             .join(" OR ");
 
