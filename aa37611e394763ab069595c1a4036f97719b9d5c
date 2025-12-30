@@ -5,10 +5,9 @@ namespace: decisions
 status: active
 tags:
 - git-notes
-- git-persistence
+- notes-as-persistence
 - yaml-front-matter
-- cat-sort-uniq
-- performance-limits
+- cat-sort-uniq-merge
 updated_at: 1767029431
 ---
 Git notes chosen as primary persistence layer: Notes attached to commits in refs/notes/mem/{namespace}, YAML front matter for metadata, Markdown body for content, cat-sort-uniq merge strategy. Benefits: built-in version history, free remote sync via git push/pull, works with existing git workflows, no additional infrastructure. Trade-offs: git dependency, performance limits at 10K+ memories, not suitable for multi-user concurrent writes. This is ADR-006.
