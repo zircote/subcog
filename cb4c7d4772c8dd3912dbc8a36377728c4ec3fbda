@@ -5,9 +5,9 @@ id: 1767060796000699000
 namespace: learnings
 status: active
 tags:
-- git-merge-conflicts
-- avoid-reset-hard
-- collaborative-repos
+- git
+- merge-conflicts
+- avoid-git-reset-hard
 - preserve-local-changes
 updated_at: 1767060796
 ---
