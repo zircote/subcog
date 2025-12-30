@@ -111,8 +111,11 @@ jobs:
           # Ensure .nojekyll exists at root
           touch .nojekyll
 
+          # Stage all changes first (new files are untracked, git diff won't see them)
+          git add -A
+
           # Check for changes
-          if git diff --quiet && git diff --staged --quiet; then
+          if git diff --staged --quiet; then
             echo "No changes to deploy"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -123,7 +126,6 @@ jobs:
           # Commit changes
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
           git commit -m "docs: update subcog documentation
 
           Source: ${{ github.repository }}@${SOURCE_SHA}"
