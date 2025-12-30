@@ -3,6 +3,11 @@ created_at: 1767061626
 id: 1767061626380590000
 namespace: learnings
 status: active
+tags:
+- git
+- git-diff
+- untracked-files
+- git-add
 updated_at: 1767061626
 ---
 Git diff doesn't detect untracked files. When checking for changes after copying new files into a git repo, you must `git add -A` first, then check `git diff --staged --quiet`. The pattern `git diff --quiet && git diff --staged --quiet` only sees tracked/staged changes, not new untracked files.
