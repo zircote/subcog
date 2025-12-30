@@ -3,6 +3,12 @@ created_at: 1767029448
 id: decisions-1767029448641900000
 namespace: decisions
 status: active
+tags:
+- opentelemetry
+- tracing-instrumentation
+- otlp-export
+- prometheus-metrics
+- adr-010
 updated_at: 1767029448
 ---
 OpenTelemetry chosen for observability: tracing crate for instrumentation, opentelemetry for OTLP export, tracing-subscriber for formatting, Prometheus endpoint for metrics. Benefits: industry standard, vendor-neutral, excellent Rust support, unified tracing/metrics. Trade-offs: configuration complexity, runtime overhead, large dependency tree. This is ADR-010.
