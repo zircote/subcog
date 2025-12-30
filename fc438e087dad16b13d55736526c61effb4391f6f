@@ -5,9 +5,9 @@ namespace: learnings
 status: active
 tags:
 - pushgateway
-- prometheus-pushgateway
 - cli-metrics
 - metrics-persistence
+- prometheus-integration
 updated_at: 1766999431
 ---
 Pushgateway integration enables CLI metrics persistence across invocations
