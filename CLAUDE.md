@@ -508,3 +508,4 @@ Full specification in `docs/spec/active/2025-12-28-subcog-rust-rewrite/`:
 - [IMPLEMENTATION_PLAN.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/IMPLEMENTATION_PLAN.md) - Phased implementation
 - [DECISIONS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/DECISIONS.md) - Architecture decision records
 - [PROGRESS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/PROGRESS.md) - Implementation progress
+- always run `make ci` before commiting or declaring success ensuring all gates pass
