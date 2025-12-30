@@ -591,7 +591,7 @@ fn calculate_confidence(matched_signals: &[(&SearchSignal, String)], prompt: &st
 /// Topics are significant words that might map to memory tags or namespaces.
 fn extract_topics(prompt: &str) -> Vec<String> {
     let mut topics = Vec::new();
-    let seen: HashSet<String> = HashSet::new();
+    let mut seen: HashSet<String> = HashSet::new();
 
     // Simple word tokenization and filtering
     let words: Vec<&str> = prompt
@@ -620,6 +620,7 @@ fn extract_topics(prompt: &str) -> Vec<String> {
             continue;
         }
 
+        seen.insert(cleaned.clone());
         topics.push(cleaned);
     }
 
