@@ -3,6 +3,11 @@ created_at: 1766998600
 id: learnings-1766998600831572000
 namespace: learnings
 status: active
+tags:
+- domain-specific-agents
+- specialist-code-review
+- parallel-agents
+- issue-routing
 updated_at: 1766998600
 ---
 Domain-specific agents (security-engineer, rust-engineer, performance-engineer) produce significantly higher quality output than general-purpose agents. For code review, 12 parallel specialist agents found 176 issues across all domains. Route fixes to appropriate specialists based on category.
