@@ -50,6 +50,8 @@ impl NotesManager {
     }
 
     /// Gets the default signature for commits.
+    /// Kept as method for API consistency with other repository operations.
+    #[allow(clippy::unused_self)]
     fn get_signature(&self, repo: &Repository) -> Result<Signature<'_>> {
         repo.signature().or_else(|_| {
             Signature::now("subcog", "subcog@local").map_err(|e| Error::OperationFailed {
@@ -61,6 +63,8 @@ impl NotesManager {
 
     /// Gets or creates the notes ref commit.
     /// Uses HEAD as the annotated object for notes.
+    /// Kept as method for API consistency with other repository operations.
+    #[allow(clippy::unused_self)]
     fn get_notes_target(&self, repo: &Repository) -> Result<git2::Oid> {
         // Get HEAD commit
         let head = repo.head().map_err(|e| Error::OperationFailed {
@@ -83,9 +87,8 @@ impl NotesManager {
         let repo = self.open_repo()?;
         let sig = self.get_signature(&repo)?;
 
-        let oid = git2::Oid::from_str(commit_id).map_err(|e| Error::InvalidInput(format!(
-            "Invalid commit ID '{commit_id}': {e}"
-        )))?;
+        let oid = git2::Oid::from_str(commit_id)
+            .map_err(|e| Error::InvalidInput(format!("Invalid commit ID '{commit_id}': {e}")))?;
 
         repo.note(&sig, &sig, Some(&self.notes_ref), oid, content, true)
             .map_err(|e| Error::OperationFailed {
@@ -106,7 +109,8 @@ impl NotesManager {
         let sig = self.get_signature(&repo)?;
         let target = self.get_notes_target(&repo)?;
 
-        let note_oid = repo.note(&sig, &sig, Some(&self.notes_ref), target, content, true)
+        let note_oid = repo
+            .note(&sig, &sig, Some(&self.notes_ref), target, content, true)
             .map_err(|e| Error::OperationFailed {
                 operation: "add_note".to_string(),
                 cause: e.to_string(),
@@ -123,9 +127,8 @@ impl NotesManager {
     pub fn get(&self, commit_id: &str) -> Result<Option<String>> {
         let repo = self.open_repo()?;
 
-        let oid = git2::Oid::from_str(commit_id).map_err(|e| Error::InvalidInput(format!(
-            "Invalid commit ID '{commit_id}': {e}"
-        )))?;
+        let oid = git2::Oid::from_str(commit_id)
+            .map_err(|e| Error::InvalidInput(format!("Invalid commit ID '{commit_id}': {e}")))?;
 
         match repo.find_note(Some(&self.notes_ref), oid) {
             Ok(note) => Ok(note.message().map(String::from)),
@@ -165,9 +168,8 @@ impl NotesManager {
         let repo = self.open_repo()?;
         let sig = self.get_signature(&repo)?;
 
-        let oid = git2::Oid::from_str(commit_id).map_err(|e| Error::InvalidInput(format!(
-            "Invalid commit ID '{commit_id}': {e}"
-        )))?;
+        let oid = git2::Oid::from_str(commit_id)
+            .map_err(|e| Error::InvalidInput(format!("Invalid commit ID '{commit_id}': {e}")))?;
 
         match repo.note_delete(oid, Some(&self.notes_ref), &sig, &sig) {
             Ok(()) => Ok(true),
@@ -179,7 +181,7 @@ impl NotesManager {
         }
     }
 
-    /// Lists all notes as (commit_id, content) pairs.
+    /// Lists all notes as (`commit_id`, content) pairs.
     ///
     /// # Errors
     ///
@@ -191,10 +193,12 @@ impl NotesManager {
         let notes = match repo.notes(Some(&self.notes_ref)) {
             Ok(notes) => notes,
             Err(e) if e.code() == git2::ErrorCode::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(Error::OperationFailed {
-                operation: "list_notes".to_string(),
-                cause: e.to_string(),
-            }),
+            Err(e) => {
+                return Err(Error::OperationFailed {
+                    operation: "list_notes".to_string(),
+                    cause: e.to_string(),
+                });
+            },
         };
 
         for note_result in notes {
@@ -203,12 +207,16 @@ impl NotesManager {
                 cause: e.to_string(),
             })?;
 
-            // Get the note content
-            if let Ok(blob) = repo.find_blob(note_oid) {
-                if let Some(content) = std::str::from_utf8(blob.content()).ok() {
-                    results.push((annotated_oid.to_string(), content.to_string()));
-                }
-            }
+            // Get the note content using let-else to reduce nesting
+            let Ok(blob) = repo.find_blob(note_oid) else {
+                continue;
+            };
+
+            let Ok(content) = std::str::from_utf8(blob.content()) else {
+                continue;
+            };
+
+            results.push((annotated_oid.to_string(), content.to_string()));
         }
 
         Ok(results)

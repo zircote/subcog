@@ -2,6 +2,11 @@
 //!
 //! Provides embedding generation using fastembed or fallback to BM25-only.
 
+// Allow cast precision loss for hash-based embedding calculations.
+#![allow(clippy::cast_precision_loss)]
+// Allow cast possible truncation for hash index calculations on 32-bit platforms.
+#![allow(clippy::cast_possible_truncation)]
+
 mod fallback;
 mod fastembed;
 

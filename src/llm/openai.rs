@@ -67,14 +67,17 @@ impl OpenAiClient {
         Ok(())
     }
 
-    /// Makes a request to the OpenAI API.
+    /// Makes a request to the `OpenAI` API.
     fn request(&self, messages: Vec<ChatMessage>) -> Result<String> {
         self.validate()?;
 
-        let api_key = self.api_key.as_ref().ok_or_else(|| Error::OperationFailed {
-            operation: "openai_request".to_string(),
-            cause: "API key not configured".to_string(),
-        })?;
+        let api_key = self
+            .api_key
+            .as_ref()
+            .ok_or_else(|| Error::OperationFailed {
+                operation: "openai_request".to_string(),
+                cause: "API key not configured".to_string(),
+            })?;
 
         let request = ChatCompletionRequest {
             model: self.model.clone(),
@@ -102,10 +105,11 @@ impl OpenAiClient {
             });
         }
 
-        let response: ChatCompletionResponse = response.json().map_err(|e| Error::OperationFailed {
-            operation: "openai_response".to_string(),
-            cause: e.to_string(),
-        })?;
+        let response: ChatCompletionResponse =
+            response.json().map_err(|e| Error::OperationFailed {
+                operation: "openai_response".to_string(),
+                cause: e.to_string(),
+            })?;
 
         // Extract content from first choice
         response
@@ -140,21 +144,20 @@ impl LlmProvider for OpenAiClient {
     }
 
     fn analyze_for_capture(&self, content: &str) -> Result<CaptureAnalysis> {
-        let system_prompt = r#"You are an AI assistant that analyzes content to determine if it should be captured as a memory for an AI coding assistant. Respond only with valid JSON."#;
+        let system_prompt = "You are an AI assistant that analyzes content to determine if it should be captured as a memory for an AI coding assistant. Respond only with valid JSON.";
 
         let user_prompt = format!(
             r#"Analyze the following content and determine if it should be captured as a memory.
 
 Content:
-{}
+{content}
 
 Respond in JSON format with these fields:
 - should_capture: boolean
 - confidence: number from 0.0 to 1.0
 - suggested_namespace: one of "decisions", "patterns", "learnings", "blockers", "tech-debt", "context"
 - suggested_tags: array of relevant tags
-- reasoning: brief explanation"#,
-            content
+- reasoning: brief explanation"#
         );
 
         let messages = vec![
@@ -171,12 +174,11 @@ Respond in JSON format with these fields:
         let response = self.request(messages)?;
 
         // Parse JSON response
-        let analysis: AnalysisResponse = serde_json::from_str(&response).map_err(|e| {
-            Error::OperationFailed {
+        let analysis: AnalysisResponse =
+            serde_json::from_str(&response).map_err(|e| Error::OperationFailed {
                 operation: "parse_analysis".to_string(),
                 cause: e.to_string(),
-            }
-        })?;
+            })?;
 
         Ok(CaptureAnalysis {
             should_capture: analysis.should_capture,

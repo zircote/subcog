@@ -1,9 +1,11 @@
 //! PII detection.
+// Allow expect() on static regex patterns - these are guaranteed to compile
+#![allow(clippy::expect_used)]
 //!
 //! Detects personally identifiable information in content.
 
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 /// A detected PII match.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,44 +23,56 @@ pub struct PiiMatch {
 /// Pattern for detecting PII.
 struct PiiPattern {
     name: &'static str,
-    regex: &'static Lazy<Regex>,
+    regex: &'static LazyLock<Regex>,
 }
 
 // Define regex patterns as separate statics
-static EMAIL_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap_or_else(|_| Regex::new(".^").unwrap())
+// Note: These patterns are static and guaranteed to compile, so expect() is safe
+static EMAIL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+        .expect("static regex: email pattern")
 });
 
-static SSN_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\b\d{3}-\d{2}-\d{4}\b").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static SSN_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b\d{3}-\d{2}-\d{4}\b").expect("static regex: SSN pattern"));
+
+static PHONE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:\+?1[-.\s]?)?\(?[2-9]\d{2}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b")
+        .expect("static regex: phone pattern")
 });
 
-static PHONE_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\b(?:\+?1[-.\s]?)?\(?[2-9]\d{2}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static CREDIT_CARD_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b",
+    )
+    .expect("static regex: credit card pattern")
 });
 
-static CREDIT_CARD_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static IP_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b",
+    )
+    .expect("static regex: IP address pattern")
 });
 
-static IP_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static DOB_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)\b(?:dob|date\s*of\s*birth|birth\s*date)\s*[:=]?\s*\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}\b",
+    )
+    .expect("static regex: date of birth pattern")
 });
 
-static DOB_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)\b(?:dob|date\s*of\s*birth|birth\s*date)\s*[:=]?\s*\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}\b").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static ZIP_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b\d{5}(?:-\d{4})?\b").expect("static regex: ZIP code pattern"));
+
+static DL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:driver'?s?\s*license|dl)\s*#?\s*[:=]?\s*[A-Z0-9]{6,12}\b")
+        .expect("static regex: driver's license pattern")
 });
 
-static ZIP_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\b\d{5}(?:-\d{4})?\b").unwrap_or_else(|_| Regex::new(".^").unwrap())
-});
-
-static DL_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)\b(?:driver'?s?\s*license|dl)\s*#?\s*[:=]?\s*[A-Z0-9]{6,12}\b").unwrap_or_else(|_| Regex::new(".^").unwrap())
-});
-
-static PASSPORT_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)\bpassport\s*#?\s*[:=]?\s*[A-Z0-9]{6,9}\b").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static PASSPORT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bpassport\s*#?\s*[:=]?\s*[A-Z0-9]{6,9}\b")
+        .expect("static regex: passport pattern")
 });
 
 /// Returns the list of PII patterns to check.
@@ -132,63 +146,62 @@ impl PiiDetector {
     /// Returns all detected PII matches.
     #[must_use]
     pub fn detect(&self, content: &str) -> Vec<PiiMatch> {
-        let mut matches = Vec::new();
+        let mut found_matches = Vec::new();
 
         for pattern in pii_patterns() {
-            for m in pattern.regex.find_iter(content) {
-                let matched = m.as_str();
-
-                // Skip local IP addresses if configured
-                if self.skip_local && pattern.name == "IP Address" {
-                    if matched.starts_with("127.")
-                        || matched.starts_with("10.")
-                        || matched.starts_with("192.168.")
-                        || matched.starts_with("172.16.")
-                        || matched == "0.0.0.0"
-                    {
-                        continue;
-                    }
-                }
-
-                // Skip common non-PII ZIP codes (very short, likely not actual addresses)
-                if pattern.name == "ZIP Code" && matched.len() == 5 {
-                    // Only flag ZIP codes if they appear in an address context
-                    let before = if m.start() >= 20 {
-                        &content[m.start() - 20..m.start()]
-                    } else {
-                        &content[..m.start()]
-                    };
-                    if !before.to_lowercase().contains("address")
-                        && !before.to_lowercase().contains("zip")
-                        && !before.contains(',')
-                    {
-                        continue;
-                    }
-                }
-
-                matches.push(PiiMatch {
-                    pii_type: pattern.name.to_string(),
-                    start: m.start(),
-                    end: m.end(),
-                    matched_text: matched.to_string(),
-                });
-            }
+            self.collect_pattern_matches(pattern.name, pattern.regex, content, &mut found_matches);
         }
 
         // Sort by position
-        matches.sort_by_key(|m| m.start);
+        found_matches.sort_by_key(|m| m.start);
 
         // Remove overlapping matches
-        let mut result = Vec::new();
-        let mut last_end = 0;
-        for m in matches {
-            if m.start >= last_end {
-                last_end = m.end;
-                result.push(m);
+        deduplicate_overlapping(found_matches)
+    }
+
+    /// Collects matches for a single pattern into the result vector.
+    fn collect_pattern_matches(
+        &self,
+        pattern_name: &str,
+        regex: &Regex,
+        content: &str,
+        matches: &mut Vec<PiiMatch>,
+    ) {
+        for m in regex.find_iter(content) {
+            if let Some(pii_match) = self.process_match(pattern_name, &m, content) {
+                matches.push(pii_match);
             }
         }
+    }
 
-        result
+    /// Processes a match and returns a `PiiMatch` if it should be included.
+    fn process_match(
+        &self,
+        pattern_name: &str,
+        m: &regex::Match<'_>,
+        content: &str,
+    ) -> Option<PiiMatch> {
+        let match_str = m.as_str();
+
+        // Skip local IP addresses if configured
+        if self.skip_local && pattern_name == "IP Address" && is_local_ip(match_str) {
+            return None;
+        }
+
+        // Skip common non-PII ZIP codes (very short, likely not actual addresses)
+        if pattern_name == "ZIP Code"
+            && match_str.len() == 5
+            && !is_zip_in_address_context(content, m.start())
+        {
+            return None;
+        }
+
+        Some(PiiMatch {
+            pii_type: pattern_name.to_string(),
+            start: m.start(),
+            end: m.end(),
+            matched_text: match_str.to_string(),
+        })
     }
 
     /// Returns the types of PII detected.
@@ -205,6 +218,41 @@ impl PiiDetector {
     pub fn count(&self, content: &str) -> usize {
         self.detect(content).len()
     }
+}
+
+/// Removes overlapping matches, keeping the first occurrence.
+fn deduplicate_overlapping(sorted_matches: Vec<PiiMatch>) -> Vec<PiiMatch> {
+    let mut result = Vec::new();
+    let mut last_end = 0;
+
+    for m in sorted_matches {
+        if m.start >= last_end {
+            last_end = m.end;
+            result.push(m);
+        }
+    }
+
+    result
+}
+
+/// Checks if an IP address is a local/private address.
+fn is_local_ip(ip: &str) -> bool {
+    ip.starts_with("127.")
+        || ip.starts_with("10.")
+        || ip.starts_with("192.168.")
+        || ip.starts_with("172.16.")
+        || ip == "0.0.0.0"
+}
+
+/// Checks if a ZIP code appears in an address context.
+fn is_zip_in_address_context(content: &str, match_start: usize) -> bool {
+    let before = if match_start >= 20 {
+        &content[match_start - 20..match_start]
+    } else {
+        &content[..match_start]
+    };
+    let before_lower = before.to_lowercase();
+    before_lower.contains("address") || before_lower.contains("zip") || before.contains(',')
 }
 
 impl Default for PiiDetector {

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// LM Studio local LLM client.
 ///
-/// LM Studio provides an OpenAI-compatible API on localhost.
+/// LM Studio provides an `OpenAI`-compatible API on localhost.
 pub struct LmStudioClient {
     /// API endpoint.
     endpoint: String,
@@ -48,6 +48,7 @@ impl LmStudioClient {
     }
 
     /// Checks if LM Studio is available.
+    #[must_use]
     pub fn is_available(&self) -> bool {
         self.client
             .get(format!("{}/models", self.endpoint))
@@ -59,7 +60,10 @@ impl LmStudioClient {
     /// Makes a request to the LM Studio API.
     fn request(&self, messages: Vec<ChatMessage>) -> Result<String> {
         let request = ChatCompletionRequest {
-            model: self.model.clone().unwrap_or_else(|| "local-model".to_string()),
+            model: self
+                .model
+                .clone()
+                .unwrap_or_else(|| "local-model".to_string()),
             messages,
             max_tokens: Some(1024),
             temperature: Some(0.7),
@@ -83,10 +87,11 @@ impl LmStudioClient {
             });
         }
 
-        let response: ChatCompletionResponse = response.json().map_err(|e| Error::OperationFailed {
-            operation: "lmstudio_response".to_string(),
-            cause: e.to_string(),
-        })?;
+        let response: ChatCompletionResponse =
+            response.json().map_err(|e| Error::OperationFailed {
+                operation: "lmstudio_response".to_string(),
+                cause: e.to_string(),
+            })?;
 
         // Extract content from first choice
         response
@@ -121,21 +126,20 @@ impl LlmProvider for LmStudioClient {
     }
 
     fn analyze_for_capture(&self, content: &str) -> Result<CaptureAnalysis> {
-        let system_prompt = r#"You are an AI assistant that analyzes content to determine if it should be captured as a memory for an AI coding assistant. Respond only with valid JSON."#;
+        let system_prompt = "You are an AI assistant that analyzes content to determine if it should be captured as a memory for an AI coding assistant. Respond only with valid JSON.";
 
         let user_prompt = format!(
             r#"Analyze the following content and determine if it should be captured as a memory.
 
 Content:
-{}
+{content}
 
 Respond in JSON format with these fields:
 - should_capture: boolean
 - confidence: number from 0.0 to 1.0
 - suggested_namespace: one of "decisions", "patterns", "learnings", "blockers", "tech-debt", "context"
 - suggested_tags: array of relevant tags
-- reasoning: brief explanation"#,
-            content
+- reasoning: brief explanation"#
         );
 
         let messages = vec![
@@ -155,12 +159,11 @@ Respond in JSON format with these fields:
         let json_str = extract_json(&response).unwrap_or(&response);
 
         // Parse JSON response
-        let analysis: AnalysisResponse = serde_json::from_str(json_str).map_err(|e| {
-            Error::OperationFailed {
+        let analysis: AnalysisResponse =
+            serde_json::from_str(json_str).map_err(|e| Error::OperationFailed {
                 operation: "parse_analysis".to_string(),
-                cause: format!("Failed to parse: {} - Response was: {}", e, response),
-            }
-        })?;
+                cause: format!("Failed to parse: {e} - Response was: {response}"),
+            })?;
 
         Ok(CaptureAnalysis {
             should_capture: analysis.should_capture,
@@ -245,9 +248,9 @@ mod tests {
 
     #[test]
     fn test_extract_json() {
-        let text = "Here's the JSON: {\"key\": \"value\"} and some more text";
+        let text = r#"Here's the JSON: {"key": "value"} and some more text"#;
         let json = extract_json(text);
-        assert_eq!(json, Some("{\"key\": \"value\"}"));
+        assert_eq!(json, Some(r#"{"key": "value"}"#));
     }
 
     #[test]

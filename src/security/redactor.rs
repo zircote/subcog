@@ -7,10 +7,10 @@ use super::{PiiDetector, SecretDetector};
 /// Redaction mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RedactionMode {
-    /// Replace with [REDACTED].
+    /// Replace with `[REDACTED]`.
     #[default]
     Mask,
-    /// Replace with type-specific placeholder (e.g., [SECRET:AWS_KEY]).
+    /// Replace with type-specific placeholder (e.g., `SECRET:AWS_KEY`).
     TypedMask,
     /// Replace with asterisks of same length.
     Asterisks,
@@ -98,7 +98,7 @@ impl ContentRedactor {
 
     /// Creates a new content redactor with custom config.
     #[must_use]
-    pub fn with_config(config: RedactionConfig) -> Self {
+    pub const fn with_config(config: RedactionConfig) -> Self {
         Self {
             secret_detector: SecretDetector::new(),
             pii_detector: PiiDetector::new(),
@@ -192,7 +192,9 @@ impl ContentRedactor {
     fn get_replacement(&self, type_name: &str, length: usize) -> String {
         match self.config.mode {
             RedactionMode::Mask => self.config.placeholder.clone(),
-            RedactionMode::TypedMask => format!("[REDACTED:{}]", type_name.to_uppercase().replace(' ', "_")),
+            RedactionMode::TypedMask => {
+                format!("[REDACTED:{}]", type_name.to_uppercase().replace(' ', "_"))
+            },
             RedactionMode::Asterisks => "*".repeat(length),
             RedactionMode::Remove => String::new(),
         }

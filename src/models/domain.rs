@@ -99,6 +99,27 @@ impl Namespace {
     pub const fn is_system(&self) -> bool {
         matches!(self, Self::Help)
     }
+
+    /// Parses a namespace from a string.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "decisions" => Some(Self::Decisions),
+            "patterns" => Some(Self::Patterns),
+            "learnings" => Some(Self::Learnings),
+            "context" => Some(Self::Context),
+            "tech-debt" | "techdebt" | "tech_debt" => Some(Self::TechDebt),
+            "blockers" => Some(Self::Blockers),
+            "progress" => Some(Self::Progress),
+            "apis" => Some(Self::Apis),
+            "config" => Some(Self::Config),
+            "security" => Some(Self::Security),
+            "performance" => Some(Self::Performance),
+            "testing" => Some(Self::Testing),
+            "help" => Some(Self::Help),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for Namespace {

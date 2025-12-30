@@ -1,9 +1,11 @@
 //! Secret detection patterns.
+// Allow expect() on static regex patterns - these are guaranteed to compile
+#![allow(clippy::expect_used)]
 //!
 //! Detects common secret patterns in content to prevent accidental capture.
 
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 /// A detected secret match.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,72 +23,81 @@ pub struct SecretMatch {
 /// Pattern for detecting secrets.
 struct SecretPattern {
     name: &'static str,
-    regex: &'static Lazy<Regex>,
+    regex: &'static LazyLock<Regex>,
 }
 
 // Define regex patterns as separate statics
-static AWS_ACCESS_KEY_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)AKIA[0-9A-Z]{16}").unwrap_or_else(|_| Regex::new(".^").unwrap())
+// Note: These patterns are static and guaranteed to compile, so expect() is safe
+static AWS_ACCESS_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)AKIA[0-9A-Z]{16}").expect("static regex: AWS access key pattern")
 });
 
-static AWS_SECRET_KEY_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?i)(?:aws_secret_access_key|aws_secret_key|secret_access_key)\s*[=:]\s*['"]?([A-Za-z0-9/+=]{40})['"]?"#).unwrap_or_else(|_| Regex::new(".^").unwrap())
+static AWS_SECRET_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)(?:aws_secret_access_key|aws_secret_key|secret_access_key)\s*[=:]\s*['"]?([A-Za-z0-9/+=]{40})['"]?"#).expect("static regex: AWS secret key pattern")
 });
 
-static GITHUB_TOKEN_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"gh[pousr]_[A-Za-z0-9_]{36,}").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static GITHUB_TOKEN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"gh[pousr]_[A-Za-z0-9_]{36,}").expect("static regex: GitHub token pattern")
 });
 
-static GITHUB_PAT_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"github_pat_[A-Za-z0-9_]{22,}").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static GITHUB_PAT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"github_pat_[A-Za-z0-9_]{22,}").expect("static regex: GitHub PAT pattern")
 });
 
-static GENERIC_API_KEY_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?i)(?:api[_-]?key|apikey)\s*[=:]\s*['"]?([A-Za-z0-9_\-]{20,})['"]?"#).unwrap_or_else(|_| Regex::new(".^").unwrap())
+static GENERIC_API_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)(?:api[_-]?key|apikey)\s*[=:]\s*['"]?([A-Za-z0-9_\-]{20,})['"]?"#)
+        .expect("static regex: generic API key pattern")
 });
 
-static GENERIC_SECRET_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?i)(?:secret|password|passwd|pwd)\s*[=:]\s*['"]?([^\s'"]{8,})['"]?"#).unwrap_or_else(|_| Regex::new(".^").unwrap())
+static GENERIC_SECRET_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)(?:secret|password|passwd|pwd)\s*[=:]\s*['"]?([^\s'"]{8,})['"]?"#)
+        .expect("static regex: generic secret pattern")
 });
 
-static PRIVATE_KEY_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static PRIVATE_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----")
+        .expect("static regex: private key pattern")
 });
 
-static JWT_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static JWT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*")
+        .expect("static regex: JWT pattern")
 });
 
-static SLACK_TOKEN_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"xox[baprs]-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static SLACK_TOKEN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"xox[baprs]-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*")
+        .expect("static regex: Slack token pattern")
 });
 
-static SLACK_WEBHOOK_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[a-zA-Z0-9]+").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static SLACK_WEBHOOK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[a-zA-Z0-9]+")
+        .expect("static regex: Slack webhook pattern")
 });
 
-static GOOGLE_API_KEY_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"AIza[0-9A-Za-z_-]{35}").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static GOOGLE_API_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"AIza[0-9A-Za-z_-]{35}").expect("static regex: Google API key pattern")
 });
 
-static STRIPE_API_KEY_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?:sk|pk)_(?:live|test)_[A-Za-z0-9]{24,}").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static STRIPE_API_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:sk|pk)_(?:live|test)_[A-Za-z0-9]{24,}")
+        .expect("static regex: Stripe API key pattern")
 });
 
-static DATABASE_URL_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)(?:postgres|mysql|mongodb|redis)://[^:]+:[^@]+@[^\s]+").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static DATABASE_URL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(?:postgres|mysql|mongodb|redis)://[^:]+:[^@]+@[^\s]+")
+        .expect("static regex: database URL pattern")
 });
 
-static BEARER_TOKEN_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)bearer\s+[A-Za-z0-9_\-.]+").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static BEARER_TOKEN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)bearer\s+[A-Za-z0-9_\-.]+").expect("static regex: bearer token pattern")
 });
 
-static OPENAI_API_KEY_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"sk-[A-Za-z0-9]{48}").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static OPENAI_API_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"sk-[A-Za-z0-9]{48}").expect("static regex: OpenAI API key pattern")
 });
 
-static ANTHROPIC_API_KEY_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"sk-ant-api[A-Za-z0-9_-]{90,}").unwrap_or_else(|_| Regex::new(".^").unwrap())
+static ANTHROPIC_API_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"sk-ant-api[A-Za-z0-9_-]{90,}").expect("static regex: Anthropic API key pattern")
 });
 
 /// Returns the list of secret patterns to check.
@@ -305,8 +316,10 @@ mod tests {
         let detector = SecretDetector::new();
         // Build test URL in parts to avoid GitHub secret scanning
         let base = "https://hooks.slack.com/services/";
-        let fake_ids = ["T", "FAKE", "FAKE", "TEST/B", "FAKE", "FAKE", "TEST/", "fake", "token", "here"];
-        let content = format!("SLACK_WEBHOOK={}{}", base, fake_ids.join(""));
+        let fake_ids = [
+            "T", "FAKE", "FAKE", "TEST/B", "FAKE", "FAKE", "TEST/", "fake", "token", "here",
+        ];
+        let content = format!("SLACK_WEBHOOK={base}{}", fake_ids.join(""));
         let matches = detector.detect(&content);
 
         assert!(!matches.is_empty());
@@ -328,9 +341,11 @@ mod tests {
         let matches = detector.detect(content);
 
         assert!(!matches.is_empty());
-        assert!(matches
-            .iter()
-            .any(|m| m.secret_type == "Database URL with Credentials"));
+        assert!(
+            matches
+                .iter()
+                .any(|m| m.secret_type == "Database URL with Credentials")
+        );
     }
 
     #[test]
@@ -351,8 +366,7 @@ mod tests {
     #[test]
     fn test_multiple_secrets() {
         let detector = SecretDetector::new();
-        let content =
-            "AWS_KEY=AKIAIOSFODNN7EXAMPLE and GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+        let content = "AWS_KEY=AKIAIOSFODNN7EXAMPLE and GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
         let matches = detector.detect(content);
 
         assert_eq!(matches.len(), 2);

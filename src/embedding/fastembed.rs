@@ -23,7 +23,7 @@ impl FastEmbedEmbedder {
 
     /// Creates a new `FastEmbed` embedder.
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             dimensions: Self::DEFAULT_DIMENSIONS,
             initialized: true,
@@ -136,10 +136,8 @@ mod tests {
         let result = embedder.embed("Hello, world!");
 
         assert!(result.is_ok());
-        let embedding = result.ok();
-        assert!(embedding.is_some());
-        let embedding = embedding.as_ref();
-        assert!(embedding.map_or(false, |e| e.len() == FastEmbedEmbedder::DEFAULT_DIMENSIONS));
+        let embedding = result.unwrap();
+        assert_eq!(embedding.len(), FastEmbedEmbedder::DEFAULT_DIMENSIONS);
     }
 
     #[test]
@@ -154,20 +152,18 @@ mod tests {
         let embedder = FastEmbedEmbedder::new();
         let text = "Rust programming language";
 
-        let result1 = embedder.embed(text).ok();
-        let result2 = embedder.embed(text).ok();
+        let result1 = embedder.embed(text);
+        let result2 = embedder.embed(text);
 
         // Same text should produce same embedding
-        assert!(result1.is_some());
-        assert!(result2.is_some());
+        assert!(result1.is_ok());
+        assert!(result2.is_ok());
 
-        let emb1 = result1.as_ref();
-        let emb2 = result2.as_ref();
+        let emb1 = result1.unwrap();
+        let emb2 = result2.unwrap();
 
-        if let (Some(e1), Some(e2)) = (emb1, emb2) {
-            for (v1, v2) in e1.iter().zip(e2.iter()) {
-                assert!((v1 - v2).abs() < f32::EPSILON);
-            }
+        for (v1, v2) in emb1.iter().zip(emb2.iter()) {
+            assert!((v1 - v2).abs() < f32::EPSILON);
         }
     }
 
@@ -175,26 +171,21 @@ mod tests {
     fn test_embed_different_text() {
         let embedder = FastEmbedEmbedder::new();
 
-        let result1 = embedder.embed("Rust programming").ok();
-        let result2 = embedder.embed("Python scripting").ok();
+        let result1 = embedder.embed("Rust programming");
+        let result2 = embedder.embed("Python scripting");
 
-        assert!(result1.is_some());
-        assert!(result2.is_some());
+        assert!(result1.is_ok());
+        assert!(result2.is_ok());
 
         // Different text should produce different embeddings
-        let emb1 = result1.as_ref();
-        let emb2 = result2.as_ref();
+        let emb1 = result1.unwrap();
+        let emb2 = result2.unwrap();
 
-        if let (Some(e1), Some(e2)) = (emb1, emb2) {
-            let mut different = false;
-            for (v1, v2) in e1.iter().zip(e2.iter()) {
-                if (v1 - v2).abs() > f32::EPSILON {
-                    different = true;
-                    break;
-                }
-            }
-            assert!(different);
-        }
+        let different = emb1
+            .iter()
+            .zip(emb2.iter())
+            .any(|(v1, v2)| (v1 - v2).abs() > f32::EPSILON);
+        assert!(different);
     }
 
     #[test]
@@ -203,14 +194,11 @@ mod tests {
         let result = embedder.embed("Test embedding normalization");
 
         assert!(result.is_ok());
-        let embedding = result.ok();
-        assert!(embedding.is_some());
+        let emb = result.unwrap();
 
-        if let Some(emb) = embedding {
-            // Check that the embedding is normalized (magnitude ~= 1)
-            let magnitude: f32 = emb.iter().map(|x| x * x).sum::<f32>().sqrt();
-            assert!((magnitude - 1.0).abs() < 0.01);
-        }
+        // Check that the embedding is normalized (magnitude ~= 1)
+        let magnitude: f32 = emb.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((magnitude - 1.0).abs() < 0.01);
     }
 
     #[test]
@@ -221,15 +209,11 @@ mod tests {
         let result = embedder.embed_batch(&texts);
         assert!(result.is_ok());
 
-        let embeddings = result.ok();
-        assert!(embeddings.is_some());
-        let embeddings = embeddings.as_ref();
-        assert!(embeddings.map_or(false, |e| e.len() == 3));
+        let embeddings = result.unwrap();
+        assert_eq!(embeddings.len(), 3);
 
-        if let Some(embs) = embeddings {
-            for emb in embs {
-                assert_eq!(emb.len(), FastEmbedEmbedder::DEFAULT_DIMENSIONS);
-            }
+        for emb in &embeddings {
+            assert_eq!(emb.len(), FastEmbedEmbedder::DEFAULT_DIMENSIONS);
         }
     }
 }

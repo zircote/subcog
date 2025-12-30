@@ -47,22 +47,29 @@ impl RemoteManager {
         let mut callbacks = RemoteCallbacks::new();
 
         // Try to use SSH agent for authentication
-        callbacks.credentials(|_url, username_from_url, allowed_types| {
-            if allowed_types.contains(git2::CredentialType::SSH_KEY) {
-                // Try SSH agent
-                if let Some(username) = username_from_url {
-                    return git2::Cred::ssh_key_from_agent(username);
-                }
-            }
-
-            if allowed_types.contains(git2::CredentialType::DEFAULT) {
-                return git2::Cred::default();
-            }
-
-            Err(git2::Error::from_str("No suitable credentials found"))
-        });
+        callbacks.credentials(Self::handle_credentials);
 
         callbacks
+    }
+
+    /// Handles credential requests for git operations.
+    fn handle_credentials(
+        _url: &str,
+        username_from_url: Option<&str>,
+        allowed_types: git2::CredentialType,
+    ) -> std::result::Result<git2::Cred, git2::Error> {
+        // Try SSH agent with username if available
+        if allowed_types.contains(git2::CredentialType::SSH_KEY) {
+            if let Some(username) = username_from_url {
+                return git2::Cred::ssh_key_from_agent(username);
+            }
+        }
+
+        if allowed_types.contains(git2::CredentialType::DEFAULT) {
+            return git2::Cred::default();
+        }
+
+        Err(git2::Error::from_str("No suitable credentials found"))
     }
 
     /// Fetches notes from a remote.
@@ -73,10 +80,12 @@ impl RemoteManager {
     pub fn fetch(&self, remote_name: &str) -> Result<usize> {
         let repo = self.open_repo()?;
 
-        let mut remote = repo.find_remote(remote_name).map_err(|e| Error::OperationFailed {
-            operation: "find_remote".to_string(),
-            cause: e.to_string(),
-        })?;
+        let mut remote = repo
+            .find_remote(remote_name)
+            .map_err(|e| Error::OperationFailed {
+                operation: "find_remote".to_string(),
+                cause: e.to_string(),
+            })?;
 
         let callbacks = Self::create_callbacks();
         let mut fetch_options = FetchOptions::new();
@@ -104,10 +113,12 @@ impl RemoteManager {
     pub fn push(&self, remote_name: &str) -> Result<usize> {
         let repo = self.open_repo()?;
 
-        let mut remote = repo.find_remote(remote_name).map_err(|e| Error::OperationFailed {
-            operation: "find_remote".to_string(),
-            cause: e.to_string(),
-        })?;
+        let mut remote = repo
+            .find_remote(remote_name)
+            .map_err(|e| Error::OperationFailed {
+                operation: "find_remote".to_string(),
+                cause: e.to_string(),
+            })?;
 
         let callbacks = Self::create_callbacks();
         let mut push_options = PushOptions::new();
@@ -139,10 +150,7 @@ impl RemoteManager {
             cause: e.to_string(),
         })?;
 
-        Ok(remotes
-            .iter()
-            .filter_map(|r| r.map(String::from))
-            .collect())
+        Ok(remotes.iter().filter_map(|r| r.map(String::from)).collect())
     }
 
     /// Gets the URL for a remote.

@@ -44,7 +44,10 @@ impl YamlFrontMatterParser {
         // Check if content starts with front matter delimiter
         if !content.starts_with(Self::DELIMITER) {
             // No front matter, return empty metadata and original content
-            return Ok((serde_json::Value::Object(serde_json::Map::new()), content.to_string()));
+            return Ok((
+                serde_json::Value::Object(serde_json::Map::new()),
+                content.to_string(),
+            ));
         }
 
         // Find the end of front matter
@@ -89,15 +92,16 @@ impl YamlFrontMatterParser {
     /// ```
     pub fn serialize(metadata: &serde_json::Value, content: &str) -> Result<String> {
         // If metadata is empty, just return content
-        if metadata.is_null() || (metadata.is_object() && metadata.as_object().is_some_and(|m| m.is_empty())) {
+        if metadata.is_null()
+            || (metadata.is_object() && metadata.as_object().is_some_and(serde_json::Map::is_empty))
+        {
             return Ok(content.to_string());
         }
 
-        let yaml = serde_yaml::to_string(metadata)
-            .map_err(|e| Error::OperationFailed {
-                operation: "serialize_yaml".to_string(),
-                cause: e.to_string(),
-            })?;
+        let yaml = serde_yaml::to_string(metadata).map_err(|e| Error::OperationFailed {
+            operation: "serialize_yaml".to_string(),
+            cause: e.to_string(),
+        })?;
 
         Ok(format!(
             "{}\n{}{}\n{}",
@@ -120,12 +124,12 @@ impl YamlFrontMatterParser {
         let after_first = &content[Self::DELIMITER.len()..];
         let after_first = after_first.trim_start_matches(['\r', '\n']);
 
-        if let Some(end_pos) = after_first.find(Self::DELIMITER) {
-            let body_start = end_pos + Self::DELIMITER.len();
-            after_first[body_start..].trim_start_matches(['\r', '\n'])
-        } else {
-            content
-        }
+        after_first
+            .find(Self::DELIMITER)
+            .map_or(content, |end_pos| {
+                let body_start = end_pos + Self::DELIMITER.len();
+                after_first[body_start..].trim_start_matches(['\r', '\n'])
+            })
     }
 }
 
@@ -191,7 +195,10 @@ mod tests {
         assert_eq!(YamlFrontMatterParser::extract_body(content), "The body");
 
         let plain = "No front matter";
-        assert_eq!(YamlFrontMatterParser::extract_body(plain), "No front matter");
+        assert_eq!(
+            YamlFrontMatterParser::extract_body(plain),
+            "No front matter"
+        );
     }
 
     #[test]

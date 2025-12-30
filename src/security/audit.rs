@@ -157,7 +157,7 @@ impl AuditLogger {
 
     /// Creates a new audit logger with custom config.
     #[must_use]
-    pub fn with_config(config: AuditConfig) -> Self {
+    pub const fn with_config(config: AuditConfig) -> Self {
         Self {
             config,
             entries: Mutex::new(Vec::new()),
@@ -195,21 +195,19 @@ impl AuditLogger {
 
     /// Logs a search/recall event.
     pub fn log_recall(&self, query: &str, result_count: usize) {
-        let entry = AuditEntry::new("memory.recall", "search")
-            .with_metadata(serde_json::json!({
-                "query_length": query.len(),
-                "result_count": result_count
-            }));
+        let entry = AuditEntry::new("memory.recall", "search").with_metadata(serde_json::json!({
+            "query_length": query.len(),
+            "result_count": result_count
+        }));
         self.log_entry(entry);
     }
 
     /// Logs a sync event.
     pub fn log_sync(&self, pushed: usize, pulled: usize) {
-        let entry = AuditEntry::new("memory.sync", "sync")
-            .with_metadata(serde_json::json!({
-                "pushed": pushed,
-                "pulled": pulled
-            }));
+        let entry = AuditEntry::new("memory.sync", "sync").with_metadata(serde_json::json!({
+            "pushed": pushed,
+            "pulled": pulled
+        }));
         self.log_entry(entry);
     }
 
@@ -357,12 +355,14 @@ impl AuditLogger {
                 archived,
                 merged,
                 timestamp,
-            } => AuditEntry::new("memory.consolidated", "consolidate").with_metadata(serde_json::json!({
-                "processed": processed,
-                "archived": archived,
-                "merged": merged,
-                "event_timestamp": timestamp
-            })),
+            } => AuditEntry::new("memory.consolidated", "consolidate").with_metadata(
+                serde_json::json!({
+                    "processed": processed,
+                    "archived": archived,
+                    "merged": merged,
+                    "event_timestamp": timestamp
+                }),
+            ),
         }
     }
 
@@ -371,14 +371,10 @@ impl AuditLogger {
         use std::fs::OpenOptions;
         use std::io::Write;
 
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
+        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
 
-        let json = serde_json::to_string(entry).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        })?;
+        let json = serde_json::to_string(entry)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         writeln!(file, "{json}")?;
         Ok(())
@@ -448,7 +444,7 @@ mod tests {
             namespace: Namespace::Decisions,
             domain: Domain::new(),
             content_length: 100,
-            timestamp: 1234567890,
+            timestamp: 1_234_567_890,
         };
 
         logger.log(&event);

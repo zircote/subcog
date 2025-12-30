@@ -71,10 +71,13 @@ impl AnthropicClient {
     fn request(&self, messages: Vec<Message>) -> Result<String> {
         self.validate()?;
 
-        let api_key = self.api_key.as_ref().ok_or_else(|| Error::OperationFailed {
-            operation: "anthropic_request".to_string(),
-            cause: "API key not configured".to_string(),
-        })?;
+        let api_key = self
+            .api_key
+            .as_ref()
+            .ok_or_else(|| Error::OperationFailed {
+                operation: "anthropic_request".to_string(),
+                cause: "API key not configured".to_string(),
+            })?;
 
         let request = MessagesRequest {
             model: self.model.clone(),
@@ -150,7 +153,7 @@ impl LlmProvider for AnthropicClient {
             r#"Analyze the following content and determine if it should be captured as a memory for an AI coding assistant.
 
 Content:
-{}
+{content}
 
 Respond in JSON format with these fields:
 - should_capture: boolean
@@ -159,19 +162,17 @@ Respond in JSON format with these fields:
 - suggested_tags: array of relevant tags
 - reasoning: brief explanation
 
-Only the JSON, no other text."#,
-            content
+Only the JSON, no other text."#
         );
 
         let response = self.complete(&prompt)?;
 
         // Parse JSON response
-        let analysis: AnalysisResponse = serde_json::from_str(&response).map_err(|e| {
-            Error::OperationFailed {
+        let analysis: AnalysisResponse =
+            serde_json::from_str(&response).map_err(|e| Error::OperationFailed {
                 operation: "parse_analysis".to_string(),
                 cause: e.to_string(),
-            }
-        })?;
+            })?;
 
         Ok(CaptureAnalysis {
             should_capture: analysis.should_capture,

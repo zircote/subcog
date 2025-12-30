@@ -24,10 +24,10 @@ impl OllamaClient {
     /// Creates a new Ollama client.
     #[must_use]
     pub fn new() -> Self {
-        let endpoint = std::env::var("OLLAMA_HOST")
-            .unwrap_or_else(|_| Self::DEFAULT_ENDPOINT.to_string());
-        let model = std::env::var("OLLAMA_MODEL")
-            .unwrap_or_else(|_| Self::DEFAULT_MODEL.to_string());
+        let endpoint =
+            std::env::var("OLLAMA_HOST").unwrap_or_else(|_| Self::DEFAULT_ENDPOINT.to_string());
+        let model =
+            std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| Self::DEFAULT_MODEL.to_string());
 
         Self {
             endpoint,
@@ -51,6 +51,7 @@ impl OllamaClient {
     }
 
     /// Checks if Ollama is available.
+    #[must_use]
     pub fn is_available(&self) -> bool {
         self.client
             .get(format!("{}/api/tags", self.endpoint))
@@ -142,13 +143,13 @@ impl LlmProvider for OllamaClient {
     }
 
     fn analyze_for_capture(&self, content: &str) -> Result<CaptureAnalysis> {
-        let system_prompt = r#"You are an AI assistant that analyzes content to determine if it should be captured as a memory for an AI coding assistant. Always respond with valid JSON only, no other text."#;
+        let system_prompt = "You are an AI assistant that analyzes content to determine if it should be captured as a memory for an AI coding assistant. Always respond with valid JSON only, no other text.";
 
         let user_prompt = format!(
             r#"Analyze the following content and determine if it should be captured as a memory.
 
 Content:
-{}
+{content}
 
 Respond in JSON format with these fields:
 - should_capture: boolean
@@ -157,8 +158,7 @@ Respond in JSON format with these fields:
 - suggested_tags: array of relevant tags
 - reasoning: brief explanation
 
-Only output the JSON, nothing else."#,
-            content
+Only output the JSON, nothing else."#
         );
 
         let messages = vec![
@@ -178,12 +178,11 @@ Only output the JSON, nothing else."#,
         let json_str = extract_json(&response).unwrap_or(&response);
 
         // Parse JSON response
-        let analysis: AnalysisResponse = serde_json::from_str(json_str).map_err(|e| {
-            Error::OperationFailed {
+        let analysis: AnalysisResponse =
+            serde_json::from_str(json_str).map_err(|e| Error::OperationFailed {
                 operation: "parse_analysis".to_string(),
-                cause: format!("Failed to parse: {} - Response was: {}", e, response),
-            }
-        })?;
+                cause: format!("Failed to parse: {e} - Response was: {response}"),
+            })?;
 
         Ok(CaptureAnalysis {
             should_capture: analysis.should_capture,
@@ -273,13 +272,13 @@ mod tests {
 
     #[test]
     fn test_extract_json() {
-        let text = "Here's the JSON: {\"key\": \"value\"} and some more text";
+        let text = r#"Here's the JSON: {"key": "value"} and some more text"#;
         let json = extract_json(text);
-        assert_eq!(json, Some("{\"key\": \"value\"}"));
+        assert_eq!(json, Some(r#"{"key": "value"}"#));
 
-        let clean = "{\"key\": \"value\"}";
+        let clean = r#"{"key": "value"}"#;
         let json = extract_json(clean);
-        assert_eq!(json, Some("{\"key\": \"value\"}"));
+        assert_eq!(json, Some(r#"{"key": "value"}"#));
 
         let no_json = "no json here";
         let json = extract_json(no_json);

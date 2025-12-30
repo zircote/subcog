@@ -27,8 +27,9 @@ use subcog::hooks::{
     HookHandler, PostToolUseHandler, PreCompactHandler, SessionStartHandler, StopHandler,
     UserPromptHandler,
 };
-use subcog::storage::index::SqliteBackend;
 use subcog::mcp::{McpServer, Transport};
+use subcog::services::ContextBuilderService;
+use subcog::storage::index::SqliteBackend;
 use subcog::{
     CaptureRequest, CaptureService, Domain, Namespace, RecallService, SearchFilter, SearchMode,
     SyncService,
@@ -466,9 +467,20 @@ fn cmd_hook(event: HookEvent) -> Result<(), Box<dyn std::error::Error>> {
     // Read input from stdin as a string
     let input = read_hook_input()?;
 
+    // Try to initialize services for hooks (may fail if no data dir)
+    let recall_service = try_init_recall_service();
+    let capture_service = CaptureService::default();
+    let sync_service = SyncService::default();
+
     let response = match event {
         HookEvent::SessionStart => {
-            let handler = SessionStartHandler::new();
+            // SessionStart with context builder for memory injection
+            let handler = if let Some(recall) = recall_service {
+                SessionStartHandler::new()
+                    .with_context_builder(ContextBuilderService::with_recall(recall))
+            } else {
+                SessionStartHandler::new()
+            };
             handler.handle(&input)?
         },
         HookEvent::UserPromptSubmit => {
@@ -476,15 +488,22 @@ fn cmd_hook(event: HookEvent) -> Result<(), Box<dyn std::error::Error>> {
             handler.handle(&input)?
         },
         HookEvent::PostToolUse => {
-            let handler = PostToolUseHandler::new();
+            // PostToolUse with recall service for memory surfacing
+            let handler = if let Some(recall) = recall_service {
+                PostToolUseHandler::new().with_recall(recall)
+            } else {
+                PostToolUseHandler::new()
+            };
             handler.handle(&input)?
         },
         HookEvent::PreCompact => {
-            let handler = PreCompactHandler::new();
+            // PreCompact with capture service for auto-capture
+            let handler = PreCompactHandler::new().with_capture(capture_service);
             handler.handle(&input)?
         },
         HookEvent::Stop => {
-            let handler = StopHandler::new();
+            // Stop with sync service for session-end sync
+            let handler = StopHandler::new().with_sync(sync_service);
             handler.handle(&input)?
         },
     };
@@ -493,6 +512,24 @@ fn cmd_hook(event: HookEvent) -> Result<(), Box<dyn std::error::Error>> {
     println!("{response}");
 
     Ok(())
+}
+
+/// Tries to initialize a recall service with `SQLite` backend.
+fn try_init_recall_service() -> Option<RecallService> {
+    let data_dir = directories::BaseDirs::new().map_or_else(
+        || std::path::PathBuf::from(".").join(".subcog"),
+        |b| b.data_local_dir().join("subcog"),
+    );
+
+    // Ensure data directory exists
+    if std::fs::create_dir_all(&data_dir).is_err() {
+        return None;
+    }
+
+    let db_path = data_dir.join("index.db");
+    SqliteBackend::new(&db_path)
+        .ok()
+        .map(RecallService::with_index)
 }
 
 /// Reads hook input from stdin as a string.
