@@ -3,6 +3,12 @@ created_at: 1767039717
 id: 1767039717170191000
 namespace: decisions
 status: active
+tags:
+- memory-capture-enforcement
+- userpromptsubmit-hook
+- proactive-memory-check
+- enforcement-configurable
+- output-schema-update
 updated_at: 1767039717
 ---
 Implemented Memory Capture Enforcement in UserPromptSubmit Hook (SPEC-2025-12-29-002)
