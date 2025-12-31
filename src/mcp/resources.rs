@@ -27,7 +27,8 @@
 
 use crate::Namespace;
 use crate::models::SearchMode;
-use crate::services::{RecallService, TopicIndexService};
+use crate::services::{PromptService, RecallService, TopicIndexService};
+use crate::storage::index::DomainScope;
 use crate::{Error, Result, SearchFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -40,6 +41,8 @@ pub struct ResourceHandler {
     recall_service: Option<RecallService>,
     /// Topic index for topic-based resource access.
     topic_index: Option<TopicIndexService>,
+    /// Optional prompt service for prompt resources.
+    prompt_service: Option<PromptService>,
 }
 
 impl ResourceHandler {
@@ -141,7 +144,15 @@ impl ResourceHandler {
             help_content,
             recall_service: None,
             topic_index: None,
+            prompt_service: None,
         }
+    }
+
+    /// Adds a prompt service to the resource handler.
+    #[must_use]
+    pub fn with_prompt_service(mut self, prompt_service: PromptService) -> Self {
+        self.prompt_service = Some(prompt_service);
+        self
     }
 
     /// Adds a recall service to the resource handler.
@@ -234,6 +245,35 @@ impl ResourceHandler {
             mime_type: Some("application/json".to_string()),
         });
 
+        // Prompt resources
+        resources.push(ResourceDefinition {
+            uri: "subcog://project/_prompts".to_string(),
+            name: "Project Prompts".to_string(),
+            description: Some("List all prompts in the project scope".to_string()),
+            mime_type: Some("application/json".to_string()),
+        });
+
+        resources.push(ResourceDefinition {
+            uri: "subcog://user/_prompts".to_string(),
+            name: "User Prompts".to_string(),
+            description: Some("List all prompts in the user scope".to_string()),
+            mime_type: Some("application/json".to_string()),
+        });
+
+        resources.push(ResourceDefinition {
+            uri: "subcog://project/_prompts/{name}".to_string(),
+            name: "Project Prompt".to_string(),
+            description: Some("Get a specific prompt by name from project scope".to_string()),
+            mime_type: Some("application/json".to_string()),
+        });
+
+        resources.push(ResourceDefinition {
+            uri: "subcog://user/_prompts/{name}".to_string(),
+            name: "User Prompt".to_string(),
+            description: Some("Get a specific prompt by name from user scope".to_string()),
+            mime_type: Some("application/json".to_string()),
+        });
+
         resources
     }
 
@@ -255,7 +295,7 @@ impl ResourceHandler {
     /// # Errors
     ///
     /// Returns an error if the resource is not found.
-    pub fn get_resource(&self, uri: &str) -> Result<ResourceContent> {
+    pub fn get_resource(&mut self, uri: &str) -> Result<ResourceContent> {
         let uri = uri.trim();
 
         if !uri.starts_with("subcog://") {
@@ -272,12 +312,14 @@ impl ResourceHandler {
         match parts[0] {
             "help" => self.get_help_resource(uri, &parts),
             "_" => self.get_all_memories_resource(uri, &parts),
-            "project" => self.get_all_memories_resource(uri, &parts), // Alias for now
+            "project" => self.get_domain_scoped_resource(uri, &parts, DomainScope::Project),
+            "user" => self.get_domain_scoped_resource(uri, &parts, DomainScope::User),
+            "org" => self.get_domain_scoped_resource(uri, &parts, DomainScope::Org),
             "memory" => self.get_memory_resource(uri, &parts),
             "search" => self.get_search_resource(uri, &parts),
             "topics" => self.get_topics_resource(uri, &parts),
             _ => Err(Error::InvalidInput(format!(
-                "Unknown resource type: {}. Valid: _, help, memory, project, search, topics",
+                "Unknown resource type: {}. Valid: _, help, memory, project, user, org, search, topics",
                 parts[0]
             ))),
         }
@@ -555,6 +597,126 @@ impl ResourceHandler {
                 blob: None,
             })
         }
+    }
+
+    /// Gets domain-scoped resources (prompts or memories).
+    ///
+    /// URIs:
+    /// - `subcog://{domain}/_prompts` - List prompts in domain
+    /// - `subcog://{domain}/_prompts/{name}` - Get specific prompt by name
+    /// - `subcog://{domain}/_` - List memories in domain (alias)
+    fn get_domain_scoped_resource(
+        &mut self,
+        uri: &str,
+        parts: &[&str],
+        domain: DomainScope,
+    ) -> Result<ResourceContent> {
+        // Check if requesting prompts
+        if parts.len() >= 2 && parts[1] == "_prompts" {
+            // Check for specific prompt name
+            if parts.len() >= 3 {
+                let name = parts[2..].join("/");
+                let name = decode_uri_component(&name);
+                return self.get_single_prompt_resource(uri, domain, &name);
+            }
+            return self.get_prompts_resource(uri, domain);
+        }
+
+        // Fall back to memories (for backwards compatibility with subcog://project/_)
+        self.get_all_memories_resource(uri, parts)
+    }
+
+    /// Gets prompts for a specific domain scope.
+    fn get_prompts_resource(&mut self, uri: &str, domain: DomainScope) -> Result<ResourceContent> {
+        use crate::services::PromptFilter;
+
+        let prompt_service = self.prompt_service.as_mut().ok_or_else(|| {
+            Error::InvalidInput("Prompt browsing requires PromptService".to_string())
+        })?;
+
+        // Build filter for the specific domain
+        let filter = PromptFilter::new().with_domain(domain);
+        let prompts = prompt_service.list(&filter)?;
+
+        let prompts_json: Vec<serde_json::Value> = prompts
+            .iter()
+            .map(|p| {
+                serde_json::json!({
+                    "name": p.name,
+                    "description": p.description,
+                    "tags": p.tags,
+                    "usage_count": p.usage_count,
+                    "variables": p.variables.iter().map(|v| v.name.clone()).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+
+        let response = serde_json::json!({
+            "domain": domain.as_str(),
+            "count": prompts_json.len(),
+            "prompts": prompts_json,
+        });
+
+        Ok(ResourceContent {
+            uri: uri.to_string(),
+            mime_type: Some("application/json".to_string()),
+            text: Some(serde_json::to_string_pretty(&response).unwrap_or_default()),
+            blob: None,
+        })
+    }
+
+    /// Gets a specific prompt by name from a domain scope.
+    fn get_single_prompt_resource(
+        &mut self,
+        uri: &str,
+        domain: DomainScope,
+        name: &str,
+    ) -> Result<ResourceContent> {
+        let prompt_service = self.prompt_service.as_mut().ok_or_else(|| {
+            Error::InvalidInput("Prompt browsing requires PromptService".to_string())
+        })?;
+
+        // Get the prompt from the specific domain
+        let prompt = prompt_service.get(name, Some(domain))?.ok_or_else(|| {
+            Error::InvalidInput(format!(
+                "Prompt not found: {} in {} scope",
+                name,
+                domain.as_str()
+            ))
+        })?;
+
+        // Build full response with all prompt details
+        let variables_json: Vec<serde_json::Value> = prompt
+            .variables
+            .iter()
+            .map(|v| {
+                serde_json::json!({
+                    "name": v.name,
+                    "description": v.description,
+                    "required": v.required,
+                    "default": v.default,
+                })
+            })
+            .collect();
+
+        let response = serde_json::json!({
+            "name": prompt.name,
+            "description": prompt.description,
+            "content": prompt.content,
+            "domain": domain.as_str(),
+            "tags": prompt.tags,
+            "usage_count": prompt.usage_count,
+            "variables": variables_json,
+            "created_at": prompt.created_at,
+            "updated_at": prompt.updated_at,
+        });
+
+        Ok(ResourceContent {
+            uri: uri.to_string(),
+            mime_type: Some("application/json".to_string()),
+            text: Some(serde_json::to_string_pretty(&response).unwrap_or_default()),
+            blob: None,
+        })
     }
 
     /// Gets the help index listing all categories.
@@ -1558,7 +1720,7 @@ mod tests {
 
     #[test]
     fn test_get_help_index() {
-        let handler = ResourceHandler::new();
+        let mut handler = ResourceHandler::new();
         let result = handler.get_resource("subcog://help").unwrap();
 
         assert!(result.text.is_some());
@@ -1569,7 +1731,7 @@ mod tests {
 
     #[test]
     fn test_get_help_category() {
-        let handler = ResourceHandler::new();
+        let mut handler = ResourceHandler::new();
 
         let result = handler.get_resource("subcog://help/setup").unwrap();
         assert!(result.text.is_some());
@@ -1582,7 +1744,7 @@ mod tests {
 
     #[test]
     fn test_invalid_uri() {
-        let handler = ResourceHandler::new();
+        let mut handler = ResourceHandler::new();
 
         let result = handler.get_resource("http://example.com");
         assert!(result.is_err());
@@ -1593,7 +1755,7 @@ mod tests {
 
     #[test]
     fn test_unknown_category() {
-        let handler = ResourceHandler::new();
+        let mut handler = ResourceHandler::new();
 
         let result = handler.get_resource("subcog://help/nonexistent");
         assert!(result.is_err());
@@ -1609,7 +1771,7 @@ mod tests {
 
     #[test]
     fn test_prompts_help_category() {
-        let handler = ResourceHandler::new();
+        let mut handler = ResourceHandler::new();
 
         // Should be able to get the prompts help resource
         let result = handler.get_resource("subcog://help/prompts");
@@ -1653,7 +1815,7 @@ mod tests {
 
     #[test]
     fn test_search_resource_requires_recall_service() {
-        let handler = ResourceHandler::new();
+        let mut handler = ResourceHandler::new();
         let result = handler.get_resource("subcog://search/test");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("RecallService"));
@@ -1661,7 +1823,7 @@ mod tests {
 
     #[test]
     fn test_topics_resource_requires_topic_index() {
-        let handler = ResourceHandler::new();
+        let mut handler = ResourceHandler::new();
         let result = handler.get_resource("subcog://topics");
         assert!(result.is_err());
         assert!(
@@ -1674,7 +1836,7 @@ mod tests {
 
     #[test]
     fn test_search_resource_requires_query() {
-        let handler = ResourceHandler::new();
+        let mut handler = ResourceHandler::new();
         let result = handler.get_resource("subcog://search/");
         // Empty query after search/ is still valid parts
         // Just need recall service

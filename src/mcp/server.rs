@@ -55,17 +55,28 @@ impl McpServer {
         }
     }
 
-    /// Tries to initialize `ResourceHandler` with `RecallService`.
+    /// Tries to initialize `ResourceHandler` with services.
     ///
     /// Uses domain-scoped index (project-local `.subcog/index.db`).
     fn try_init_resources() -> ResourceHandler {
-        // Use ServiceContainer for domain-scoped index access
-        ServiceContainer::from_current_dir()
-            .and_then(|services| services.recall())
-            .map_or_else(
-                |_| ResourceHandler::new(),
-                |recall| ResourceHandler::new().with_recall_service(recall),
-            )
+        use crate::services::PromptService;
+
+        let mut handler = ResourceHandler::new();
+
+        // Try to add RecallService
+        if let Ok(services) = ServiceContainer::from_current_dir() {
+            if let Ok(recall) = services.recall() {
+                handler = handler.with_recall_service(recall);
+            }
+
+            // Try to add PromptService with repo path
+            if let Some(repo_path) = services.repo_path() {
+                let prompt_service = PromptService::default().with_repo_path(repo_path);
+                handler = handler.with_prompt_service(prompt_service);
+            }
+        }
+
+        handler
     }
 
     /// Sets the transport type.
@@ -87,7 +98,7 @@ impl McpServer {
     /// # Errors
     ///
     /// Returns an error if the server fails to start.
-    pub fn start(&self) -> Result<()> {
+    pub fn start(&mut self) -> Result<()> {
         match self.transport {
             Transport::Stdio => self.run_stdio(),
             Transport::Http => self.run_http(),
@@ -95,7 +106,7 @@ impl McpServer {
     }
 
     /// Runs the server over stdio.
-    fn run_stdio(&self) -> Result<()> {
+    fn run_stdio(&mut self) -> Result<()> {
         let stdin = std::io::stdin();
         let mut stdout = std::io::stdout();
         let reader = BufReader::new(stdin.lock());
@@ -137,7 +148,7 @@ impl McpServer {
     }
 
     /// Handles a JSON-RPC request.
-    fn handle_request(&self, request: &str) -> String {
+    fn handle_request(&mut self, request: &str) -> String {
         let parsed: std::result::Result<JsonRpcRequest, _> = serde_json::from_str(request);
 
         match parsed {
@@ -150,7 +161,7 @@ impl McpServer {
     }
 
     /// Dispatches a method call.
-    fn dispatch_method(&self, method: &str, params: Option<Value>) -> DispatchResult {
+    fn dispatch_method(&mut self, method: &str, params: Option<Value>) -> DispatchResult {
         match method {
             "initialize" => self.handle_initialize(params),
             "tools/list" => self.handle_list_tools(),
@@ -245,7 +256,7 @@ impl McpServer {
     }
 
     /// Handles resources/read.
-    fn handle_read_resource(&self, params: Option<Value>) -> DispatchResult {
+    fn handle_read_resource(&mut self, params: Option<Value>) -> DispatchResult {
         let params = params.ok_or((-32602, "Missing params".to_string()))?;
 
         let uri = params
@@ -415,7 +426,7 @@ mod tests {
 
     #[test]
     fn test_handle_initialize() {
-        let server = McpServer::new();
+        let mut server = McpServer::new();
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#;
         let response = server.handle_request(request);
 
@@ -426,7 +437,7 @@ mod tests {
 
     #[test]
     fn test_handle_list_tools() {
-        let server = McpServer::new();
+        let mut server = McpServer::new();
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
         let response = server.handle_request(request);
 
@@ -437,7 +448,7 @@ mod tests {
 
     #[test]
     fn test_handle_list_resources() {
-        let server = McpServer::new();
+        let mut server = McpServer::new();
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"resources/list"}"#;
         let response = server.handle_request(request);
 
@@ -447,7 +458,7 @@ mod tests {
 
     #[test]
     fn test_handle_list_prompts() {
-        let server = McpServer::new();
+        let mut server = McpServer::new();
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"prompts/list"}"#;
         let response = server.handle_request(request);
 
@@ -457,7 +468,7 @@ mod tests {
 
     #[test]
     fn test_handle_call_tool() {
-        let server = McpServer::new();
+        let mut server = McpServer::new();
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"subcog_status","arguments":{}}}"#;
         let response = server.handle_request(request);
 
@@ -467,7 +478,7 @@ mod tests {
 
     #[test]
     fn test_handle_read_resource() {
-        let server = McpServer::new();
+        let mut server = McpServer::new();
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"subcog://help"}}"#;
         let response = server.handle_request(request);
 
@@ -477,7 +488,7 @@ mod tests {
 
     #[test]
     fn test_handle_get_prompt() {
-        let server = McpServer::new();
+        let mut server = McpServer::new();
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"subcog_tutorial","arguments":{"familiarity":"beginner"}}}"#;
         let response = server.handle_request(request);
 
@@ -486,7 +497,7 @@ mod tests {
 
     #[test]
     fn test_handle_ping() {
-        let server = McpServer::new();
+        let mut server = McpServer::new();
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#;
         let response = server.handle_request(request);
 
@@ -495,7 +506,7 @@ mod tests {
 
     #[test]
     fn test_handle_unknown_method() {
-        let server = McpServer::new();
+        let mut server = McpServer::new();
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"unknown/method"}"#;
         let response = server.handle_request(request);
 
@@ -505,7 +516,7 @@ mod tests {
 
     #[test]
     fn test_handle_parse_error() {
-        let server = McpServer::new();
+        let mut server = McpServer::new();
         let request = "not valid json";
         let response = server.handle_request(request);
 
@@ -515,7 +526,7 @@ mod tests {
 
     #[test]
     fn test_handle_missing_params() {
-        let server = McpServer::new();
+        let mut server = McpServer::new();
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call"}"#;
         let response = server.handle_request(request);
 

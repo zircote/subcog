@@ -348,7 +348,7 @@ fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             limit,
         } => cmd_recall(query, mode, namespace, limit),
 
-        Commands::Status => cmd_status(),
+        Commands::Status => cmd_status(&config),
 
         Commands::Sync { push, fetch } => cmd_sync(push, fetch),
 
@@ -504,17 +504,81 @@ fn cmd_recall(
 }
 
 /// Status command.
-fn cmd_status() -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_status(config: &SubcogConfig) -> Result<(), Box<dyn std::error::Error>> {
     println!("Subcog Status");
     println!("=============");
     println!();
     println!("Version: {}", env!("CARGO_PKG_VERSION"));
-    println!("Storage: Not configured");
-    println!("Sync: Not configured");
     println!();
-    println!("Use 'subcog config --show' to view configuration");
+
+    // Check git repository
+    let git_dir = config.repo_path.join(".git");
+    let git_status = if git_dir.exists() {
+        "Available"
+    } else {
+        "Not found (.git missing)"
+    };
+    println!("Git Repository: {git_status}");
+    println!("  Path: {}", config.repo_path.display());
+
+    // Check data directory
+    let data_status = if config.data_dir.exists() {
+        "Configured"
+    } else {
+        "Will be created on first use"
+    };
+    println!("Data Directory: {data_status}");
+    println!("  Path: {}", config.data_dir.display());
+
+    // Check SQLite index
+    let sqlite_path = config.data_dir.join("index.sqlite");
+    let sqlite_status = if sqlite_path.exists() {
+        "Available"
+    } else {
+        "Not initialized"
+    };
+    println!("SQLite Index: {sqlite_status}");
+
+    // Check usearch index
+    let usearch_path = config.data_dir.join("vectors.usearch");
+    let usearch_status = if usearch_path.exists() {
+        "Available"
+    } else {
+        "Not initialized"
+    };
+    println!("Vector Index: {usearch_status}");
+
+    // Check git notes
+    let notes_status = check_git_notes_status(&config.repo_path);
+    println!("Git Notes: {notes_status}");
+
+    println!();
+    println!("Use 'subcog config --show' to view full configuration");
 
     Ok(())
+}
+
+/// Check git notes status.
+fn check_git_notes_status(repo_path: &std::path::Path) -> &'static str {
+    use std::process::Command;
+
+    let result = Command::new("git")
+        .args(["notes", "--ref=subcog/memories", "list"])
+        .current_dir(repo_path)
+        .output();
+
+    match result {
+        Ok(output) if output.status.success() => {
+            let count = String::from_utf8_lossy(&output.stdout).lines().count();
+            if count > 0 {
+                "Available (has memories)"
+            } else {
+                "Available (empty)"
+            }
+        },
+        Ok(_) => "Initialized (no memories yet)",
+        Err(_) => "Not available (git error)",
+    }
 }
 
 /// Sync command.
@@ -817,7 +881,7 @@ fn cmd_serve(transport: String, port: u16) -> Result<(), Box<dyn std::error::Err
         _ => Transport::Stdio,
     };
 
-    let server = McpServer::new()
+    let mut server = McpServer::new()
         .with_transport(transport_type)
         .with_port(port);
 

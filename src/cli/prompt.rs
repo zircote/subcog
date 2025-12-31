@@ -113,7 +113,7 @@ pub fn cmd_prompt_save(
     from_file: Option<PathBuf>,
     from_stdin: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let service = create_prompt_service()?;
+    let mut service = create_prompt_service()?;
 
     // Build template from input source
     let mut template = build_template_from_input(name, content, from_file, from_stdin)?;
@@ -128,10 +128,7 @@ pub fn cmd_prompt_save(
 
     let scope = parse_domain_scope(domain.as_deref());
 
-    // Save the template (clone for display after save takes ownership)
-    let saved_template = template.clone();
-    let id = service.save(template, scope)?;
-    let template = saved_template;
+    let id = service.save(&template, scope)?;
 
     println!("Prompt saved:");
     println!("  Name: {}", template.name);
@@ -158,11 +155,17 @@ fn build_template_from_input(
     from_stdin: bool,
 ) -> Result<PromptTemplate, Box<dyn std::error::Error>> {
     if let Some(path) = from_file {
-        // Parse from file
-        PromptParser::from_file(&path).map_err(|e| e.to_string().into())
+        // Parse from file, then override name with CLI argument
+        let mut template: PromptTemplate =
+            PromptParser::from_file(&path).map_err(|e| e.to_string())?;
+        template.name = name; // CLI --name always takes precedence
+        Ok(template)
     } else if from_stdin {
-        // Parse from stdin (default to markdown format)
-        PromptParser::from_stdin(PromptFormat::Markdown, &name).map_err(|e| e.to_string().into())
+        // Parse from stdin, then override name with CLI argument
+        let mut template =
+            PromptParser::from_stdin(PromptFormat::Markdown, &name).map_err(|e| e.to_string())?;
+        template.name = name; // CLI --name always takes precedence
+        Ok(template)
     } else if let Some(content_str) = content {
         // Build from inline content
         Ok(PromptTemplate::new(name, content_str))
@@ -206,7 +209,7 @@ pub fn cmd_prompt_list(
     format: Option<String>,
     limit: Option<usize>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let service = create_prompt_service()?;
+    let mut service = create_prompt_service()?;
 
     // Build filter
     let mut filter = PromptFilter::default();
@@ -285,7 +288,7 @@ pub fn cmd_prompt_get(
     domain: Option<String>,
     format: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let service = create_prompt_service()?;
+    let mut service = create_prompt_service()?;
 
     let scope = domain.as_deref().map(|d| parse_domain_scope(Some(d)));
     let prompt = service.get(&name, scope)?;
@@ -378,7 +381,7 @@ pub fn cmd_prompt_run(
     domain: Option<String>,
     interactive: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let service = create_prompt_service()?;
+    let mut service = create_prompt_service()?;
 
     let scope = domain.as_deref().map(|d| parse_domain_scope(Some(d)));
     let prompt = service.get(&name, scope)?;
@@ -491,7 +494,7 @@ pub fn cmd_prompt_delete(
     domain: String,
     force: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let service = create_prompt_service()?;
+    let mut service = create_prompt_service()?;
 
     let scope = parse_domain_scope(Some(&domain));
 
@@ -538,7 +541,7 @@ pub fn cmd_prompt_export(
     format: Option<String>,
     domain: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let service = create_prompt_service()?;
+    let mut service = create_prompt_service()?;
 
     let scope = domain.as_deref().map(|d| parse_domain_scope(Some(d)));
     let prompt = service.get(&name, scope)?;

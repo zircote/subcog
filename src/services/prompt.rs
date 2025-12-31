@@ -1,35 +1,32 @@
 //! Prompt template storage and management service.
 //!
-//! Provides CRUD operations for user-defined prompt templates, storing them
-//! as memories in the `prompts` namespace with JSON-serialized content.
+//! Provides CRUD operations for user-defined prompt templates using
+//! domain-scoped storage backends via [`PromptStorageFactory`].
 //!
 //! # Domain Hierarchy
 //!
 //! Prompts are searched in priority order:
-//! 1. **Project** - Repository-specific prompts in `.git/notes/subcog`
-//! 2. **User** - User-wide prompts in `~/.subcog/`
-//! 3. **Org** - Organization-wide prompts (if configured)
+//! 1. **Project** - Repository-specific prompts (git notes at `refs/notes/_prompts`)
+//! 2. **User** - User-wide prompts (`~/.config/subcog/_prompts/`)
+//! 3. **Org** - Organization-wide prompts (deferred)
 //!
-//! # Storage Format
+//! # Storage Backends
 //!
-//! Prompts are stored as memories with this structure:
-//! ```yaml
-//! ---
-//! id: prompt-code-review-1234567890
-//! namespace: prompts
-//! domain: project
-//! tags: [coding, review]
-//! ---
-//! {"name":"code-review","description":"...","content":"...","variables":[...]}
-//! ```
+//! | Domain | Backend | Location |
+//! |--------|---------|----------|
+//! | Project | Git Notes | `.git/refs/notes/_prompts` |
+//! | User | SQLite | `~/.config/subcog/_prompts/prompts.db` |
+//! | User | Filesystem | `~/.config/subcog/_prompts/` (fallback) |
+//! | Org | Deferred | Not yet implemented |
 
 use crate::config::Config;
-use crate::git::{NotesManager, YamlFrontMatterParser};
-use crate::models::{MemoryStatus, Namespace, PromptTemplate};
+use crate::models::PromptTemplate;
 use crate::storage::index::DomainScope;
+use crate::storage::prompt::{PromptStorage, PromptStorageFactory};
 use crate::{Error, Result};
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
 
 /// Filter for listing prompts.
 #[derive(Debug, Clone, Default)]
@@ -86,41 +83,53 @@ impl PromptFilter {
 }
 
 /// Service for prompt template CRUD operations.
+///
+/// Uses [`PromptStorageFactory`] to get domain-scoped storage backends.
 pub struct PromptService {
     /// Configuration.
     config: Config,
-    /// Repository path for git notes storage.
-    repo_path: Option<PathBuf>,
+    /// Cached storage backends per domain.
+    storage_cache: HashMap<DomainScope, Arc<dyn PromptStorage>>,
 }
 
 impl PromptService {
     /// Creates a new prompt service.
     #[must_use]
-    pub const fn new(config: Config) -> Self {
+    pub fn new(config: Config) -> Self {
         Self {
             config,
-            repo_path: None,
+            storage_cache: HashMap::new(),
         }
     }
 
     /// Creates a prompt service with a repository path.
     #[must_use]
     pub fn with_repo_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.repo_path = Some(path.into());
+        self.config.repo_path = Some(path.into());
         self
     }
 
     /// Sets the repository path.
     pub fn set_repo_path(&mut self, path: impl Into<PathBuf>) {
-        self.repo_path = Some(path.into());
+        self.config.repo_path = Some(path.into());
+        // Clear cache since repo path changed
+        self.storage_cache.clear();
     }
 
-    /// Gets the effective repository path.
-    fn get_repo_path(&self) -> Result<&PathBuf> {
-        self.repo_path
-            .as_ref()
-            .or(self.config.repo_path.as_ref())
-            .ok_or_else(|| Error::InvalidInput("Repository path not configured".to_string()))
+    /// Gets the storage backend for a domain scope.
+    fn get_storage(&mut self, domain: DomainScope) -> Result<Arc<dyn PromptStorage>> {
+        // Check cache first
+        if let Some(storage) = self.storage_cache.get(&domain) {
+            return Ok(Arc::clone(storage));
+        }
+
+        // Create new storage via factory
+        let storage = PromptStorageFactory::create_for_scope(domain, &self.config)?;
+
+        // Cache it
+        self.storage_cache.insert(domain, Arc::clone(&storage));
+
+        Ok(storage)
     }
 
     /// Saves or updates a prompt template.
@@ -147,59 +156,20 @@ impl PromptService {
     /// use subcog::models::PromptTemplate;
     /// use subcog::storage::index::DomainScope;
     ///
-    /// let service = PromptService::new(Default::default());
+    /// let mut service = PromptService::new(Default::default());
     /// let template = PromptTemplate::new("code-review", "Review {{code}}");
-    /// let id = service.save(template, DomainScope::Project)?;
+    /// let id = service.save(&template, DomainScope::Project)?;
     /// # Ok::<(), subcog::Error>(())
     /// ```
-    pub fn save(&self, mut template: PromptTemplate, domain: DomainScope) -> Result<String> {
+    pub fn save(&mut self, template: &PromptTemplate, domain: DomainScope) -> Result<String> {
         // Validate name
         validate_prompt_name(&template.name)?;
 
-        // Set timestamps if not already set
-        let now = current_timestamp();
-        if template.created_at == 0 {
-            template.created_at = now;
-        }
-        template.updated_at = now;
+        // Get storage for domain
+        let storage = self.get_storage(domain)?;
 
-        // Serialize template to JSON for storage
-        let json_content =
-            serde_json::to_string(&template).map_err(|e| Error::OperationFailed {
-                operation: "serialize_prompt".to_string(),
-                cause: e.to_string(),
-            })?;
-
-        // Generate memory ID
-        let memory_id = format!("prompt_{}_{}", template.name, now);
-
-        // Store to git notes
-        let repo_path = self.get_repo_path()?;
-        let notes = NotesManager::new(repo_path);
-
-        // Build metadata
-        let metadata = serde_json::json!({
-            "id": memory_id,
-            "namespace": Namespace::Prompts.as_str(),
-            "domain": domain_scope_to_string(domain),
-            "status": MemoryStatus::Active.as_str(),
-            "created_at": template.created_at,
-            "updated_at": template.updated_at,
-            "tags": template.tags,
-            "prompt_name": template.name,
-        });
-
-        let note_content = YamlFrontMatterParser::serialize(&metadata, &json_content)?;
-
-        // Check if prompt already exists - if so, delete old and add new
-        // (NotesManager.add with force=true will overwrite)
-        if let Some(existing_id) = self.find_prompt_note_id(&template.name, domain)? {
-            // Remove old note, then add new one
-            notes.remove(&existing_id)?;
-        }
-        notes.add_to_head(&note_content)?;
-
-        Ok(memory_id)
+        // Delegate to storage backend
+        storage.save(template)
     }
 
     /// Gets a prompt by name, searching domain hierarchy.
@@ -218,41 +188,29 @@ impl PromptService {
     /// # Errors
     ///
     /// Returns an error if storage operations fail.
-    pub fn get(&self, name: &str, domain: Option<DomainScope>) -> Result<Option<PromptTemplate>> {
-        let repo_path = self.get_repo_path()?;
-        let notes = NotesManager::new(repo_path);
-
-        // Get all notes and search for the prompt
-        let all_notes = notes.list()?;
-
+    pub fn get(
+        &mut self,
+        name: &str,
+        domain: Option<DomainScope>,
+    ) -> Result<Option<PromptTemplate>> {
         // Search order based on domain parameter
         let scopes = match domain {
             Some(scope) => vec![scope],
-            None => vec![DomainScope::Project, DomainScope::User, DomainScope::Org],
+            None => vec![DomainScope::Project, DomainScope::User],
         };
 
         for scope in scopes {
-            if let Some(template) = self.find_prompt_in_notes(&all_notes, name, scope)? {
+            // Get storage, skipping unimplemented domains (e.g., Org)
+            let storage = match self.get_storage(scope) {
+                Ok(s) => s,
+                Err(Error::NotImplemented(_)) => continue,
+                Err(e) => return Err(e),
+            };
+            if let Some(template) = storage.get(name)? {
                 return Ok(Some(template));
             }
         }
 
-        Ok(None)
-    }
-
-    /// Searches for a prompt in notes for a specific domain scope.
-    fn find_prompt_in_notes(
-        &self,
-        notes: &[(String, String)],
-        name: &str,
-        scope: DomainScope,
-    ) -> Result<Option<PromptTemplate>> {
-        for (note_id, content) in notes {
-            let result = self.parse_prompt_note(note_id, content, name, scope)?;
-            if result.is_some() {
-                return Ok(result);
-            }
-        }
         Ok(None)
     }
 
@@ -269,12 +227,34 @@ impl PromptService {
     /// # Errors
     ///
     /// Returns an error if storage operations fail.
-    pub fn list(&self, filter: &PromptFilter) -> Result<Vec<PromptTemplate>> {
-        let repo_path = self.get_repo_path()?;
-        let notes = NotesManager::new(repo_path);
+    pub fn list(&mut self, filter: &PromptFilter) -> Result<Vec<PromptTemplate>> {
+        let mut results = Vec::new();
 
-        let all_notes = notes.list()?;
-        let mut results = self.collect_matching_prompts(&all_notes, filter)?;
+        // Determine which domains to search
+        let scopes = match filter.domain {
+            Some(scope) => vec![scope],
+            None => vec![DomainScope::Project, DomainScope::User],
+        };
+
+        // Collect from all relevant domains
+        for scope in scopes {
+            // Get storage, skipping unimplemented domains
+            let storage = match self.get_storage(scope) {
+                Ok(s) => s,
+                Err(Error::NotImplemented(_)) => continue,
+                Err(e) => return Err(e),
+            };
+
+            let tags = (!filter.tags.is_empty()).then_some(filter.tags.as_slice());
+            let prompts = storage.list(tags, filter.name_pattern.as_deref())?;
+
+            // Filter and collect matching templates
+            results.extend(
+                prompts
+                    .into_iter()
+                    .filter(|t| self.matches_filter(t, filter)),
+            );
+        }
 
         // Sort by usage count (descending) then name
         results.sort_by(|a, b| {
@@ -288,22 +268,6 @@ impl PromptService {
             results.truncate(limit);
         }
 
-        Ok(results)
-    }
-
-    /// Collects prompts from notes that match the filter.
-    fn collect_matching_prompts(
-        &self,
-        notes: &[(String, String)],
-        filter: &PromptFilter,
-    ) -> Result<Vec<PromptTemplate>> {
-        let mut results = Vec::new();
-        for (_note_id, content) in notes {
-            let template = self.try_parse_prompt(content)?;
-            if let Some(t) = template.filter(|t| self.matches_filter(t, filter)) {
-                results.push(t);
-            }
-        }
         Ok(results)
     }
 
@@ -321,17 +285,9 @@ impl PromptService {
     /// # Errors
     ///
     /// Returns an error if storage operations fail.
-    pub fn delete(&self, name: &str, domain: DomainScope) -> Result<bool> {
-        let repo_path = self.get_repo_path()?;
-        let notes = NotesManager::new(repo_path);
-
-        // Find the note containing this prompt
-        if let Some(note_id) = self.find_prompt_note_id(name, domain)? {
-            notes.remove(&note_id)?;
-            return Ok(true);
-        }
-
-        Ok(false)
+    pub fn delete(&mut self, name: &str, domain: DomainScope) -> Result<bool> {
+        let storage = self.get_storage(domain)?;
+        storage.delete(name)
     }
 
     /// Searches prompts semantically by query.
@@ -348,49 +304,25 @@ impl PromptService {
     /// # Errors
     ///
     /// Returns an error if storage operations fail.
-    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<PromptTemplate>> {
-        let repo_path = self.get_repo_path()?;
-        let notes = NotesManager::new(repo_path);
+    pub fn search(&mut self, query: &str, limit: usize) -> Result<Vec<PromptTemplate>> {
+        // Get all prompts from all domains
+        let all_prompts = self.list(&PromptFilter::new())?;
 
-        let all_notes = notes.list()?;
         let query_lower = query.to_lowercase();
-        let mut results = self.score_prompts(&all_notes, &query_lower)?;
+        let mut scored: Vec<(PromptTemplate, f32)> = all_prompts
+            .into_iter()
+            .map(|t| {
+                let score = self.calculate_relevance(&t, &query_lower);
+                (t, score)
+            })
+            .filter(|(_, score)| *score > 0.0)
+            .collect();
 
         // Sort by score descending
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Take top results
-        Ok(results.into_iter().take(limit).map(|(t, _)| t).collect())
-    }
-
-    /// Scores prompts against a search query.
-    fn score_prompts(
-        &self,
-        notes: &[(String, String)],
-        query_lower: &str,
-    ) -> Result<Vec<(PromptTemplate, f32)>> {
-        let mut results = Vec::new();
-        for (_note_id, content) in notes {
-            self.add_scored_prompt(&mut results, content, query_lower)?;
-        }
-        Ok(results)
-    }
-
-    /// Calculates and adds a scored prompt if it matches the query.
-    fn add_scored_prompt(
-        &self,
-        results: &mut Vec<(PromptTemplate, f32)>,
-        content: &str,
-        query_lower: &str,
-    ) -> Result<()> {
-        let Some(template) = self.try_parse_prompt(content)? else {
-            return Ok(());
-        };
-        let score = self.calculate_relevance(&template, query_lower);
-        if score > 0.0 {
-            results.push((template, score));
-        }
-        Ok(())
+        Ok(scored.into_iter().take(limit).map(|(t, _)| t).collect())
     }
 
     /// Increments the usage count for a prompt.
@@ -403,144 +335,10 @@ impl PromptService {
     /// # Errors
     ///
     /// Returns an error if the prompt is not found or storage fails.
-    pub fn increment_usage(&self, name: &str, domain: DomainScope) -> Result<()> {
-        // Get the existing prompt
-        let mut template = self
-            .get(name, Some(domain))?
-            .ok_or_else(|| Error::OperationFailed {
-                operation: "increment_usage".to_string(),
-                cause: format!("Prompt not found: {name}"),
-            })?;
-
-        // Increment usage count
-        template.usage_count = template.usage_count.saturating_add(1);
-
-        // Save back
-        self.save(template, domain)?;
-
+    pub fn increment_usage(&mut self, name: &str, domain: DomainScope) -> Result<()> {
+        let storage = self.get_storage(domain)?;
+        storage.increment_usage(name)?;
         Ok(())
-    }
-
-    /// Finds the git note ID for a prompt by name and domain.
-    fn find_prompt_note_id(&self, name: &str, domain: DomainScope) -> Result<Option<String>> {
-        let repo_path = self.get_repo_path()?;
-        let notes = NotesManager::new(repo_path);
-
-        let all_notes = notes.list()?;
-
-        for (note_id, content) in &all_notes {
-            if self.note_matches_prompt(content, name, domain) {
-                return Ok(Some(note_id.clone()));
-            }
-        }
-
-        Ok(None)
-    }
-
-    /// Checks if a note matches a prompt by name and domain.
-    fn note_matches_prompt(&self, content: &str, name: &str, domain: DomainScope) -> bool {
-        let Ok((metadata, _)) = YamlFrontMatterParser::parse(content) else {
-            return false;
-        };
-
-        // Check if this is a prompt note
-        let is_prompt = metadata
-            .get("namespace")
-            .and_then(|v| v.as_str())
-            .is_some_and(|ns| ns == Namespace::Prompts.as_str());
-
-        if !is_prompt {
-            return false;
-        }
-
-        // Check name match
-        let name_matches = metadata
-            .get("prompt_name")
-            .and_then(|v| v.as_str())
-            .is_some_and(|n| n == name);
-
-        if !name_matches {
-            return false;
-        }
-
-        // Check domain match
-        metadata
-            .get("domain")
-            .and_then(|v| v.as_str())
-            .is_some_and(|d| d == domain_scope_to_string(domain))
-    }
-
-    /// Parses a prompt note if it matches the name and domain.
-    fn parse_prompt_note(
-        &self,
-        _note_id: &str,
-        content: &str,
-        name: &str,
-        domain: DomainScope,
-    ) -> Result<Option<PromptTemplate>> {
-        let (metadata, body) = YamlFrontMatterParser::parse(content)?;
-
-        // Check if this is a prompt note
-        let is_prompt = metadata
-            .get("namespace")
-            .and_then(|v| v.as_str())
-            .is_some_and(|ns| ns == Namespace::Prompts.as_str());
-
-        if !is_prompt {
-            return Ok(None);
-        }
-
-        // Check domain
-        let domain_str = domain_scope_to_string(domain);
-        let domain_matches = metadata
-            .get("domain")
-            .and_then(|v| v.as_str())
-            .is_some_and(|d| d == domain_str);
-
-        if !domain_matches {
-            return Ok(None);
-        }
-
-        // Parse the JSON body
-        let template: PromptTemplate =
-            serde_json::from_str(&body).map_err(|e| Error::OperationFailed {
-                operation: "parse_prompt_json".to_string(),
-                cause: e.to_string(),
-            })?;
-
-        // Check name match
-        if template.name != name {
-            return Ok(None);
-        }
-
-        Ok(Some(template))
-    }
-
-    /// Tries to parse a note as a prompt template.
-    fn try_parse_prompt(&self, content: &str) -> Result<Option<PromptTemplate>> {
-        let parse_result = YamlFrontMatterParser::parse(content);
-        let (metadata, body) = match parse_result {
-            Ok(result) => result,
-            Err(_) => return Ok(None),
-        };
-
-        // Check if this is a prompt note
-        let is_prompt = metadata
-            .get("namespace")
-            .and_then(|v| v.as_str())
-            .is_some_and(|ns| ns == Namespace::Prompts.as_str());
-
-        if !is_prompt {
-            return Ok(None);
-        }
-
-        // Parse the JSON body
-        let template: PromptTemplate = match serde_json::from_str(&body) {
-            Ok(t) => t,
-            Err(_) => return Ok(None),
-        };
-
-        Ok(Some(template))
     }
 
     /// Checks if a template matches the filter.
@@ -609,7 +407,7 @@ impl Default for PromptService {
 /// Must start with a letter, cannot end with a hyphen, and cannot have consecutive hyphens.
 ///
 /// Examples of valid names: `code-review`, `api-design-v2`, `weekly-report`
-fn validate_prompt_name(name: &str) -> Result<()> {
+pub fn validate_prompt_name(name: &str) -> Result<()> {
     if name.is_empty() {
         return Err(Error::InvalidInput(
             "Prompt name cannot be empty. Use a kebab-case name like 'code-review' or 'api-design'."
@@ -655,23 +453,6 @@ fn validate_prompt_name(name: &str) -> Result<()> {
     }
 
     Ok(())
-}
-
-/// Converts domain scope to string for storage.
-const fn domain_scope_to_string(scope: DomainScope) -> &'static str {
-    match scope {
-        DomainScope::Project => "project",
-        DomainScope::User => "user",
-        DomainScope::Org => "org",
-    }
-}
-
-/// Gets current Unix timestamp.
-fn current_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 /// Simple glob pattern matching (* only).
@@ -844,12 +625,5 @@ mod tests {
         assert!(exact_score > partial_score);
         assert!(partial_score > desc_score);
         assert!(no_match_score == 0.0);
-    }
-
-    #[test]
-    fn test_domain_scope_to_string() {
-        assert_eq!(domain_scope_to_string(DomainScope::Project), "project");
-        assert_eq!(domain_scope_to_string(DomainScope::User), "user");
-        assert_eq!(domain_scope_to_string(DomainScope::Org), "org");
     }
 }

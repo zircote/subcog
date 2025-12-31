@@ -295,7 +295,7 @@ impl PromptRegistry {
     #[must_use]
     pub fn list_all_prompts(
         &self,
-        prompt_service: &crate::services::PromptService,
+        prompt_service: &mut crate::services::PromptService,
     ) -> Vec<PromptDefinition> {
         use crate::services::PromptFilter;
 
@@ -323,7 +323,7 @@ impl PromptRegistry {
     pub fn get_prompt_with_user(
         &self,
         name: &str,
-        prompt_service: &crate::services::PromptService,
+        prompt_service: &mut crate::services::PromptService,
     ) -> Option<PromptDefinition> {
         // Check built-in prompts first
         if let Some(builtin) = self.prompts.get(name) {

@@ -261,7 +261,7 @@ impl ToolRegistry {
     fn prompt_save_tool() -> ToolDefinition {
         ToolDefinition {
             name: "prompt_save".to_string(),
-            description: "Save a user-defined prompt template for later use".to_string(),
+            description: "Save a user-defined prompt template. Provide either 'content' or 'file_path' (not both)".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -271,7 +271,7 @@ impl ToolRegistry {
                     },
                     "content": {
                         "type": "string",
-                        "description": "Prompt content with {{variable}} placeholders"
+                        "description": "Prompt content with {{variable}} placeholders (required if file_path not provided)"
                     },
                     "file_path": {
                         "type": "string",
@@ -308,10 +308,7 @@ impl ToolRegistry {
                     }
                 },
                 "required": ["name"],
-                "oneOf": [
-                    { "required": ["content"] },
-                    { "required": ["file_path"] }
-                ]
+                "additionalProperties": false
             }),
         }
     }
@@ -873,8 +870,8 @@ impl ToolRegistry {
             .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
             .clone();
 
-        let prompt_service = PromptService::default().with_repo_path(&repo_path);
-        let memory_id = prompt_service.save(template.clone(), domain)?;
+        let mut prompt_service = PromptService::default().with_repo_path(&repo_path);
+        let memory_id = prompt_service.save(&template, domain)?;
 
         Ok(ToolResult {
             content: vec![ToolContent::Text {
@@ -932,7 +929,7 @@ impl ToolRegistry {
             .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
             .clone();
 
-        let prompt_service = PromptService::default().with_repo_path(&repo_path);
+        let mut prompt_service = PromptService::default().with_repo_path(&repo_path);
         let prompts = prompt_service.list(&filter)?;
 
         if prompts.is_empty() {
@@ -1006,7 +1003,7 @@ impl ToolRegistry {
             .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
             .clone();
 
-        let prompt_service = PromptService::default().with_repo_path(&repo_path);
+        let mut prompt_service = PromptService::default().with_repo_path(&repo_path);
         let prompt = prompt_service.get(&args.name, domain)?;
 
         match prompt {
@@ -1067,7 +1064,7 @@ impl ToolRegistry {
             .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
             .clone();
 
-        let prompt_service = PromptService::default().with_repo_path(&repo_path);
+        let mut prompt_service = PromptService::default().with_repo_path(&repo_path);
         let prompt = prompt_service.get(&args.name, domain)?;
 
         match prompt {
@@ -1143,7 +1140,7 @@ impl ToolRegistry {
             .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
             .clone();
 
-        let prompt_service = PromptService::default().with_repo_path(&repo_path);
+        let mut prompt_service = PromptService::default().with_repo_path(&repo_path);
         let deleted = prompt_service.delete(&args.name, domain)?;
 
         if deleted {

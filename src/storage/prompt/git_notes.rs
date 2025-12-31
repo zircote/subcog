@@ -1,6 +1,6 @@
 //! Git notes-based prompt storage for project scope.
 //!
-//! Stores prompts as git notes in the `refs/notes/subcog/prompts` ref.
+//! Stores prompts as git notes in the `refs/notes/_prompts` ref.
 //! Each prompt is stored as a note attached to a separate empty commit.
 
 use super::PromptStorage;
@@ -14,7 +14,10 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Notes ref for storing prompts.
-const PROMPTS_NOTES_REF: &str = "refs/notes/subcog/prompts";
+///
+/// Uses `_prompts` (underscore prefix) to distinguish from memory namespaces
+/// and avoid conflicts with `refs/notes/subcog`.
+const PROMPTS_NOTES_REF: &str = "refs/notes/_prompts";
 
 /// Git notes-based prompt storage.
 pub struct GitNotesPromptStorage {

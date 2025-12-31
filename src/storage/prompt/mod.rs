@@ -2,7 +2,7 @@
 //!
 //! Provides domain-scoped storage for prompt templates with pluggable backends:
 //!
-//! - **Project scope**: Git notes (`refs/notes/subcog/prompts`)
+//! - **Project scope**: Git notes (`refs/notes/_prompts`)
 //! - **User scope**: `SQLite`, PostgreSQL, Redis, or Filesystem
 //! - **Org scope**: Deferred (not yet implemented)
 //!
@@ -20,7 +20,7 @@
 //!
 //! | Domain | Backend | Location |
 //! |--------|---------|----------|
-//! | Project | Git Notes | `.git/refs/notes/subcog/prompts` |
+//! | Project | Git Notes | `.git/refs/notes/_prompts` |
 //! | User | SQLite | `~/.config/subcog/_prompts/prompts.db` |
 //! | User | PostgreSQL | Configured connection |
 //! | User | Redis | Configured connection |
