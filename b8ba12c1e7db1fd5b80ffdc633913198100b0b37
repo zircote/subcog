@@ -1,41 +1,49 @@
 ---
-created_at: 1767210891
+created_at: 1767212425
 domain: global
-id: patterns_223833eb-08fa-464e-9457-d38ac1e491e7
-namespace: patterns
+id: learnings_bff7ef64-30fd-4429-8229-230945d7294a
+namespace: learnings
 status: active
 tags:
-- rust
 - prometheus
+- push-gateway
 - metrics
 - debugging
-- push-gateway
-- observability
-updated_at: 1767210891
+- claude-code-hooks
+- reqwest
+updated_at: 1767212425
 ---
-## Rust Metrics Debugging Pattern
+# Prometheus Push Gateway Metrics Debugging
 
-When Prometheus metrics aren't appearing in push gateway:
+## Problem
+Metrics pushed to Prometheus push gateway via reqwest were returning 200 OK but not persisting in the gateway.
 
-1. **Verify metrics are actually being pushed**: 
-   - Check push gateway directly: `curl -s http://localhost:9091/metrics | grep <metric_prefix>`
-   - Push a test metric manually: `echo 'test_metric 123' | curl --data-binary @- http://localhost:9091/metrics/job/subcog`
+## Root Causes Found
 
-2. **Check metric visibility**:
-   - List all unique metric names: `grep -v "^#" /tmp/metrics.txt | awk '{print $1}' | sed 's/{.*//' | sort -u`
-   - Filter out Go/process metrics: `grep -v "^go_" | grep -v "^process_" | grep -v "^promhttp"`
+### 1. Claude Code Hook Input Format
+The `UserPromptSubmit` hook was extracting the prompt from wrong JSON path:
+- **Wrong**: `input_json.get("prompt")`
+- **Correct**: `input_json.get("hookSpecificData").and_then(|v| v.get("userPromptContent"))`
 
-3. **Instance labeling for multi-source metrics**:
-   - Use static `OnceLock<String>` for thread-safe instance labels (avoid unsafe `set_var` in Rust 2024)
-   - Set instance label before any metrics are recorded
-   - Push gateway endpoint format: `http://host:9091/metrics/job/{job}/instance/{instance}`
+### 2. Push Gateway Metric Family Replacement
+Push gateway replaces metrics at the **family** level, not individual time series:
+- When `PostToolUse` pushed `hook_duration_ms`, it replaced ALL `hook_duration_ms` metrics from `UserPromptSubmit`
+- Solution: Use different instance labels for each hook type
+- Pattern: `hooks-{hook_type}` (e.g., `hooks-user-prompt-submit`, `hooks-post-tool-use`)
 
-4. **Spawned thread metric timing**:
-   - Metrics recorded in spawned threads may not appear if main thread exits too quickly
-   - Add delay before `flush_metrics()` to allow spawned threads to complete
-   - Consider using `map_or_else` pattern per clippy::option_if_let_else
+### 3. POST vs PUT for Push Gateway
+- **PUT**: Replaces ALL metrics for the grouping key (job + instance)
+- **POST**: Adds/updates individual metric families while preserving others
+- Default should be POST for multi-component scenarios
 
-5. **Metrics crate usage in Rust**:
-   - `metrics::counter!`, `metrics::histogram!`, `metrics::gauge!` macros work globally
-   - No explicit `use metrics;` needed if crate is in Cargo.toml
-   - Global recorder must be installed via `metrics::set_global_recorder()`
+## Debugging Techniques
+
+1. **Payload inspection**: Save payload to file and push with curl to isolate issue
+2. **Binary search**: Split payload in half to find problematic metrics
+3. **Instance isolation**: Test with unique instance labels to avoid collision
+4. **Direct push test**: `cat payload | curl --data-binary @-` vs `curl --data-binary @file`
+
+## Files Modified
+- `src/hooks/user_prompt.rs` - Fixed prompt extraction path
+- `src/observability/metrics.rs` - Default POST, trailing newline, proper logging
+- `src/main.rs` - Per-hook-type instance labels
