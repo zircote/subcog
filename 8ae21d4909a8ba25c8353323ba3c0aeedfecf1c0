@@ -1,11 +1,14 @@
 ---
-created_at: 1767143333
-domain: project
-id: prompt_code-review_1767143333
-namespace: prompts
-prompt_name: code-review
+created_at: 1767143977
+domain: global
+id: decisions_74bb6953-66bf-47f5-bccd-090996d5ee90
+namespace: decisions
 status: active
-tags: []
-updated_at: 1767143333
+tags:
+- prompts
+- storage
+- naming-convention
+- git-notes
+updated_at: 1767143977
 ---
-{"name":"code-review","description":"Code review helper","content":"Review {{file}} for {{issue_type}} issues","variables":[{"name":"file","description":null,"default":null,"required":true},{"name":"issue_type","description":null,"default":null,"required":true}],"tags":[],"author":null,"usage_count":0,"created_at":1767143333,"updated_at":1767143333}
+Selected `_prompts` (underscore prefix) as the git notes ref for prompt storage (`refs/notes/_prompts`) to make it distinct from memory namespace categories (decisions, patterns, learnings, etc.). This avoids confusion with the `prompts` namespace and prevents ref conflicts with `refs/notes/subcog`.
