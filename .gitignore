@@ -112,3 +112,6 @@ junit.xml
 
 # Observability logs
 observability/
+
+# Local Claude settings
+.claude/settings.local.json
