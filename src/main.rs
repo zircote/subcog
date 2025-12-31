@@ -162,6 +162,13 @@ enum Commands {
         #[command(subcommand)]
         event: HookEvent,
     },
+
+    /// Manage prompt templates.
+    Prompt {
+        /// Prompt subcommand.
+        #[command(subcommand)]
+        action: PromptAction,
+    },
 }
 
 /// Hook events.
@@ -177,6 +184,127 @@ enum HookEvent {
     PreCompact,
     /// Stop hook.
     Stop,
+}
+
+/// Prompt subcommands.
+#[derive(Subcommand)]
+enum PromptAction {
+    /// Save a prompt template.
+    Save {
+        /// Prompt name (kebab-case).
+        #[arg(short, long)]
+        name: String,
+
+        /// Prompt content with {{variable}} placeholders.
+        content: Option<String>,
+
+        /// Description of the prompt.
+        #[arg(short, long)]
+        description: Option<String>,
+
+        /// Tags for the prompt (comma-separated).
+        #[arg(short, long)]
+        tags: Option<String>,
+
+        /// Domain scope: project, user, or org.
+        #[arg(long, default_value = "project")]
+        domain: Option<String>,
+
+        /// Path to file containing prompt.
+        #[arg(long)]
+        from_file: Option<PathBuf>,
+
+        /// Read prompt from stdin.
+        #[arg(long)]
+        from_stdin: bool,
+    },
+
+    /// List saved prompts.
+    List {
+        /// Filter by domain scope.
+        #[arg(long)]
+        domain: Option<String>,
+
+        /// Filter by tags (comma-separated).
+        #[arg(short, long)]
+        tags: Option<String>,
+
+        /// Filter by name pattern (glob).
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// Output format: table or json.
+        #[arg(short, long, default_value = "table")]
+        format: Option<String>,
+
+        /// Maximum number of results.
+        #[arg(short, long)]
+        limit: Option<usize>,
+    },
+
+    /// Get a prompt by name.
+    Get {
+        /// Prompt name.
+        name: String,
+
+        /// Domain scope to search.
+        #[arg(long)]
+        domain: Option<String>,
+
+        /// Output format: template, json, markdown, or yaml.
+        #[arg(short, long, default_value = "template")]
+        format: Option<String>,
+    },
+
+    /// Run a prompt with variable substitution.
+    Run {
+        /// Prompt name.
+        name: String,
+
+        /// Variable values as KEY=VALUE.
+        #[arg(short, long = "var")]
+        variables: Vec<String>,
+
+        /// Domain scope to search.
+        #[arg(long)]
+        domain: Option<String>,
+
+        /// Prompt for missing variables interactively.
+        #[arg(short, long)]
+        interactive: bool,
+    },
+
+    /// Delete a prompt.
+    Delete {
+        /// Prompt name.
+        name: String,
+
+        /// Domain scope (required).
+        #[arg(long)]
+        domain: String,
+
+        /// Skip confirmation.
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Export a prompt to a file.
+    Export {
+        /// Prompt name.
+        name: String,
+
+        /// Output file path.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Export format: markdown, yaml, or json.
+        #[arg(short, long)]
+        format: Option<String>,
+
+        /// Domain scope to search.
+        #[arg(long)]
+        domain: Option<String>,
+    },
 }
 
 /// Main entry point.
@@ -240,6 +368,8 @@ fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Commands::Serve { transport, port } => cmd_serve(transport, port),
 
         Commands::Hook { event } => cmd_hook(event),
+
+        Commands::Prompt { action } => cmd_prompt(action),
     }
 }
 
@@ -785,5 +915,67 @@ fn read_hook_input() -> Result<String, Box<dyn std::error::Error>> {
         Ok("{}".to_string())
     } else {
         Ok(input)
+    }
+}
+
+/// Prompt command.
+fn cmd_prompt(action: PromptAction) -> Result<(), Box<dyn std::error::Error>> {
+    use subcog::cli::{
+        cmd_prompt_delete, cmd_prompt_export, cmd_prompt_get, cmd_prompt_list, cmd_prompt_run,
+        cmd_prompt_save,
+    };
+
+    match action {
+        PromptAction::Save {
+            name,
+            content,
+            description,
+            tags,
+            domain,
+            from_file,
+            from_stdin,
+        } => cmd_prompt_save(
+            name,
+            content,
+            description,
+            tags,
+            domain,
+            from_file,
+            from_stdin,
+        ),
+
+        PromptAction::List {
+            domain,
+            tags,
+            name,
+            format,
+            limit,
+        } => cmd_prompt_list(domain, tags, name, format, limit),
+
+        PromptAction::Get {
+            name,
+            domain,
+            format,
+        } => cmd_prompt_get(name, domain, format),
+
+        PromptAction::Run {
+            name,
+            variables,
+            domain,
+            interactive,
+        } => cmd_prompt_run(name, variables, domain, interactive),
+
+        PromptAction::Delete {
+            name,
+            domain,
+            force,
+        } => cmd_prompt_delete(name, domain, force),
+
+        PromptAction::Export {
+            name,
+            output,
+            format,
+            domain,
+        } => cmd_prompt_export(name, output, format, domain),
     }
 }

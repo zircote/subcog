@@ -20,10 +20,16 @@
 #![allow(clippy::unused_self)]
 
 pub mod index;
+pub mod migrations;
 pub mod persistence;
+pub mod prompt;
 pub mod traits;
 pub mod vector;
 
+pub use prompt::{
+    FilesystemPromptStorage, GitNotesPromptStorage, PostgresPromptStorage, PromptBackendType,
+    PromptStorage, PromptStorageFactory, RedisPromptStorage, SqlitePromptStorage,
+};
 pub use traits::{IndexBackend, PersistenceBackend, VectorBackend};
 
 /// Composite storage combining all three layers.

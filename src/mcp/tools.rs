@@ -3,9 +3,13 @@
 //! Provides tool handlers for the Model Context Protocol.
 
 use crate::models::{
-    CaptureRequest, DetailLevel, Domain, MemoryStatus, Namespace, SearchFilter, SearchMode,
+    CaptureRequest, DetailLevel, Domain, MemoryStatus, Namespace, PromptTemplate, SearchFilter,
+    SearchMode, substitute_variables,
 };
-use crate::services::{ServiceContainer, parse_filter_query};
+use crate::services::{
+    PromptFilter, PromptParser, PromptService, ServiceContainer, parse_filter_query,
+};
+use crate::storage::index::DomainScope;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -31,6 +35,13 @@ impl ToolRegistry {
         tools.insert("subcog_enrich".to_string(), Self::enrich_tool());
         tools.insert("subcog_sync".to_string(), Self::sync_tool());
         tools.insert("subcog_reindex".to_string(), Self::reindex_tool());
+
+        // Prompt management tools
+        tools.insert("prompt_save".to_string(), Self::prompt_save_tool());
+        tools.insert("prompt_list".to_string(), Self::prompt_list_tool());
+        tools.insert("prompt_get".to_string(), Self::prompt_get_tool());
+        tools.insert("prompt_run".to_string(), Self::prompt_run_tool());
+        tools.insert("prompt_delete".to_string(), Self::prompt_delete_tool());
 
         Self { tools }
     }
@@ -242,6 +253,178 @@ impl ToolRegistry {
         }
     }
 
+    // ============================================================================
+    // Prompt Management Tools
+    // ============================================================================
+
+    /// Defines the prompt.save tool.
+    fn prompt_save_tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "prompt_save".to_string(),
+            description: "Save a user-defined prompt template for later use".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Unique prompt name (kebab-case, e.g., 'code-review')"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Prompt content with {{variable}} placeholders"
+                    },
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to file containing prompt (alternative to content)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Human-readable description of the prompt"
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Tags for categorization and search"
+                    },
+                    "domain": {
+                        "type": "string",
+                        "description": "Storage scope: project (default), user, or org",
+                        "enum": ["project", "user", "org"],
+                        "default": "project"
+                    },
+                    "variables": {
+                        "type": "array",
+                        "description": "Explicit variable definitions with metadata",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "Variable name (without braces)" },
+                                "description": { "type": "string", "description": "Human-readable description" },
+                                "default": { "type": "string", "description": "Default value if not provided" },
+                                "required": { "type": "boolean", "default": true, "description": "Whether variable is required" }
+                            },
+                            "required": ["name"]
+                        }
+                    }
+                },
+                "required": ["name"],
+                "oneOf": [
+                    { "required": ["content"] },
+                    { "required": ["file_path"] }
+                ]
+            }),
+        }
+    }
+
+    /// Defines the prompt.list tool.
+    fn prompt_list_tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "prompt_list".to_string(),
+            description: "List saved prompt templates with optional filtering".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "domain": {
+                        "type": "string",
+                        "description": "Filter by domain scope",
+                        "enum": ["project", "user", "org"]
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Filter by tags (AND logic - must have all)"
+                    },
+                    "name_pattern": {
+                        "type": "string",
+                        "description": "Filter by name pattern (glob-style, e.g., 'code-*')"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 20
+                    }
+                },
+                "required": []
+            }),
+        }
+    }
+
+    /// Defines the prompt.get tool.
+    fn prompt_get_tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "prompt_get".to_string(),
+            description: "Get a prompt template by name".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Prompt name to retrieve"
+                    },
+                    "domain": {
+                        "type": "string",
+                        "description": "Domain to search (if not specified, searches Project → User → Org)",
+                        "enum": ["project", "user", "org"]
+                    }
+                },
+                "required": ["name"]
+            }),
+        }
+    }
+
+    /// Defines the prompt.run tool.
+    fn prompt_run_tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "prompt_run".to_string(),
+            description: "Run a saved prompt, substituting variable values".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Prompt name to run"
+                    },
+                    "variables": {
+                        "type": "object",
+                        "description": "Variable values to substitute (key: value pairs)",
+                        "additionalProperties": { "type": "string" }
+                    },
+                    "domain": {
+                        "type": "string",
+                        "description": "Domain to search for the prompt",
+                        "enum": ["project", "user", "org"]
+                    }
+                },
+                "required": ["name"]
+            }),
+        }
+    }
+
+    /// Defines the prompt.delete tool.
+    fn prompt_delete_tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "prompt_delete".to_string(),
+            description: "Delete a saved prompt template".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Prompt name to delete"
+                    },
+                    "domain": {
+                        "type": "string",
+                        "description": "Domain scope to delete from (required for safety)",
+                        "enum": ["project", "user", "org"]
+                    }
+                },
+                "required": ["name", "domain"]
+            }),
+        }
+    }
+
     /// Returns all tool definitions.
     #[must_use]
     pub fn list_tools(&self) -> Vec<&ToolDefinition> {
@@ -269,6 +452,12 @@ impl ToolRegistry {
             "subcog_enrich" => self.execute_enrich(arguments),
             "subcog_sync" => self.execute_sync(arguments),
             "subcog_reindex" => self.execute_reindex(arguments),
+            // Prompt management tools
+            "prompt_save" => self.execute_prompt_save(arguments),
+            "prompt_list" => self.execute_prompt_list(arguments),
+            "prompt_get" => self.execute_prompt_get(arguments),
+            "prompt_run" => self.execute_prompt_run(arguments),
+            "prompt_delete" => self.execute_prompt_delete(arguments),
             _ => Err(Error::InvalidInput(format!("Unknown tool: {name}"))),
         }
     }
@@ -633,6 +822,354 @@ impl ToolRegistry {
             }),
         }
     }
+
+    // ============================================================================
+    // Prompt Tool Handlers
+    // ============================================================================
+
+    /// Executes the prompt.save tool.
+    fn execute_prompt_save(&self, arguments: Value) -> Result<ToolResult> {
+        let args: PromptSaveArgs =
+            serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+        // Parse domain scope
+        let domain = parse_domain_scope(args.domain.as_deref());
+
+        // Build template either from content or file
+        let template = if let Some(content) = args.content {
+            let mut t = PromptTemplate::new(&args.name, &content);
+            if let Some(desc) = args.description {
+                t = t.with_description(&desc);
+            }
+            if let Some(tags) = args.tags {
+                t = t.with_tags(tags);
+            }
+            if let Some(vars) = args.variables {
+                use crate::models::PromptVariable;
+                let variables: Vec<PromptVariable> = vars
+                    .into_iter()
+                    .map(|v| PromptVariable {
+                        name: v.name,
+                        description: v.description,
+                        default: v.default,
+                        required: v.required.unwrap_or(true),
+                    })
+                    .collect();
+                t = t.with_variables(variables);
+            }
+            t
+        } else if let Some(file_path) = args.file_path {
+            PromptParser::from_file(&file_path)?
+        } else {
+            return Err(Error::InvalidInput(
+                "Either 'content' or 'file_path' must be provided".to_string(),
+            ));
+        };
+
+        // Get repo path and create service
+        let services = ServiceContainer::from_current_dir()?;
+        let repo_path = services
+            .repo_path()
+            .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
+            .clone();
+
+        let prompt_service = PromptService::default().with_repo_path(&repo_path);
+        let memory_id = prompt_service.save(template.clone(), domain)?;
+
+        Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!(
+                    "Prompt saved successfully!\n\n\
+                     Name: {}\n\
+                     ID: {}\n\
+                     Domain: {}\n\
+                     Variables: {}",
+                    template.name,
+                    memory_id,
+                    domain_scope_to_display(domain),
+                    if template.variables.is_empty() {
+                        "none".to_string()
+                    } else {
+                        template
+                            .variables
+                            .iter()
+                            .map(|v| v.name.clone())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    }
+                ),
+            }],
+            is_error: false,
+        })
+    }
+
+    /// Executes the prompt.list tool.
+    fn execute_prompt_list(&self, arguments: Value) -> Result<ToolResult> {
+        let args: PromptListArgs =
+            serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+        // Build filter
+        let mut filter = PromptFilter::new();
+        if let Some(domain) = args.domain {
+            filter = filter.with_domain(parse_domain_scope(Some(&domain)));
+        }
+        if let Some(tags) = args.tags {
+            filter = filter.with_tags(tags);
+        }
+        if let Some(pattern) = args.name_pattern {
+            filter = filter.with_name_pattern(pattern);
+        }
+        if let Some(limit) = args.limit {
+            filter = filter.with_limit(limit);
+        } else {
+            filter = filter.with_limit(20);
+        }
+
+        // Get prompts
+        let services = ServiceContainer::from_current_dir()?;
+        let repo_path = services
+            .repo_path()
+            .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
+            .clone();
+
+        let prompt_service = PromptService::default().with_repo_path(&repo_path);
+        let prompts = prompt_service.list(&filter)?;
+
+        if prompts.is_empty() {
+            return Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: "No prompts found matching the filter.".to_string(),
+                }],
+                is_error: false,
+            });
+        }
+
+        let mut output = format!("Found {} prompt(s):\n\n", prompts.len());
+        for (i, prompt) in prompts.iter().enumerate() {
+            let tags_display = if prompt.tags.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", prompt.tags.join(", "))
+            };
+
+            let vars_count = prompt.variables.len();
+            let usage_info = if prompt.usage_count > 0 {
+                format!(" (used {} times)", prompt.usage_count)
+            } else {
+                String::new()
+            };
+
+            output.push_str(&format!(
+                "{}. **{}**{}{}\n   {}\n   Variables: {}\n\n",
+                i + 1,
+                prompt.name,
+                tags_display,
+                usage_info,
+                if prompt.description.is_empty() {
+                    "(no description)"
+                } else {
+                    &prompt.description
+                },
+                if vars_count == 0 {
+                    "none".to_string()
+                } else {
+                    format!(
+                        "{} ({})",
+                        vars_count,
+                        prompt
+                            .variables
+                            .iter()
+                            .map(|v| v.name.clone())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }
+            ));
+        }
+
+        Ok(ToolResult {
+            content: vec![ToolContent::Text { text: output }],
+            is_error: false,
+        })
+    }
+
+    /// Executes the prompt.get tool.
+    fn execute_prompt_get(&self, arguments: Value) -> Result<ToolResult> {
+        let args: PromptGetArgs =
+            serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+        let domain = args.domain.map(|d| parse_domain_scope(Some(&d)));
+
+        let services = ServiceContainer::from_current_dir()?;
+        let repo_path = services
+            .repo_path()
+            .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
+            .clone();
+
+        let prompt_service = PromptService::default().with_repo_path(&repo_path);
+        let prompt = prompt_service.get(&args.name, domain)?;
+
+        match prompt {
+            Some(p) => {
+                let vars_info: Vec<String> = p.variables.iter().map(format_variable_info).collect();
+
+                Ok(ToolResult {
+                    content: vec![ToolContent::Text {
+                        text: format!(
+                            "**{}**\n\n\
+                             {}\n\n\
+                             **Variables:**\n{}\n\n\
+                             **Content:**\n```\n{}\n```\n\n\
+                             Tags: {}\n\
+                             Usage count: {}",
+                            p.name,
+                            if p.description.is_empty() {
+                                "(no description)".to_string()
+                            } else {
+                                p.description.clone()
+                            },
+                            if vars_info.is_empty() {
+                                "none".to_string()
+                            } else {
+                                vars_info.join("\n")
+                            },
+                            p.content,
+                            if p.tags.is_empty() {
+                                "none".to_string()
+                            } else {
+                                p.tags.join(", ")
+                            },
+                            p.usage_count
+                        ),
+                    }],
+                    is_error: false,
+                })
+            },
+            None => Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: format!("Prompt '{}' not found.", args.name),
+                }],
+                is_error: true,
+            }),
+        }
+    }
+
+    /// Executes the prompt.run tool.
+    fn execute_prompt_run(&self, arguments: Value) -> Result<ToolResult> {
+        let args: PromptRunArgs =
+            serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+        let domain = args.domain.map(|d| parse_domain_scope(Some(&d)));
+
+        let services = ServiceContainer::from_current_dir()?;
+        let repo_path = services
+            .repo_path()
+            .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
+            .clone();
+
+        let prompt_service = PromptService::default().with_repo_path(&repo_path);
+        let prompt = prompt_service.get(&args.name, domain)?;
+
+        match prompt {
+            Some(p) => {
+                // Convert variables to HashMap
+                let values: HashMap<String, String> = args.variables.unwrap_or_default();
+
+                // Check for missing required variables
+                let missing: Vec<&str> = find_missing_required_variables(&p.variables, &values);
+
+                if !missing.is_empty() {
+                    return Ok(ToolResult {
+                        content: vec![ToolContent::Text {
+                            text: format!(
+                                "Missing required variables: {}\n\n\
+                                 Use the 'variables' parameter to provide values:\n\
+                                 ```json\n{{\n  \"variables\": {{\n{}\n  }}\n}}\n```",
+                                missing.join(", "),
+                                missing
+                                    .iter()
+                                    .map(|n| format!("    \"{n}\": \"<value>\""))
+                                    .collect::<Vec<_>>()
+                                    .join(",\n")
+                            ),
+                        }],
+                        is_error: true,
+                    });
+                }
+
+                // Substitute variables
+                let result = substitute_variables(&p.content, &values, &p.variables)?;
+
+                // Increment usage count (best effort)
+                if let Some(scope) = domain {
+                    let _ = prompt_service.increment_usage(&args.name, scope);
+                }
+
+                Ok(ToolResult {
+                    content: vec![ToolContent::Text {
+                        text: format!(
+                            "**Prompt: {}**\n\n{}\n\n---\n_Variables substituted: {}_",
+                            p.name,
+                            result,
+                            if values.is_empty() {
+                                "none (defaults used)".to_string()
+                            } else {
+                                values.keys().cloned().collect::<Vec<_>>().join(", ")
+                            }
+                        ),
+                    }],
+                    is_error: false,
+                })
+            },
+            None => Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: format!("Prompt '{}' not found.", args.name),
+                }],
+                is_error: true,
+            }),
+        }
+    }
+
+    /// Executes the prompt.delete tool.
+    fn execute_prompt_delete(&self, arguments: Value) -> Result<ToolResult> {
+        let args: PromptDeleteArgs =
+            serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+        let domain = parse_domain_scope(Some(&args.domain));
+
+        let services = ServiceContainer::from_current_dir()?;
+        let repo_path = services
+            .repo_path()
+            .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
+            .clone();
+
+        let prompt_service = PromptService::default().with_repo_path(&repo_path);
+        let deleted = prompt_service.delete(&args.name, domain)?;
+
+        if deleted {
+            Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: format!(
+                        "Prompt '{}' deleted from {} scope.",
+                        args.name,
+                        domain_scope_to_display(domain)
+                    ),
+                }],
+                is_error: false,
+            })
+        } else {
+            Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: format!(
+                        "Prompt '{}' not found in {} scope.",
+                        args.name,
+                        domain_scope_to_display(domain)
+                    ),
+                }],
+                is_error: true,
+            })
+        }
+    }
 }
 
 impl Default for ToolRegistry {
@@ -730,6 +1267,62 @@ struct ReindexArgs {
     repo_path: Option<String>,
 }
 
+// ============================================================================
+// Prompt Tool Arguments
+// ============================================================================
+
+/// Arguments for the prompt.save tool.
+#[derive(Debug, Deserialize)]
+struct PromptSaveArgs {
+    name: String,
+    content: Option<String>,
+    file_path: Option<String>,
+    description: Option<String>,
+    tags: Option<Vec<String>>,
+    domain: Option<String>,
+    variables: Option<Vec<PromptVariableArg>>,
+}
+
+/// Variable definition argument for prompt.save.
+#[derive(Debug, Deserialize)]
+struct PromptVariableArg {
+    name: String,
+    description: Option<String>,
+    default: Option<String>,
+    required: Option<bool>,
+}
+
+/// Arguments for the prompt.list tool.
+#[derive(Debug, Deserialize)]
+struct PromptListArgs {
+    domain: Option<String>,
+    tags: Option<Vec<String>>,
+    name_pattern: Option<String>,
+    limit: Option<usize>,
+}
+
+/// Arguments for the prompt.get tool.
+#[derive(Debug, Deserialize)]
+struct PromptGetArgs {
+    name: String,
+    domain: Option<String>,
+}
+
+/// Arguments for the prompt.run tool.
+#[derive(Debug, Deserialize)]
+struct PromptRunArgs {
+    name: String,
+    variables: Option<HashMap<String, String>>,
+    domain: Option<String>,
+}
+
+/// Arguments for the prompt.delete tool.
+#[derive(Debug, Deserialize)]
+struct PromptDeleteArgs {
+    name: String,
+    domain: String,
+}
+
 /// Parses a namespace string to Namespace enum.
 fn parse_namespace(s: &str) -> Namespace {
     match s.to_lowercase().as_str() {
@@ -754,6 +1347,51 @@ fn parse_search_mode(s: &str) -> SearchMode {
         "text" => SearchMode::Text,
         _ => SearchMode::Hybrid,
     }
+}
+
+/// Parses a domain scope string to `DomainScope` enum.
+fn parse_domain_scope(s: Option<&str>) -> DomainScope {
+    match s.map(str::to_lowercase).as_deref() {
+        Some("user") => DomainScope::User,
+        Some("org") => DomainScope::Org,
+        _ => DomainScope::Project,
+    }
+}
+
+/// Converts a `DomainScope` to a display string.
+const fn domain_scope_to_display(scope: DomainScope) -> &'static str {
+    match scope {
+        DomainScope::Project => "project",
+        DomainScope::User => "user",
+        DomainScope::Org => "org",
+    }
+}
+
+/// Formats a `PromptVariable` for display.
+fn format_variable_info(v: &crate::models::PromptVariable) -> String {
+    let mut info = format!("- **{{{{{}}}}}**", v.name);
+    if let Some(ref desc) = v.description {
+        info.push_str(&format!(": {desc}"));
+    }
+    if let Some(ref default) = v.default {
+        info.push_str(&format!(" (default: `{default}`)"));
+    }
+    if !v.required {
+        info.push_str(" [optional]");
+    }
+    info
+}
+
+/// Finds missing required variables.
+fn find_missing_required_variables<'a>(
+    variables: &'a [crate::models::PromptVariable],
+    values: &HashMap<String, String>,
+) -> Vec<&'a str> {
+    variables
+        .iter()
+        .filter(|v| v.required && v.default.is_none() && !values.contains_key(&v.name))
+        .map(|v| v.name.as_str())
+        .collect()
 }
 
 /// Truncates a string to a maximum length.
@@ -908,5 +1546,156 @@ mod tests {
     fn test_truncate() {
         assert_eq!(truncate("short", 10), "short");
         assert_eq!(truncate("this is a long string", 10), "this is...");
+    }
+
+    // ============================================================================
+    // Prompt Tool Tests
+    // ============================================================================
+
+    #[test]
+    fn test_prompt_tools_registered() {
+        let registry = ToolRegistry::new();
+
+        assert!(registry.get_tool("prompt_save").is_some());
+        assert!(registry.get_tool("prompt_list").is_some());
+        assert!(registry.get_tool("prompt_get").is_some());
+        assert!(registry.get_tool("prompt_run").is_some());
+        assert!(registry.get_tool("prompt_delete").is_some());
+    }
+
+    #[test]
+    fn test_prompt_save_tool_schema() {
+        let registry = ToolRegistry::new();
+        let tool = registry.get_tool("prompt_save").unwrap();
+
+        assert!(tool.description.contains("Save"));
+        assert!(tool.input_schema["properties"]["name"].is_object());
+        assert!(tool.input_schema["properties"]["content"].is_object());
+        assert!(tool.input_schema["properties"]["file_path"].is_object());
+        assert!(tool.input_schema["properties"]["domain"].is_object());
+        assert!(tool.input_schema["properties"]["variables"].is_object());
+    }
+
+    #[test]
+    fn test_prompt_list_tool_schema() {
+        let registry = ToolRegistry::new();
+        let tool = registry.get_tool("prompt_list").unwrap();
+
+        assert!(tool.description.contains("List"));
+        assert!(tool.input_schema["properties"]["domain"].is_object());
+        assert!(tool.input_schema["properties"]["tags"].is_object());
+        assert!(tool.input_schema["properties"]["name_pattern"].is_object());
+    }
+
+    #[test]
+    fn test_prompt_get_tool_schema() {
+        let registry = ToolRegistry::new();
+        let tool = registry.get_tool("prompt_get").unwrap();
+
+        assert!(tool.description.contains("Get"));
+        let required = tool.input_schema["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("name")));
+    }
+
+    #[test]
+    fn test_prompt_run_tool_schema() {
+        let registry = ToolRegistry::new();
+        let tool = registry.get_tool("prompt_run").unwrap();
+
+        assert!(tool.description.contains("Run"));
+        assert!(tool.input_schema["properties"]["variables"].is_object());
+    }
+
+    #[test]
+    fn test_prompt_delete_tool_schema() {
+        let registry = ToolRegistry::new();
+        let tool = registry.get_tool("prompt_delete").unwrap();
+
+        assert!(tool.description.contains("Delete"));
+        let required = tool.input_schema["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("name")));
+        assert!(required.contains(&serde_json::json!("domain")));
+    }
+
+    #[test]
+    fn test_parse_domain_scope() {
+        assert_eq!(parse_domain_scope(Some("project")), DomainScope::Project);
+        assert_eq!(parse_domain_scope(Some("PROJECT")), DomainScope::Project);
+        assert_eq!(parse_domain_scope(Some("user")), DomainScope::User);
+        assert_eq!(parse_domain_scope(Some("org")), DomainScope::Org);
+        assert_eq!(parse_domain_scope(None), DomainScope::Project);
+        assert_eq!(parse_domain_scope(Some("unknown")), DomainScope::Project);
+    }
+
+    #[test]
+    fn test_domain_scope_to_display() {
+        assert_eq!(domain_scope_to_display(DomainScope::Project), "project");
+        assert_eq!(domain_scope_to_display(DomainScope::User), "user");
+        assert_eq!(domain_scope_to_display(DomainScope::Org), "org");
+    }
+
+    #[test]
+    fn test_format_variable_info() {
+        use crate::models::PromptVariable;
+
+        // Required variable with description and default
+        let var = PromptVariable {
+            name: "name".to_string(),
+            description: Some("User name".to_string()),
+            default: Some("World".to_string()),
+            required: true,
+        };
+        let info = format_variable_info(&var);
+        assert!(info.contains("**{{name}}**"));
+        assert!(info.contains("User name"));
+        assert!(info.contains("World"));
+        assert!(!info.contains("[optional]"));
+
+        // Optional variable
+        let var = PromptVariable {
+            name: "extra".to_string(),
+            description: None,
+            default: None,
+            required: false,
+        };
+        let info = format_variable_info(&var);
+        assert!(info.contains("[optional]"));
+    }
+
+    #[test]
+    fn test_find_missing_required_variables() {
+        use crate::models::PromptVariable;
+
+        let variables = vec![
+            PromptVariable {
+                name: "required_var".to_string(),
+                description: None,
+                default: None,
+                required: true,
+            },
+            PromptVariable {
+                name: "optional_var".to_string(),
+                description: None,
+                default: None,
+                required: false,
+            },
+            PromptVariable {
+                name: "with_default".to_string(),
+                description: None,
+                default: Some("default_value".to_string()),
+                required: true,
+            },
+        ];
+
+        // No values provided - only required_var should be missing
+        let values = HashMap::new();
+        let missing = find_missing_required_variables(&variables, &values);
+        assert_eq!(missing, vec!["required_var"]);
+
+        // With required_var provided - nothing missing
+        let mut values = HashMap::new();
+        values.insert("required_var".to_string(), "value".to_string());
+        let missing = find_missing_required_variables(&variables, &values);
+        assert!(missing.is_empty());
     }
 }

@@ -2,61 +2,414 @@
 //!
 //! Provides reliable persistence using PostgreSQL as the storage backend.
 
-use crate::models::{Memory, MemoryId};
-use crate::storage::traits::PersistenceBackend;
-use crate::{Error, Result};
+#[cfg(feature = "postgres")]
+mod implementation {
+    use crate::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace};
+    use crate::storage::migrations::{Migration, MigrationRunner};
+    use crate::storage::traits::PersistenceBackend;
+    use crate::{Error, Result};
+    use deadpool_postgres::{Config, Pool, Runtime};
+    use tokio::runtime::Handle;
+    use tokio_postgres::NoTls;
 
-/// PostgreSQL-based persistence backend.
-pub struct PostgresBackend {
-    /// PostgreSQL connection URL.
-    connection_url: String,
-    /// Table name for memories.
-    table_name: String,
-}
+    /// Embedded migrations compiled into the binary.
+    const MIGRATIONS: &[Migration] = &[
+        Migration {
+            version: 1,
+            description: "Initial memories table",
+            sql: r"
+                CREATE TABLE IF NOT EXISTS {table} (
+                    id TEXT PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    namespace TEXT NOT NULL,
+                    domain_org TEXT,
+                    domain_project TEXT,
+                    domain_repo TEXT,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    tags TEXT[] NOT NULL DEFAULT '{}',
+                    source TEXT,
+                    embedding JSONB,
+                    created_at BIGINT NOT NULL,
+                    updated_at BIGINT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_{table}_namespace ON {table} (namespace);
+                CREATE INDEX IF NOT EXISTS idx_{table}_status ON {table} (status);
+                CREATE INDEX IF NOT EXISTS idx_{table}_created_at ON {table} (created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_{table}_updated_at ON {table} (updated_at DESC);
+            ",
+        },
+        Migration {
+            version: 2,
+            description: "Add tags GIN index",
+            sql: r"
+                CREATE INDEX IF NOT EXISTS idx_{table}_tags ON {table} USING GIN(tags);
+            ",
+        },
+        Migration {
+            version: 3,
+            description: "Add domain composite index",
+            sql: r"
+                CREATE INDEX IF NOT EXISTS idx_{table}_domain ON {table} (domain_org, domain_project, domain_repo);
+            ",
+        },
+    ];
 
-impl PostgresBackend {
-    /// Creates a new PostgreSQL backend.
-    #[must_use]
-    pub fn new(connection_url: impl Into<String>, table_name: impl Into<String>) -> Self {
-        Self {
-            connection_url: connection_url.into(),
-            table_name: table_name.into(),
+    /// PostgreSQL-based persistence backend.
+    pub struct PostgresBackend {
+        /// Connection pool.
+        pool: Pool,
+        /// Table name for memories.
+        table_name: String,
+    }
+
+    /// Helper to map pool errors.
+    fn pool_error(e: impl std::fmt::Display) -> Error {
+        Error::OperationFailed {
+            operation: "postgres_persistence_get_client".to_string(),
+            cause: e.to_string(),
         }
     }
 
-    /// Creates a backend with default settings.
-    #[must_use]
-    pub fn with_defaults() -> Self {
-        Self::new("postgresql://localhost/subcog", "memories")
+    /// Helper to map query errors.
+    fn query_error(op: &str, e: impl std::fmt::Display) -> Error {
+        Error::OperationFailed {
+            operation: op.to_string(),
+            cause: e.to_string(),
+        }
+    }
+
+    impl PostgresBackend {
+        /// Creates a new PostgreSQL backend.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the connection pool fails to initialize.
+        pub fn new(connection_url: &str, table_name: impl Into<String>) -> Result<Self> {
+            let table_name = table_name.into();
+            let config = Self::parse_connection_url(connection_url)?;
+            let cfg = Self::build_pool_config(&config);
+
+            let pool = cfg.create_pool(Some(Runtime::Tokio1), NoTls).map_err(|e| {
+                Error::OperationFailed {
+                    operation: "postgres_persistence_create_pool".to_string(),
+                    cause: e.to_string(),
+                }
+            })?;
+
+            let backend = Self { pool, table_name };
+            backend.run_migrations()?;
+            Ok(backend)
+        }
+
+        /// Parses the connection URL into a tokio-postgres config.
+        fn parse_connection_url(url: &str) -> Result<tokio_postgres::Config> {
+            url.parse::<tokio_postgres::Config>()
+                .map_err(|e| Error::OperationFailed {
+                    operation: "postgres_persistence_parse_url".to_string(),
+                    cause: e.to_string(),
+                })
+        }
+
+        /// Extracts host string from tokio-postgres Host.
+        #[cfg(unix)]
+        fn host_to_string(h: &tokio_postgres::config::Host) -> String {
+            match h {
+                tokio_postgres::config::Host::Tcp(s) => s.clone(),
+                tokio_postgres::config::Host::Unix(p) => p.to_string_lossy().to_string(),
+            }
+        }
+
+        /// Extracts host string from tokio-postgres Host (Windows: Tcp only).
+        #[cfg(not(unix))]
+        fn host_to_string(h: &tokio_postgres::config::Host) -> String {
+            let tokio_postgres::config::Host::Tcp(s) = h;
+            s.clone()
+        }
+
+        /// Builds a deadpool config from tokio-postgres config.
+        fn build_pool_config(config: &tokio_postgres::Config) -> Config {
+            let mut cfg = Config::new();
+            cfg.host = config.get_hosts().first().map(Self::host_to_string);
+            cfg.port = config.get_ports().first().copied();
+            cfg.user = config.get_user().map(String::from);
+            cfg.password = config
+                .get_password()
+                .map(|p| String::from_utf8_lossy(p).to_string());
+            cfg.dbname = config.get_dbname().map(String::from);
+            cfg
+        }
+
+        /// Creates a backend with default settings.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the connection fails.
+        pub fn with_defaults() -> Result<Self> {
+            Self::new("postgresql://localhost/subcog", "memories")
+        }
+
+        /// Runs a blocking operation on the async pool.
+        fn block_on<F, T>(&self, f: F) -> Result<T>
+        where
+            F: std::future::Future<Output = Result<T>>,
+        {
+            if let Ok(handle) = Handle::try_current() {
+                handle.block_on(f)
+            } else {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "postgres_persistence_create_runtime".to_string(),
+                        cause: e.to_string(),
+                    })?;
+                rt.block_on(f)
+            }
+        }
+
+        /// Runs migrations.
+        fn run_migrations(&self) -> Result<()> {
+            self.block_on(async {
+                let runner = MigrationRunner::new(self.pool.clone(), &self.table_name);
+                runner.run(MIGRATIONS).await
+            })
+        }
+
+        /// Async implementation of store operation.
+        #[allow(clippy::cast_possible_wrap)]
+        async fn store_async(&self, memory: &Memory) -> Result<()> {
+            let client = self.pool.get().await.map_err(pool_error)?;
+
+            let upsert = format!(
+                r"INSERT INTO {} (id, content, namespace, domain_org, domain_project, domain_repo,
+                    status, tags, source, embedding, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                ON CONFLICT (id) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    namespace = EXCLUDED.namespace,
+                    domain_org = EXCLUDED.domain_org,
+                    domain_project = EXCLUDED.domain_project,
+                    domain_repo = EXCLUDED.domain_repo,
+                    status = EXCLUDED.status,
+                    tags = EXCLUDED.tags,
+                    source = EXCLUDED.source,
+                    embedding = EXCLUDED.embedding,
+                    updated_at = EXCLUDED.updated_at",
+                self.table_name
+            );
+
+            let tags: Vec<&str> = memory.tags.iter().map(String::as_str).collect();
+            let embedding_json: Option<serde_json::Value> =
+                memory.embedding.as_ref().map(|e| serde_json::json!(e));
+
+            client
+                .execute(
+                    &upsert,
+                    &[
+                        &memory.id.as_str(),
+                        &memory.content,
+                        &memory.namespace.as_str(),
+                        &memory.domain.organization,
+                        &memory.domain.project,
+                        &memory.domain.repository,
+                        &memory.status.as_str(),
+                        &tags,
+                        &memory.source,
+                        &embedding_json,
+                        &(memory.created_at as i64),
+                        &(memory.updated_at as i64),
+                    ],
+                )
+                .await
+                .map_err(|e| query_error("postgres_persistence_store", e))?;
+
+            Ok(())
+        }
+
+        /// Async implementation of get operation.
+        #[allow(clippy::cast_sign_loss)]
+        async fn get_async(&self, id: &MemoryId) -> Result<Option<Memory>> {
+            let client = self.pool.get().await.map_err(pool_error)?;
+
+            let query = format!(
+                r"SELECT id, content, namespace, domain_org, domain_project, domain_repo,
+                    status, tags, source, embedding, created_at, updated_at
+                FROM {}
+                WHERE id = $1",
+                self.table_name
+            );
+
+            let row = client
+                .query_opt(&query, &[&id.as_str()])
+                .await
+                .map_err(|e| query_error("postgres_persistence_get", e))?;
+
+            Ok(row.map(|r| Self::row_to_memory(&r)))
+        }
+
+        /// Converts a database row to a Memory.
+        #[allow(clippy::cast_sign_loss)]
+        fn row_to_memory(row: &tokio_postgres::Row) -> Memory {
+            let id: String = row.get("id");
+            let content: String = row.get("content");
+            let namespace_str: String = row.get("namespace");
+            let domain_org: Option<String> = row.get("domain_org");
+            let domain_project: Option<String> = row.get("domain_project");
+            let domain_repo: Option<String> = row.get("domain_repo");
+            let status_str: String = row.get("status");
+            let tags: Vec<String> = row.get("tags");
+            let source: Option<String> = row.get("source");
+            let embedding_json: Option<serde_json::Value> = row.get("embedding");
+            let created_at: i64 = row.get("created_at");
+            let updated_at: i64 = row.get("updated_at");
+
+            let namespace = Namespace::parse(&namespace_str).unwrap_or_default();
+            let status = match status_str.as_str() {
+                "active" => MemoryStatus::Active,
+                "archived" => MemoryStatus::Archived,
+                "superseded" => MemoryStatus::Superseded,
+                "pending" => MemoryStatus::Pending,
+                "deleted" => MemoryStatus::Deleted,
+                _ => MemoryStatus::Active,
+            };
+
+            let embedding: Option<Vec<f32>> =
+                embedding_json.and_then(|v| serde_json::from_value(v).ok());
+
+            Memory {
+                id: MemoryId::new(id),
+                content,
+                namespace,
+                domain: Domain {
+                    organization: domain_org,
+                    project: domain_project,
+                    repository: domain_repo,
+                },
+                status,
+                tags,
+                source,
+                embedding,
+                created_at: created_at as u64,
+                updated_at: updated_at as u64,
+            }
+        }
+
+        /// Async implementation of delete operation.
+        async fn delete_async(&self, id: &MemoryId) -> Result<bool> {
+            let client = self.pool.get().await.map_err(pool_error)?;
+            let delete = format!("DELETE FROM {} WHERE id = $1", self.table_name);
+            let rows = client
+                .execute(&delete, &[&id.as_str()])
+                .await
+                .map_err(|e| query_error("postgres_persistence_delete", e))?;
+            Ok(rows > 0)
+        }
+
+        /// Async implementation of `list_ids` operation.
+        async fn list_ids_async(&self) -> Result<Vec<MemoryId>> {
+            let client = self.pool.get().await.map_err(pool_error)?;
+
+            let query = format!(
+                "SELECT id FROM {} ORDER BY updated_at DESC",
+                self.table_name
+            );
+
+            let rows = client
+                .query(&query, &[])
+                .await
+                .map_err(|e| query_error("postgres_persistence_list_ids", e))?;
+
+            Ok(rows
+                .iter()
+                .map(|row| {
+                    let id: String = row.get(0);
+                    MemoryId::new(id)
+                })
+                .collect())
+        }
+    }
+
+    impl PersistenceBackend for PostgresBackend {
+        fn store(&mut self, memory: &Memory) -> Result<()> {
+            self.block_on(self.store_async(memory))
+        }
+
+        fn get(&self, id: &MemoryId) -> Result<Option<Memory>> {
+            self.block_on(self.get_async(id))
+        }
+
+        fn delete(&mut self, id: &MemoryId) -> Result<bool> {
+            self.block_on(self.delete_async(id))
+        }
+
+        fn list_ids(&self) -> Result<Vec<MemoryId>> {
+            self.block_on(self.list_ids_async())
+        }
     }
 }
 
-impl PersistenceBackend for PostgresBackend {
-    fn store(&mut self, _memory: &Memory) -> Result<()> {
-        Err(Error::NotImplemented(format!(
-            "PostgresBackend::store to {} on {}",
-            self.table_name, self.connection_url
-        )))
+#[cfg(feature = "postgres")]
+pub use implementation::PostgresBackend;
+
+#[cfg(not(feature = "postgres"))]
+mod stub {
+    use crate::models::{Memory, MemoryId};
+    use crate::storage::traits::PersistenceBackend;
+    use crate::{Error, Result};
+
+    /// Stub PostgreSQL backend when feature is not enabled.
+    pub struct PostgresBackend {
+        connection_url: String,
+        table_name: String,
     }
 
-    fn get(&self, _id: &MemoryId) -> Result<Option<Memory>> {
-        Err(Error::NotImplemented(format!(
-            "PostgresBackend::get from {} on {}",
-            self.table_name, self.connection_url
-        )))
+    impl PostgresBackend {
+        /// Creates a new PostgreSQL backend (stub).
+        #[must_use]
+        pub fn new(connection_url: impl Into<String>, table_name: impl Into<String>) -> Self {
+            Self {
+                connection_url: connection_url.into(),
+                table_name: table_name.into(),
+            }
+        }
+
+        /// Creates a backend with default settings (stub).
+        #[must_use]
+        pub fn with_defaults() -> Self {
+            Self::new("postgresql://localhost/subcog", "memories")
+        }
     }
 
-    fn delete(&mut self, _id: &MemoryId) -> Result<bool> {
-        Err(Error::NotImplemented(format!(
-            "PostgresBackend::delete from {} on {}",
-            self.table_name, self.connection_url
-        )))
-    }
+    impl PersistenceBackend for PostgresBackend {
+        fn store(&mut self, _memory: &Memory) -> Result<()> {
+            Err(Error::NotImplemented(format!(
+                "PostgresBackend::store to {} on {}",
+                self.table_name, self.connection_url
+            )))
+        }
 
-    fn list_ids(&self) -> Result<Vec<MemoryId>> {
-        Err(Error::NotImplemented(format!(
-            "PostgresBackend::list_ids from {} on {}",
-            self.table_name, self.connection_url
-        )))
+        fn get(&self, _id: &MemoryId) -> Result<Option<Memory>> {
+            Err(Error::NotImplemented(format!(
+                "PostgresBackend::get from {} on {}",
+                self.table_name, self.connection_url
+            )))
+        }
+
+        fn delete(&mut self, _id: &MemoryId) -> Result<bool> {
+            Err(Error::NotImplemented(format!(
+                "PostgresBackend::delete from {} on {}",
+                self.table_name, self.connection_url
+            )))
+        }
+
+        fn list_ids(&self) -> Result<Vec<MemoryId>> {
+            Err(Error::NotImplemented(format!(
+                "PostgresBackend::list_ids from {} on {}",
+                self.table_name, self.connection_url
+            )))
+        }
     }
 }
+
+#[cfg(not(feature = "postgres"))]
+pub use stub::PostgresBackend;

@@ -71,7 +71,7 @@ dotenvy = "0.15"
 redis = { version = "0.28", features = ["tokio-comp", "connection-manager"], optional = true }
 
 # PostgreSQL client (optional)
-tokio-postgres = { version = "0.7", optional = true }
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1"], optional = true }
 deadpool-postgres = { version = "0.14", optional = true }
 
 [dev-dependencies]

@@ -282,10 +282,61 @@ impl PromptRegistry {
         }
     }
 
-    /// Returns all prompt definitions.
+    /// Returns all prompt definitions (built-in only).
     #[must_use]
     pub fn list_prompts(&self) -> Vec<&PromptDefinition> {
         self.prompts.values().collect()
+    }
+
+    /// Returns all prompt definitions including user-defined prompts.
+    ///
+    /// User prompts are fetched from the `PromptService` and combined with built-in prompts.
+    /// Built-in prompts take precedence if there are name conflicts.
+    #[must_use]
+    pub fn list_all_prompts(
+        &self,
+        prompt_service: &crate::services::PromptService,
+    ) -> Vec<PromptDefinition> {
+        use crate::services::PromptFilter;
+
+        let mut result: Vec<PromptDefinition> = self.prompts.values().cloned().collect();
+
+        // Add user prompts from all domains
+        let user_prompts = prompt_service
+            .list(&PromptFilter::default())
+            .unwrap_or_default();
+        for template in user_prompts {
+            let definition = user_prompt_to_definition(&template);
+            // Skip if we already have a built-in prompt with this name
+            if !self.prompts.contains_key(&definition.name) {
+                result.push(definition);
+            }
+        }
+
+        result
+    }
+
+    /// Gets a prompt definition by name, including user prompts.
+    ///
+    /// User prompts are prefixed with "user/" (e.g., "user/code-review").
+    #[must_use]
+    pub fn get_prompt_with_user(
+        &self,
+        name: &str,
+        prompt_service: &crate::services::PromptService,
+    ) -> Option<PromptDefinition> {
+        // Check built-in prompts first
+        if let Some(builtin) = self.prompts.get(name) {
+            return Some(builtin.clone());
+        }
+
+        // Check user prompts (with or without "user/" prefix)
+        let user_name = name.strip_prefix("user/").unwrap_or(name);
+        prompt_service
+            .get(user_name, None)
+            .ok()
+            .flatten()
+            .map(|t| user_prompt_to_definition(&t))
     }
 
     /// Gets a prompt definition by name.
@@ -763,6 +814,29 @@ pub enum PromptContent {
         /// Resource URI.
         uri: String,
     },
+}
+
+/// Converts a user `PromptTemplate` to a `PromptDefinition`.
+fn user_prompt_to_definition(template: &crate::models::PromptTemplate) -> PromptDefinition {
+    let description = if template.description.is_empty() {
+        None
+    } else {
+        Some(template.description.clone())
+    };
+
+    PromptDefinition {
+        name: format!("user/{}", template.name),
+        description,
+        arguments: template
+            .variables
+            .iter()
+            .map(|v| PromptArgument {
+                name: v.name.clone(),
+                description: v.description.clone(),
+                required: v.required,
+            })
+            .collect(),
+    }
 }
 
 // Tutorial content

@@ -126,6 +126,17 @@ impl ResourceHandler {
             },
         );
 
+        // Prompts category
+        help_content.insert(
+            "prompts".to_string(),
+            HelpCategory {
+                name: "prompts".to_string(),
+                title: "User-Defined Prompts".to_string(),
+                description: "Save, manage, and run prompt templates with variables".to_string(),
+                content: HELP_PROMPTS.to_string(),
+            },
+        );
+
         Self {
             help_content,
             recall_service: None,
@@ -1197,6 +1208,277 @@ Default: `all-MiniLM-L6-v2` (384 dimensions)
 The embedding model is used for semantic similarity search in vector mode.
 "#;
 
+const HELP_PROMPTS: &str = r#"
+## User-Defined Prompts
+
+Subcog supports saving and reusing prompt templates with variable substitution.
+
+## MCP Tools for Prompts
+
+| Tool | Description |
+|------|-------------|
+| `prompt_save` | Save a prompt template |
+| `prompt_list` | List saved prompts |
+| `prompt_get` | Get a prompt by name |
+| `prompt_run` | Execute a prompt with variables |
+| `prompt_delete` | Delete a prompt |
+
+## Saving Prompts
+
+### From Content
+
+```json
+{
+  "tool": "prompt_save",
+  "arguments": {
+    "name": "code-review",
+    "content": "Review the {{language}} code in {{file}} for:\n- Security issues\n- Performance\n- Best practices",
+    "description": "Code review checklist template",
+    "tags": ["review", "quality"]
+  }
+}
+```
+
+### From File
+
+```json
+{
+  "tool": "prompt_save",
+  "arguments": {
+    "name": "refactor-plan",
+    "file_path": "/path/to/prompt.md"
+  }
+}
+```
+
+## Variable Syntax
+
+Variables use double-brace syntax: `{{variable_name}}`
+
+### Required vs Optional
+
+| Syntax | Type | Behavior |
+|--------|------|----------|
+| `{{name}}` | Required | Must be provided |
+| `{{name:default}}` | Optional | Uses default if not provided |
+
+### Example Template
+
+```markdown
+---
+name: api-design
+description: API endpoint design guide
+tags:
+  - api
+  - design
+variables:
+  - name: resource
+    description: The resource being designed
+    required: true
+  - name: version
+    description: API version
+    default: v1
+---
+
+Design a REST API for the {{resource}} resource.
+
+API Version: {{version}}
+
+Include:
+- Endpoints (GET, POST, PUT, DELETE)
+- Request/response schemas
+- Error handling
+```
+
+## Running Prompts
+
+### With All Variables
+
+```json
+{
+  "tool": "prompt_run",
+  "arguments": {
+    "name": "code-review",
+    "variables": {
+      "language": "Rust",
+      "file": "src/main.rs"
+    }
+  }
+}
+```
+
+### With Defaults
+
+```json
+{
+  "tool": "prompt_run",
+  "arguments": {
+    "name": "api-design",
+    "variables": {
+      "resource": "users"
+    }
+  }
+}
+```
+
+The `version` variable will use its default value of "v1".
+
+## Domain Scopes
+
+Prompts support three domain scopes:
+
+| Scope | Description | Search Order |
+|-------|-------------|--------------|
+| `project` | Current repository | Searched first |
+| `user` | User-wide prompts | Searched second |
+| `org` | Organization-wide | Searched last |
+
+### Saving to a Specific Domain
+
+```json
+{
+  "tool": "prompt_save",
+  "arguments": {
+    "name": "deploy-checklist",
+    "content": "...",
+    "domain": "org"
+  }
+}
+```
+
+### Retrieving with Domain Fallback
+
+When getting a prompt, subcog searches in order: project → user → org
+
+```json
+{
+  "tool": "prompt_get",
+  "arguments": {
+    "name": "deploy-checklist"
+  }
+}
+```
+
+## Listing and Filtering
+
+### List All Prompts
+
+```json
+{
+  "tool": "prompt_list",
+  "arguments": {}
+}
+```
+
+### Filter by Domain
+
+```json
+{
+  "tool": "prompt_list",
+  "arguments": {
+    "domain": "user"
+  }
+}
+```
+
+### Filter by Tags
+
+```json
+{
+  "tool": "prompt_list",
+  "arguments": {
+    "tags": ["api", "design"]
+  }
+}
+```
+
+### Filter by Name Pattern
+
+```json
+{
+  "tool": "prompt_list",
+  "arguments": {
+    "name_pattern": "code-*"
+  }
+}
+```
+
+## CLI Commands
+
+### Save a Prompt
+
+```bash
+# From content
+subcog prompt save my-prompt "Template with {{var}}"
+
+# From file
+subcog prompt save my-prompt --from-file prompt.md
+
+# With options
+subcog prompt save my-prompt "content" \
+  --description "Description here" \
+  --tags "tag1,tag2" \
+  --domain user
+```
+
+### List Prompts
+
+```bash
+subcog prompt list
+subcog prompt list --domain user
+subcog prompt list --tags api,design
+subcog prompt list --format json
+```
+
+### Get a Prompt
+
+```bash
+subcog prompt get my-prompt
+subcog prompt get my-prompt --format yaml
+```
+
+### Run a Prompt
+
+```bash
+# With variables
+subcog prompt run my-prompt var1=value1 var2=value2
+
+# Interactive mode (prompts for missing variables)
+subcog prompt run my-prompt --interactive
+```
+
+### Export a Prompt
+
+```bash
+subcog prompt export my-prompt --output prompt.md
+subcog prompt export my-prompt --format yaml
+```
+
+### Delete a Prompt
+
+```bash
+subcog prompt delete my-prompt --domain project --force
+```
+
+## Supported Formats
+
+| Format | Extension | Description |
+|--------|-----------|-------------|
+| Markdown | `.md` | YAML front matter + content |
+| YAML | `.yaml`, `.yml` | Full structured format |
+| JSON | `.json` | Machine-readable format |
+| Plain Text | `.txt` | Content only (no metadata) |
+
+## Best Practices
+
+1. **Use descriptive names**: `api-design` not `prompt1`
+2. **Add descriptions**: Explain the prompt's purpose
+3. **Tag consistently**: Use standard tags across prompts
+4. **Provide defaults**: Make prompts easier to use
+5. **Document variables**: Add descriptions for clarity
+6. **Use domain scoping**: Share org-wide, customize per project
+"#;
+
 /// Formats a memory as a JSON preview for topic listings.
 fn format_memory_preview(m: &crate::models::Memory) -> serde_json::Value {
     serde_json::json!({
@@ -1322,7 +1604,23 @@ mod tests {
         let handler = ResourceHandler::new();
         let categories = handler.list_categories();
 
-        assert_eq!(categories.len(), 7);
+        assert_eq!(categories.len(), 8); // Including prompts
+    }
+
+    #[test]
+    fn test_prompts_help_category() {
+        let handler = ResourceHandler::new();
+
+        // Should be able to get the prompts help resource
+        let result = handler.get_resource("subcog://help/prompts");
+        assert!(result.is_ok());
+
+        let content = result.unwrap();
+        assert!(content.text.is_some());
+        let text = content.text.unwrap();
+        assert!(text.contains("User-Defined Prompts"));
+        assert!(text.contains("prompt_save"));
+        assert!(text.contains("Variable Syntax"));
     }
 
     #[test]

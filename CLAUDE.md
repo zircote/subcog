@@ -28,8 +28,9 @@ src/
 │   ├── capture.rs           # CaptureResult, CaptureRequest
 │   ├── search.rs            # SearchResult, SearchFilter, SearchMode
 │   ├── consolidation.rs     # MemoryTier, EdgeType, RetentionScore
-│   ├── domain.rs            # Domain, Namespace (10 variants), MemoryStatus
-│   └── events.rs            # MemoryEvent variants
+│   ├── domain.rs            # Domain, Namespace (11 variants), MemoryStatus
+│   ├── events.rs            # MemoryEvent variants
+│   └── prompt.rs            # PromptTemplate, PromptVariable, validation
 │
 ├── storage/                  # Three-layer storage abstraction
 │   ├── mod.rs               # CompositeStorage, layer trait re-exports
@@ -57,7 +58,9 @@ src/
 │   ├── sync.rs              # SyncService
 │   ├── consolidation.rs     # ConsolidationService
 │   ├── context.rs           # ContextBuilderService
-│   └── topic_index.rs       # TopicIndexService (topic → memory map)
+│   ├── topic_index.rs       # TopicIndexService (topic → memory map)
+│   ├── prompt.rs            # PromptService (CRUD for prompts)
+│   └── prompt_parser.rs     # Multi-format parsing (MD, YAML, JSON)
 │
 ├── git/                      # Git operations
 │   ├── notes.rs             # Git notes CRUD
@@ -110,7 +113,8 @@ src/
 │   ├── consolidate.rs       # consolidate subcommand
 │   ├── config.rs            # config subcommand
 │   ├── serve.rs             # serve subcommand (MCP)
-│   └── hook.rs              # hook subcommand
+│   ├── hook.rs              # hook subcommand
+│   └── prompt.rs            # prompt subcommand (save, list, get, run, delete, export)
 │
 └── observability/            # Telemetry
     ├── metrics.rs           # Prometheus metrics
@@ -202,7 +206,52 @@ subcog hook user-prompt-submit
 subcog hook post-tool-use
 subcog hook pre-compact
 subcog hook stop
+
+# Prompt management commands
+subcog prompt save my-prompt --content "Review {{file}} for {{issue_type}}"
+subcog prompt save code-review --file prompts/code-review.md --domain user
+subcog prompt list --domain project
+subcog prompt get my-prompt
+subcog prompt run code-review --var file=src/main.rs --var issue_type=security
+subcog prompt delete my-prompt --domain project
+subcog prompt export my-prompt --format yaml --output my-prompt.yaml
 ```
+
+### Prompt Templates
+
+Subcog supports user-defined prompt templates with variable substitution. Templates can be stored at project, user, or org scope and shared across sessions.
+
+**Variable Syntax**: `{{variable_name}}`
+- Valid names: alphanumeric and underscores only
+- Reserved prefixes: `subcog_`, `system_`, `__`
+
+**Example Template** (YAML format):
+```yaml
+name: code-review
+description: Comprehensive code review
+content: |
+  Review {{file}} for:
+  - {{issue_type}} issues
+  - Best practices
+  - Edge cases
+variables:
+  - name: file
+    description: File path to review
+    required: true
+  - name: issue_type
+    description: Type of issues to focus on
+    default: general
+tags: [review, quality]
+```
+
+**MCP Tools**:
+| Tool | Description |
+|------|-------------|
+| `prompt_save` | Save a new prompt template |
+| `prompt_list` | List prompts with optional filtering |
+| `prompt_get` | Get a specific prompt by name |
+| `prompt_run` | Execute a prompt with variable substitution |
+| `prompt_delete` | Delete a prompt |
 
 ## Proactive Memory Surfacing
 

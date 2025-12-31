@@ -5,11 +5,59 @@
 #[cfg(feature = "postgres")]
 mod implementation {
     use crate::models::{Memory, MemoryId, SearchFilter};
+    use crate::storage::migrations::{Migration, MigrationRunner};
     use crate::storage::traits::IndexBackend;
     use crate::{Error, Result};
     use deadpool_postgres::{Config, Pool, Runtime};
     use tokio::runtime::Handle;
     use tokio_postgres::NoTls;
+
+    /// Embedded migrations compiled into the binary.
+    const MIGRATIONS: &[Migration] = &[
+        Migration {
+            version: 1,
+            description: "Initial index table with FTS",
+            sql: r"
+                CREATE TABLE IF NOT EXISTS {table} (
+                    id TEXT PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    namespace TEXT NOT NULL,
+                    domain TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    tags TEXT[] DEFAULT '{}',
+                    created_at BIGINT NOT NULL,
+                    updated_at BIGINT NOT NULL,
+                    search_vector TSVECTOR GENERATED ALWAYS AS (
+                        setweight(to_tsvector('english', coalesce(content, '')), 'A') ||
+                        setweight(to_tsvector('english', coalesce(array_to_string(tags, ' '), '')), 'B')
+                    ) STORED
+                );
+            ",
+        },
+        Migration {
+            version: 2,
+            description: "Add GIN index on search_vector",
+            sql: r"
+                CREATE INDEX IF NOT EXISTS {table}_search_idx ON {table} USING GIN (search_vector);
+            ",
+        },
+        Migration {
+            version: 3,
+            description: "Add namespace and updated_at indexes",
+            sql: r"
+                CREATE INDEX IF NOT EXISTS {table}_namespace_idx ON {table} (namespace);
+                CREATE INDEX IF NOT EXISTS {table}_updated_idx ON {table} (updated_at DESC);
+            ",
+        },
+        Migration {
+            version: 4,
+            description: "Add status and created_at indexes",
+            sql: r"
+                CREATE INDEX IF NOT EXISTS {table}_status_idx ON {table} (status);
+                CREATE INDEX IF NOT EXISTS {table}_created_idx ON {table} (created_at DESC);
+            ",
+        },
+    ];
 
     /// PostgreSQL-based index backend.
     pub struct PostgresIndexBackend {
@@ -54,7 +102,7 @@ mod implementation {
             })?;
 
             let backend = Self { pool, table_name };
-            backend.ensure_table()?;
+            backend.run_migrations()?;
             Ok(backend)
         }
 
@@ -102,7 +150,7 @@ mod implementation {
         ///
         /// Returns an error if the connection fails.
         pub fn with_defaults() -> Result<Self> {
-            Self::new("postgresql://localhost/subcog", "memories")
+            Self::new("postgresql://localhost/subcog", "memories_index")
         }
 
         /// Runs a blocking operation on the async pool.
@@ -124,83 +172,12 @@ mod implementation {
             }
         }
 
-        /// Ensures the memories table and index exist.
-        fn ensure_table(&self) -> Result<()> {
-            self.block_on(self.ensure_table_async())
-        }
-
-        /// Async implementation of table creation.
-        async fn ensure_table_async(&self) -> Result<()> {
-            let client = self.pool.get().await.map_err(pool_error)?;
-            self.create_main_table(&client).await?;
-            self.create_search_index(&client).await?;
-            self.create_namespace_index(&client).await?;
-            self.create_updated_index(&client).await
-        }
-
-        /// Creates the main memories table.
-        async fn create_main_table(&self, client: &deadpool_postgres::Object) -> Result<()> {
-            let sql = format!(
-                r"CREATE TABLE IF NOT EXISTS {} (
-                    id TEXT PRIMARY KEY,
-                    content TEXT NOT NULL,
-                    namespace TEXT NOT NULL,
-                    domain TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    tags TEXT[] DEFAULT '{{}}',
-                    created_at BIGINT NOT NULL,
-                    updated_at BIGINT NOT NULL,
-                    search_vector TSVECTOR GENERATED ALWAYS AS (
-                        setweight(to_tsvector('english', coalesce(content, '')), 'A') ||
-                        setweight(to_tsvector('english', coalesce(array_to_string(tags, ' '), '')), 'B')
-                    ) STORED
-                )",
-                self.table_name
-            );
-            client
-                .execute(&sql, &[])
-                .await
-                .map_err(|e| query_error("postgres_create_table", e))?;
-            Ok(())
-        }
-
-        /// Creates GIN index on `search_vector`.
-        async fn create_search_index(&self, client: &deadpool_postgres::Object) -> Result<()> {
-            let sql = format!(
-                "CREATE INDEX IF NOT EXISTS {}_search_idx ON {} USING GIN (search_vector)",
-                self.table_name, self.table_name
-            );
-            client
-                .execute(&sql, &[])
-                .await
-                .map_err(|e| query_error("postgres_create_index", e))?;
-            Ok(())
-        }
-
-        /// Creates index on namespace for filtering.
-        async fn create_namespace_index(&self, client: &deadpool_postgres::Object) -> Result<()> {
-            let sql = format!(
-                "CREATE INDEX IF NOT EXISTS {}_namespace_idx ON {} (namespace)",
-                self.table_name, self.table_name
-            );
-            client
-                .execute(&sql, &[])
-                .await
-                .map_err(|e| query_error("postgres_create_ns_index", e))?;
-            Ok(())
-        }
-
-        /// Creates index on `updated_at` for sorting.
-        async fn create_updated_index(&self, client: &deadpool_postgres::Object) -> Result<()> {
-            let sql = format!(
-                "CREATE INDEX IF NOT EXISTS {}_updated_idx ON {} (updated_at DESC)",
-                self.table_name, self.table_name
-            );
-            client
-                .execute(&sql, &[])
-                .await
-                .map_err(|e| query_error("postgres_create_updated_index", e))?;
-            Ok(())
+        /// Runs migrations.
+        fn run_migrations(&self) -> Result<()> {
+            self.block_on(async {
+                let runner = MigrationRunner::new(self.pool.clone(), &self.table_name);
+                runner.run(MIGRATIONS).await
+            })
         }
 
         /// Builds WHERE clause for filters.
@@ -469,7 +446,7 @@ mod implementation {
         }
 
         fn get_memory(&self, _id: &MemoryId) -> Result<Option<Memory>> {
-            // TODO: Implement PostgreSQL get_memory when needed
+            // Index backend stores minimal data for search, not full memories
             Ok(None)
         }
 

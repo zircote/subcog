@@ -36,6 +36,8 @@ pub enum Namespace {
     Testing,
     /// Built-in help content (read-only system namespace).
     Help,
+    /// Reusable prompt templates with variable substitution.
+    Prompts,
 }
 
 impl Namespace {
@@ -56,6 +58,7 @@ impl Namespace {
             Self::Performance,
             Self::Testing,
             Self::Help,
+            Self::Prompts,
         ]
     }
 
@@ -75,6 +78,7 @@ impl Namespace {
             Self::Security,
             Self::Performance,
             Self::Testing,
+            Self::Prompts,
         ]
     }
 
@@ -95,6 +99,7 @@ impl Namespace {
             Self::Performance => "performance",
             Self::Testing => "testing",
             Self::Help => "help",
+            Self::Prompts => "prompts",
         }
     }
 
@@ -121,6 +126,7 @@ impl Namespace {
             "performance" => Some(Self::Performance),
             "testing" => Some(Self::Testing),
             "help" => Some(Self::Help),
+            "prompts" => Some(Self::Prompts),
             _ => None,
         }
     }

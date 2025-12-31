@@ -2,7 +2,7 @@
 
 use super::HookHandler;
 use crate::Result;
-use crate::models::{SearchFilter, SearchMode};
+use crate::models::{IssueSeverity, SearchFilter, SearchMode, validate_prompt_content};
 use crate::services::RecallService;
 use tracing::instrument;
 
@@ -62,6 +62,59 @@ impl PostToolUseHandler {
         CONTEXTUAL_TOOLS
             .iter()
             .any(|t| t.eq_ignore_ascii_case(tool_name))
+    }
+
+    /// Checks if a tool is a prompt save tool.
+    fn is_prompt_save_tool(tool_name: &str) -> bool {
+        let lower = tool_name.to_lowercase();
+        lower == "prompt_save" || lower == "prompt.save" || lower == "subcog_prompt_save"
+    }
+
+    /// Validates prompt content and returns any issues.
+    ///
+    /// Returns a guidance message if validation issues are found.
+    fn validate_prompt(&self, tool_input: &serde_json::Value) -> Option<String> {
+        // Extract content from tool input
+        let content = tool_input.get("content").and_then(|v| v.as_str())?;
+
+        // Skip validation for empty content
+        if content.is_empty() {
+            return None;
+        }
+
+        // Validate the prompt content
+        let validation = validate_prompt_content(content);
+
+        if validation.is_valid {
+            return None;
+        }
+
+        // Build guidance message for issues
+        let mut guidance = vec!["**Prompt Validation Issues**\n".to_string()];
+
+        for issue in &validation.issues {
+            let severity_icon = match issue.severity {
+                IssueSeverity::Error => "\u{274c}",   // X
+                IssueSeverity::Warning => "\u{26a0}", // Warning sign
+            };
+
+            let position_info = issue
+                .position
+                .map_or(String::new(), |pos| format!(" at position {pos}"));
+
+            guidance.push(format!(
+                "- {severity_icon} {}{position_info}",
+                issue.message
+            ));
+        }
+
+        guidance.push("\n**Tips:**".to_string());
+        guidance.push("- Variables use `{{variable_name}}` syntax".to_string());
+        guidance.push("- Ensure all `{{` have matching `}}`".to_string());
+        guidance.push("- Variable names should be alphanumeric with underscores".to_string());
+        guidance.push("- See `subcog://help/prompts` for format documentation".to_string());
+
+        Some(guidance.join("\n"))
     }
 
     /// Extracts a search query from tool input.
@@ -179,6 +232,31 @@ impl HookHandler for PostToolUseHandler {
         let tool_input = input_json
             .get("tool_input")
             .unwrap_or(&serde_json::Value::Null);
+
+        // Check for prompt_save tool and validate content
+        if Self::is_prompt_save_tool(tool_name) {
+            if let Some(guidance) = self.validate_prompt(tool_input) {
+                // Return validation guidance
+                let response = serde_json::json!({
+                    "hookSpecificOutput": {
+                        "hookEventName": "PostToolUse",
+                        "additionalContext": guidance
+                    }
+                });
+                return serde_json::to_string(&response).map_err(|e| {
+                    crate::Error::OperationFailed {
+                        operation: "serialize_response".to_string(),
+                        cause: e.to_string(),
+                    }
+                });
+            }
+            // Prompt is valid, return empty response
+            let response = serde_json::json!({});
+            return serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
+                operation: "serialize_response".to_string(),
+                cause: e.to_string(),
+            });
+        }
 
         // Check if we should look up memories for this tool
         if !self.should_lookup(tool_name) {
@@ -390,5 +468,91 @@ mod tests {
 
         assert_eq!(handler.max_memories, 5);
         assert!((handler.min_relevance - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_is_prompt_save_tool() {
+        assert!(PostToolUseHandler::is_prompt_save_tool("prompt_save"));
+        assert!(PostToolUseHandler::is_prompt_save_tool("PROMPT_SAVE"));
+        assert!(PostToolUseHandler::is_prompt_save_tool("prompt.save"));
+        assert!(PostToolUseHandler::is_prompt_save_tool(
+            "subcog_prompt_save"
+        ));
+        assert!(!PostToolUseHandler::is_prompt_save_tool("prompt_get"));
+        assert!(!PostToolUseHandler::is_prompt_save_tool("subcog_capture"));
+    }
+
+    #[test]
+    fn test_handle_prompt_save_valid() {
+        let handler = PostToolUseHandler::default();
+
+        let input = serde_json::json!({
+            "tool_name": "prompt_save",
+            "tool_input": {
+                "name": "test-prompt",
+                "content": "Hello {{name}}, welcome to {{place}}!"
+            }
+        });
+
+        let result = handler.handle(&serde_json::to_string(&input).unwrap());
+        assert!(result.is_ok());
+
+        let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        // Valid prompt - empty response (no validation issues)
+        assert!(response.as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_handle_prompt_save_invalid_braces() {
+        let handler = PostToolUseHandler::default();
+
+        let input = serde_json::json!({
+            "tool_name": "prompt_save",
+            "tool_input": {
+                "name": "test-prompt",
+                "content": "Hello {{name, this is broken"
+            }
+        });
+
+        let result = handler.handle(&serde_json::to_string(&input).unwrap());
+        assert!(result.is_ok());
+
+        let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        // Invalid prompt - should have validation guidance
+        assert!(response.get("hookSpecificOutput").is_some());
+
+        let additional_context = response
+            .get("hookSpecificOutput")
+            .and_then(|o| o.get("additionalContext"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert!(additional_context.contains("Prompt Validation Issues"));
+        assert!(additional_context.contains("subcog://help/prompts"));
+    }
+
+    #[test]
+    fn test_validate_prompt_empty_content() {
+        let handler = PostToolUseHandler::default();
+
+        let input = serde_json::json!({
+            "content": ""
+        });
+
+        // Empty content should return None (no validation needed)
+        let guidance = handler.validate_prompt(&input);
+        assert!(guidance.is_none());
+    }
+
+    #[test]
+    fn test_validate_prompt_missing_content() {
+        let handler = PostToolUseHandler::default();
+
+        let input = serde_json::json!({
+            "name": "test"
+        });
+
+        // Missing content should return None
+        let guidance = handler.validate_prompt(&input);
+        assert!(guidance.is_none());
     }
 }
