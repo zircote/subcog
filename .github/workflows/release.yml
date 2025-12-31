@@ -330,14 +330,15 @@ jobs:
         run: |
           cd homebrew-tap
 
-          if git diff --quiet Formula/subcog.rb 2>/dev/null; then
+          git add Formula/subcog.rb
+
+          if git diff --staged --quiet; then
             echo "No changes to formula"
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/subcog.rb
           git commit -m "chore(formula): bump subcog to ${VERSION}"
           if ! git push; then
             echo "Failed to push Homebrew tap changes. Please check for conflicts, branch protection rules, or permission issues." >&2
