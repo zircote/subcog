@@ -648,6 +648,27 @@ Full specification in `docs/spec/active/2025-12-28-subcog-rust-rewrite/`:
 
 ### Completed Specifications
 
+- **[User Prompt Management](docs/spec/completed/2025-12-30-prompt-management/)** (2025-12-30)
+  - **Issues**: [#6](https://github.com/zircote/subcog/issues/6), [#8](https://github.com/zircote/subcog/issues/8), [#9](https://github.com/zircote/subcog/issues/9), [#10](https://github.com/zircote/subcog/issues/10), [#11](https://github.com/zircote/subcog/issues/11), [#12](https://github.com/zircote/subcog/issues/12), [#13](https://github.com/zircote/subcog/issues/13), [#14](https://github.com/zircote/subcog/issues/14)
+  - **PR**: [#26](https://github.com/zircote/subcog/pull/26)
+  - **Outcome**: Success - All 7 phases delivered (55/56 tasks), 460 tests passing
+  - **Features**:
+    - Reusable prompt templates with `{{variable}}` substitution
+    - Multi-format support (YAML, JSON, Markdown, plain text)
+    - Domain-scoped storage (user, org, project, repo)
+    - 6 storage backends (Filesystem, SQLite, Git Notes, PostgreSQL, Redis, stub)
+    - PostgreSQL auto-migrations for all storage layers
+    - 5 MCP tools (prompt_save, prompt_list, prompt_get, prompt_run, prompt_delete)
+    - 8 CLI commands (list, get, save, delete, run, export, import, share)
+    - Post-tool-use hook for validation
+    - Usage tracking and analytics
+  - **Key Learnings**:
+    - Migration systems pay off early - zero manual schema management
+    - PROGRESS.md effective for tracking multi-phase projects
+    - Test coverage (460 tests for ~3,000 LOC) provided confidence
+    - Git notes storage surprisingly effective for <10k items
+  - **Key docs**: REQUIREMENTS.md, ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, PROGRESS.md, RETROSPECTIVE.md
+
 - **[Proactive Memory Surfacing](docs/spec/completed/2025-12-30-issue-15-memory-surfacing/)** (2025-12-30)
   - **Issues**: [#15](https://github.com/zircote/subcog/issues/15), [#24](https://github.com/zircote/subcog/issues/24)
   - **PR**: [#23](https://github.com/zircote/subcog/pull/23)
