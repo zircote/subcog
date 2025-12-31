@@ -1,0 +1,14 @@
+---
+created_at: 1767207519
+domain: global
+id: learnings_2b05a011-095f-43d9-b07a-89a28ddd00ae
+namespace: learnings
+status: active
+tags:
+- metrics
+- observability
+- hooks
+- mcp
+updated_at: 1767207519
+---
+Metrics flush now works for both MCP server and hooks - added flush_metrics() call after hook processing
