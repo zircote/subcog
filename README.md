@@ -8,6 +8,8 @@
 
 A persistent memory system for AI coding assistants. Subcog captures decisions, learnings, and context from coding sessions and surfaces them when relevant.
 
+![Subcog Prompt Library Workflow](docs/_assets/subcog-inforgraphic.png)
+
 ## Overview
 
 Subcog is a Rust rewrite of the [git-notes-memory](https://github.com/zircote/git-notes-memory) Python system, delivering:
