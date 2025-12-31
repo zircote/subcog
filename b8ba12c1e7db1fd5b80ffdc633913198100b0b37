@@ -1,10 +1,10 @@
 ---
-created_at: 1767221040
+created_at: 1767221041
 domain: global
-id: decisions_9509d43b-d056-44f4-b15d-58e4b4104735
-namespace: decisions
+id: learnings_a4152498-c6c1-4aa9-aa5c-e5ec63493376
+namespace: learnings
 status: active
 tags: []
-updated_at: 1767221040
+updated_at: 1767221041
 ---
-E2E test: Use Prometheus for metrics
+E2E test: Push gateway requires trailing newline
