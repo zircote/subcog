@@ -130,6 +130,7 @@ mod property_tests {
 /// - `RecallService` unavailable → skip memory injection
 /// - Low confidence → reduced memory count
 mod graceful_degradation_tests {
+    use std::sync::Arc;
     use std::time::Duration;
     use subcog::Result;
     use subcog::config::SearchIntentConfig;
@@ -196,11 +197,8 @@ mod graceful_degradation_tests {
     fn test_llm_unavailable_falls_back_to_keyword() {
         // When LLM provider is None, should fall back to keyword detection
         let config = SearchIntentConfig::default();
-        let intent = detect_search_intent_with_timeout::<FailingLlmProvider>(
-            None,
-            "how do I implement authentication?",
-            &config,
-        );
+        let intent =
+            detect_search_intent_with_timeout(None, "how do I implement authentication?", &config);
 
         // Should still detect intent via keywords
         assert_eq!(intent.source, DetectionSource::Keyword);
@@ -211,11 +209,11 @@ mod graceful_degradation_tests {
     #[test]
     fn test_llm_disabled_uses_keyword_only() {
         // When LLM is disabled via config, should use keyword-only
-        let failing_provider = FailingLlmProvider;
+        let failing_provider = Arc::new(FailingLlmProvider);
         let config = SearchIntentConfig::default().with_use_llm(false);
 
         let intent = detect_search_intent_with_timeout(
-            Some(&failing_provider),
+            Some(failing_provider),
             "where is the database config?",
             &config,
         );
@@ -227,11 +225,11 @@ mod graceful_degradation_tests {
     #[test]
     fn test_llm_timeout_falls_back_to_keyword() {
         // When LLM times out, should fall back to keyword detection
-        let slow_provider = SlowLlmProvider { delay_ms: 500 };
+        let slow_provider = Arc::new(SlowLlmProvider { delay_ms: 500 });
         let config = SearchIntentConfig::default().with_llm_timeout_ms(50); // 50ms timeout
 
         let intent = detect_search_intent_with_timeout(
-            Some(&slow_provider),
+            Some(slow_provider),
             "what is the purpose of this module?",
             &config,
         );
@@ -243,13 +241,13 @@ mod graceful_degradation_tests {
     #[test]
     fn test_llm_failure_in_hybrid_falls_back_to_keyword() {
         // In hybrid mode, LLM failure should result in keyword-only results
-        let failing_provider = FailingLlmProvider;
+        let failing_provider = Arc::new(FailingLlmProvider);
         let config = SearchIntentConfig::default()
             .with_llm_timeout_ms(1000)
             .with_min_confidence(0.5);
 
         let intent = detect_search_intent_hybrid(
-            Some(&failing_provider),
+            Some(failing_provider),
             "why is this error happening?",
             &config,
         );
@@ -328,7 +326,7 @@ mod graceful_degradation_tests {
 
         // With timeout function, should return default
         let config = SearchIntentConfig::default();
-        let intent = detect_search_intent_with_timeout::<FailingLlmProvider>(None, "", &config);
+        let intent = detect_search_intent_with_timeout(None, "", &config);
 
         assert_eq!(intent.intent_type, SearchIntentType::General);
         assert!(intent.confidence.abs() < f32::EPSILON);

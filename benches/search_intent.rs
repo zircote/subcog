@@ -11,6 +11,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
+use std::sync::Arc;
 use std::time::Duration;
 
 use subcog::Result;
@@ -150,12 +151,12 @@ fn bench_llm_classification(c: &mut Criterion) {
 
     // Test with fast mock (measures overhead only)
     group.bench_function("mock_fast", |b| {
-        let provider = MockLlmProvider::new_fast();
+        let provider: Arc<dyn LlmProvider> = Arc::new(MockLlmProvider::new_fast());
         let config = SearchIntentConfig::default().with_llm_timeout_ms(500);
 
         b.iter(|| {
             detect_search_intent_with_timeout(
-                Some(&provider),
+                Some(Arc::clone(&provider)),
                 black_box(MEDIUM_PROMPT),
                 black_box(&config),
             )
@@ -164,12 +165,12 @@ fn bench_llm_classification(c: &mut Criterion) {
 
     // Test hybrid detection with fast mock
     group.bench_function("hybrid_fast", |b| {
-        let provider = MockLlmProvider::new_fast();
+        let provider: Arc<dyn LlmProvider> = Arc::new(MockLlmProvider::new_fast());
         let config = SearchIntentConfig::default().with_llm_timeout_ms(500);
 
         b.iter(|| {
             detect_search_intent_hybrid(
-                Some(&provider),
+                Some(Arc::clone(&provider)),
                 black_box(MEDIUM_PROMPT),
                 black_box(&config),
             )
@@ -179,12 +180,12 @@ fn bench_llm_classification(c: &mut Criterion) {
     // Test timeout behavior (should fall back to keyword detection quickly)
     group.measurement_time(Duration::from_secs(10));
     group.bench_function("timeout_fallback", |b| {
-        let provider = MockLlmProvider::new_with_delay(500); // Slow provider
+        let provider: Arc<dyn LlmProvider> = Arc::new(MockLlmProvider::new_with_delay(500)); // Slow provider
         let config = SearchIntentConfig::default().with_llm_timeout_ms(50); // Short timeout
 
         b.iter(|| {
             detect_search_intent_with_timeout(
-                Some(&provider),
+                Some(Arc::clone(&provider)),
                 black_box(MEDIUM_PROMPT),
                 black_box(&config),
             )
@@ -193,12 +194,12 @@ fn bench_llm_classification(c: &mut Criterion) {
 
     // Test with LLM disabled (keyword only path)
     group.bench_function("llm_disabled", |b| {
-        let provider = MockLlmProvider::new_fast();
+        let provider: Arc<dyn LlmProvider> = Arc::new(MockLlmProvider::new_fast());
         let config = SearchIntentConfig::default().with_use_llm(false);
 
         b.iter(|| {
             detect_search_intent_with_timeout(
-                Some(&provider),
+                Some(Arc::clone(&provider)),
                 black_box(MEDIUM_PROMPT),
                 black_box(&config),
             )

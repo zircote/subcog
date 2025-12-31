@@ -41,6 +41,12 @@ tokio = { version = "1.0", features = ["full"] }
 # Logging and tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-opentelemetry = "0.32"
+opentelemetry = "0.31"
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.31", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client", "grpc-tonic"] }
+metrics = "0.24"
+metrics-exporter-prometheus = "0.18"
 
 # Git operations (vendored for cross-platform builds)
 git2 = { version = "0.20", features = ["vendored-openssl", "vendored-libgit2"] }
