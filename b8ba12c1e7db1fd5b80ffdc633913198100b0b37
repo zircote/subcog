@@ -1,14 +1,41 @@
 ---
-created_at: 1767207519
+created_at: 1767210891
 domain: global
-id: learnings_2b05a011-095f-43d9-b07a-89a28ddd00ae
-namespace: learnings
+id: patterns_223833eb-08fa-464e-9457-d38ac1e491e7
+namespace: patterns
 status: active
 tags:
+- rust
+- prometheus
 - metrics
+- debugging
+- push-gateway
 - observability
-- hooks
-- mcp
-updated_at: 1767207519
+updated_at: 1767210891
 ---
-Metrics flush now works for both MCP server and hooks - added flush_metrics() call after hook processing
+## Rust Metrics Debugging Pattern
+
+When Prometheus metrics aren't appearing in push gateway:
+
+1. **Verify metrics are actually being pushed**: 
+   - Check push gateway directly: `curl -s http://localhost:9091/metrics | grep <metric_prefix>`
+   - Push a test metric manually: `echo 'test_metric 123' | curl --data-binary @- http://localhost:9091/metrics/job/subcog`
+
+2. **Check metric visibility**:
+   - List all unique metric names: `grep -v "^#" /tmp/metrics.txt | awk '{print $1}' | sed 's/{.*//' | sort -u`
+   - Filter out Go/process metrics: `grep -v "^go_" | grep -v "^process_" | grep -v "^promhttp"`
+
+3. **Instance labeling for multi-source metrics**:
+   - Use static `OnceLock<String>` for thread-safe instance labels (avoid unsafe `set_var` in Rust 2024)
+   - Set instance label before any metrics are recorded
+   - Push gateway endpoint format: `http://host:9091/metrics/job/{job}/instance/{instance}`
+
+4. **Spawned thread metric timing**:
+   - Metrics recorded in spawned threads may not appear if main thread exits too quickly
+   - Add delay before `flush_metrics()` to allow spawned threads to complete
+   - Consider using `map_or_else` pattern per clippy::option_if_let_else
+
+5. **Metrics crate usage in Rust**:
+   - `metrics::counter!`, `metrics::histogram!`, `metrics::gauge!` macros work globally
+   - No explicit `use metrics;` needed if crate is in Cargo.toml
+   - Global recorder must be installed via `metrics::set_global_recorder()`
