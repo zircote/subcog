@@ -49,6 +49,10 @@ jobs:
           toolchain: stable
           components: clippy
 
+      - name: Install cmake (for vendored libgit2)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake
+
       - name: Cache cargo registry
         uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
@@ -79,6 +83,10 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Install cmake (for vendored libgit2)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake
+
       - name: Cache cargo registry
         uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
@@ -106,6 +114,9 @@ jobs:
         uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # master
         with:
           toolchain: stable
+
+      - name: Install cmake (for vendored libgit2)
+        run: sudo apt-get update && sudo apt-get install -y cmake
 
       - name: Cache cargo registry
         uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
@@ -148,6 +159,9 @@ jobs:
         with:
           toolchain: "1.85"
 
+      - name: Install cmake (for vendored libgit2)
+        run: sudo apt-get update && sudo apt-get install -y cmake
+
       - name: Cache cargo registry
         uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
@@ -173,6 +187,9 @@ jobs:
         uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # master
         with:
           toolchain: stable
+
+      - name: Install cmake (for vendored libgit2)
+        run: sudo apt-get update && sudo apt-get install -y cmake
 
       - name: Cache cargo registry
         uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
@@ -203,6 +220,9 @@ jobs:
         with:
           toolchain: stable
           components: llvm-tools-preview
+
+      - name: Install cmake (for vendored libgit2)
+        run: sudo apt-get update && sudo apt-get install -y cmake
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@4c6723ec9c638cccae824b8957c5085b695c8085 # v2.65.7

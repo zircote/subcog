@@ -42,8 +42,8 @@ tokio = { version = "1.0", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
-# Git operations
-git2 = "0.20"
+# Git operations (vendored for cross-platform builds)
+git2 = { version = "0.20", features = ["vendored-openssl", "vendored-libgit2"] }
 
 # SQLite for FTS5 index
 rusqlite = { version = "0.32", features = ["bundled", "modern-full"] }
