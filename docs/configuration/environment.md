@@ -41,7 +41,18 @@ Complete reference of all environment variables supported by Subcog.
 | `SUBCOG_LLM_PROVIDER` | LLM provider | None |
 | `SUBCOG_LLM_MODEL` | Model name | Provider default |
 | `SUBCOG_LLM_TIMEOUT_MS` | Request timeout | `30000` |
-| `SUBCOG_LLM_MAX_RETRIES` | Max retries | `3` |
+| `SUBCOG_LLM_CONNECT_TIMEOUT_MS` | Connect timeout | `3000` |
+| `SUBCOG_LLM_MAX_RETRIES` | Max retries | `0` |
+| `SUBCOG_LLM_RETRY_BACKOFF_MS` | Retry backoff | `100` |
+| `SUBCOG_LLM_BREAKER_FAILURE_THRESHOLD` | Circuit breaker failure threshold | `3` |
+| `SUBCOG_LLM_BREAKER_RESET_MS` | Circuit breaker reset cooldown | `30000` |
+| `SUBCOG_LLM_BREAKER_HALF_OPEN_MAX_CALLS` | Circuit breaker half-open attempts | `1` |
+| `SUBCOG_LLM_LATENCY_SLO_MS` | Latency budget threshold | `2000` |
+| `SUBCOG_LLM_ERROR_BUDGET_RATIO` | Error budget ratio threshold | `0.05` |
+| `SUBCOG_LLM_ERROR_BUDGET_WINDOW_SECS` | Error budget window | `300` |
+
+LLM settings can also be provided in `config.toml`. When both are set, environment
+variables take precedence over config values.
 
 ### Provider-Specific
 
@@ -66,7 +77,7 @@ Complete reference of all environment variables supported by Subcog.
 **LM Studio:**
 | Variable | Description |
 |----------|-------------|
-| `LMSTUDIO_HOST` | LM Studio server URL |
+| `LMSTUDIO_ENDPOINT` | LM Studio server URL |
 
 ## Search Intent Settings
 
@@ -76,6 +87,17 @@ Complete reference of all environment variables supported by Subcog.
 | `SUBCOG_SEARCH_INTENT_USE_LLM` | Use LLM for detection | `true` |
 | `SUBCOG_SEARCH_INTENT_LLM_TIMEOUT_MS` | LLM timeout | `200` |
 | `SUBCOG_SEARCH_INTENT_MIN_CONFIDENCE` | Minimum confidence | `0.5` |
+
+## Observability Settings
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SUBCOG_METRICS_ENABLED` | Enable metrics | `false` |
+| `SUBCOG_METRICS_PORT` | Metrics listener port (serve only) | `9090` |
+| `SUBCOG_METRICS_PUSH_GATEWAY_ENDPOINT` | Push gateway endpoint | None |
+| `SUBCOG_METRICS_PUSH_GATEWAY_USERNAME` | Push gateway username | None |
+| `SUBCOG_METRICS_PUSH_GATEWAY_PASSWORD` | Push gateway password | None |
+| `SUBCOG_METRICS_PUSH_GATEWAY_USE_POST` | Use POST instead of PUT | `false` |
 
 ## Hook Settings
 
@@ -124,6 +146,11 @@ Complete reference of all environment variables supported by Subcog.
 | `SUBCOG_METRICS_PORT` | Metrics endpoint port | `9090` |
 | `SUBCOG_TRACING_ENABLED` | Enable distributed tracing | `false` |
 | `SUBCOG_OTLP_ENDPOINT` | OTLP collector endpoint | None |
+| `SUBCOG_OTLP_PROTOCOL` | OTLP protocol (`grpc` or `http`) | Auto |
+| `SUBCOG_TRACE_SAMPLE_RATIO` | Trace sampling ratio (0.0-1.0) | `1.0` |
+| `SUBCOG_LOG_FORMAT` | Log format (`json` or `pretty`) | `json` |
+| `SUBCOG_LOG_LEVEL` | Log level (e.g. `info`, `debug`) | `info` |
+| `SUBCOG_LOG_FILTER` | Full filter override (e.g. `subcog=debug,hyper=info`) | `RUST_LOG` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry endpoint | None |
 
 ## Embedding Settings
@@ -184,6 +211,6 @@ export SUBCOG_OTLP_ENDPOINT=http://collector:4317
 
 ## See Also
 
-- [Config File](config-file.md) - YAML configuration
+- [Config File](config-file.md) - TOML configuration
 - [Feature Flags](features.md) - Feature descriptions
 - [File Locations](locations.md) - Platform paths

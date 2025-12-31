@@ -1,12 +1,13 @@
 # Configuration
 
-Subcog supports flexible configuration through YAML files, environment variables, and command-line options.
+Subcog supports flexible configuration through TOML files, environment variables, and command-line options.
+For a full template with every option and sane defaults, see `example.config.toml` in the repository root.
 
 ## Quick Reference
 
 | Topic | Description |
 |-------|-------------|
-| [Config File](config-file.md) | YAML configuration format |
+| [Config File](config-file.md) | TOML configuration format |
 | [Environment Variables](environment.md) | All environment variables |
 | [Feature Flags](features.md) | Optional feature toggles |
 | [File Locations](locations.md) | OS-specific paths |
@@ -17,135 +18,57 @@ Configuration is loaded from multiple sources with the following precedence (hig
 
 1. **Command-line options** - `--config`, `--verbose`, etc.
 2. **Environment variables** - `SUBCOG_*`
-3. **Project config** - `.subcog/config.yaml`
-4. **User config** - `~/.subcog/config.yaml`
-5. **System config** - `/etc/subcog/config.yaml`
-6. **Defaults** - Built-in defaults
-
-## Quick Start
-
-### Create Project Configuration
-
-```bash
-subcog config init
-```
-
-Creates `.subcog/config.yaml`:
-
-```yaml
-domain: project
-
-storage:
-  persistence: git_notes
-  index: sqlite
-  vector: usearch
-
-features:
-  secrets_filter: true
-  pii_filter: true
-```
-
-### View Current Configuration
-
-```bash
-subcog config show
-```
-
-### Set a Value
-
-```bash
-subcog config set llm.provider anthropic
-```
+3. **Project config** - `.subcog/config.toml`
+4. **User config (XDG)** - `~/.config/subcog/config.toml`
+5. **User config (macOS)** - `~/Library/Application Support/subcog/config.toml`
+6. **System config** - `/etc/subcog/config.toml`
+7. **Defaults** - Built-in defaults
 
 ## Minimal Configuration
 
 Subcog works out-of-the-box with defaults. Minimal setup:
 
-```yaml
-# .subcog/config.yaml
-domain: project
+```toml
+# .subcog/config.toml
+repo_path = "."
 ```
 
-## Full Configuration Example
+## Example Configuration
 
-```yaml
-# Domain scope
-domain: project  # project, user, or org
+```toml
+repo_path = "."
+max_results = 10
 
-# Logging
-log_level: info  # trace, debug, info, warn, error
+default_search_mode = "hybrid"
 
-# Storage backends
-storage:
-  persistence: git_notes  # git_notes, postgresql, filesystem
-  index: sqlite           # sqlite, postgresql, redis
-  vector: usearch         # usearch, pgvector, redis
+[features]
+secrets_filter = true
+pii_filter = true
+llm_features = true
 
-  # SQLite paths
-  sqlite_path: ~/.subcog/index.db
-  vector_path: ~/.subcog/vectors.usearch
+audit_log = false
 
-# Feature flags
-features:
-  secrets_filter: true
-  pii_filter: true
-  multi_domain: false
-  audit_log: false
-  llm_features: true
-  auto_capture: false
-  consolidation: false
+[llm]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
 
-# LLM configuration
-llm:
-  provider: anthropic  # anthropic, openai, ollama, lmstudio
-  model: claude-sonnet-4-20250514
-  timeout_ms: 30000
-  max_retries: 3
+[search_intent]
+enabled = true
+use_llm = true
+llm_timeout_ms = 200
+min_confidence = 0.5
 
-# Search intent detection
-search_intent:
-  enabled: true
-  use_llm: true
-  llm_timeout_ms: 200
-  min_confidence: 0.5
-
-# PostgreSQL (if using)
-postgresql:
-  host: localhost
-  port: 5432
-  database: subcog
-  user: subcog
-  password: ${SUBCOG_PG_PASSWORD}
-  ssl_mode: prefer
-
-# Redis (if using)
-redis:
-  url: redis://localhost:6379
-  prefix: subcog:
+[observability.logging]
+level = "info"
 ```
 
 ## Environment Variable Mapping
 
 Environment variables follow the pattern: `SUBCOG_<SECTION>_<KEY>`
 
-| Config Key | Environment Variable |
-|------------|---------------------|
-| `domain` | `SUBCOG_DOMAIN` |
-| `log_level` | `SUBCOG_LOG_LEVEL` |
-| `storage.persistence` | `SUBCOG_STORAGE_PERSISTENCE` |
-| `features.secrets_filter` | `SUBCOG_FEATURES_SECRETS_FILTER` |
-| `llm.provider` | `SUBCOG_LLM_PROVIDER` |
-
-## Best Practices
-
-1. **Use project config for project-specific settings**
-2. **Use user config for personal preferences** (LLM keys, themes)
-3. **Use environment variables for secrets** (API keys, passwords)
-4. **Never commit API keys** to version control
-
 ## See Also
 
-- [Config File](config-file.md) - Detailed format reference
-- [Environment Variables](environment.md) - Complete variable list
-- [Feature Flags](features.md) - Feature descriptions
-- [File Locations](locations.md) - Platform-specific paths
+- [Config File](config-file.md) - TOML configuration format
+- [Environment Variables](environment.md) - All variables
+- [Feature Flags](features.md) - Feature details
+- [File Locations](locations.md) - Platform paths

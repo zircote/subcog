@@ -1,6 +1,9 @@
 # Configuration File
 
-Subcog uses YAML configuration files for persistent settings.
+Subcog uses TOML configuration files for persistent settings.
+
+For a full copy-paste template with every option and sane defaults, see
+`example.config.toml` in the repository root.
 
 ## File Locations
 
@@ -8,291 +11,222 @@ Configuration files are loaded in order (later overrides earlier):
 
 | Scope | Path |
 |-------|------|
-| System | `/etc/subcog/config.yaml` |
-| User | `~/.subcog/config.yaml` |
-| Project | `.subcog/config.yaml` |
+| System | `/etc/subcog/config.toml` |
+| User (XDG) | `~/.config/subcog/config.toml` |
+| User (macOS) | `~/Library/Application Support/subcog/config.toml` |
+| Project | `.subcog/config.toml` |
 
-## Configuration Sections
+Environment variables override config file values when both are set.
 
-### domain
+## Core Settings
 
-Scope for memory storage.
-
-```yaml
-domain: project  # project, user, or org
+```toml
+repo_path = "/path/to/repo"
+data_dir = "/path/to/data"
+max_results = 10
+default_search_mode = "hybrid" # text, vector, hybrid
 ```
 
-| Value | Description |
-|-------|-------------|
-| `project` | Repository-scoped memories (default) |
-| `user` | User-wide memories |
-| `org` | Organization-level memories |
+## Feature Flags
 
-### log_level
-
-Logging verbosity.
-
-```yaml
-log_level: info  # trace, debug, info, warn, error
+```toml
+[features]
+secrets_filter = true
+pii_filter = true
+multi_domain = false
+audit_log = false
+llm_features = true
+auto_capture = false
+consolidation = false
 ```
 
-### git_dir
+## LLM
 
-Custom git directory path.
+```toml
+[llm]
+provider = "anthropic" # anthropic, openai, ollama, lmstudio
+model = "claude-sonnet-4-20250514"
+api_key = "" # leave empty to use env vars
+base_url = "https://api.anthropic.com"
 
-```yaml
-git_dir: .git
+timeout_ms = 30000
+connect_timeout_ms = 3000
+max_retries = 0
+retry_backoff_ms = 100
+breaker_failure_threshold = 3
+breaker_reset_ms = 30000
+breaker_half_open_max_calls = 1
+latency_slo_ms = 2000
+error_budget_ratio = 0.05
+error_budget_window_secs = 300
 ```
 
-### storage
+Empty strings for `model`, `api_key`, and `base_url` are treated as unset.
 
-Storage backend configuration.
+## Search Intent
 
-```yaml
-storage:
-  # Persistence layer (authoritative storage)
-  persistence: git_notes  # git_notes, postgresql, filesystem
-
-  # Index layer (searchable)
-  index: sqlite  # sqlite, postgresql, redis
-
-  # Vector layer (embeddings)
-  vector: usearch  # usearch, pgvector, redis
-
-  # SQLite configuration
-  sqlite_path: ~/.subcog/index.db
-
-  # Vector index path
-  vector_path: ~/.subcog/vectors.usearch
-
-  # Embedding model
-  embedding_model: all-MiniLM-L6-v2
-  embedding_dimensions: 384
+```toml
+[search_intent]
+enabled = true
+use_llm = true
+llm_timeout_ms = 200
+min_confidence = 0.5
+base_count = 5
+max_count = 15
+max_tokens = 4000
 ```
 
-### features
+## Observability
 
-Feature flags for optional functionality.
+```toml
+[observability.logging]
+format = "json" # json, pretty
+level = "info"
+filter = "subcog=info"
 
-```yaml
-features:
-  # Security
-  secrets_filter: true   # Detect and block secrets
-  pii_filter: true       # Detect and redact PII
+[observability.tracing]
+enabled = false
+sample_ratio = 1.0
+service_name = "subcog"
+resource_attributes = ["env=prod", "region=us-east-1"]
 
-  # Scoping
-  multi_domain: false    # Enable multi-domain support
+[observability.tracing.otlp]
+endpoint = "http://collector:4317"
+protocol = "grpc" # grpc, http
 
-  # Observability
-  audit_log: false       # SOC2/GDPR audit logging
+[observability.metrics]
+enabled = false
+port = 9090
 
-  # LLM Features
-  llm_features: true     # Enable LLM-powered features
-  auto_capture: false    # Auto-capture from hooks
-  consolidation: false   # Enable consolidation
-```
-
-### llm
-
-LLM provider configuration.
-
-```yaml
-llm:
-  # Provider selection
-  provider: anthropic  # anthropic, openai, ollama, lmstudio
-
-  # Model selection
-  model: claude-sonnet-4-20250514
-
-  # API settings
-  api_key: ${ANTHROPIC_API_KEY}  # Environment variable reference
-  base_url: https://api.anthropic.com
-
-  # Request settings
-  timeout_ms: 30000
-  max_retries: 3
-  retry_delay_ms: 1000
-```
-
-### search_intent
-
-Search intent detection settings.
-
-```yaml
-search_intent:
-  enabled: true           # Enable intent detection
-  use_llm: true          # Use LLM for classification
-  llm_timeout_ms: 200    # LLM timeout
-  min_confidence: 0.5    # Minimum confidence threshold
-```
-
-### postgresql
-
-PostgreSQL connection settings.
-
-```yaml
-postgresql:
-  host: localhost
-  port: 5432
-  database: subcog
-  user: subcog
-  password: ${SUBCOG_PG_PASSWORD}  # Use env var
-
-  # Connection pool
-  pool_size: 10
-  pool_timeout_ms: 5000
-
-  # SSL
-  ssl_mode: prefer  # disable, prefer, require
-
-  # Schema
-  schema: public
-```
-
-### redis
-
-Redis connection settings.
-
-```yaml
-redis:
-  url: redis://localhost:6379
-
-  # Or individual settings
-  host: localhost
-  port: 6379
-  password: ${SUBCOG_REDIS_PASSWORD}
-  db: 0
-
-  # Namespace prefix
-  prefix: subcog:
-
-  # Connection settings
-  pool_size: 10
-  timeout_ms: 5000
-```
-
-### hooks
-
-Hook behavior configuration.
-
-```yaml
-hooks:
-  # Session start
-  session_start:
-    guidance_level: standard  # minimal, standard, full
-    max_tokens: 1000
-
-  # User prompt
-  user_prompt:
-    max_memories: 15
-    skip_detection: false
-
-  # Stop
-  stop:
-    sync: true
-    summary: true
-```
-
-### observability
-
-Telemetry and monitoring settings.
-
-```yaml
-observability:
-  # Metrics
-  metrics_enabled: false
-  metrics_port: 9090
-
-  # Tracing
-  tracing_enabled: false
-  otlp_endpoint: http://localhost:4317
-
-  # Logging
-  structured_logging: true
-  log_format: json  # json, pretty
+[observability.metrics.push_gateway]
+endpoint = "http://push-gateway:9091/metrics/job/subcog"
+username = ""
+password = ""
+use_http_post = false
 ```
 
 ## Environment Variable Substitution
 
 Use `${VAR_NAME}` to reference environment variables:
 
-```yaml
-llm:
-  api_key: ${ANTHROPIC_API_KEY}
-
-postgresql:
-  password: ${SUBCOG_PG_PASSWORD}
+```toml
+[llm]
+api_key = "${ANTHROPIC_API_KEY}"
 ```
 
 ## Example Configurations
 
-### Minimal (Git Notes Only)
+### Minimal
 
-```yaml
-domain: project
+```toml
+repo_path = "."
 ```
 
 ### Development
 
-```yaml
-domain: project
-log_level: debug
+```toml
+repo_path = "."
 
-features:
-  secrets_filter: true
-  llm_features: true
-  auto_capture: true
+default_search_mode = "hybrid"
+
+[features]
+secrets_filter = true
+llm_features = true
+auto_capture = true
+
+[observability.logging]
+level = "debug"
 ```
 
-### Production (PostgreSQL)
+### Production
 
-```yaml
-domain: project
-log_level: info
+```toml
+repo_path = "/srv/subcog"
 
-storage:
-  persistence: postgresql
-  index: postgresql
-  vector: pgvector
+default_search_mode = "hybrid"
 
-postgresql:
-  host: ${DB_HOST}
-  port: 5432
-  database: subcog_prod
-  user: subcog
-  password: ${DB_PASSWORD}
-  ssl_mode: require
-  pool_size: 20
+[features]
+secrets_filter = true
+pii_filter = true
+audit_log = true
 
-features:
-  secrets_filter: true
-  pii_filter: true
-  audit_log: true
+[observability.metrics]
+enabled = true
 
-observability:
-  metrics_enabled: true
-  tracing_enabled: true
+[observability.tracing]
+enabled = true
+
+[observability.tracing.otlp]
+endpoint = "http://collector:4317"
+protocol = "grpc"
 ```
 
-### Team Collaboration
+## Complete Example
 
-```yaml
-domain: project
+```toml
+repo_path = "."
+data_dir = ".subcog"
+max_results = 10
+default_search_mode = "hybrid" # text, vector, hybrid
 
-features:
-  multi_domain: true
+[features]
+secrets_filter = false
+pii_filter = false
+multi_domain = false
+audit_log = false
+llm_features = false
+auto_capture = false
+consolidation = false
 
-llm:
-  provider: anthropic
-  model: claude-sonnet-4-20250514
-```
+[llm]
+provider = "anthropic" # anthropic, openai, ollama, lmstudio
+model = "claude-sonnet-4-20250514"
+api_key = "" # leave empty to use env vars
+base_url = "https://api.anthropic.com/v1"
+timeout_ms = 30000
+connect_timeout_ms = 3000
+max_retries = 0
+retry_backoff_ms = 100
+breaker_failure_threshold = 3
+breaker_reset_ms = 30000
+breaker_half_open_max_calls = 1
+latency_slo_ms = 2000
+error_budget_ratio = 0.05
+error_budget_window_secs = 300
 
-## Validation
+[search_intent]
+enabled = true
+use_llm = true
+llm_timeout_ms = 200
+min_confidence = 0.5
+base_count = 5
+max_count = 15
+max_tokens = 4000
 
-Validate configuration:
+[observability.logging]
+format = "json" # json, pretty
+level = "info"
+filter = "subcog=info"
 
-```bash
-subcog config show --validate
+[observability.tracing]
+enabled = false
+sample_ratio = 1.0
+service_name = "subcog"
+resource_attributes = []
+
+[observability.tracing.otlp]
+endpoint = "http://localhost:4317"
+protocol = "grpc" # grpc, http
+
+[observability.metrics]
+enabled = false
+port = 9090
+
+[observability.metrics.push_gateway]
+endpoint = ""
+username = ""
+password = ""
+use_http_post = false
 ```
 
 ## See Also

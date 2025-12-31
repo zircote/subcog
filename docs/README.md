@@ -51,7 +51,7 @@ Integration with Claude Code IDE:
 
 Configuration reference:
 
-- [Config File](configuration/config-file.md) - YAML configuration format
+- [Config File](configuration/config-file.md) - TOML configuration format
 - [Environment Variables](configuration/environment.md) - All environment variables
 - [Feature Flags](configuration/features.md) - Optional feature toggles
 - [File Locations](configuration/locations.md) - OS-specific paths

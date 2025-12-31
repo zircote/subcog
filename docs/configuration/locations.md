@@ -9,24 +9,24 @@ Subcog stores configuration, data, and cache files in platform-specific location
 Always in the project root:
 
 ```
-<project>/.subcog/config.yaml
+<project>/.subcog/config.toml
 ```
 
 ### User Configuration
 
 | Platform | Path |
 |----------|------|
-| macOS | `~/.subcog/config.yaml` |
-| Linux | `~/.subcog/config.yaml` or `$XDG_CONFIG_HOME/subcog/config.yaml` |
-| Windows | `%USERPROFILE%\.subcog\config.yaml` |
+| macOS | `~/Library/Application Support/subcog/config.toml` (also checks `~/.config/subcog/config.toml`) |
+| Linux | `~/.config/subcog/config.toml` or `$XDG_CONFIG_HOME/subcog/config.toml` |
+| Windows | `%USERPROFILE%\.subcog\config.toml` |
 
 ### System Configuration
 
 | Platform | Path |
 |----------|------|
-| macOS | `/etc/subcog/config.yaml` |
-| Linux | `/etc/subcog/config.yaml` |
-| Windows | `C:\ProgramData\subcog\config.yaml` |
+| macOS | `/etc/subcog/config.toml` |
+| Linux | `/etc/subcog/config.toml` |
+| Windows | `C:\ProgramData\subcog\config.toml` |
 
 ## Data Files
 
@@ -123,7 +123,7 @@ project/
 │           ├── subcog        # Memory storage
 │           └── _prompts      # Prompt templates
 ├── .subcog/
-│   └── config.yaml           # Project configuration
+│   └── config.toml           # Project configuration
 ├── hooks/
 │   └── hooks.json            # Claude Code hooks
 └── ...
@@ -132,8 +132,11 @@ project/
 ## User Directory Structure
 
 ```
+~/.config/subcog/
+├── config.toml               # User configuration
+~/Library/Application Support/subcog/
+├── config.toml               # macOS user configuration
 ~/.subcog/
-├── config.yaml               # User configuration
 ├── index.db                  # SQLite index
 ├── vectors.usearch           # Vector index
 └── prompts/                  # User prompt templates

@@ -1009,7 +1009,7 @@ pub enum FilterStrategy {
 ## 10. Configuration Schema
 
 ```toml
-# subcog.toml - Complete configuration
+# config.toml - Complete configuration
 
 # ===== PERSISTENCE LAYER =====
 [persistence]

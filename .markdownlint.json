@@ -1,0 +1,22 @@
+{
+  "default": true,
+  "MD007": false,
+  "MD013": {
+    "line_length": 120,
+    "tables": false,
+    "code_blocks": false,
+    "headings": false
+  },
+  "MD022": false,
+  "MD023": false,
+  "MD024": {
+    "siblings_only": true
+  },
+  "MD031": false,
+  "MD032": false,
+  "MD033": false,
+  "MD040": false,
+  "MD041": false,
+  "MD051": false,
+  "MD060": false
+}

@@ -20,7 +20,7 @@ The MCP server is a persistent process that runs for the duration of a Claude Co
 │     $ subcog serve --transport stdio                                │
 │                                                                     │
 │  2. INITIALIZATION                                                  │
-│     - Load configuration from subcog.toml                           │
+│     - Load configuration from config.toml                           │
 │     - Initialize storage connections (SQLite, usearch)              │
 │     - Load embedding model (fastembed)                              │
 │     - Set up event bus                                              │

@@ -35,9 +35,9 @@ The `config` command manages Subcog configuration at different scopes (project, 
 
 | Scope | Location | Priority |
 |-------|----------|----------|
-| `project` | `./.subcog/config.yaml` | Highest |
-| `user` | `~/.subcog/config.yaml` | Medium |
-| `system` | `/etc/subcog/config.yaml` | Lowest |
+| `project` | `./.subcog/config.toml` | Highest |
+| `user` | `~/.config/subcog/config.toml` or `~/Library/Application Support/subcog/config.toml` | Medium |
+| `system` | `/etc/subcog/config.toml` | Lowest |
 
 Configuration is merged with higher priority values overriding lower.
 
@@ -50,19 +50,17 @@ subcog config show
 ```
 
 Output:
-```yaml
-domain: project
-storage:
-  persistence: git_notes
-  index: sqlite
-  vector: usearch
-features:
-  secrets_filter: true
-  pii_filter: true
-  multi_domain: false
-llm:
-  provider: anthropic
-  model: claude-sonnet-4-20250514
+```toml
+repo_path = \".\"
+
+[features]
+secrets_filter = true
+pii_filter = true
+multi_domain = false
+
+[llm]
+provider = \"anthropic\"
+model = \"claude-sonnet-4-20250514\"
 ```
 
 ### Get Specific Value
@@ -108,7 +106,7 @@ subcog config edit
 subcog config init
 ```
 
-Creates `.subcog/config.yaml` with defaults.
+Creates `.subcog/config.toml` with defaults.
 
 ### Show Config Path
 
@@ -118,9 +116,9 @@ subcog config path
 
 Output:
 ```
-Project: /path/to/project/.subcog/config.yaml
-User: /Users/user/.subcog/config.yaml
-System: /etc/subcog/config.yaml (not found)
+Project: /path/to/project/.subcog/config.toml
+User: /Users/user/.config/subcog/config.toml
+System: /etc/subcog/config.toml (not found)
 ```
 
 ## Configuration Reference
@@ -184,8 +182,18 @@ features:
 llm:
   provider: anthropic  # anthropic, openai, ollama, lmstudio
   model: claude-sonnet-4-20250514
+  # Request timeouts, retries, and circuit breaker settings.
+  # Environment variables (SUBCOG_LLM_*) override these values when set.
   timeout_ms: 30000
-  max_retries: 3
+  connect_timeout_ms: 3000
+  max_retries: 0
+  retry_backoff_ms: 100
+  breaker_failure_threshold: 3
+  breaker_reset_ms: 30000
+  breaker_half_open_max_calls: 1
+  latency_slo_ms: 2000
+  error_budget_ratio: 0.05
+  error_budget_window_secs: 300
 ```
 
 ### Search Intent Settings

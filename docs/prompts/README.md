@@ -1,8 +1,9 @@
 # Prompt Templates
 
-Subcog supports user-defined prompt templates with variable substitution, enabling reusable prompts across sessions and teams.
+Subcog supports user-defined prompt templates with variable substitution, enabling
+reusable prompts across sessions and teams.
 
-## Overview
+## Documentation
 
 | Topic | Description |
 |-------|-------------|
@@ -11,6 +12,7 @@ Subcog supports user-defined prompt templates with variable substitution, enabli
 | [Formats](formats.md) | YAML, JSON, Markdown, Plain text |
 | [Storage](storage.md) | Domain-scoped storage |
 | [MCP Integration](mcp.md) | Accessing prompts via MCP |
+| [System Prompts](SYSTEM_PROMPTS.md) | LLM system prompts (security, customization) |
 
 ## Quick Start
 
@@ -207,3 +209,4 @@ tags: [bug, issue]
 - [Formats](formats.md) - Template formats
 - [CLI prompt](../cli/prompt.md) - CLI reference
 - [MCP prompt_*](../mcp/tools.md#prompt_save) - MCP tools
+- [System Prompts](SYSTEM_PROMPTS.md) - LLM system prompt customization
