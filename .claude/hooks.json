@@ -32,6 +32,17 @@
         }
       ],
       "matcher": "**/*.rs"
+    },
+    {
+      "name": "markdown-lint-on-edit",
+      "event": "afterWrite",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "npx markdownlint-cli \"$CLAUDE_FILE_PATH\" 2>&1 | head -20 || true"
+        }
+      ],
+      "matcher": "**/*.md"
     }
   ]
 }
