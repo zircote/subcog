@@ -6,6 +6,8 @@ use crate::git::{NotesManager, YamlFrontMatterParser};
 use crate::llm::LlmProvider;
 use crate::{Error, Result};
 use std::path::Path;
+use std::time::Instant;
+use tracing::instrument;
 
 /// Service for enriching memories with LLM-generated tags and metadata.
 pub struct EnrichmentService<P: LlmProvider> {
@@ -35,20 +37,42 @@ impl<P: LlmProvider> EnrichmentService<P> {
     /// # Errors
     ///
     /// Returns an error if enrichment fails.
+    #[instrument(skip(self), fields(operation = "enrich_all", dry_run = dry_run, update_all = update_all))]
     pub fn enrich_all(&self, dry_run: bool, update_all: bool) -> Result<EnrichmentStats> {
-        let notes = NotesManager::new(&self.repo_path);
-        let all_notes = notes.list()?;
+        let start = Instant::now();
+        let result = (|| {
+            let notes = NotesManager::new(&self.repo_path);
+            let all_notes = notes.list()?;
 
-        let mut stats = EnrichmentStats {
-            total: all_notes.len(),
-            ..Default::default()
-        };
+            let mut stats = EnrichmentStats {
+                total: all_notes.len(),
+                ..Default::default()
+            };
 
-        for (commit_id, content) in &all_notes {
-            self.process_note(commit_id, content, dry_run, update_all, &mut stats);
-        }
+            for (commit_id, content) in &all_notes {
+                self.process_note(commit_id, content, dry_run, update_all, &mut stats);
+            }
 
-        Ok(stats)
+            Ok(stats)
+        })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        metrics::counter!(
+            "memory_operations_total",
+            "operation" => "enrich",
+            "namespace" => "mixed",
+            "domain" => "project",
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!(
+            "memory_operation_duration_ms",
+            "operation" => "enrich",
+            "namespace" => "mixed"
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
+
+        result
     }
 
     /// Processes a single note for enrichment.
@@ -133,56 +157,78 @@ impl<P: LlmProvider> EnrichmentService<P> {
     /// # Errors
     ///
     /// Returns an error if the memory is not found or enrichment fails.
+    #[instrument(skip(self), fields(operation = "enrich_one", dry_run = dry_run, memory_id = memory_id))]
     pub fn enrich_one(&self, memory_id: &str, dry_run: bool) -> Result<EnrichmentResult> {
-        let notes = NotesManager::new(&self.repo_path);
-        let all_notes = notes.list()?;
+        let start = Instant::now();
+        let result = (|| {
+            let notes = NotesManager::new(&self.repo_path);
+            let all_notes = notes.list()?;
 
-        // Find the note with matching ID
-        for (commit_id, content) in &all_notes {
-            let (metadata, body) = match YamlFrontMatterParser::parse(content) {
-                Ok(result) => result,
-                Err(_) => continue,
-            };
+            // Find the note with matching ID
+            for (commit_id, content) in &all_notes {
+                let (metadata, body) = match YamlFrontMatterParser::parse(content) {
+                    Ok(result) => result,
+                    Err(_) => continue,
+                };
 
-            let id = metadata
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or(commit_id);
+                let id = metadata
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(commit_id);
 
-            if id != memory_id {
-                continue;
-            }
+                if id != memory_id {
+                    continue;
+                }
 
-            let namespace = metadata
-                .get("namespace")
-                .and_then(|v| v.as_str())
-                .unwrap_or("decisions");
+                let namespace = metadata
+                    .get("namespace")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("decisions");
 
-            // Generate tags
-            let new_tags = self.generate_tags(&body, namespace)?;
+                // Generate tags
+                let new_tags = self.generate_tags(&body, namespace)?;
 
-            if dry_run {
+                if dry_run {
+                    return Ok(EnrichmentResult {
+                        memory_id: memory_id.to_string(),
+                        new_tags,
+                        applied: false,
+                    });
+                }
+
+                // Update the note
+                self.update_note_tags(commit_id, content, &new_tags)?;
+
                 return Ok(EnrichmentResult {
                     memory_id: memory_id.to_string(),
                     new_tags,
-                    applied: false,
+                    applied: true,
                 });
             }
 
-            // Update the note
-            self.update_note_tags(commit_id, content, &new_tags)?;
+            Err(Error::OperationFailed {
+                operation: "enrich_one".to_string(),
+                cause: format!("Memory not found: {memory_id}"),
+            })
+        })();
 
-            return Ok(EnrichmentResult {
-                memory_id: memory_id.to_string(),
-                new_tags,
-                applied: true,
-            });
-        }
+        let status = if result.is_ok() { "success" } else { "error" };
+        metrics::counter!(
+            "memory_operations_total",
+            "operation" => "enrich",
+            "namespace" => "mixed",
+            "domain" => "project",
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!(
+            "memory_operation_duration_ms",
+            "operation" => "enrich",
+            "namespace" => "mixed"
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
 
-        Err(Error::OperationFailed {
-            operation: "enrich_one".to_string(),
-            cause: format!("Memory not found: {memory_id}"),
-        })
+        result
     }
 
     /// Generates tags for content using LLM.

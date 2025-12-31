@@ -4,10 +4,11 @@
 
 use crate::config::Config;
 use crate::git::{NotesManager, YamlFrontMatterParser};
-use crate::models::{CaptureRequest, CaptureResult, Memory, MemoryId, MemoryStatus};
-use crate::security::{ContentRedactor, SecretDetector};
+use crate::models::{CaptureRequest, CaptureResult, Memory, MemoryEvent, MemoryId, MemoryStatus};
+use crate::security::{ContentRedactor, SecretDetector, record_event};
 use crate::{Error, Result};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use tracing::instrument;
 
 /// Service for capturing memories.
 pub struct CaptureService {
@@ -38,85 +39,139 @@ impl CaptureService {
     /// - The content is empty
     /// - The content contains unredacted secrets (when blocking is enabled)
     /// - Storage fails
+    #[instrument(
+        skip(self, request),
+        fields(
+            operation = "capture",
+            namespace = %request.namespace,
+            domain = %request.domain,
+            content_length = request.content.len(),
+            skip_security_check = request.skip_security_check,
+            memory.id = tracing::field::Empty
+        )
+    )]
     pub fn capture(&self, request: CaptureRequest) -> Result<CaptureResult> {
-        // Validate content
-        if request.content.trim().is_empty() {
-            return Err(Error::InvalidInput("Content cannot be empty".to_string()));
-        }
+        let start = Instant::now();
+        let namespace_label = request.namespace.as_str().to_string();
+        let domain_label = request.domain.to_string();
 
-        // Check for secrets
-        let has_secrets = self.secret_detector.contains_secrets(&request.content);
-        if has_secrets && self.config.features.block_secrets && !request.skip_security_check {
-            return Err(Error::ContentBlocked {
-                reason: "Content contains detected secrets".to_string(),
-            });
-        }
+        let result = (|| {
+            // Validate content
+            if request.content.trim().is_empty() {
+                return Err(Error::InvalidInput("Content cannot be empty".to_string()));
+            }
 
-        // Optionally redact secrets
-        let (content, was_redacted) =
-            if has_secrets && self.config.features.redact_secrets && !request.skip_security_check {
+            // Check for secrets
+            let has_secrets = self.secret_detector.contains_secrets(&request.content);
+            if has_secrets && self.config.features.block_secrets && !request.skip_security_check {
+                return Err(Error::ContentBlocked {
+                    reason: "Content contains detected secrets".to_string(),
+                });
+            }
+
+            // Optionally redact secrets
+            let (content, was_redacted) = if has_secrets
+                && self.config.features.redact_secrets
+                && !request.skip_security_check
+            {
                 (self.redactor.redact(&request.content), true)
             } else {
                 (request.content.clone(), false)
             };
 
-        // Generate memory ID
-        let memory_id = self.generate_id(&request.namespace);
+            // Generate memory ID
+            let memory_id = self.generate_id(&request.namespace);
+            let span = tracing::Span::current();
+            span.record("memory.id", memory_id.as_str());
 
-        // Get current timestamp
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+            // Get current timestamp
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
 
-        // Create memory
-        let memory = Memory {
-            id: memory_id.clone(),
-            content,
-            namespace: request.namespace,
-            domain: request.domain,
-            status: MemoryStatus::Active,
-            created_at: now,
-            updated_at: now,
-            embedding: None,
-            tags: request.tags,
-            source: request.source,
-        };
+            // Create memory
+            let memory = Memory {
+                id: memory_id.clone(),
+                content,
+                namespace: request.namespace,
+                domain: request.domain,
+                status: MemoryStatus::Active,
+                created_at: now,
+                updated_at: now,
+                embedding: None,
+                tags: request.tags,
+                source: request.source,
+            };
 
-        // Store to git notes if configured
-        if let Some(ref repo_path) = self.config.repo_path {
-            let notes = NotesManager::new(repo_path);
+            // Store to git notes if configured
+            if let Some(ref repo_path) = self.config.repo_path {
+                let notes = NotesManager::new(repo_path);
 
-            // Serialize memory with front matter
-            let metadata = serde_json::json!({
-                "id": memory.id.as_str(),
-                "namespace": memory.namespace.as_str(),
-                "domain": memory.domain.to_string(),
-                "status": memory.status.as_str(),
-                "created_at": memory.created_at,
-                "updated_at": memory.updated_at,
-                "tags": memory.tags
+                // Serialize memory with front matter
+                let metadata = serde_json::json!({
+                    "id": memory.id.as_str(),
+                    "namespace": memory.namespace.as_str(),
+                    "domain": memory.domain.to_string(),
+                    "status": memory.status.as_str(),
+                    "created_at": memory.created_at,
+                    "updated_at": memory.updated_at,
+                    "tags": memory.tags
+                });
+
+                let note_content = YamlFrontMatterParser::serialize(&metadata, &memory.content)?;
+                notes.add_to_head(&note_content)?;
+            }
+
+            // Generate URN
+            let urn = self.generate_urn(&memory);
+
+            // Collect warnings
+            let mut warnings = Vec::new();
+            if was_redacted {
+                warnings.push("Content was redacted due to detected secrets".to_string());
+            }
+
+            record_event(MemoryEvent::Captured {
+                memory_id: memory_id.clone(),
+                namespace: memory.namespace,
+                domain: memory.domain.clone(),
+                content_length: memory.content.len(),
+                timestamp: now,
             });
+            if was_redacted {
+                record_event(MemoryEvent::Redacted {
+                    memory_id: memory_id.clone(),
+                    redaction_type: "secrets".to_string(),
+                    timestamp: now,
+                });
+            }
 
-            let note_content = YamlFrontMatterParser::serialize(&metadata, &memory.content)?;
-            notes.add_to_head(&note_content)?;
-        }
+            Ok(CaptureResult {
+                memory_id,
+                urn,
+                content_modified: was_redacted,
+                warnings,
+            })
+        })();
 
-        // Generate URN
-        let urn = self.generate_urn(&memory);
+        let status = if result.is_ok() { "success" } else { "error" };
+        metrics::counter!(
+            "memory_operations_total",
+            "operation" => "capture",
+            "namespace" => namespace_label.clone(),
+            "domain" => domain_label,
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!(
+            "memory_operation_duration_ms",
+            "operation" => "capture",
+            "namespace" => namespace_label
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
 
-        // Collect warnings
-        let mut warnings = Vec::new();
-        if was_redacted {
-            warnings.push("Content was redacted due to detected secrets".to_string());
-        }
-
-        Ok(CaptureResult {
-            memory_id,
-            urn,
-            content_modified: was_redacted,
-            warnings,
-        })
+        result
     }
 
     /// Generates a unique memory ID.

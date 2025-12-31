@@ -3,6 +3,7 @@
 use super::HookHandler;
 use crate::Result;
 use crate::services::{ContextBuilderService, MemoryStatistics};
+use std::time::Instant;
 use tracing::instrument;
 
 /// Handles `SessionStart` hook events.
@@ -319,79 +320,108 @@ impl HookHandler for SessionStartHandler {
         "SessionStart"
     }
 
-    #[instrument(skip(self, input), fields(hook = "SessionStart"))]
+    #[instrument(
+        skip(self, input),
+        fields(hook = "SessionStart", session_id = tracing::field::Empty, cwd = tracing::field::Empty)
+    )]
     fn handle(&self, input: &str) -> Result<String> {
-        // Parse input as JSON
-        let input_json: serde_json::Value =
-            serde_json::from_str(input).unwrap_or_else(|_| serde_json::json!({}));
+        let start = Instant::now();
+        let mut token_estimate: Option<usize> = None;
 
-        // Extract session info from input
-        let session_id = input_json
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
+        let result = (|| {
+            // Parse input as JSON
+            let input_json: serde_json::Value =
+                serde_json::from_str(input).unwrap_or_else(|_| serde_json::json!({}));
 
-        let cwd = input_json
-            .get("cwd")
-            .and_then(|v| v.as_str())
-            .unwrap_or(".");
+            // Extract session info from input
+            let session_id = input_json
+                .get("session_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
 
-        // Build session context
-        let session_context = self.build_session_context(session_id, cwd)?;
+            let cwd = input_json
+                .get("cwd")
+                .and_then(|v| v.as_str())
+                .unwrap_or(".");
+            let span = tracing::Span::current();
+            span.record("session_id", session_id);
+            span.record("cwd", cwd);
 
-        // Check for first session tutorial
-        let is_first = self.is_first_session();
+            // Build session context
+            let session_context = self.build_session_context(session_id, cwd)?;
+            token_estimate = Some(session_context.token_estimate);
 
-        // Build metadata
-        let mut metadata = serde_json::json!({
-            "memory_count": session_context.memory_count,
-            "token_estimate": session_context.token_estimate,
-            "was_truncated": session_context.was_truncated,
-            "guidance_level": format!("{:?}", self.guidance_level),
-        });
+            // Check for first session tutorial
+            let is_first = self.is_first_session();
 
-        // Add statistics to metadata if available
-        if let Some(ref stats) = session_context.statistics {
-            metadata["statistics"] = serde_json::json!({
-                "total_count": stats.total_count,
-                "namespace_counts": stats.namespace_counts,
-                "top_tags": stats.top_tags,
-                "recent_topics": stats.recent_topics
+            // Build metadata
+            let mut metadata = serde_json::json!({
+                "memory_count": session_context.memory_count,
+                "token_estimate": session_context.token_estimate,
+                "was_truncated": session_context.was_truncated,
+                "guidance_level": format!("{:?}", self.guidance_level),
             });
-        }
 
-        // Add tutorial invitation for first session
-        if is_first {
-            metadata["tutorial_invitation"] = serde_json::json!({
-                "prompt_name": "subcog_tutorial",
-                "message": "Welcome to Subcog! Use the subcog_tutorial prompt to get started."
-            });
-        }
+            // Add statistics to metadata if available
+            if let Some(ref stats) = session_context.statistics {
+                metadata["statistics"] = serde_json::json!({
+                    "total_count": stats.total_count,
+                    "namespace_counts": stats.namespace_counts,
+                    "top_tags": stats.top_tags,
+                    "recent_topics": stats.recent_topics
+                });
+            }
 
-        // Build Claude Code hook response format per specification
-        // See: https://docs.anthropic.com/en/docs/claude-code/hooks
-        let response = if session_context.content.is_empty() {
-            // Empty response when no context to inject
-            serde_json::json!({})
-        } else {
-            // Embed metadata as XML comment for debugging
-            let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
-            let context_with_metadata = format!(
-                "{}\n\n<!-- subcog-metadata: {} -->",
-                session_context.content, metadata_str
-            );
-            serde_json::json!({
-                "hookSpecificOutput": {
-                    "hookEventName": "SessionStart",
-                    "additionalContext": context_with_metadata
-                }
+            // Add tutorial invitation for first session
+            if is_first {
+                metadata["tutorial_invitation"] = serde_json::json!({
+                    "prompt_name": "subcog_tutorial",
+                    "message": "Welcome to Subcog! Use the subcog_tutorial prompt to get started."
+                });
+            }
+
+            // Build Claude Code hook response format per specification
+            // See: https://docs.anthropic.com/en/docs/claude-code/hooks
+            let response = if session_context.content.is_empty() {
+                // Empty response when no context to inject
+                serde_json::json!({})
+            } else {
+                // Embed metadata as XML comment for debugging
+                let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
+                let context_with_metadata = format!(
+                    "{}\n\n<!-- subcog-metadata: {} -->",
+                    session_context.content, metadata_str
+                );
+                serde_json::json!({
+                    "hookSpecificOutput": {
+                        "hookEventName": "SessionStart",
+                        "additionalContext": context_with_metadata
+                    }
+                })
+            };
+
+            serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
+                operation: "serialize_response".to_string(),
+                cause: e.to_string(),
             })
-        };
+        })();
 
-        serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
-            operation: "serialize_response".to_string(),
-            cause: e.to_string(),
-        })
+        let status = if result.is_ok() { "success" } else { "error" };
+        metrics::counter!(
+            "hook_executions_total",
+            "hook_type" => "SessionStart",
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!("hook_duration_ms", "hook_type" => "SessionStart")
+            .record(start.elapsed().as_secs_f64() * 1000.0);
+        if let Some(tokens) = token_estimate {
+            let tokens = u32::try_from(tokens).unwrap_or(u32::MAX);
+            metrics::histogram!("hook_context_tokens_estimate", "hook_type" => "SessionStart")
+                .record(f64::from(tokens));
+        }
+
+        result
     }
 }
 

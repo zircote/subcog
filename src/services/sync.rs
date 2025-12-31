@@ -5,6 +5,10 @@
 use crate::Result;
 use crate::config::Config;
 use crate::git::RemoteManager;
+use crate::models::MemoryEvent;
+use crate::security::record_event;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use tracing::instrument;
 
 /// Service for synchronizing memories with remote storage.
 pub struct SyncService {
@@ -24,35 +28,58 @@ impl SyncService {
     /// # Errors
     ///
     /// Returns an error if the fetch fails.
+    #[instrument(skip(self), fields(operation = "sync.fetch"))]
     pub fn fetch(&self) -> Result<SyncStats> {
-        let repo_path =
-            self.config
-                .repo_path
-                .as_ref()
-                .ok_or_else(|| crate::Error::OperationFailed {
-                    operation: "fetch".to_string(),
-                    cause: "No repository path configured".to_string(),
+        let start = Instant::now();
+        let result =
+            (|| {
+                let repo_path = self.config.repo_path.as_ref().ok_or_else(|| {
+                    crate::Error::OperationFailed {
+                        operation: "fetch".to_string(),
+                        cause: "No repository path configured".to_string(),
+                    }
                 })?;
 
-        let remote = RemoteManager::new(repo_path);
+                let remote = RemoteManager::new(repo_path);
 
-        // Get default remote
-        let remote_name =
-            remote
-                .default_remote()?
-                .ok_or_else(|| crate::Error::OperationFailed {
-                    operation: "fetch".to_string(),
-                    cause: "No remote configured".to_string(),
-                })?;
+                // Get default remote
+                let remote_name =
+                    remote
+                        .default_remote()?
+                        .ok_or_else(|| crate::Error::OperationFailed {
+                            operation: "fetch".to_string(),
+                            cause: "No remote configured".to_string(),
+                        })?;
 
-        // Fetch from remote
-        let pulled = remote.fetch(&remote_name)?;
+                // Fetch from remote
+                let pulled = remote.fetch(&remote_name)?;
 
-        Ok(SyncStats {
-            pushed: 0,
-            pulled,
-            conflicts: 0,
-        })
+                let stats = SyncStats {
+                    pushed: 0,
+                    pulled,
+                    conflicts: 0,
+                };
+                record_event(MemoryEvent::Synced {
+                    pushed: stats.pushed,
+                    pulled: stats.pulled,
+                    conflicts: stats.conflicts,
+                    timestamp: current_timestamp(),
+                });
+                Ok(stats)
+            })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        metrics::counter!(
+            "memory_sync_total",
+            "direction" => "fetch",
+            "domain" => "project",
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!("memory_sync_duration_ms", "direction" => "fetch")
+            .record(start.elapsed().as_secs_f64() * 1000.0);
+
+        result
     }
 
     /// Pushes memories to remote.
@@ -60,35 +87,58 @@ impl SyncService {
     /// # Errors
     ///
     /// Returns an error if the push fails.
+    #[instrument(skip(self), fields(operation = "sync.push"))]
     pub fn push(&self) -> Result<SyncStats> {
-        let repo_path =
-            self.config
-                .repo_path
-                .as_ref()
-                .ok_or_else(|| crate::Error::OperationFailed {
-                    operation: "push".to_string(),
-                    cause: "No repository path configured".to_string(),
+        let start = Instant::now();
+        let result =
+            (|| {
+                let repo_path = self.config.repo_path.as_ref().ok_or_else(|| {
+                    crate::Error::OperationFailed {
+                        operation: "push".to_string(),
+                        cause: "No repository path configured".to_string(),
+                    }
                 })?;
 
-        let remote = RemoteManager::new(repo_path);
+                let remote = RemoteManager::new(repo_path);
 
-        // Get default remote
-        let remote_name =
-            remote
-                .default_remote()?
-                .ok_or_else(|| crate::Error::OperationFailed {
-                    operation: "push".to_string(),
-                    cause: "No remote configured".to_string(),
-                })?;
+                // Get default remote
+                let remote_name =
+                    remote
+                        .default_remote()?
+                        .ok_or_else(|| crate::Error::OperationFailed {
+                            operation: "push".to_string(),
+                            cause: "No remote configured".to_string(),
+                        })?;
 
-        // Push to remote
-        let pushed = remote.push(&remote_name)?;
+                // Push to remote
+                let pushed = remote.push(&remote_name)?;
 
-        Ok(SyncStats {
-            pushed,
-            pulled: 0,
-            conflicts: 0,
-        })
+                let stats = SyncStats {
+                    pushed,
+                    pulled: 0,
+                    conflicts: 0,
+                };
+                record_event(MemoryEvent::Synced {
+                    pushed: stats.pushed,
+                    pulled: stats.pulled,
+                    conflicts: stats.conflicts,
+                    timestamp: current_timestamp(),
+                });
+                Ok(stats)
+            })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        metrics::counter!(
+            "memory_sync_total",
+            "direction" => "push",
+            "domain" => "project",
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!("memory_sync_duration_ms", "direction" => "push")
+            .record(start.elapsed().as_secs_f64() * 1000.0);
+
+        result
     }
 
     /// Performs a full sync (fetch + push).
@@ -96,18 +146,35 @@ impl SyncService {
     /// # Errors
     ///
     /// Returns an error if the sync fails.
+    #[instrument(skip(self), fields(operation = "sync.full"))]
     pub fn sync(&self) -> Result<SyncStats> {
-        // Fetch first
-        let fetch_stats = self.fetch()?;
+        let start = Instant::now();
+        let result = (|| {
+            // Fetch first
+            let fetch_stats = self.fetch()?;
 
-        // Then push
-        let push_stats = self.push()?;
+            // Then push
+            let push_stats = self.push()?;
 
-        Ok(SyncStats {
-            pushed: push_stats.pushed,
-            pulled: fetch_stats.pulled,
-            conflicts: 0, // TODO: Implement conflict detection
-        })
+            Ok(SyncStats {
+                pushed: push_stats.pushed,
+                pulled: fetch_stats.pulled,
+                conflicts: 0, // TODO: Implement conflict detection
+            })
+        })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        metrics::counter!(
+            "memory_sync_total",
+            "direction" => "full",
+            "domain" => "project",
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!("memory_sync_duration_ms", "direction" => "full")
+            .record(start.elapsed().as_secs_f64() * 1000.0);
+
+        result
     }
 
     /// Checks if sync is available (remote exists and is reachable).
@@ -159,6 +226,13 @@ impl SyncService {
 
         remote.get_remote_url(&remote_name)
     }
+}
+
+fn current_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 impl Default for SyncService {

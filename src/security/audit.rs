@@ -3,10 +3,12 @@
 //! Provides SOC2/GDPR compliant audit logging for memory operations.
 
 use crate::models::MemoryEvent;
+use crate::{Error, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 
 /// Audit log entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,6 +146,8 @@ pub struct AuditLogger {
     config: AuditConfig,
     entries: Mutex<Vec<AuditEntry>>,
 }
+
+static GLOBAL_AUDIT_LOGGER: OnceLock<AuditLogger> = OnceLock::new();
 
 impl AuditLogger {
     /// Creates a new audit logger with default config.
@@ -378,6 +382,45 @@ impl AuditLogger {
 
         writeln!(file, "{json}")?;
         Ok(())
+    }
+}
+
+/// Initializes the global audit logger.
+///
+/// # Errors
+///
+/// Returns an error if the log directory cannot be created or if the global
+/// audit logger has already been initialized.
+pub fn init_global(config: AuditConfig) -> Result<()> {
+    if let Some(ref path) = config.log_path {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| Error::OperationFailed {
+                operation: "init_audit_logger".to_string(),
+                cause: e.to_string(),
+            })?;
+        }
+    }
+
+    GLOBAL_AUDIT_LOGGER
+        .set(AuditLogger::with_config(config))
+        .map_err(|_logger| Error::OperationFailed {
+            operation: "init_audit_logger".to_string(),
+            cause: "audit logger already initialized".to_string(),
+        })?;
+
+    Ok(())
+}
+
+/// Returns the global audit logger, if initialized.
+#[must_use]
+pub fn global_logger() -> Option<&'static AuditLogger> {
+    GLOBAL_AUDIT_LOGGER.get()
+}
+
+/// Records a memory event through the global audit logger.
+pub fn record_event(event: MemoryEvent) {
+    if let Some(logger) = global_logger() {
+        logger.log(&event);
     }
 }
 

@@ -8,6 +8,8 @@ use crate::{Error, Result};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Instant;
+use tracing::instrument;
 
 /// SQLite-based index backend with FTS5.
 pub struct SqliteBackend {
@@ -15,6 +17,16 @@ pub struct SqliteBackend {
     conn: Mutex<Connection>,
     /// Path to the `SQLite` database (None for in-memory).
     db_path: Option<PathBuf>,
+}
+
+struct MemoryRow {
+    id: String,
+    namespace: String,
+    domain: Option<String>,
+    status: String,
+    created_at: i64,
+    tags: Option<String>,
+    content: String,
 }
 
 impl SqliteBackend {
@@ -212,366 +224,438 @@ impl SqliteBackend {
 
         (clause, params, param_idx)
     }
+
+    fn record_operation_metrics(
+        &self,
+        operation: &'static str,
+        start: Instant,
+        status: &'static str,
+    ) {
+        metrics::counter!(
+            "storage_operations_total",
+            "backend" => "sqlite",
+            "operation" => operation,
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!(
+            "storage_operation_duration_ms",
+            "backend" => "sqlite",
+            "operation" => operation,
+            "status" => status
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
+    }
+}
+
+fn fetch_memory_row(conn: &Connection, id: &MemoryId) -> Result<Option<MemoryRow>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT m.id, m.namespace, m.domain, m.status, m.created_at, m.tags, f.content
+             FROM memories m
+             JOIN memories_fts f ON m.id = f.id
+             WHERE m.id = ?1",
+        )
+        .map_err(|e| Error::OperationFailed {
+            operation: "prepare_get_memory".to_string(),
+            cause: e.to_string(),
+        })?;
+
+    let result: std::result::Result<Option<_>, _> = stmt
+        .query_row(params![id.as_str()], |row| {
+            Ok(MemoryRow {
+                id: row.get(0)?,
+                namespace: row.get(1)?,
+                domain: row.get(2)?,
+                status: row.get(3)?,
+                created_at: row.get(4)?,
+                tags: row.get(5)?,
+                content: row.get(6)?,
+            })
+        })
+        .optional();
+
+    result.map_err(|e| Error::OperationFailed {
+        operation: "get_memory".to_string(),
+        cause: e.to_string(),
+    })
+}
+
+fn build_memory_from_row(row: MemoryRow) -> Memory {
+    use crate::models::{Domain, MemoryStatus, Namespace};
+
+    let namespace = Namespace::parse(&row.namespace).unwrap_or_default();
+    let domain = row.domain.map_or_else(Domain::new, |d: String| {
+        if d.is_empty() || d == "global" {
+            Domain::new()
+        } else {
+            let parts: Vec<&str> = d.split('/').collect();
+            match parts.len() {
+                1 => Domain {
+                    organization: Some(parts[0].to_string()),
+                    project: None,
+                    repository: None,
+                },
+                2 => Domain {
+                    organization: Some(parts[0].to_string()),
+                    project: None,
+                    repository: Some(parts[1].to_string()),
+                },
+                _ => Domain::new(),
+            }
+        }
+    });
+
+    let status = match row.status.to_lowercase().as_str() {
+        "active" => MemoryStatus::Active,
+        "archived" => MemoryStatus::Archived,
+        "superseded" => MemoryStatus::Superseded,
+        "pending" => MemoryStatus::Pending,
+        "deleted" => MemoryStatus::Deleted,
+        _ => MemoryStatus::Active,
+    };
+
+    let tags: Vec<String> = row
+        .tags
+        .map(|t| {
+            t.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    #[allow(clippy::cast_sign_loss)]
+    let created_at_u64 = row.created_at as u64;
+
+    Memory {
+        id: MemoryId::new(row.id),
+        content: row.content,
+        namespace,
+        domain,
+        status,
+        created_at: created_at_u64,
+        updated_at: created_at_u64,
+        embedding: None,
+        tags,
+        source: None,
+    }
 }
 
 impl IndexBackend for SqliteBackend {
+    #[instrument(
+        skip(self, memory),
+        fields(
+            operation = "index",
+            backend = "sqlite",
+            memory.id = %memory.id.as_str(),
+            namespace = %memory.namespace.as_str(),
+            domain = %memory.domain.to_string()
+        )
+    )]
     fn index(&mut self, memory: &Memory) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
-            operation: "lock_connection".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        let tags_str = memory.tags.join(",");
-        let domain_str = memory.domain.to_string();
-
-        // Insert or replace in main table
-        conn.execute(
-            "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags, source)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                memory.id.as_str(),
-                memory.namespace.as_str(),
-                domain_str,
-                memory.status.as_str(),
-                memory.created_at,
-                tags_str,
-                memory.source.as_deref()
-            ],
-        )
-        .map_err(|e| Error::OperationFailed {
-            operation: "insert_memory".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        // Delete from FTS if exists (FTS5 uses rowid internally for matching)
-        conn.execute(
-            "DELETE FROM memories_fts WHERE id = ?1",
-            params![memory.id.as_str()],
-        )
-        .map_err(|e| Error::OperationFailed {
-            operation: "delete_fts".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        // Insert into FTS table
-        conn.execute(
-            "INSERT INTO memories_fts (id, content, tags) VALUES (?1, ?2, ?3)",
-            params![memory.id.as_str(), memory.content, tags_str],
-        )
-        .map_err(|e| Error::OperationFailed {
-            operation: "insert_fts".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        Ok(())
-    }
-
-    fn remove(&mut self, id: &MemoryId) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
-            operation: "lock_connection".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        // Delete from FTS
-        conn.execute(
-            "DELETE FROM memories_fts WHERE id = ?1",
-            params![id.as_str()],
-        )
-        .map_err(|e| Error::OperationFailed {
-            operation: "delete_fts".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        // Delete from main table
-        let deleted = conn
-            .execute("DELETE FROM memories WHERE id = ?1", params![id.as_str()])
-            .map_err(|e| Error::OperationFailed {
-                operation: "delete_memory".to_string(),
+        let start = Instant::now();
+        let result = (|| {
+            let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_connection".to_string(),
                 cause: e.to_string(),
             })?;
 
-        Ok(deleted > 0)
+            let tags_str = memory.tags.join(",");
+            let domain_str = memory.domain.to_string();
+
+            // Insert or replace in main table
+            conn.execute(
+                "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags, source)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    memory.id.as_str(),
+                    memory.namespace.as_str(),
+                    domain_str,
+                    memory.status.as_str(),
+                    memory.created_at,
+                    tags_str,
+                    memory.source.as_deref()
+                ],
+            )
+            .map_err(|e| Error::OperationFailed {
+                operation: "insert_memory".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            // Delete from FTS if exists (FTS5 uses rowid internally for matching)
+            conn.execute(
+                "DELETE FROM memories_fts WHERE id = ?1",
+                params![memory.id.as_str()],
+            )
+            .map_err(|e| Error::OperationFailed {
+                operation: "delete_fts".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            // Insert into FTS table
+            conn.execute(
+                "INSERT INTO memories_fts (id, content, tags) VALUES (?1, ?2, ?3)",
+                params![memory.id.as_str(), memory.content, tags_str],
+            )
+            .map_err(|e| Error::OperationFailed {
+                operation: "insert_fts".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            Ok(())
+        })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        self.record_operation_metrics("index", start, status);
+        result
     }
 
+    #[instrument(skip(self), fields(operation = "remove", backend = "sqlite", memory.id = %id.as_str()))]
+    fn remove(&mut self, id: &MemoryId) -> Result<bool> {
+        let start = Instant::now();
+        let result = (|| {
+            let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_connection".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            // Delete from FTS
+            conn.execute(
+                "DELETE FROM memories_fts WHERE id = ?1",
+                params![id.as_str()],
+            )
+            .map_err(|e| Error::OperationFailed {
+                operation: "delete_fts".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            // Delete from main table
+            let deleted = conn
+                .execute("DELETE FROM memories WHERE id = ?1", params![id.as_str()])
+                .map_err(|e| Error::OperationFailed {
+                    operation: "delete_memory".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            Ok(deleted > 0)
+        })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        self.record_operation_metrics("remove", start, status);
+        result
+    }
+
+    #[instrument(
+        skip(self, query, filter),
+        fields(operation = "search", backend = "sqlite", query_length = query.len(), limit = limit)
+    )]
     fn search(
         &self,
         query: &str,
         filter: &SearchFilter,
         limit: usize,
     ) -> Result<Vec<(MemoryId, f32)>> {
-        let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
-            operation: "lock_connection".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        // Build filter clause with numbered parameters starting from ?2
-        // ?1 is the FTS query
-        let (filter_clause, filter_params, next_param) =
-            self.build_filter_clause_numbered(filter, 2);
-
-        // Use FTS5 MATCH for search with BM25 ranking
-        // Limit parameter comes after all filter parameters
-        let sql = format!(
-            "SELECT f.id, bm25(memories_fts) as score
-             FROM memories_fts f
-             JOIN memories m ON f.id = m.id
-             WHERE memories_fts MATCH ?1 {filter_clause}
-             ORDER BY score
-             LIMIT ?{next_param}"
-        );
-
-        let mut stmt = conn.prepare(&sql).map_err(|e| Error::OperationFailed {
-            operation: "prepare_search".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        // Build parameters: query, filter params, limit
-        let mut results = Vec::new();
-
-        // FTS5 query - escape special characters and wrap terms in quotes
-        // FTS5 special chars: - (NOT), * (prefix), " (phrase), : (column)
-        let fts_query = query
-            .split_whitespace()
-            .map(|term| {
-                // Escape double quotes and wrap each term in quotes for literal matching
-                let escaped = term.replace('"', "\"\"");
-                format!("\"{escaped}\"")
-            })
-            .collect::<Vec<_>>()
-            .join(" OR ");
-
-        let rows = stmt
-            .query_map(
-                rusqlite::params_from_iter(
-                    std::iter::once(fts_query)
-                        .chain(filter_params.into_iter())
-                        .chain(std::iter::once(limit.to_string())),
-                ),
-                |row| {
-                    let id: String = row.get(0)?;
-                    let score: f64 = row.get(1)?;
-                    Ok((id, score))
-                },
-            )
-            .map_err(|e| Error::OperationFailed {
-                operation: "execute_search".to_string(),
+        let start = Instant::now();
+        let result = (|| {
+            let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_connection".to_string(),
                 cause: e.to_string(),
             })?;
 
-        for row in rows {
-            let (id, score) = row.map_err(|e| Error::OperationFailed {
-                operation: "read_search_row".to_string(),
+            // Build filter clause with numbered parameters starting from ?2
+            // ?1 is the FTS query
+            let (filter_clause, filter_params, next_param) =
+                self.build_filter_clause_numbered(filter, 2);
+
+            // Use FTS5 MATCH for search with BM25 ranking
+            // Limit parameter comes after all filter parameters
+            let sql = format!(
+                "SELECT f.id, bm25(memories_fts) as score
+                 FROM memories_fts f
+                 JOIN memories m ON f.id = m.id
+                 WHERE memories_fts MATCH ?1 {filter_clause}
+                 ORDER BY score
+                 LIMIT ?{next_param}"
+            );
+
+            let mut stmt = conn.prepare(&sql).map_err(|e| Error::OperationFailed {
+                operation: "prepare_search".to_string(),
                 cause: e.to_string(),
             })?;
 
-            // Normalize BM25 score (BM25 returns negative values, lower is better)
-            // Convert to 0-1 range where higher is better
-            #[allow(clippy::cast_possible_truncation)]
-            let normalized_score = (1.0 / (1.0 - score)).min(1.0) as f32;
+            // Build parameters: query, filter params, limit
+            let mut results = Vec::new();
 
-            results.push((MemoryId::new(id), normalized_score));
-        }
+            // FTS5 query - escape special characters and wrap terms in quotes
+            // FTS5 special chars: - (NOT), * (prefix), " (phrase), : (column)
+            let fts_query = query
+                .split_whitespace()
+                .map(|term| {
+                    // Escape double quotes and wrap each term in quotes for literal matching
+                    let escaped = term.replace('"', "\"\"");
+                    format!("\"{escaped}\"")
+                })
+                .collect::<Vec<_>>()
+                .join(" OR ");
 
-        // Apply minimum score filter if specified
-        if let Some(min_score) = filter.min_score {
-            results.retain(|(_, score)| *score >= min_score);
-        }
-
-        Ok(results)
-    }
-
-    fn clear(&mut self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
-            operation: "lock_connection".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        conn.execute("DELETE FROM memories_fts", [])
-            .map_err(|e| Error::OperationFailed {
-                operation: "clear_fts".to_string(),
-                cause: e.to_string(),
-            })?;
-
-        conn.execute("DELETE FROM memories", [])
-            .map_err(|e| Error::OperationFailed {
-                operation: "clear_memories".to_string(),
-                cause: e.to_string(),
-            })?;
-
-        Ok(())
-    }
-
-    fn list_all(&self, filter: &SearchFilter, limit: usize) -> Result<Vec<(MemoryId, f32)>> {
-        let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
-            operation: "lock_connection".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        // Build filter clause (starting at parameter 1, no FTS query)
-        let (filter_clause, filter_params, next_param) =
-            self.build_filter_clause_numbered(filter, 1);
-
-        // Query all memories without FTS MATCH, ordered by created_at desc
-        let sql = format!(
-            "SELECT m.id, 1.0 as score
-             FROM memories m
-             WHERE 1=1 {filter_clause}
-             ORDER BY m.created_at DESC
-             LIMIT ?{next_param}"
-        );
-
-        let mut stmt = conn.prepare(&sql).map_err(|e| Error::OperationFailed {
-            operation: "prepare_list_all".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        let mut results = Vec::new();
-
-        let rows = stmt
-            .query_map(
-                rusqlite::params_from_iter(
-                    filter_params
-                        .into_iter()
-                        .chain(std::iter::once(limit.to_string())),
-                ),
-                |row| {
-                    let id: String = row.get(0)?;
-                    let score: f64 = row.get(1)?;
-                    Ok((id, score))
-                },
-            )
-            .map_err(|e| Error::OperationFailed {
-                operation: "list_all".to_string(),
-                cause: e.to_string(),
-            })?;
-
-        for row in rows {
-            let (id, score) = row.map_err(|e| Error::OperationFailed {
-                operation: "read_list_row".to_string(),
-                cause: e.to_string(),
-            })?;
-
-            #[allow(clippy::cast_possible_truncation)]
-            results.push((MemoryId::new(id), score as f32));
-        }
-
-        Ok(results)
-    }
-
-    fn get_memory(&self, id: &MemoryId) -> Result<Option<Memory>> {
-        use crate::models::{Domain, MemoryStatus, Namespace};
-
-        let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
-            operation: "lock_connection".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        // Join memories and memories_fts to get full memory data
-        let mut stmt = conn
-            .prepare(
-                "SELECT m.id, m.namespace, m.domain, m.status, m.created_at, m.tags, f.content
-                 FROM memories m
-                 JOIN memories_fts f ON m.id = f.id
-                 WHERE m.id = ?1",
-            )
-            .map_err(|e| Error::OperationFailed {
-                operation: "prepare_get_memory".to_string(),
-                cause: e.to_string(),
-            })?;
-
-        let result: std::result::Result<Option<_>, _> = stmt
-            .query_row(params![id.as_str()], |row| {
-                let id_str: String = row.get(0)?;
-                let namespace_str: String = row.get(1)?;
-                let domain_str: Option<String> = row.get(2)?;
-                let status_str: String = row.get(3)?;
-                let created_at: i64 = row.get(4)?;
-                let tags_str: Option<String> = row.get(5)?;
-                let content: String = row.get(6)?;
-
-                Ok((
-                    id_str,
-                    namespace_str,
-                    domain_str,
-                    status_str,
-                    created_at,
-                    tags_str,
-                    content,
-                ))
-            })
-            .optional();
-
-        let result = result.map_err(|e| Error::OperationFailed {
-            operation: "get_memory".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        let Some((id_str, namespace_str, domain_str, status_str, created_at, tags_str, content)) =
-            result
-        else {
-            return Ok(None);
-        };
-
-        // Parse namespace
-        let namespace = Namespace::parse(&namespace_str).unwrap_or_default();
-
-        // Parse domain
-        let domain = domain_str.map_or_else(Domain::new, |d: String| {
-            if d.is_empty() || d == "global" {
-                Domain::new()
-            } else {
-                let parts: Vec<&str> = d.split('/').collect();
-                match parts.len() {
-                    1 => Domain {
-                        organization: Some(parts[0].to_string()),
-                        project: None,
-                        repository: None,
+            let rows = stmt
+                .query_map(
+                    rusqlite::params_from_iter(
+                        std::iter::once(fts_query)
+                            .chain(filter_params.into_iter())
+                            .chain(std::iter::once(limit.to_string())),
+                    ),
+                    |row| {
+                        let id: String = row.get(0)?;
+                        let score: f64 = row.get(1)?;
+                        Ok((id, score))
                     },
-                    2 => Domain {
-                        organization: Some(parts[0].to_string()),
-                        project: None,
-                        repository: Some(parts[1].to_string()),
-                    },
-                    _ => Domain::new(),
-                }
+                )
+                .map_err(|e| Error::OperationFailed {
+                    operation: "execute_search".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            for row in rows {
+                let (id, score) = row.map_err(|e| Error::OperationFailed {
+                    operation: "read_search_row".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+                // Normalize BM25 score (BM25 returns negative values, lower is better)
+                // Convert to 0-1 range where higher is better
+                #[allow(clippy::cast_possible_truncation)]
+                let normalized_score = (1.0 / (1.0 - score)).min(1.0) as f32;
+
+                results.push((MemoryId::new(id), normalized_score));
             }
-        });
 
-        // Parse status
-        let status = match status_str.to_lowercase().as_str() {
-            "active" => MemoryStatus::Active,
-            "archived" => MemoryStatus::Archived,
-            "superseded" => MemoryStatus::Superseded,
-            "pending" => MemoryStatus::Pending,
-            "deleted" => MemoryStatus::Deleted,
-            _ => MemoryStatus::Active,
-        };
+            // Apply minimum score filter if specified
+            if let Some(min_score) = filter.min_score {
+                results.retain(|(_, score)| *score >= min_score);
+            }
 
-        // Parse tags
-        let tags: Vec<String> = tags_str
-            .map(|t: String| {
-                t.split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default();
+            Ok(results)
+        })();
 
-        #[allow(clippy::cast_sign_loss)]
-        let created_at_u64 = created_at as u64;
+        let status = if result.is_ok() { "success" } else { "error" };
+        self.record_operation_metrics("search", start, status);
+        result
+    }
 
-        Ok(Some(Memory {
-            id: MemoryId::new(id_str),
-            content,
-            namespace,
-            domain,
-            status,
-            created_at: created_at_u64,
-            updated_at: created_at_u64,
-            embedding: None,
-            tags,
-            source: None,
-        }))
+    #[instrument(skip(self), fields(operation = "clear", backend = "sqlite"))]
+    fn clear(&mut self) -> Result<()> {
+        let start = Instant::now();
+        let result = (|| {
+            let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_connection".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            conn.execute("DELETE FROM memories_fts", [])
+                .map_err(|e| Error::OperationFailed {
+                    operation: "clear_fts".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            conn.execute("DELETE FROM memories", [])
+                .map_err(|e| Error::OperationFailed {
+                    operation: "clear_memories".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            Ok(())
+        })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        self.record_operation_metrics("clear", start, status);
+        result
+    }
+
+    #[instrument(
+        skip(self, filter),
+        fields(operation = "list_all", backend = "sqlite", limit = limit)
+    )]
+    fn list_all(&self, filter: &SearchFilter, limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+        let start = Instant::now();
+        let result = (|| {
+            let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_connection".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            // Build filter clause (starting at parameter 1, no FTS query)
+            let (filter_clause, filter_params, next_param) =
+                self.build_filter_clause_numbered(filter, 1);
+
+            // Query all memories without FTS MATCH, ordered by created_at desc
+            let sql = format!(
+                "SELECT m.id, 1.0 as score
+                 FROM memories m
+                 WHERE 1=1 {filter_clause}
+                 ORDER BY m.created_at DESC
+                 LIMIT ?{next_param}"
+            );
+
+            let mut stmt = conn.prepare(&sql).map_err(|e| Error::OperationFailed {
+                operation: "prepare_list_all".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            let mut results = Vec::new();
+
+            let rows = stmt
+                .query_map(
+                    rusqlite::params_from_iter(
+                        filter_params
+                            .into_iter()
+                            .chain(std::iter::once(limit.to_string())),
+                    ),
+                    |row| {
+                        let id: String = row.get(0)?;
+                        let score: f64 = row.get(1)?;
+                        Ok((id, score))
+                    },
+                )
+                .map_err(|e| Error::OperationFailed {
+                    operation: "list_all".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            for row in rows {
+                let (id, score) = row.map_err(|e| Error::OperationFailed {
+                    operation: "read_list_row".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+                #[allow(clippy::cast_possible_truncation)]
+                results.push((MemoryId::new(id), score as f32));
+            }
+
+            Ok(results)
+        })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        self.record_operation_metrics("list_all", start, status);
+        result
+    }
+
+    #[instrument(skip(self), fields(operation = "get_memory", backend = "sqlite", memory.id = %id.as_str()))]
+    fn get_memory(&self, id: &MemoryId) -> Result<Option<Memory>> {
+        let start = Instant::now();
+        let result = (|| {
+            let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_connection".to_string(),
+                cause: e.to_string(),
+            })?;
+            let row = fetch_memory_row(&conn, id)?;
+            Ok(row.map(build_memory_from_row))
+        })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        self.record_operation_metrics("get_memory", start, status);
+        result
     }
 }
 

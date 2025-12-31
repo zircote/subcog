@@ -7,6 +7,7 @@ use crate::hooks::HookHandler;
 use crate::models::{CaptureRequest, Domain, Namespace};
 use crate::services::CaptureService;
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 use tracing::instrument;
 
 /// Handler for the `PreCompact` hook event.
@@ -303,74 +304,106 @@ impl HookHandler for PreCompactHandler {
         "PreCompact"
     }
 
-    #[instrument(skip(self, input), fields(hook = "PreCompact"))]
+    #[instrument(
+        skip(self, input),
+        fields(hook = "PreCompact", captures = tracing::field::Empty)
+    )]
     fn handle(&self, input: &str) -> Result<String> {
-        let parsed: PreCompactInput =
-            serde_json::from_str(input).unwrap_or_else(|_| PreCompactInput {
-                context: input.to_string(),
-                ..Default::default()
+        let start = Instant::now();
+        let (result, capture_count) = {
+            let parsed: PreCompactInput =
+                serde_json::from_str(input).unwrap_or_else(|_| PreCompactInput {
+                    context: input.to_string(),
+                    ..Default::default()
+                });
+
+            // Analyze content for capture candidates
+            let candidates = self.analyze_content(&parsed);
+
+            // Capture the candidates
+            let captured = self.capture_candidates(candidates);
+            let capture_count = captured.len();
+            let span = tracing::Span::current();
+            span.record("captures", capture_count);
+
+            // Build metadata
+            let metadata = serde_json::json!({
+                "captured": !captured.is_empty(),
+                "captures": captured.iter().map(|c| serde_json::json!({
+                    "memory_id": c.memory_id,
+                    "namespace": c.namespace,
+                    "confidence": c.confidence
+                })).collect::<Vec<_>>()
             });
 
-        // Analyze content for capture candidates
-        let candidates = self.analyze_content(&parsed);
+            // Build context message about captured memories
+            let context_message = if captured.is_empty() {
+                None
+            } else {
+                let mut lines = vec![
+                    "**Subcog Pre-Compact Auto-Capture**\n".to_string(),
+                    format!(
+                        "Captured {} memories before context compaction:\n",
+                        captured.len()
+                    ),
+                ];
+                for c in &captured {
+                    lines.push(format!(
+                        "- `{}`: {} (confidence: {:.0}%)",
+                        c.namespace,
+                        c.memory_id,
+                        c.confidence * 100.0
+                    ));
+                }
+                Some(lines.join("\n"))
+            };
 
-        // Capture the candidates
-        let captured = self.capture_candidates(candidates);
+            // Build Claude Code hook response format per specification
+            // See: https://docs.anthropic.com/en/docs/claude-code/hooks
+            let response = context_message.map_or_else(
+                || serde_json::json!({}),
+                |ctx| {
+                    // Embed metadata as XML comment for debugging
+                    let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
+                    let context_with_metadata =
+                        format!("{ctx}\n\n<!-- subcog-metadata: {metadata_str} -->");
+                    serde_json::json!({
+                        "hookSpecificOutput": {
+                            "hookEventName": "PreCompact",
+                            "additionalContext": context_with_metadata
+                        }
+                    })
+                },
+            );
 
-        // Build metadata
-        let metadata = serde_json::json!({
-            "captured": !captured.is_empty(),
-            "captures": captured.iter().map(|c| serde_json::json!({
-                "memory_id": c.memory_id,
-                "namespace": c.namespace,
-                "confidence": c.confidence
-            })).collect::<Vec<_>>()
-        });
-
-        // Build context message about captured memories
-        let context_message = if captured.is_empty() {
-            None
-        } else {
-            let mut lines = vec![
-                "**Subcog Pre-Compact Auto-Capture**\n".to_string(),
-                format!(
-                    "Captured {} memories before context compaction:\n",
-                    captured.len()
-                ),
-            ];
-            for c in &captured {
-                lines.push(format!(
-                    "- `{}`: {} (confidence: {:.0}%)",
-                    c.namespace,
-                    c.memory_id,
-                    c.confidence * 100.0
-                ));
-            }
-            Some(lines.join("\n"))
+            (
+                serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
+                    operation: "serialize_output".to_string(),
+                    cause: e.to_string(),
+                }),
+                capture_count,
+            )
         };
 
-        // Build Claude Code hook response format per specification
-        // See: https://docs.anthropic.com/en/docs/claude-code/hooks
-        let response = context_message.map_or_else(
-            || serde_json::json!({}),
-            |ctx| {
-                // Embed metadata as XML comment for debugging
-                let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
-                let context_with_metadata =
-                    format!("{ctx}\n\n<!-- subcog-metadata: {metadata_str} -->");
-                serde_json::json!({
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreCompact",
-                        "additionalContext": context_with_metadata
-                    }
-                })
-            },
-        );
+        let status = if result.is_ok() { "success" } else { "error" };
+        metrics::counter!(
+            "hook_executions_total",
+            "hook_type" => "PreCompact",
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!("hook_duration_ms", "hook_type" => "PreCompact")
+            .record(start.elapsed().as_secs_f64() * 1000.0);
+        if capture_count > 0 {
+            metrics::counter!(
+                "hook_auto_capture_total",
+                "hook_type" => "PreCompact",
+                "namespace" => "mixed"
+            )
+            .increment(capture_count as u64);
+        }
 
-        serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
-            operation: "serialize_output".to_string(),
-            cause: e.to_string(),
-        })
+        result
     }
 }
 

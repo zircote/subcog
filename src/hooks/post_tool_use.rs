@@ -4,6 +4,7 @@ use super::HookHandler;
 use crate::Result;
 use crate::models::{IssueSeverity, SearchFilter, SearchMode, validate_prompt_content};
 use crate::services::RecallService;
+use std::time::Instant;
 use tracing::instrument;
 
 /// Handles `PostToolUse` hook events.
@@ -195,6 +196,122 @@ impl PostToolUseHandler {
 
         Ok(memories)
     }
+
+    fn empty_response() -> Result<String> {
+        Self::serialize_response(&serde_json::json!({}))
+    }
+
+    fn serialize_response(response: &serde_json::Value) -> Result<String> {
+        serde_json::to_string(response).map_err(|e| crate::Error::OperationFailed {
+            operation: "serialize_response".to_string(),
+            cause: e.to_string(),
+        })
+    }
+
+    fn build_memories_response(
+        tool_name: &str,
+        query: &str,
+        memories: &[RelatedMemory],
+    ) -> serde_json::Value {
+        if memories.is_empty() {
+            return serde_json::json!({});
+        }
+
+        let memories_json: Vec<serde_json::Value> = memories
+            .iter()
+            .map(|m| {
+                serde_json::json!({
+                    "id": m.id,
+                    "namespace": m.namespace,
+                    "content": m.content,
+                    "relevance": m.relevance
+                })
+            })
+            .collect();
+
+        let metadata = serde_json::json!({
+            "memories": memories_json,
+            "lookup_performed": true,
+            "query": query,
+            "tool_name": tool_name
+        });
+
+        let mut lines = vec!["**Related Subcog Memories**\n".to_string()];
+        for m in memories {
+            lines.push(format!(
+                "- **[{}]** (relevance: {:.0}%): {}",
+                m.namespace,
+                m.relevance * 100.0,
+                m.content
+            ));
+        }
+        let context = lines.join("\n");
+
+        let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
+        let context_with_metadata =
+            format!("{context}\n\n<!-- subcog-metadata: {metadata_str} -->");
+
+        serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "additionalContext": context_with_metadata
+            }
+        })
+    }
+
+    fn handle_inner(
+        &self,
+        input: &str,
+        lookup_performed: &mut bool,
+        memories_found: &mut usize,
+    ) -> Result<String> {
+        let input_json: serde_json::Value =
+            serde_json::from_str(input).unwrap_or_else(|_| serde_json::json!({}));
+
+        let tool_name = input_json
+            .get("tool_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let span = tracing::Span::current();
+        span.record("tool_name", tool_name);
+
+        let tool_input = input_json
+            .get("tool_input")
+            .unwrap_or(&serde_json::Value::Null);
+
+        if Self::is_prompt_save_tool(tool_name) {
+            if let Some(guidance) = self.validate_prompt(tool_input) {
+                let response = serde_json::json!({
+                    "hookSpecificOutput": {
+                        "hookEventName": "PostToolUse",
+                        "additionalContext": guidance
+                    }
+                });
+                return Self::serialize_response(&response);
+            }
+            return Self::empty_response();
+        }
+
+        if !self.should_lookup(tool_name) {
+            return Self::empty_response();
+        }
+
+        let query = self
+            .extract_query(tool_name, tool_input)
+            .filter(|q| !q.is_empty());
+        let Some(query) = query else {
+            return Self::empty_response();
+        };
+
+        let memories = self.find_related_memories(&query)?;
+        *lookup_performed = true;
+        *memories_found = memories.len();
+        span.record("lookup_performed", *lookup_performed);
+        span.record("memories_found", *memories_found);
+
+        let response = Self::build_memories_response(tool_name, &query, &memories);
+        Self::serialize_response(&response)
+    }
 }
 
 /// Truncates content to a maximum length.
@@ -217,130 +334,41 @@ impl HookHandler for PostToolUseHandler {
         "PostToolUse"
     }
 
-    #[instrument(skip(self, input), fields(hook = "PostToolUse"))]
+    #[instrument(
+        skip(self, input),
+        fields(
+            hook = "PostToolUse",
+            tool_name = tracing::field::Empty,
+            lookup_performed = tracing::field::Empty,
+            memories_found = tracing::field::Empty
+        )
+    )]
     fn handle(&self, input: &str) -> Result<String> {
-        // Parse input as JSON
-        let input_json: serde_json::Value =
-            serde_json::from_str(input).unwrap_or_else(|_| serde_json::json!({}));
+        let start = Instant::now();
+        let mut lookup_performed = false;
+        let mut memories_found = 0usize;
 
-        // Extract tool information
-        let tool_name = input_json
-            .get("tool_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let result = self.handle_inner(input, &mut lookup_performed, &mut memories_found);
 
-        let tool_input = input_json
-            .get("tool_input")
-            .unwrap_or(&serde_json::Value::Null);
-
-        // Check for prompt_save tool and validate content
-        if Self::is_prompt_save_tool(tool_name) {
-            if let Some(guidance) = self.validate_prompt(tool_input) {
-                // Return validation guidance
-                let response = serde_json::json!({
-                    "hookSpecificOutput": {
-                        "hookEventName": "PostToolUse",
-                        "additionalContext": guidance
-                    }
-                });
-                return serde_json::to_string(&response).map_err(|e| {
-                    crate::Error::OperationFailed {
-                        operation: "serialize_response".to_string(),
-                        cause: e.to_string(),
-                    }
-                });
-            }
-            // Prompt is valid, return empty response
-            let response = serde_json::json!({});
-            return serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
-                operation: "serialize_response".to_string(),
-                cause: e.to_string(),
-            });
+        let status = if result.is_ok() { "success" } else { "error" };
+        metrics::counter!(
+            "hook_executions_total",
+            "hook_type" => "PostToolUse",
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!("hook_duration_ms", "hook_type" => "PostToolUse")
+            .record(start.elapsed().as_secs_f64() * 1000.0);
+        if lookup_performed {
+            metrics::counter!(
+                "hook_memory_lookup_total",
+                "hook_type" => "PostToolUse",
+                "result" => if memories_found > 0 { "hit" } else { "miss" }
+            )
+            .increment(1);
         }
 
-        // Check if we should look up memories for this tool
-        if !self.should_lookup(tool_name) {
-            // Empty response when no memory lookup needed
-            let response = serde_json::json!({});
-            return serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
-                operation: "serialize_response".to_string(),
-                cause: e.to_string(),
-            });
-        }
-
-        // Extract query from tool input
-        let query = match self.extract_query(tool_name, tool_input) {
-            Some(q) if !q.is_empty() => q,
-            _ => {
-                // Empty response when no query to search
-                let response = serde_json::json!({});
-                return serde_json::to_string(&response).map_err(|e| {
-                    crate::Error::OperationFailed {
-                        operation: "serialize_response".to_string(),
-                        cause: e.to_string(),
-                    }
-                });
-            },
-        };
-
-        // Search for related memories
-        let memories = self.find_related_memories(&query)?;
-
-        // Build memories JSON for metadata
-        let memories_json: Vec<serde_json::Value> = memories
-            .iter()
-            .map(|m| {
-                serde_json::json!({
-                    "id": m.id,
-                    "namespace": m.namespace,
-                    "content": m.content,
-                    "relevance": m.relevance
-                })
-            })
-            .collect();
-
-        let metadata = serde_json::json!({
-            "memories": memories_json,
-            "lookup_performed": true,
-            "query": query,
-            "tool_name": tool_name
-        });
-
-        // Build Claude Code hook response format per specification
-        // See: https://docs.anthropic.com/en/docs/claude-code/hooks
-        let response = if memories.is_empty() {
-            // Empty response when no related memories
-            serde_json::json!({})
-        } else {
-            // Build context message with related memories
-            let mut lines = vec!["**Related Subcog Memories**\n".to_string()];
-            for m in &memories {
-                lines.push(format!(
-                    "- **[{}]** (relevance: {:.0}%): {}",
-                    m.namespace,
-                    m.relevance * 100.0,
-                    m.content
-                ));
-            }
-            let context = lines.join("\n");
-
-            // Embed metadata as XML comment for debugging
-            let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
-            let context_with_metadata =
-                format!("{context}\n\n<!-- subcog-metadata: {metadata_str} -->");
-
-            serde_json::json!({
-                "hookSpecificOutput": {
-                    "hookEventName": "PostToolUse",
-                    "additionalContext": context_with_metadata
-                }
-            })
-        };
-
-        serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
-            operation: "serialize_response".to_string(),
-            cause: e.to_string(),
-        })
+        result
     }
 }
 

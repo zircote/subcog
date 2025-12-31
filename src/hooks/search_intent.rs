@@ -12,7 +12,7 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, mpsc};
 use std::time::Duration;
 
 use crate::Result;
@@ -756,11 +756,10 @@ fn extract_json_from_response(response: &str) -> &str {
 ///
 /// # Panics
 ///
-/// This function does not panic. The internal `expect` is guarded by a prior
-/// `is_none()` check and will never be reached when provider is None.
+/// This function does not panic under normal operation.
 #[must_use]
-pub fn detect_search_intent_with_timeout<P: LlmProviderTrait + ?Sized>(
-    provider: Option<&P>,
+pub fn detect_search_intent_with_timeout(
+    provider: Option<Arc<dyn LlmProviderTrait>>,
     prompt: &str,
     config: &SearchIntentConfig,
 ) -> SearchIntent {
@@ -769,26 +768,8 @@ pub fn detect_search_intent_with_timeout<P: LlmProviderTrait + ?Sized>(
         return detect_search_intent(prompt).unwrap_or_default();
     }
 
-    let provider = provider.expect("provider checked above");
     let timeout = Duration::from_millis(config.llm_timeout_ms);
-
-    // Try LLM classification with timeout
-    let prompt_owned = prompt.to_string();
-    let llm_result = std::thread::scope(|s| {
-        let handle = s.spawn(|| classify_intent_with_llm(provider, &prompt_owned));
-
-        // Wait with timeout using a simple polling approach
-        let start = std::time::Instant::now();
-        loop {
-            if handle.is_finished() {
-                return handle.join().ok().and_then(std::result::Result::ok);
-            }
-            if start.elapsed() >= timeout {
-                return None; // Timeout
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-    });
+    let llm_result = run_llm_with_timeout(provider, prompt.to_string(), timeout);
 
     // Return LLM result if successful, otherwise fall back to keyword
     llm_result.unwrap_or_else(|| detect_search_intent(prompt).unwrap_or_default())
@@ -811,11 +792,10 @@ pub fn detect_search_intent_with_timeout<P: LlmProviderTrait + ?Sized>(
 ///
 /// # Panics
 ///
-/// This function does not panic. The internal `expect` is guarded by a prior
-/// `is_none()` check and will never be reached when provider is None.
+/// This function does not panic under normal operation.
 #[must_use]
-pub fn detect_search_intent_hybrid<P: LlmProviderTrait + ?Sized>(
-    provider: Option<&P>,
+pub fn detect_search_intent_hybrid(
+    provider: Option<Arc<dyn LlmProviderTrait>>,
     prompt: &str,
     config: &SearchIntentConfig,
 ) -> SearchIntent {
@@ -827,28 +807,34 @@ pub fn detect_search_intent_hybrid<P: LlmProviderTrait + ?Sized>(
         return keyword_result.unwrap_or_default();
     }
 
-    let provider = provider.expect("provider checked above");
     let timeout = Duration::from_millis(config.llm_timeout_ms);
-
-    // Try LLM classification with timeout
-    let prompt_owned = prompt.to_string();
-    let llm_result = std::thread::scope(|s| {
-        let handle = s.spawn(|| classify_intent_with_llm(provider, &prompt_owned));
-
-        let start = std::time::Instant::now();
-        loop {
-            if handle.is_finished() {
-                return handle.join().ok().and_then(std::result::Result::ok);
-            }
-            if start.elapsed() >= timeout {
-                return None;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-    });
+    let llm_result = run_llm_with_timeout(provider, prompt.to_string(), timeout);
 
     // Merge results
     merge_intent_results(keyword_result, llm_result, config)
+}
+
+fn run_llm_with_timeout(
+    provider: Option<Arc<dyn LlmProviderTrait>>,
+    prompt: String,
+    timeout: Duration,
+) -> Option<SearchIntent> {
+    let provider = provider?;
+    let (tx, rx) = mpsc::channel();
+    let parent_span = tracing::Span::current();
+
+    std::thread::spawn(move || {
+        let _parent = parent_span.enter();
+        let span = tracing::info_span!("search_intent.llm");
+        let _guard = span.enter();
+        let result = classify_intent_with_llm(provider.as_ref(), &prompt);
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(intent)) => Some(intent),
+        _ => None,
+    }
 }
 
 /// Merges keyword and LLM intent results.
@@ -901,6 +887,7 @@ fn merge_intent_results(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     // Task 1.9: Unit Tests for Intent Type Detection
 
@@ -1430,8 +1417,11 @@ mod tests {
         let config = SearchIntentConfig::default().with_use_llm(false);
         let provider = MockLlmProvider::new(r#"{"intent_type": "howto", "confidence": 0.9}"#);
 
-        let intent =
-            detect_search_intent_with_timeout(Some(&provider), "how to implement?", &config);
+        let intent = detect_search_intent_with_timeout(
+            Some(Arc::new(provider)),
+            "how to implement?",
+            &config,
+        );
         // Should use keyword detection, not LLM
         assert_eq!(intent.source, DetectionSource::Keyword);
     }
@@ -1439,11 +1429,7 @@ mod tests {
     #[test]
     fn test_detect_search_intent_with_timeout_no_provider() {
         let config = SearchIntentConfig::default();
-        let intent = detect_search_intent_with_timeout::<MockLlmProvider>(
-            None,
-            "how to implement?",
-            &config,
-        );
+        let intent = detect_search_intent_with_timeout(None, "how to implement?", &config);
         // Should use keyword detection
         assert_eq!(intent.source, DetectionSource::Keyword);
         assert_eq!(intent.intent_type, SearchIntentType::HowTo);
@@ -1456,8 +1442,11 @@ mod tests {
             r#"{"intent_type": "location", "confidence": 0.85, "topics": ["config"]}"#,
         );
 
-        let intent =
-            detect_search_intent_with_timeout(Some(&provider), "where is the config?", &config);
+        let intent = detect_search_intent_with_timeout(
+            Some(Arc::new(provider)),
+            "where is the config?",
+            &config,
+        );
         assert_eq!(intent.intent_type, SearchIntentType::Location);
         assert_eq!(intent.source, DetectionSource::Llm);
     }
@@ -1471,8 +1460,11 @@ mod tests {
             500, // Provider takes 500ms
         );
 
-        let intent =
-            detect_search_intent_with_timeout(Some(&provider), "where is the config?", &config);
+        let intent = detect_search_intent_with_timeout(
+            Some(Arc::new(provider)),
+            "where is the config?",
+            &config,
+        );
         // Should fall back to keyword detection due to timeout
         assert_eq!(intent.source, DetectionSource::Keyword);
     }
@@ -1489,8 +1481,11 @@ mod tests {
         );
 
         // Keyword would detect "error" as Troubleshoot
-        let intent =
-            detect_search_intent_hybrid(Some(&provider), "error connecting to database", &config);
+        let intent = detect_search_intent_hybrid(
+            Some(Arc::new(provider)),
+            "error connecting to database",
+            &config,
+        );
         assert_eq!(intent.intent_type, SearchIntentType::Troubleshoot);
         assert_eq!(intent.source, DetectionSource::Hybrid);
         // Should use LLM topics since confidence is high
@@ -1507,8 +1502,11 @@ mod tests {
         );
 
         // Keyword detects "how to" as HowTo
-        let intent =
-            detect_search_intent_hybrid(Some(&provider), "how to implement this?", &config);
+        let intent = detect_search_intent_hybrid(
+            Some(Arc::new(provider)),
+            "how to implement this?",
+            &config,
+        );
         // Should use keyword intent type since LLM confidence is below threshold
         assert_eq!(intent.intent_type, SearchIntentType::HowTo);
         assert_eq!(intent.source, DetectionSource::Hybrid);
@@ -1519,7 +1517,8 @@ mod tests {
         let config = SearchIntentConfig::default().with_use_llm(false);
         let provider = MockLlmProvider::new(r#"{"intent_type": "howto", "confidence": 0.9}"#);
 
-        let intent = detect_search_intent_hybrid(Some(&provider), "how to implement?", &config);
+        let intent =
+            detect_search_intent_hybrid(Some(Arc::new(provider)), "how to implement?", &config);
         // LLM disabled, use keyword only
         assert_eq!(intent.source, DetectionSource::Keyword);
     }

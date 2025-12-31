@@ -3,7 +3,7 @@
 use super::HookHandler;
 use crate::Result;
 use crate::services::SyncService;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::instrument;
 
 /// Handles Stop hook events.
@@ -131,96 +131,119 @@ impl HookHandler for StopHandler {
         "Stop"
     }
 
-    #[instrument(skip(self, input), fields(hook = "Stop"))]
+    #[instrument(
+        skip(self, input),
+        fields(hook = "Stop", session_id = tracing::field::Empty, sync_performed = tracing::field::Empty)
+    )]
     fn handle(&self, input: &str) -> Result<String> {
-        // Parse input as JSON
-        let input_json: serde_json::Value =
-            serde_json::from_str(input).unwrap_or_else(|_| serde_json::json!({}));
+        let start = Instant::now();
 
-        // Generate session summary
-        let summary = self.generate_summary(&input_json);
+        let result = {
+            // Parse input as JSON
+            let input_json: serde_json::Value =
+                serde_json::from_str(input).unwrap_or_else(|_| serde_json::json!({}));
 
-        // Perform sync if enabled
-        let sync_result = self.perform_sync();
+            // Generate session summary
+            let summary = self.generate_summary(&input_json);
+            let span = tracing::Span::current();
+            span.record("session_id", summary.session_id.as_str());
 
-        // Build metadata
-        let mut metadata = serde_json::json!({
-            "session_id": summary.session_id,
-            "duration_seconds": summary.duration_seconds,
-            "interaction_count": summary.interaction_count,
-            "memories_captured": summary.memories_captured,
-            "tools_used": summary.tools_used,
-        });
+            // Perform sync if enabled
+            let sync_result = self.perform_sync();
+            let sync_performed = sync_result.is_some();
+            span.record("sync_performed", sync_performed);
 
-        // Add sync results if performed
-        if let Some(sync) = &sync_result {
-            metadata["sync"] = serde_json::json!({
-                "performed": true,
-                "success": sync.success,
-                "pushed": sync.pushed,
-                "pulled": sync.pulled,
-                "error": sync.error
+            // Build metadata
+            let mut metadata = serde_json::json!({
+                "session_id": summary.session_id,
+                "duration_seconds": summary.duration_seconds,
+                "interaction_count": summary.interaction_count,
+                "memories_captured": summary.memories_captured,
+                "tools_used": summary.tools_used,
             });
-        } else {
-            metadata["sync"] = serde_json::json!({
-                "performed": false
-            });
-        }
 
-        // Build context message for session summary
-        let mut context_lines = vec![
-            "**Subcog Session Summary**\n".to_string(),
-            format!("Session: `{}`", summary.session_id),
-            format!("Duration: {} seconds", summary.duration_seconds),
-            format!("Interactions: {}", summary.interaction_count),
-            format!("Memories captured: {}", summary.memories_captured),
-            format!("Tools used: {}", summary.tools_used),
-        ];
-
-        // Add sync status
-        if let Some(sync) = &sync_result {
-            if sync.success {
-                context_lines.push(format!(
-                    "\n**Sync**: ✓ {} pushed, {} pulled",
-                    sync.pushed, sync.pulled
-                ));
+            // Add sync results if performed
+            if let Some(sync) = &sync_result {
+                metadata["sync"] = serde_json::json!({
+                    "performed": true,
+                    "success": sync.success,
+                    "pushed": sync.pushed,
+                    "pulled": sync.pulled,
+                    "error": sync.error
+                });
             } else {
-                context_lines.push(format!(
-                    "\n**Sync**: ✗ Failed - {}",
-                    sync.error.as_deref().unwrap_or("Unknown error")
-                ));
+                metadata["sync"] = serde_json::json!({
+                    "performed": false
+                });
             }
-        }
 
-        // Add hints if no memories were captured
-        if summary.memories_captured == 0 && summary.interaction_count > 5 {
-            metadata["hints"] = serde_json::json!([
-                "Consider capturing key decisions made during this session",
-                "Use 'mcp__plugin_subcog_subcog__subcog_capture' to save important learnings"
-            ]);
-            context_lines.push("\n**Tip**: No memories were captured this session. Consider using `mcp__plugin_subcog_subcog__subcog_capture` to save important decisions and learnings.".to_string());
-        }
+            // Build context message for session summary
+            let mut context_lines = vec![
+                "**Subcog Session Summary**\n".to_string(),
+                format!("Session: `{}`", summary.session_id),
+                format!("Duration: {} seconds", summary.duration_seconds),
+                format!("Interactions: {}", summary.interaction_count),
+                format!("Memories captured: {}", summary.memories_captured),
+                format!("Tools used: {}", summary.tools_used),
+            ];
 
-        // Build Claude Code hook response format per specification
-        // See: https://docs.anthropic.com/en/docs/claude-code/hooks
-        // Embed metadata as XML comment for debugging
-        let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
-        let context_with_metadata = format!(
-            "{}\n\n<!-- subcog-metadata: {} -->",
-            context_lines.join("\n"),
-            metadata_str
-        );
-        let response = serde_json::json!({
-            "hookSpecificOutput": {
-                "hookEventName": "Stop",
-                "additionalContext": context_with_metadata
+            // Add sync status
+            if let Some(sync) = &sync_result {
+                if sync.success {
+                    context_lines.push(format!(
+                        "\n**Sync**: ✓ {} pushed, {} pulled",
+                        sync.pushed, sync.pulled
+                    ));
+                } else {
+                    context_lines.push(format!(
+                        "\n**Sync**: ✗ Failed - {}",
+                        sync.error.as_deref().unwrap_or("Unknown error")
+                    ));
+                }
             }
-        });
 
-        serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
-            operation: "serialize_response".to_string(),
-            cause: e.to_string(),
-        })
+            // Add hints if no memories were captured
+            if summary.memories_captured == 0 && summary.interaction_count > 5 {
+                metadata["hints"] = serde_json::json!([
+                    "Consider capturing key decisions made during this session",
+                    "Use 'mcp__plugin_subcog_subcog__subcog_capture' to save important learnings"
+                ]);
+                context_lines.push("\n**Tip**: No memories were captured this session. Consider using `mcp__plugin_subcog_subcog__subcog_capture` to save important decisions and learnings.".to_string());
+            }
+
+            // Build Claude Code hook response format per specification
+            // See: https://docs.anthropic.com/en/docs/claude-code/hooks
+            // Embed metadata as XML comment for debugging
+            let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
+            let context_with_metadata = format!(
+                "{}\n\n<!-- subcog-metadata: {} -->",
+                context_lines.join("\n"),
+                metadata_str
+            );
+            let response = serde_json::json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "Stop",
+                    "additionalContext": context_with_metadata
+                }
+            });
+
+            serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
+                operation: "serialize_response".to_string(),
+                cause: e.to_string(),
+            })
+        };
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        metrics::counter!(
+            "hook_executions_total",
+            "hook_type" => "Stop",
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!("hook_duration_ms", "hook_type" => "Stop")
+            .record(start.elapsed().as_secs_f64() * 1000.0);
+
+        result
     }
 }
 

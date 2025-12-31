@@ -360,10 +360,6 @@ impl ResourceHandler {
     ///
     /// For advanced filtering, use the `subcog_browse` prompt.
     fn get_all_memories_resource(&self, uri: &str, parts: &[&str]) -> Result<ResourceContent> {
-        let recall = self.recall_service.as_ref().ok_or_else(|| {
-            Error::InvalidInput("Memory browsing requires RecallService".to_string())
-        })?;
-
         // Parse namespace filter from URI
         // subcog://_ -> no filter
         // subcog://_/learnings -> filter by namespace
@@ -381,34 +377,7 @@ impl ResourceHandler {
                 .ok_or_else(|| Error::InvalidInput(format!("Unknown namespace: {ns_str}")))?;
             filter = filter.with_namespace(ns);
         }
-
-        let results = recall.list_all(&filter, 500)?;
-
-        // Bare minimum for informed selection: id, ns, tags, uri
-        let memories: Vec<serde_json::Value> = results
-            .memories
-            .iter()
-            .map(|hit| {
-                serde_json::json!({
-                    "id": hit.memory.id.as_str(),
-                    "ns": hit.memory.namespace.as_str(),
-                    "tags": hit.memory.tags,
-                    "uri": format!("subcog://memory/{}", hit.memory.id.as_str()),
-                })
-            })
-            .collect();
-
-        let response = serde_json::json!({
-            "count": memories.len(),
-            "memories": memories,
-        });
-
-        Ok(ResourceContent {
-            uri: uri.to_string(),
-            mime_type: Some("application/json".to_string()),
-            text: Some(serde_json::to_string_pretty(&response).unwrap_or_default()),
-            blob: None,
-        })
+        self.list_memories(uri, &filter)
     }
 
     /// Gets a specific memory by ID with full content (cross-domain lookup).
@@ -437,6 +406,45 @@ impl ResourceHandler {
         self.format_memory_response(uri, &memory)
     }
 
+    /// Gets memories scoped to a namespace.
+    fn get_namespace_memories_resource(
+        &self,
+        uri: &str,
+        namespace: &str,
+    ) -> Result<ResourceContent> {
+        let ns = Namespace::parse(namespace)
+            .ok_or_else(|| Error::InvalidInput(format!("Unknown namespace: {namespace}")))?;
+        let filter = SearchFilter::new().with_namespace(ns);
+        self.list_memories(uri, &filter)
+    }
+
+    /// Gets a specific memory by ID with namespace validation.
+    fn get_scoped_memory_resource(
+        &self,
+        uri: &str,
+        namespace: &str,
+        memory_id: &str,
+    ) -> Result<ResourceContent> {
+        use crate::models::MemoryId;
+
+        let recall = self.recall_service.as_ref().ok_or_else(|| {
+            Error::InvalidInput("Memory browsing requires RecallService".to_string())
+        })?;
+
+        let memory = recall
+            .get_by_id(&MemoryId::new(memory_id))?
+            .ok_or_else(|| Error::InvalidInput(format!("Memory not found: {memory_id}")))?;
+
+        if memory.namespace.as_str() != namespace {
+            return Err(Error::InvalidInput(format!(
+                "Memory {memory_id} is in namespace {}, not {namespace}",
+                memory.namespace.as_str()
+            )));
+        }
+
+        self.format_memory_response(uri, &memory)
+    }
+
     /// Formats a memory as a JSON response.
     fn format_memory_response(
         &self,
@@ -453,6 +461,40 @@ impl ResourceHandler {
             "status": memory.status.as_str(),
             "created_at": memory.created_at,
             "updated_at": memory.updated_at,
+        });
+
+        Ok(ResourceContent {
+            uri: uri.to_string(),
+            mime_type: Some("application/json".to_string()),
+            text: Some(serde_json::to_string_pretty(&response).unwrap_or_default()),
+            blob: None,
+        })
+    }
+
+    fn list_memories(&self, uri: &str, filter: &SearchFilter) -> Result<ResourceContent> {
+        let recall = self.recall_service.as_ref().ok_or_else(|| {
+            Error::InvalidInput("Memory browsing requires RecallService".to_string())
+        })?;
+
+        let results = recall.list_all(filter, 500)?;
+
+        // Bare minimum for informed selection: id, ns, tags, uri
+        let memories: Vec<serde_json::Value> = results
+            .memories
+            .iter()
+            .map(|hit| {
+                serde_json::json!({
+                    "id": hit.memory.id.as_str(),
+                    "ns": hit.memory.namespace.as_str(),
+                    "tags": hit.memory.tags,
+                    "uri": format!("subcog://memory/{}", hit.memory.id.as_str()),
+                })
+            })
+            .collect();
+
+        let response = serde_json::json!({
+            "count": memories.len(),
+            "memories": memories,
         });
 
         Ok(ResourceContent {
@@ -622,8 +664,21 @@ impl ResourceHandler {
             return self.get_prompts_resource(uri, domain);
         }
 
-        // Fall back to memories (for backwards compatibility with subcog://project/_)
-        self.get_all_memories_resource(uri, parts)
+        if parts.len() == 1 {
+            return self.get_all_memories_resource(uri, parts);
+        }
+
+        let namespace = decode_uri_component(parts[1]);
+        if namespace == "_" {
+            return self.get_all_memories_resource(uri, parts);
+        }
+
+        if parts.len() >= 3 {
+            let memory_id = decode_uri_component(&parts[2..].join("/"));
+            return self.get_scoped_memory_resource(uri, &namespace, &memory_id);
+        }
+
+        self.get_namespace_memories_resource(uri, &namespace)
     }
 
     /// Gets prompts for a specific domain scope.
@@ -834,14 +889,15 @@ Add to `~/.claude/settings.json`:
 
 ### Configuration File
 
-Create `~/.config/subcog/config.yaml`:
+Create `~/.config/subcog/config.toml`:
 
-```yaml
-data_dir: ~/.subcog
-features:
-  redact_secrets: true
-  block_secrets: false
-  auto_sync: true
+```toml
+data_dir = "~/.subcog"
+
+[features]
+secrets_filter = true
+pii_filter = false
+auto_capture = true
 ```
 
 ## Available MCP Tools
@@ -1221,9 +1277,8 @@ If `subcog_recall` returns no results:
 The `subcog_capture` tool blocked content with potential secrets:
 
 1. Remove the secret from content
-2. Check `~/.config/subcog/config.yaml`:
-   - `block_secrets: false` to allow (not recommended)
-   - `redact_secrets: true` to auto-redact
+2. Check `~/.config/subcog/config.toml`:
+   - `[features] secrets_filter = false` to disable secrets filtering
 
 ### "Index not found"
 
@@ -1277,7 +1332,7 @@ GitHub: https://github.com/zircote/subcog/issues
 const HELP_ADVANCED: &str = r#"
 ## LLM-Powered Tools
 
-These tools require an LLM provider configured in `~/.config/subcog/config.yaml`.
+These tools require an LLM provider configured in `~/.config/subcog/config.toml`.
 
 ### Memory Consolidation
 
@@ -1317,13 +1372,13 @@ Improve a memory with better structure and tags:
 
 ## LLM Provider Configuration
 
-Configure in `~/.config/subcog/config.yaml`:
+Configure in `~/.config/subcog/config.toml`:
 
-```yaml
-llm:
-  provider: anthropic  # or openai, ollama, lmstudio
-  api_key: ${ANTHROPIC_API_KEY}
-  model: claude-3-haiku-20240307
+```toml
+[llm]
+provider = "anthropic" # or "openai", "ollama", "lmstudio"
+api_key = "${ANTHROPIC_API_KEY}"
+model = "claude-3-haiku-20240307"
 ```
 
 | Provider | Model | Use Case |
@@ -1707,6 +1762,45 @@ fn truncate_content(content: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{Domain, Memory, MemoryId, MemoryStatus};
+    use crate::services::RecallService;
+    use crate::storage::index::SqliteBackend;
+    use crate::storage::traits::IndexBackend;
+
+    fn build_handler_with_memories() -> ResourceHandler {
+        let mut index = SqliteBackend::in_memory().expect("in-memory index");
+        let now = 1_700_000_000;
+        let memory = Memory {
+            id: MemoryId::new("decisions-1"),
+            content: "Decision content".to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            status: MemoryStatus::Active,
+            created_at: now,
+            updated_at: now,
+            embedding: None,
+            tags: vec!["alpha".to_string()],
+            source: None,
+        };
+        let other = Memory {
+            id: MemoryId::new("patterns-1"),
+            content: "Pattern content".to_string(),
+            namespace: Namespace::Patterns,
+            domain: Domain::new(),
+            status: MemoryStatus::Active,
+            created_at: now,
+            updated_at: now,
+            embedding: None,
+            tags: vec!["beta".to_string()],
+            source: None,
+        };
+
+        index.index(&memory).expect("index memory");
+        index.index(&other).expect("index memory");
+
+        let recall = RecallService::with_index(index);
+        ResourceHandler::new().with_recall_service(recall)
+    }
 
     #[test]
     fn test_resource_handler_creation() {
@@ -1840,6 +1934,36 @@ mod tests {
         let result = handler.get_resource("subcog://search/");
         // Empty query after search/ is still valid parts
         // Just need recall service
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_project_namespace_listing_filters() {
+        let mut handler = build_handler_with_memories();
+        let result = handler.get_resource("subcog://project/decisions").unwrap();
+        let body = result.text.unwrap();
+        let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(value["count"].as_u64(), Some(1));
+        assert_eq!(value["memories"][0]["id"], "decisions-1");
+        assert_eq!(value["memories"][0]["ns"], "decisions");
+    }
+
+    #[test]
+    fn test_project_namespace_memory_fetch() {
+        let mut handler = build_handler_with_memories();
+        let result = handler
+            .get_resource("subcog://project/decisions/decisions-1")
+            .unwrap();
+        let body = result.text.unwrap();
+        let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(value["id"], "decisions-1");
+        assert_eq!(value["namespace"], "decisions");
+    }
+
+    #[test]
+    fn test_project_namespace_memory_fetch_rejects_mismatch() {
+        let mut handler = build_handler_with_memories();
+        let result = handler.get_resource("subcog://project/decisions/patterns-1");
         assert!(result.is_err());
     }
 }

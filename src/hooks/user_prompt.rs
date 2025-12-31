@@ -15,6 +15,7 @@ use crate::models::Namespace;
 use crate::services::RecallService;
 use regex::Regex;
 use std::sync::{Arc, LazyLock};
+use std::time::Instant;
 use tracing::instrument;
 
 /// Handles `UserPromptSubmit` hook events.
@@ -189,6 +190,9 @@ impl UserPromptHandler {
     /// Uses LLM-based classification when an LLM provider is configured,
     /// otherwise falls back to keyword-based detection.
     fn detect_search_intent(&self, prompt: &str) -> Option<SearchIntent> {
+        if !self.search_intent_config.enabled {
+            return None;
+        }
         let intent = self.classify_intent(prompt);
 
         if intent.confidence >= self.search_intent_threshold {
@@ -200,14 +204,10 @@ impl UserPromptHandler {
 
     /// Classifies intent using the appropriate detection method.
     fn classify_intent(&self, prompt: &str) -> SearchIntent {
-        self.llm_provider.as_ref().map_or_else(
+        self.llm_provider.clone().map_or_else(
             || self.classify_without_llm(prompt),
             |provider| {
-                detect_search_intent_hybrid(
-                    Some(provider.as_ref()),
-                    prompt,
-                    &self.search_intent_config,
-                )
+                detect_search_intent_hybrid(Some(provider), prompt, &self.search_intent_config)
             },
         )
     }
@@ -217,11 +217,7 @@ impl UserPromptHandler {
         if self.search_intent_config.use_llm {
             // LLM enabled in config but no provider - use timeout-based detection
             // which will fall back to keyword detection
-            detect_search_intent_with_timeout::<crate::llm::AnthropicClient>(
-                None,
-                prompt,
-                &self.search_intent_config,
-            )
+            detect_search_intent_with_timeout(None, prompt, &self.search_intent_config)
         } else {
             // Keyword-only detection
             detect_search_intent(prompt).unwrap_or_default()
@@ -319,40 +315,20 @@ impl UserPromptHandler {
 
         content.to_string()
     }
-}
 
-/// Calculates confidence score based on pattern matches.
-#[allow(clippy::cast_precision_loss)]
-fn calculate_confidence(pattern_matches: &[String], prompt: &str) -> f32 {
-    let base_confidence = 0.5;
-    let match_bonus = 0.15_f32.min(pattern_matches.len() as f32 * 0.1);
-
-    // Longer prompts with patterns are more likely to be intentional
-    let length_factor = if prompt.len() > 50 { 0.1 } else { 0.0 };
-
-    // Multiple sentences suggest more context
-    let sentence_factor = if prompt.contains('.') || prompt.contains('!') || prompt.contains('?') {
-        0.1
-    } else {
-        0.0
-    };
-
-    (base_confidence + match_bonus + length_factor + sentence_factor).min(0.95)
-}
-
-impl Default for UserPromptHandler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl HookHandler for UserPromptHandler {
-    fn event_type(&self) -> &'static str {
-        "UserPromptSubmit"
+    fn serialize_response(response: &serde_json::Value) -> Result<String> {
+        serde_json::to_string(response).map_err(|e| crate::Error::OperationFailed {
+            operation: "serialize_response".to_string(),
+            cause: e.to_string(),
+        })
     }
 
-    #[instrument(skip(self, input), fields(hook = "UserPromptSubmit"))]
-    fn handle(&self, input: &str) -> Result<String> {
+    fn handle_inner(
+        &self,
+        input: &str,
+        prompt_len: &mut usize,
+        intent_detected: &mut bool,
+    ) -> Result<String> {
         // Parse input as JSON
         let input_json: serde_json::Value =
             serde_json::from_str(input).unwrap_or_else(|_| serde_json::json!({}));
@@ -362,14 +338,12 @@ impl HookHandler for UserPromptHandler {
             .get("prompt")
             .and_then(|v| v.as_str())
             .unwrap_or("");
+        *prompt_len = prompt.len();
+        let span = tracing::Span::current();
+        span.record("prompt_length", *prompt_len);
 
         if prompt.is_empty() {
-            // Empty response when no prompt
-            let response = serde_json::json!({});
-            return serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
-                operation: "serialize_response".to_string(),
-                cause: e.to_string(),
-            });
+            return Self::serialize_response(&serde_json::json!({}));
         }
 
         // Detect capture signals
@@ -381,11 +355,7 @@ impl HookHandler for UserPromptHandler {
             .any(|s| s.confidence >= self.confidence_threshold);
 
         // Extract content if capturing
-        let content = if should_capture {
-            Some(self.extract_content(prompt))
-        } else {
-            None
-        };
+        let content = should_capture.then(|| self.extract_content(prompt));
 
         // Build signals JSON for metadata
         let signals_json: Vec<serde_json::Value> = signals
@@ -408,6 +378,8 @@ impl HookHandler for UserPromptHandler {
 
         // Detect search intent for proactive memory surfacing
         let search_intent = self.detect_search_intent(prompt);
+        *intent_detected = search_intent.is_some();
+        span.record("search_intent", *intent_detected);
 
         // Build memory context and add to metadata if search intent detected
         let memory_context = if let Some(ref intent) = search_intent {
@@ -463,10 +435,71 @@ impl HookHandler for UserPromptHandler {
             },
         );
 
-        serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
-            operation: "serialize_response".to_string(),
-            cause: e.to_string(),
-        })
+        Self::serialize_response(&response)
+    }
+}
+
+/// Calculates confidence score based on pattern matches.
+#[allow(clippy::cast_precision_loss)]
+fn calculate_confidence(pattern_matches: &[String], prompt: &str) -> f32 {
+    let base_confidence = 0.5;
+    let match_bonus = 0.15_f32.min(pattern_matches.len() as f32 * 0.1);
+
+    // Longer prompts with patterns are more likely to be intentional
+    let length_factor = if prompt.len() > 50 { 0.1 } else { 0.0 };
+
+    // Multiple sentences suggest more context
+    let sentence_factor = if prompt.contains('.') || prompt.contains('!') || prompt.contains('?') {
+        0.1
+    } else {
+        0.0
+    };
+
+    (base_confidence + match_bonus + length_factor + sentence_factor).min(0.95)
+}
+
+impl Default for UserPromptHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HookHandler for UserPromptHandler {
+    fn event_type(&self) -> &'static str {
+        "UserPromptSubmit"
+    }
+
+    #[instrument(
+        skip(self, input),
+        fields(
+            hook = "UserPromptSubmit",
+            prompt_length = tracing::field::Empty,
+            search_intent = tracing::field::Empty
+        )
+    )]
+    fn handle(&self, input: &str) -> Result<String> {
+        let start = Instant::now();
+        let mut prompt_len = 0usize;
+        let mut intent_detected = false;
+        let result = self.handle_inner(input, &mut prompt_len, &mut intent_detected);
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        metrics::counter!(
+            "hook_executions_total",
+            "hook_type" => "UserPromptSubmit",
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!("hook_duration_ms", "hook_type" => "UserPromptSubmit")
+            .record(start.elapsed().as_secs_f64() * 1000.0);
+        metrics::counter!(
+            "hook_memory_lookup_total",
+            "hook_type" => "UserPromptSubmit",
+            "result" => if intent_detected { "detected" } else { "not_detected" }
+        )
+        .increment(1);
+
+        result
     }
 }
 

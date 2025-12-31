@@ -3,6 +3,7 @@
 //! Builds memory context based on detected search intent for proactive surfacing.
 
 use crate::Result;
+use crate::config::SearchIntentConfig;
 use crate::hooks::search_intent::{SearchIntent, SearchIntentType};
 use crate::models::{Namespace, SearchFilter, SearchMode};
 use crate::services::RecallService;
@@ -76,6 +77,18 @@ impl AdaptiveContextConfig {
     pub const fn with_min_confidence(mut self, confidence: f32) -> Self {
         self.min_confidence = confidence;
         self
+    }
+
+    /// Builds context configuration from search intent settings.
+    #[must_use]
+    pub const fn from_search_intent_config(config: &SearchIntentConfig) -> Self {
+        Self {
+            base_count: config.base_count,
+            max_count: config.max_count,
+            max_tokens: config.max_tokens,
+            preview_length: 200,
+            min_confidence: config.min_confidence,
+        }
     }
 
     /// Calculates the number of memories to retrieve based on confidence.

@@ -3,13 +3,15 @@
 //! Searches for memories using hybrid (vector + BM25) search with RRF fusion.
 
 use crate::models::{
-    Memory, MemoryId, MemoryStatus, SearchFilter, SearchHit, SearchMode, SearchResult,
+    Memory, MemoryEvent, MemoryId, MemoryStatus, SearchFilter, SearchHit, SearchMode, SearchResult,
 };
+use crate::security::record_event;
 use crate::storage::index::SqliteBackend;
 use crate::storage::traits::IndexBackend;
 use crate::{Error, Result};
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use tracing::instrument;
 
 /// Service for searching and retrieving memories.
 pub struct RecallService {
@@ -36,6 +38,15 @@ impl RecallService {
     ///
     /// Returns an error if the search fails.
     #[allow(clippy::cast_possible_truncation)]
+    #[instrument(
+        skip(self, query, filter),
+        fields(
+            operation = "recall",
+            mode = %mode,
+            query_length = query.len(),
+            limit = limit
+        )
+    )]
     pub fn search(
         &self,
         query: &str,
@@ -44,28 +55,59 @@ impl RecallService {
         limit: usize,
     ) -> Result<SearchResult> {
         let start = Instant::now();
+        let domain_label = domain_label(filter);
+        let mode_label = mode.as_str();
 
-        // Validate query
-        if query.trim().is_empty() {
-            return Err(Error::InvalidInput("Query cannot be empty".to_string()));
-        }
+        let result = (|| {
+            // Validate query
+            if query.trim().is_empty() {
+                return Err(Error::InvalidInput("Query cannot be empty".to_string()));
+            }
 
-        let memories = match mode {
-            SearchMode::Text => self.text_search(query, filter, limit)?,
-            SearchMode::Vector => self.vector_search(query, filter, limit)?,
-            SearchMode::Hybrid => self.hybrid_search(query, filter, limit)?,
-        };
+            let memories = match mode {
+                SearchMode::Text => self.text_search(query, filter, limit)?,
+                SearchMode::Vector => self.vector_search(query, filter, limit)?,
+                SearchMode::Hybrid => self.hybrid_search(query, filter, limit)?,
+            };
 
-        // Safe cast: u128 milliseconds will practically never exceed u64::MAX
-        let execution_time_ms = start.elapsed().as_millis() as u64;
-        let total_count = memories.len();
+            // Safe cast: u128 milliseconds will practically never exceed u64::MAX
+            let execution_time_ms = start.elapsed().as_millis() as u64;
+            let total_count = memories.len();
+            let timestamp = current_timestamp();
+            let query_value = query.to_string();
+            for hit in &memories {
+                record_event(MemoryEvent::Retrieved {
+                    memory_id: hit.memory.id.clone(),
+                    query: query_value.clone(),
+                    score: hit.score,
+                    timestamp,
+                });
+            }
 
-        Ok(SearchResult {
-            memories,
-            total_count,
-            mode,
-            execution_time_ms,
-        })
+            Ok(SearchResult {
+                memories,
+                total_count,
+                mode,
+                execution_time_ms,
+            })
+        })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        metrics::counter!(
+            "memory_search_total",
+            "mode" => mode_label,
+            "domain" => domain_label,
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!(
+            "memory_search_duration_ms",
+            "mode" => mode_label,
+            "backend" => "sqlite"
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
+
+        result
     }
 
     /// Lists all memories, optionally filtered by namespace.
@@ -77,42 +119,72 @@ impl RecallService {
     ///
     /// Returns an error if the index is not available.
     #[allow(clippy::cast_possible_truncation)]
+    #[instrument(skip(self, filter), fields(operation = "list_all", limit = limit))]
     pub fn list_all(&self, filter: &SearchFilter, limit: usize) -> Result<SearchResult> {
         let start = Instant::now();
+        let domain_label = domain_label(filter);
 
-        let index = self.index.as_ref().ok_or_else(|| Error::OperationFailed {
-            operation: "list_all".to_string(),
-            cause: "No index backend configured".to_string(),
-        })?;
+        let result = (|| {
+            let index = self.index.as_ref().ok_or_else(|| Error::OperationFailed {
+                operation: "list_all".to_string(),
+                cause: "No index backend configured".to_string(),
+            })?;
 
-        let results = index.list_all(filter, limit)?;
+            let results = index.list_all(filter, limit)?;
 
-        // Fetch memory to get namespace. Content cleared - details via drill-down.
-        let memories: Vec<SearchHit> = results
-            .into_iter()
-            .filter_map(|(id, score)| {
-                index.get_memory(&id).ok().flatten().map(|mut memory| {
-                    // Clear content for lightweight response
-                    memory.content = String::new();
-                    SearchHit {
-                        memory,
-                        score,
-                        vector_score: None,
-                        bm25_score: None,
-                    }
+            // Fetch memory to get namespace. Content cleared - details via drill-down.
+            let memories: Vec<SearchHit> = results
+                .into_iter()
+                .filter_map(|(id, score)| {
+                    index.get_memory(&id).ok().flatten().map(|mut memory| {
+                        // Clear content for lightweight response
+                        memory.content = String::new();
+                        SearchHit {
+                            memory,
+                            score,
+                            vector_score: None,
+                            bm25_score: None,
+                        }
+                    })
                 })
+                .collect();
+
+            let execution_time_ms = start.elapsed().as_millis() as u64;
+            let total_count = memories.len();
+            let timestamp = current_timestamp();
+            for hit in &memories {
+                record_event(MemoryEvent::Retrieved {
+                    memory_id: hit.memory.id.clone(),
+                    query: "*".to_string(),
+                    score: hit.score,
+                    timestamp,
+                });
+            }
+
+            Ok(SearchResult {
+                memories,
+                total_count,
+                mode: SearchMode::Text,
+                execution_time_ms,
             })
-            .collect();
+        })();
 
-        let execution_time_ms = start.elapsed().as_millis() as u64;
-        let total_count = memories.len();
+        let status = if result.is_ok() { "success" } else { "error" };
+        metrics::counter!(
+            "memory_search_total",
+            "mode" => "list_all",
+            "domain" => domain_label,
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!(
+            "memory_search_duration_ms",
+            "mode" => "list_all",
+            "backend" => "sqlite"
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
 
-        Ok(SearchResult {
-            memories,
-            total_count,
-            mode: SearchMode::Text,
-            execution_time_ms,
-        })
+        result
     }
 
     /// Performs BM25 text search.
@@ -260,6 +332,21 @@ impl RecallService {
         // Would need persistence backend to implement
         Ok(Vec::new())
     }
+}
+
+fn domain_label(filter: &SearchFilter) -> String {
+    match filter.domains.len() {
+        0 => "all".to_string(),
+        1 => filter.domains[0].to_string(),
+        _ => "multi".to_string(),
+    }
+}
+
+fn current_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Merges a vector score into an existing search hit.

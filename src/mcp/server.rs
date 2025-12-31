@@ -8,6 +8,8 @@ use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
+use std::time::Instant;
+use tracing::info_span;
 
 /// MCP protocol version.
 const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -149,15 +151,60 @@ impl McpServer {
 
     /// Handles a JSON-RPC request.
     fn handle_request(&mut self, request: &str) -> String {
-        let parsed: std::result::Result<JsonRpcRequest, _> = serde_json::from_str(request);
+        let start = Instant::now();
+        let transport_label = match self.transport {
+            Transport::Stdio => "stdio",
+            Transport::Http => "http",
+        };
 
-        match parsed {
+        let span = info_span!(
+            "mcp.request",
+            transport = transport_label,
+            rpc.method = tracing::field::Empty,
+            rpc.id = tracing::field::Empty,
+            status = tracing::field::Empty
+        );
+        let _guard = span.enter();
+
+        let parsed: std::result::Result<JsonRpcRequest, _> = serde_json::from_str(request);
+        let mut method_label = "parse_error".to_string();
+        let mut status_label = "error";
+
+        let response = match parsed {
             Ok(req) => {
+                method_label.clone_from(&req.method);
+                span.record("rpc.method", method_label.as_str());
+                if let Some(id) = &req.id {
+                    let id_str = id.to_string();
+                    span.record("rpc.id", id_str.as_str());
+                }
+
                 let result = self.dispatch_method(&req.method, req.params);
+                status_label = if result.is_ok() { "success" } else { "error" };
+                span.record("status", status_label);
                 self.format_response(req.id, result)
             },
-            Err(e) => self.format_error(None, -32700, &format!("Parse error: {e}")),
-        }
+            Err(e) => {
+                span.record("status", "parse_error");
+                self.format_error(None, -32700, &format!("Parse error: {e}"))
+            },
+        };
+
+        metrics::counter!(
+            "mcp_requests_total",
+            "method" => method_label.clone(),
+            "transport" => transport_label,
+            "status" => status_label
+        )
+        .increment(1);
+        metrics::histogram!(
+            "mcp_request_duration_ms",
+            "method" => method_label,
+            "transport" => transport_label
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
+
+        response
     }
 
     /// Dispatches a method call.
@@ -218,22 +265,56 @@ impl McpServer {
             .get("name")
             .and_then(|v| v.as_str())
             .ok_or((-32602, "Missing tool name".to_string()))?;
+        let tool_name = name.to_string();
+        let span = info_span!("mcp.tool.call", tool.name = tool_name.as_str());
+        let _guard = span.enter();
+        let start = Instant::now();
 
         let arguments = params
             .get("arguments")
             .cloned()
             .unwrap_or(serde_json::json!({}));
 
-        match self.tools.execute(name, arguments) {
-            Ok(result) => Ok(serde_json::json!({
-                "content": result.content,
-                "isError": result.is_error
-            })),
-            Err(e) => Ok(serde_json::json!({
-                "content": [{ "type": "text", "text": e.to_string() }],
-                "isError": true
-            })),
+        let (result, status_label) = match self.tools.execute(name, arguments) {
+            Ok(result) => {
+                let status_label = if result.is_error { "error" } else { "success" };
+                (
+                    Ok(serde_json::json!({
+                        "content": result.content,
+                        "isError": result.is_error
+                    })),
+                    status_label,
+                )
+            },
+            Err(e) => (
+                Ok(serde_json::json!({
+                    "content": [{ "type": "text", "text": e.to_string() }],
+                    "isError": true
+                })),
+                "error",
+            ),
+        };
+        metrics::counter!(
+            "mcp_tool_calls_total",
+            "tool" => tool_name.clone(),
+            "status" => status_label
+        )
+        .increment(1);
+        if status_label == "error" {
+            metrics::counter!(
+                "mcp_tool_errors_total",
+                "tool" => tool_name.clone()
+            )
+            .increment(1);
         }
+        metrics::histogram!(
+            "mcp_tool_duration_ms",
+            "tool" => tool_name,
+            "status" => status_label
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
+
+        result
     }
 
     /// Handles resources/list.
@@ -264,7 +345,17 @@ impl McpServer {
             .and_then(|v| v.as_str())
             .ok_or((-32602, "Missing resource URI".to_string()))?;
 
-        match self.resources.get_resource(uri) {
+        let resource_kind = classify_resource_kind(uri);
+        let span = info_span!(
+            "mcp.resource.read",
+            resource.uri = uri,
+            resource.kind = resource_kind,
+            status = tracing::field::Empty
+        );
+        let _guard = span.enter();
+        let start = Instant::now();
+
+        let result = match self.resources.get_resource(uri) {
             Ok(content) => Ok(serde_json::json!({
                 "contents": [{
                     "uri": content.uri,
@@ -273,7 +364,24 @@ impl McpServer {
                 }]
             })),
             Err(e) => Err((-32603, e.to_string())),
-        }
+        };
+
+        let status_label = if result.is_ok() { "success" } else { "error" };
+        span.record("status", status_label);
+        metrics::counter!(
+            "mcp_resource_reads_total",
+            "resource_kind" => resource_kind,
+            "status" => status_label
+        )
+        .increment(1);
+        metrics::histogram!(
+            "mcp_resource_read_duration_ms",
+            "resource_kind" => resource_kind,
+            "status" => status_label
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
+
+        result
     }
 
     /// Handles prompts/list.
@@ -308,6 +416,8 @@ impl McpServer {
             .get("name")
             .and_then(|v| v.as_str())
             .ok_or((-32602, "Missing prompt name".to_string()))?;
+        let span = info_span!("mcp.prompt.get", prompt.name = name);
+        let _guard = span.enter();
 
         let arguments = params
             .get("arguments")
@@ -361,6 +471,18 @@ impl McpServer {
             }),
         };
         serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string())
+    }
+}
+
+fn classify_resource_kind(uri: &str) -> &'static str {
+    if uri.starts_with("subcog://memory/") {
+        "memory"
+    } else if uri.starts_with("subcog://project/") {
+        "project"
+    } else if uri.starts_with("subcog://help") {
+        "help"
+    } else {
+        "other"
     }
 }
 

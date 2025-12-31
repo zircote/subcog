@@ -3,10 +3,14 @@
 //! Manages memory lifecycle, clustering, and archival.
 
 use crate::Result;
-use crate::models::{EdgeType, Memory, MemoryStatus, MemoryTier, Namespace, RetentionScore};
+use crate::models::{
+    EdgeType, Memory, MemoryEvent, MemoryStatus, MemoryTier, Namespace, RetentionScore,
+};
+use crate::security::record_event;
 use crate::storage::traits::PersistenceBackend;
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use tracing::instrument;
 
 /// Service for consolidating and managing memory lifecycle.
 pub struct ConsolidationService<P: PersistenceBackend> {
@@ -41,40 +45,69 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     /// # Errors
     ///
     /// Returns an error if consolidation fails.
+    #[instrument(skip(self), fields(operation = "consolidate"))]
     pub fn consolidate(&mut self) -> Result<ConsolidationStats> {
-        let mut stats = ConsolidationStats::default();
+        let start = Instant::now();
+        let result = (|| {
+            let mut stats = ConsolidationStats::default();
 
-        // Get all memory IDs
-        let memory_ids = self.persistence.list_ids()?;
-        stats.processed = memory_ids.len();
+            // Get all memory IDs
+            let memory_ids = self.persistence.list_ids()?;
+            stats.processed = memory_ids.len();
 
-        let now = current_timestamp();
-        let mut to_archive = Vec::new();
+            let now = current_timestamp();
+            let mut to_archive = Vec::new();
 
-        for id in &memory_ids {
-            // Calculate retention score
-            let score = self.calculate_retention_score(id.as_str(), now);
-            let tier = score.suggested_tier();
+            for id in &memory_ids {
+                // Calculate retention score
+                let score = self.calculate_retention_score(id.as_str(), now);
+                let tier = score.suggested_tier();
 
-            // Archive memories in Archive tier
-            if tier == MemoryTier::Archive {
-                to_archive.push(id.clone());
+                // Archive memories in Archive tier
+                if tier == MemoryTier::Archive {
+                    to_archive.push(id.clone());
+                }
             }
-        }
 
-        // Archive identified memories
-        for id in to_archive {
-            if let Some(mut memory) = self.persistence.get(&id)? {
-                memory.status = MemoryStatus::Archived;
-                self.persistence.store(&memory)?;
-                stats.archived += 1;
+            // Archive identified memories
+            for id in to_archive {
+                if let Some(mut memory) = self.persistence.get(&id)? {
+                    memory.status = MemoryStatus::Archived;
+                    self.persistence.store(&memory)?;
+                    stats.archived += 1;
+                }
             }
-        }
 
-        // Detect contradictions (simple heuristic: same namespace, similar timestamps)
-        stats.contradictions = self.detect_contradictions(&memory_ids)?;
+            // Detect contradictions (simple heuristic: same namespace, similar timestamps)
+            stats.contradictions = self.detect_contradictions(&memory_ids)?;
 
-        Ok(stats)
+            record_event(MemoryEvent::Consolidated {
+                processed: stats.processed,
+                archived: stats.archived,
+                merged: stats.merged,
+                timestamp: current_timestamp(),
+            });
+
+            Ok(stats)
+        })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        metrics::counter!(
+            "memory_operations_total",
+            "operation" => "consolidate",
+            "namespace" => "mixed",
+            "domain" => "project",
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!(
+            "memory_operation_duration_ms",
+            "operation" => "consolidate",
+            "namespace" => "mixed"
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
+
+        result
     }
 
     /// Calculates the retention score for a memory.
