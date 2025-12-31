@@ -1,0 +1,97 @@
+# Subcog full configuration with sane defaults.
+
+repo_path = "."
+data_dir = ".subcog"
+max_results = 10
+default_search_mode = "hybrid" # text, vector, hybrid
+
+[features]
+secrets_filter = false
+pii_filter = false
+multi_domain = false
+audit_log = false
+llm_features = false
+auto_capture = false
+consolidation = false
+
+[llm]
+provider = "anthropic" # anthropic, openai, ollama, lmstudio
+model = "claude-sonnet-4-20250514"
+api_key = "" # leave empty to use env vars
+base_url = "https://api.anthropic.com/v1"
+timeout_ms = 30000
+connect_timeout_ms = 3000
+max_retries = 0
+retry_backoff_ms = 100
+breaker_failure_threshold = 3
+breaker_reset_ms = 30000
+breaker_half_open_max_calls = 1
+latency_slo_ms = 2000
+error_budget_ratio = 0.05
+error_budget_window_secs = 300
+
+[search_intent]
+enabled = true
+use_llm = true
+llm_timeout_ms = 200
+min_confidence = 0.5
+base_count = 5
+max_count = 15
+max_tokens = 4000
+
+[observability.logging]
+format = "json" # json, pretty
+level = "info"
+filter = "subcog=info"
+
+[observability.tracing]
+enabled = false
+sample_ratio = 1.0
+service_name = "subcog"
+resource_attributes = []
+
+[observability.tracing.otlp]
+endpoint = "http://localhost:4317"
+protocol = "grpc" # grpc, http
+
+[observability.metrics]
+enabled = false
+port = 9090
+
+[observability.metrics.push_gateway]
+endpoint = "" # full push gateway URL, including /metrics/job/<job>
+username = ""
+password = ""
+use_http_post = false
+
+# Prompt customization - extend or override the default LLM system prompts.
+# Use this to add domain-specific guidance, compliance requirements, or custom behaviors.
+[prompt]
+# Additional identity context (appended to subcog's identity section).
+# Use this to describe your environment, compliance requirements, or organizational context.
+# identity_addendum = """
+# You are operating in a healthcare environment subject to HIPAA regulations.
+# All captured memories must be reviewed for PHI before storage.
+# """
+
+# Global additional guidance (applies to all LLM operations).
+# Use this for cross-cutting concerns like security policies or quality standards.
+# additional_guidance = """
+# When analyzing content:
+# - Pay special attention to PCI-DSS compliance for payment-related code
+# - Flag any hardcoded credentials or API keys as security risks
+# - Prioritize capturing architectural decisions over implementation details
+# """
+
+# Per-operation customizations - add guidance specific to each operation type.
+[prompt.capture]
+# additional_guidance = "Be extra conservative with captures in this repository."
+
+[prompt.search]
+# additional_guidance = "Prioritize recent memories over older ones."
+
+[prompt.enrichment]
+# additional_guidance = "Include compliance-related tags when applicable."
+
+[prompt.consolidation]
+# additional_guidance = "Preserve all security-related memories during consolidation."

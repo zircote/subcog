@@ -1,6 +1,6 @@
 //! LM Studio client.
 
-use super::{CaptureAnalysis, LlmProvider};
+use super::{CaptureAnalysis, LlmHttpConfig, LlmProvider, build_http_client};
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 
@@ -29,7 +29,7 @@ impl LmStudioClient {
         Self {
             endpoint,
             model: None,
-            client: reqwest::blocking::Client::new(),
+            client: build_http_client(LlmHttpConfig::from_env()),
         }
     }
 
@@ -44,6 +44,13 @@ impl LmStudioClient {
     #[must_use]
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = Some(model.into());
+        self
+    }
+
+    /// Sets HTTP client timeouts for LLM requests.
+    #[must_use]
+    pub fn with_http_config(mut self, config: LlmHttpConfig) -> Self {
+        self.client = build_http_client(config);
         self
     }
 

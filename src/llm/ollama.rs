@@ -1,6 +1,6 @@
 //! Ollama (local) client.
 
-use super::{CaptureAnalysis, LlmProvider};
+use super::{CaptureAnalysis, LlmHttpConfig, LlmProvider, build_http_client};
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 
@@ -32,7 +32,7 @@ impl OllamaClient {
         Self {
             endpoint,
             model,
-            client: reqwest::blocking::Client::new(),
+            client: build_http_client(LlmHttpConfig::from_env()),
         }
     }
 
@@ -47,6 +47,13 @@ impl OllamaClient {
     #[must_use]
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = model.into();
+        self
+    }
+
+    /// Sets HTTP client timeouts for LLM requests.
+    #[must_use]
+    pub fn with_http_config(mut self, config: LlmHttpConfig) -> Self {
+        self.client = build_http_client(config);
         self
     }
 

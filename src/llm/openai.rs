@@ -1,6 +1,6 @@
 //! `OpenAI` client.
 
-use super::{CaptureAnalysis, LlmProvider};
+use super::{CaptureAnalysis, LlmHttpConfig, LlmProvider, build_http_client};
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 
@@ -31,7 +31,7 @@ impl OpenAiClient {
             api_key,
             endpoint: Self::DEFAULT_ENDPOINT.to_string(),
             model: Self::DEFAULT_MODEL.to_string(),
-            client: reqwest::blocking::Client::new(),
+            client: build_http_client(LlmHttpConfig::from_env()),
         }
     }
 
@@ -53,6 +53,13 @@ impl OpenAiClient {
     #[must_use]
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = model.into();
+        self
+    }
+
+    /// Sets HTTP client timeouts for LLM requests.
+    #[must_use]
+    pub fn with_http_config(mut self, config: LlmHttpConfig) -> Self {
+        self.client = build_http_client(config);
         self
     }
 
