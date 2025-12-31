@@ -22,12 +22,15 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 use subcog::config::SubcogConfig;
 use subcog::hooks::{
-    HookHandler, PostToolUseHandler, PreCompactHandler, SessionStartHandler, StopHandler,
-    UserPromptHandler,
+    AdaptiveContextConfig, HookHandler, PostToolUseHandler, PreCompactHandler, SessionStartHandler,
+    StopHandler, UserPromptHandler,
 };
 use subcog::mcp::{McpServer, Transport};
+use subcog::observability::{self, InitOptions};
+use subcog::security::AuditConfig;
 use subcog::services::ContextBuilderService;
 use subcog::storage::index::SqliteBackend;
 use subcog::{
@@ -308,17 +311,34 @@ enum PromptAction {
 }
 
 /// Main entry point.
-fn main() -> ExitCode {
+#[tokio::main]
+async fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    // Initialize tracing if verbose
-    if cli.verbose {
-        tracing_subscriber::fmt()
-            .with_env_filter("subcog=debug")
-            .init();
-    }
+    let config = match load_config(cli.config.as_deref()) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("Failed to load configuration: {e}");
+            return ExitCode::FAILURE;
+        },
+    };
 
-    let result = run_command(cli);
+    let expose_metrics = matches!(cli.command, Commands::Serve { .. });
+    let _observability = match observability::init_from_config(
+        &config.observability,
+        InitOptions {
+            verbose: cli.verbose,
+            metrics_expose: expose_metrics,
+        },
+    ) {
+        Ok(handle) => handle,
+        Err(e) => {
+            eprintln!("Failed to initialize observability: {e}");
+            return ExitCode::FAILURE;
+        },
+    };
+
+    let result = run_command(cli, config);
 
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -330,8 +350,12 @@ fn main() -> ExitCode {
 }
 
 /// Runs the selected command.
-fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
-    let config = load_config(cli.config.as_deref())?;
+fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::error::Error>> {
+    if config.features.audit_log {
+        let audit_path = config.data_dir.join("audit.log");
+        let audit_config = AuditConfig::new().with_log_path(audit_path);
+        subcog::security::init_global(audit_config)?;
+    }
 
     match cli.command {
         Commands::Capture {
@@ -339,7 +363,7 @@ fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             namespace,
             tags,
             source,
-        } => cmd_capture(content, namespace, tags, source),
+        } => cmd_capture(&config, content, namespace, tags, source),
 
         Commands::Recall {
             query,
@@ -367,7 +391,7 @@ fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Serve { transport, port } => cmd_serve(transport, port),
 
-        Commands::Hook { event } => cmd_hook(event),
+        Commands::Hook { event } => cmd_hook(event, &config),
 
         Commands::Prompt { action } => cmd_prompt(action),
     }
@@ -379,6 +403,14 @@ fn load_config(path: Option<&str>) -> Result<SubcogConfig, Box<dyn std::error::E
     if let Some(config_path) = path {
         return SubcogConfig::load_from_file(std::path::Path::new(config_path))
             .map_err(std::convert::Into::into);
+    }
+
+    // Environment override for config path
+    if let Ok(config_path) = std::env::var("SUBCOG_CONFIG_PATH") {
+        if !config_path.trim().is_empty() {
+            return SubcogConfig::load_from_file(std::path::Path::new(&config_path))
+                .map_err(std::convert::Into::into);
+        }
     }
 
     // Otherwise, load from default location
@@ -415,6 +447,7 @@ fn parse_search_mode(s: &str) -> SearchMode {
 
 /// Capture command.
 fn cmd_capture(
+    config: &SubcogConfig,
     content: String,
     namespace: String,
     tags: Option<String>,
@@ -422,8 +455,9 @@ fn cmd_capture(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Get repo path so captures are stored to git notes
     let cwd = std::env::current_dir()?;
-    let config = subcog::config::Config::new().with_repo_path(&cwd);
-    let service = CaptureService::new(config);
+    let mut service_config = subcog::config::Config::from(config.clone());
+    service_config = service_config.with_repo_path(&cwd);
+    let service = CaptureService::new(service_config);
 
     let tag_list = tags
         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
@@ -631,7 +665,7 @@ fn cmd_sync(push: bool, fetch: bool) -> Result<(), Box<dyn std::error::Error>> {
 /// Consolidate command.
 fn cmd_consolidate() -> Result<(), Box<dyn std::error::Error>> {
     println!("Consolidation requires a configured storage backend.");
-    println!("Configure storage in subcog.toml or use environment variables.");
+    println!("Configure storage in config.toml or use environment variables.");
 
     Ok(())
 }
@@ -671,8 +705,6 @@ fn cmd_enrich(
     dry_run: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use subcog::config::LlmProvider;
-    use subcog::llm::{AnthropicClient, LmStudioClient, OllamaClient, OpenAiClient};
-    use subcog::services::EnrichmentService;
 
     // Get repository path
     let cwd = std::env::current_dir()?;
@@ -687,75 +719,169 @@ fn cmd_enrich(
             .as_ref()
             .map_or(String::new(), |m| format!(" (model: {m})"))
     );
-
     // Build enrichment service with configured provider
     match llm_config.provider {
-        LlmProvider::OpenAi => {
-            let mut client = OpenAiClient::new();
-            if let Some(ref model) = llm_config.model {
-                client = client.with_model(model);
-            }
-            if let Some(ref base_url) = llm_config.base_url {
-                client = client.with_endpoint(base_url);
-            }
-            run_enrichment(
-                EnrichmentService::new(client, &cwd),
-                all,
-                update_all,
-                id,
-                dry_run,
-                &cwd,
-            )
-        },
-        LlmProvider::Anthropic => {
-            let mut client = AnthropicClient::new();
-            if let Some(ref model) = llm_config.model {
-                client = client.with_model(model);
-            }
-            run_enrichment(
-                EnrichmentService::new(client, &cwd),
-                all,
-                update_all,
-                id,
-                dry_run,
-                &cwd,
-            )
-        },
-        LlmProvider::Ollama => {
-            let mut client = OllamaClient::new();
-            if let Some(ref model) = llm_config.model {
-                client = client.with_model(model);
-            }
-            if let Some(ref base_url) = llm_config.base_url {
-                client = client.with_endpoint(base_url);
-            }
-            run_enrichment(
-                EnrichmentService::new(client, &cwd),
-                all,
-                update_all,
-                id,
-                dry_run,
-                &cwd,
-            )
-        },
-        LlmProvider::LmStudio => {
-            let mut client = LmStudioClient::new();
-            if let Some(ref model) = llm_config.model {
-                client = client.with_model(model);
-            }
-            if let Some(ref base_url) = llm_config.base_url {
-                client = client.with_endpoint(base_url);
-            }
-            run_enrichment(
-                EnrichmentService::new(client, &cwd),
-                all,
-                update_all,
-                id,
-                dry_run,
-                &cwd,
-            )
-        },
+        LlmProvider::OpenAi => run_enrich_with_client(
+            build_openai_client(llm_config),
+            llm_config,
+            all,
+            update_all,
+            id,
+            dry_run,
+            &cwd,
+        ),
+        LlmProvider::Anthropic => run_enrich_with_client(
+            build_anthropic_client(llm_config),
+            llm_config,
+            all,
+            update_all,
+            id,
+            dry_run,
+            &cwd,
+        ),
+        LlmProvider::Ollama => run_enrich_with_client(
+            build_ollama_client(llm_config),
+            llm_config,
+            all,
+            update_all,
+            id,
+            dry_run,
+            &cwd,
+        ),
+        LlmProvider::LmStudio => run_enrich_with_client(
+            build_lmstudio_client(llm_config),
+            llm_config,
+            all,
+            update_all,
+            id,
+            dry_run,
+            &cwd,
+        ),
     }
+}
+
+fn build_http_config(llm_config: &subcog::config::LlmConfig) -> subcog::llm::LlmHttpConfig {
+    subcog::llm::LlmHttpConfig::from_config(llm_config).with_env_overrides()
+}
+
+fn build_resilience_config(
+    llm_config: &subcog::config::LlmConfig,
+) -> subcog::llm::LlmResilienceConfig {
+    subcog::llm::LlmResilienceConfig::from_config(llm_config).with_env_overrides()
+}
+
+fn build_openai_client(llm_config: &subcog::config::LlmConfig) -> subcog::llm::OpenAiClient {
+    let mut client = subcog::llm::OpenAiClient::new();
+    if let Some(ref api_key) = llm_config.api_key {
+        client = client.with_api_key(api_key);
+    }
+    if let Some(ref model) = llm_config.model {
+        client = client.with_model(model);
+    }
+    if let Some(ref base_url) = llm_config.base_url {
+        client = client.with_endpoint(base_url);
+    }
+    client.with_http_config(build_http_config(llm_config))
+}
+
+fn build_anthropic_client(llm_config: &subcog::config::LlmConfig) -> subcog::llm::AnthropicClient {
+    let mut client = subcog::llm::AnthropicClient::new();
+    if let Some(ref api_key) = llm_config.api_key {
+        client = client.with_api_key(api_key);
+    }
+    if let Some(ref model) = llm_config.model {
+        client = client.with_model(model);
+    }
+    if let Some(ref base_url) = llm_config.base_url {
+        client = client.with_endpoint(base_url);
+    }
+    client.with_http_config(build_http_config(llm_config))
+}
+
+fn build_ollama_client(llm_config: &subcog::config::LlmConfig) -> subcog::llm::OllamaClient {
+    let mut client = subcog::llm::OllamaClient::new();
+    if let Some(ref model) = llm_config.model {
+        client = client.with_model(model);
+    }
+    if let Some(ref base_url) = llm_config.base_url {
+        client = client.with_endpoint(base_url);
+    }
+    client.with_http_config(build_http_config(llm_config))
+}
+
+fn build_lmstudio_client(llm_config: &subcog::config::LlmConfig) -> subcog::llm::LmStudioClient {
+    let mut client = subcog::llm::LmStudioClient::new();
+    if let Some(ref model) = llm_config.model {
+        client = client.with_model(model);
+    }
+    if let Some(ref base_url) = llm_config.base_url {
+        client = client.with_endpoint(base_url);
+    }
+    client.with_http_config(build_http_config(llm_config))
+}
+
+fn run_enrich_with_client<P: subcog::llm::LlmProvider>(
+    client: P,
+    llm_config: &subcog::config::LlmConfig,
+    all: bool,
+    update_all: bool,
+    id: Option<String>,
+    dry_run: bool,
+    cwd: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let resilience_config = build_resilience_config(llm_config);
+    let client = subcog::llm::ResilientLlmProvider::new(client, resilience_config);
+    run_enrichment(
+        subcog::services::EnrichmentService::new(client, cwd),
+        all,
+        update_all,
+        id,
+        dry_run,
+        cwd,
+    )
+}
+
+fn build_hook_llm_provider(config: &SubcogConfig) -> Option<Arc<dyn subcog::llm::LlmProvider>> {
+    use subcog::config::LlmProvider as Provider;
+    use subcog::llm::{LlmProvider as LlmProviderTrait, ResilientLlmProvider};
+
+    if !config.search_intent.use_llm {
+        return None;
+    }
+
+    let llm_config = &config.llm;
+    let provider: Arc<dyn LlmProviderTrait> = match llm_config.provider {
+        Provider::OpenAi => {
+            let resilience_config = build_resilience_config(llm_config);
+            Arc::new(ResilientLlmProvider::new(
+                build_openai_client(llm_config),
+                resilience_config,
+            ))
+        },
+        Provider::Anthropic => {
+            let resilience_config = build_resilience_config(llm_config);
+            Arc::new(ResilientLlmProvider::new(
+                build_anthropic_client(llm_config),
+                resilience_config,
+            ))
+        },
+        Provider::Ollama => {
+            let resilience_config = build_resilience_config(llm_config);
+            Arc::new(ResilientLlmProvider::new(
+                build_ollama_client(llm_config),
+                resilience_config,
+            ))
+        },
+        Provider::LmStudio => {
+            let resilience_config = build_resilience_config(llm_config);
+            Arc::new(ResilientLlmProvider::new(
+                build_lmstudio_client(llm_config),
+                resilience_config,
+            ))
+        },
+    };
+
+    Some(provider)
 }
 
 /// Runs the enrichment operation with the given service.
@@ -891,7 +1017,7 @@ fn cmd_serve(transport: String, port: u16) -> Result<(), Box<dyn std::error::Err
 }
 
 /// Hook command.
-fn cmd_hook(event: HookEvent) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn std::error::Error>> {
     // Read input from stdin as a string
     let input = read_hook_input()?;
 
@@ -900,11 +1026,10 @@ fn cmd_hook(event: HookEvent) -> Result<(), Box<dyn std::error::Error>> {
 
     // Get repo path so captures are stored to git notes
     let cwd = std::env::current_dir().ok();
-    let capture_config = cwd
-        .as_ref()
-        .map_or_else(subcog::config::Config::default, |p| {
-            subcog::config::Config::new().with_repo_path(p)
-        });
+    let mut capture_config = subcog::config::Config::from(config.clone());
+    if let Some(path) = cwd.as_ref() {
+        capture_config = capture_config.with_repo_path(path);
+    }
     let capture_service = CaptureService::new(capture_config);
     let sync_service = SyncService::default();
 
@@ -920,7 +1045,14 @@ fn cmd_hook(event: HookEvent) -> Result<(), Box<dyn std::error::Error>> {
             handler.handle(&input)?
         },
         HookEvent::UserPromptSubmit => {
-            let handler = UserPromptHandler::new();
+            let context_config =
+                AdaptiveContextConfig::from_search_intent_config(&config.search_intent);
+            let mut handler = UserPromptHandler::new()
+                .with_search_intent_config(config.search_intent.clone())
+                .with_context_config(context_config);
+            if let Some(provider) = build_hook_llm_provider(config) {
+                handler = handler.with_llm_provider(provider);
+            }
             handler.handle(&input)?
         },
         HookEvent::PostToolUse => {
