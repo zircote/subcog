@@ -1,15 +1,10 @@
 ---
-created_at: 1767222018
+created_at: 1767224582
 domain: global
-id: config_d08f46d5-8b46-44c2-a3ec-0383fe87136a
-namespace: config
+id: decisions_591d0557-6783-40e3-b8f1-dd67111b40a5
+namespace: decisions
 status: active
-tags:
-- openai
-- llm
-- models
-- gpt-5
-- cost
-updated_at: 1767222018
+tags: []
+updated_at: 1767224582
 ---
-Current OpenAI GPT model names (as of late 2025): GPT-5.2, GPT-5-mini, GPT-5-nano, among others. The GPT-4o models are older and more expensive. Always use GPT-5-mini for cost-effective LLM operations unless specified otherwise.
+E2E test: Use Prometheus for metrics
