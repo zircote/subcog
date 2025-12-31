@@ -1,0 +1,70 @@
+{
+  "model": "gpt-5.2",
+  "date": "2025-12-31T00:20:05.233455+00:00",
+  "benchmarks": {
+    "locomo": {
+      "with_memory": {
+        "accuracy": 0.64,
+        "correct": 16,
+        "total": 25,
+        "avg_score": 0.5952000000000001
+      },
+      "without_memory": {
+        "accuracy": 0.0,
+        "correct": 0,
+        "total": 25,
+        "avg_score": 0.0
+      },
+      "delta_accuracy": 0.64,
+      "delta_score": 0.5952000000000001
+    },
+    "longmemeval": {
+      "with_memory": {
+        "accuracy": 0.96,
+        "correct": 24,
+        "total": 25,
+        "avg_score": 0.92
+      },
+      "without_memory": {
+        "accuracy": 0.0,
+        "correct": 0,
+        "total": 25,
+        "avg_score": 0.0
+      },
+      "delta_accuracy": 0.96,
+      "delta_score": 0.92
+    },
+    "contextbench": {
+      "with_memory": {
+        "accuracy": 0.2,
+        "correct": 5,
+        "total": 25,
+        "avg_score": 0.184
+      },
+      "without_memory": {
+        "accuracy": 0.0,
+        "correct": 0,
+        "total": 25,
+        "avg_score": 0.0
+      },
+      "delta_accuracy": 0.2,
+      "delta_score": 0.184
+    },
+    "memoryagentbench": {
+      "with_memory": {
+        "accuracy": 0.2916666666666667,
+        "correct": 7,
+        "total": 24,
+        "avg_score": 0.27166666666666667
+      },
+      "without_memory": {
+        "accuracy": 0.20833333333333334,
+        "correct": 5,
+        "total": 24,
+        "avg_score": 0.18833333333333332
+      },
+      "delta_accuracy": 0.08333333333333334,
+      "delta_score": 0.08333333333333334
+    }
+  }
+}

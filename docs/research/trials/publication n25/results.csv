@@ -1,0 +1,9 @@
+benchmark,adapter,correct,total,accuracy,avg_score
+locomo,subcog,16,25,0.6400,0.5952
+locomo,no-memory,0,25,0.0000,0.0000
+longmemeval,subcog,24,25,0.9600,0.9200
+longmemeval,no-memory,0,25,0.0000,0.0000
+contextbench,subcog,5,25,0.2000,0.1840
+contextbench,no-memory,0,25,0.0000,0.0000
+memoryagentbench,subcog,7,24,0.2917,0.2717
+memoryagentbench,no-memory,5,24,0.2083,0.1883

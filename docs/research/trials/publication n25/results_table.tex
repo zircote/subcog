@@ -1,0 +1,17 @@
+\begin{table}[h]
+\centering
+\caption{Memory System Benchmark Results (gpt-5.2, n=25 questions/benchmark)}
+\label{tab:results}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Benchmark} & \textbf{With Memory} & \textbf{Without Memory} & \textbf{$\Delta$ Accuracy} & \textbf{Avg Score} \\
+\midrule
+locomo & 64\% & 0\% & +64\% & 0.60 \\
+longmemeval & 96\% & 0\% & +96\% & 0.92 \\
+contextbench & 20\% & 0\% & +20\% & 0.18 \\
+memoryagentbench & 29\% & 21\% & +8\% & 0.27 \\
+\midrule
+\textbf{Mean} & \textbf{52\%} & \textbf{5\%} & \textbf{+47\%} & -- \\
+\bottomrule
+\end{tabular}
+\end{table}

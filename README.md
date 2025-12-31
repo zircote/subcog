@@ -18,6 +18,17 @@ Subcog is a Rust rewrite of the [git-notes-memory](https://github.com/zircote/gi
 - **Claude Code hooks** for seamless IDE integration
 - **Semantic search** with hybrid vector + BM25 ranking
 
+## Benchmark Results
+
+Subcog achieves **97% accuracy on factual recall** (LongMemEval) and **57% on personal context** (LoCoMo), compared to 0% baseline without memory. See [full benchmark results](docs/BENCHMARKS.md).
+
+| Benchmark | With Subcog | Baseline | Improvement |
+|-----------|-------------|----------|-------------|
+| LongMemEval | 97% | 0% | +97% |
+| LoCoMo | 57% | 0% | +57% |
+| ContextBench | 24% | 0% | +24% |
+| MemoryAgentBench | 28% | 21% | +7% |
+
 ## Features
 
 ### Core (Always Available)
