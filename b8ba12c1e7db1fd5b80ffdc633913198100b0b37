@@ -1,10 +1,15 @@
 ---
-created_at: 1767221743
+created_at: 1767222018
 domain: global
-id: learnings_197084a8-37b1-4749-9726-f64292381a37
-namespace: learnings
+id: config_d08f46d5-8b46-44c2-a3ec-0383fe87136a
+namespace: config
 status: active
-tags: []
-updated_at: 1767221743
+tags:
+- openai
+- llm
+- models
+- gpt-5
+- cost
+updated_at: 1767222018
 ---
-E2E test: Push gateway requires trailing newline
+Current OpenAI GPT model names (as of late 2025): GPT-5.2, GPT-5-mini, GPT-5-nano, among others. The GPT-4o models are older and more expensive. Always use GPT-5-mini for cost-effective LLM operations unless specified otherwise.
