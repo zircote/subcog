@@ -3,9 +3,9 @@
 //! Detects duplicates by comparing SHA256 content hashes stored as tags.
 //! Uses `hash:sha256:<prefix>` tag format for efficient lookup.
 
+use crate::Result;
 use crate::models::{MemoryId, Namespace, SearchFilter};
 use crate::services::recall::RecallService;
-use crate::Result;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::instrument;
@@ -161,7 +161,12 @@ mod tests {
     use crate::storage::index::SqliteBackend;
     use crate::storage::traits::IndexBackend;
 
-    fn create_test_memory(id: &str, content: &str, namespace: Namespace, tags: Vec<String>) -> Memory {
+    fn create_test_memory(
+        id: &str,
+        content: &str,
+        namespace: Namespace,
+        tags: Vec<String>,
+    ) -> Memory {
         Memory {
             id: MemoryId::new(id),
             content: content.to_string(),

@@ -59,11 +59,31 @@ mod implementation {
         },
     ];
 
+    /// Allowed table names for SQL injection prevention.
+    const ALLOWED_TABLE_NAMES: &[&str] = &[
+        "memories_index",
+        "memories",
+        "subcog_memories",
+        "subcog_index",
+    ];
+
+    /// Validates that a table name is in the whitelist.
+    fn validate_table_name(name: &str) -> Result<()> {
+        if ALLOWED_TABLE_NAMES.contains(&name) {
+            Ok(())
+        } else {
+            Err(Error::InvalidInput(format!(
+                "Table name '{}' is not allowed. Allowed names: {:?}",
+                name, ALLOWED_TABLE_NAMES
+            )))
+        }
+    }
+
     /// PostgreSQL-based index backend.
     pub struct PostgresIndexBackend {
         /// Connection pool.
         pool: Pool,
-        /// Table name for memories.
+        /// Table name for memories (validated against whitelist).
         table_name: String,
     }
 
@@ -88,9 +108,14 @@ mod implementation {
         ///
         /// # Errors
         ///
-        /// Returns an error if the connection pool fails to initialize.
+        /// Returns an error if the connection pool fails to initialize
+        /// or if the table name is not in the allowed whitelist.
         pub fn new(connection_url: &str, table_name: impl Into<String>) -> Result<Self> {
             let table_name = table_name.into();
+
+            // Validate table name against whitelist to prevent SQL injection
+            validate_table_name(&table_name)?;
+
             let config = Self::parse_connection_url(connection_url)?;
             let cfg = Self::build_pool_config(&config);
 
@@ -132,7 +157,16 @@ mod implementation {
         }
 
         /// Builds a deadpool config from tokio-postgres config.
+        ///
+        /// Configures connection pool with safety limits:
+        /// - Max 20 connections (prevents pool exhaustion)
+        /// - 5 second wait timeout (prevents indefinite blocking)
+        /// - 10 second create timeout (prevents slow connection hangs)
+        /// - 30 second recycle timeout (prevents stale connections)
         fn build_pool_config(config: &tokio_postgres::Config) -> Config {
+            use deadpool_postgres::{PoolConfig, Timeouts};
+            use std::time::Duration;
+
             let mut cfg = Config::new();
             cfg.host = config.get_hosts().first().map(Self::host_to_string);
             cfg.port = config.get_ports().first().copied();
@@ -141,6 +175,18 @@ mod implementation {
                 .get_password()
                 .map(|p| String::from_utf8_lossy(p).to_string());
             cfg.dbname = config.get_dbname().map(String::from);
+
+            // Configure pool with safety limits to prevent exhaustion
+            cfg.pool = Some(PoolConfig {
+                max_size: 20,
+                timeouts: Timeouts {
+                    wait: Some(Duration::from_secs(5)),
+                    create: Some(Duration::from_secs(10)),
+                    recycle: Some(Duration::from_secs(30)),
+                },
+                queue_mode: Default::default(),
+            });
+
             cfg
         }
 

@@ -9,8 +9,14 @@ use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::info_span;
+
+/// Maximum requests per rate limit window.
+const RATE_LIMIT_MAX_REQUESTS: usize = 1000;
+
+/// Rate limit window duration (1 minute).
+const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 
 /// MCP protocol version.
 const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -111,11 +117,15 @@ impl McpServer {
         }
     }
 
-    /// Runs the server over stdio.
+    /// Runs the server over stdio with rate limiting.
     fn run_stdio(&mut self) -> Result<()> {
         let stdin = std::io::stdin();
         let mut stdout = std::io::stdout();
         let reader = BufReader::new(stdin.lock());
+
+        // Rate limiting state
+        let mut request_count: usize = 0;
+        let mut window_start = Instant::now();
 
         for line in reader.lines() {
             let line = line.map_err(|e| Error::OperationFailed {
@@ -127,6 +137,42 @@ impl McpServer {
                 continue;
             }
 
+            // Rate limiting: reset window if expired
+            if window_start.elapsed() > RATE_LIMIT_WINDOW {
+                request_count = 0;
+                window_start = Instant::now();
+            }
+
+            // Check rate limit
+            if request_count >= RATE_LIMIT_MAX_REQUESTS {
+                tracing::warn!(
+                    "Rate limit exceeded: {} requests in {:?}",
+                    request_count,
+                    RATE_LIMIT_WINDOW
+                );
+                metrics::counter!("mcp_rate_limit_exceeded_total").increment(1);
+
+                // Return rate limit error
+                let error_response = self.format_error(
+                    None,
+                    -32000,
+                    &format!(
+                        "Rate limit exceeded: max {} requests per {:?}",
+                        RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW
+                    ),
+                );
+                writeln!(stdout, "{error_response}").map_err(|e| Error::OperationFailed {
+                    operation: "write_stdout".to_string(),
+                    cause: e.to_string(),
+                })?;
+                stdout.flush().map_err(|e| Error::OperationFailed {
+                    operation: "flush_stdout".to_string(),
+                    cause: e.to_string(),
+                })?;
+                continue;
+            }
+
+            request_count += 1;
             let response = self.handle_request(&line);
 
             writeln!(stdout, "{response}").map_err(|e| Error::OperationFailed {

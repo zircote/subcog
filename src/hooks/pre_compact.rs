@@ -1,21 +1,36 @@
 //! Pre-compact hook handler.
 //!
 //! Analyzes content being compacted and auto-captures important memories.
+//! Integrates with `DeduplicationService` to avoid capturing duplicate memories.
 
 use crate::Result;
 use crate::hooks::HookHandler;
-use crate::models::{CaptureRequest, Domain, Namespace};
+use crate::models::{CaptureRequest, Domain, MemoryId, Namespace};
 use crate::services::CaptureService;
+use crate::services::deduplication::{Deduplicator, DuplicateReason};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::Instant;
 use tracing::instrument;
 
 /// Handler for the `PreCompact` hook event.
 ///
 /// Analyzes context being compacted and auto-captures valuable memories.
+/// Integrates with `DeduplicationService` to check for duplicates before capture.
+///
+/// # Deduplication
+///
+/// When a deduplication service is configured, each candidate is checked against:
+/// 1. **Exact match**: SHA256 hash comparison
+/// 2. **Semantic similarity**: Embedding cosine similarity (if embeddings available)
+/// 3. **Recent capture**: LRU cache with TTL
+///
+/// Duplicates are skipped and reported in the hook output.
 pub struct PreCompactHandler {
     /// Capture service instance.
     capture: Option<CaptureService>,
+    /// Deduplication service instance (trait object for flexibility).
+    dedup: Option<Arc<dyn Deduplicator>>,
 }
 
 /// Input for the `PreCompact` hook.
@@ -54,6 +69,20 @@ pub struct CapturedMemory {
     pub confidence: f32,
 }
 
+/// A candidate that was skipped due to duplication.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkippedDuplicate {
+    /// The reason it was skipped.
+    pub reason: String,
+    /// URN of the existing memory it matched.
+    pub matched_urn: String,
+    /// Similarity score (for semantic matches).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub similarity_score: Option<f32>,
+    /// Namespace of the candidate.
+    pub namespace: String,
+}
+
 /// Candidate for capture.
 struct CaptureCandidate {
     content: String,
@@ -65,13 +94,26 @@ impl PreCompactHandler {
     /// Creates a new `PreCompact` handler.
     #[must_use]
     pub const fn new() -> Self {
-        Self { capture: None }
+        Self {
+            capture: None,
+            dedup: None,
+        }
     }
 
     /// Sets the capture service.
     #[must_use]
     pub fn with_capture(mut self, capture: CaptureService) -> Self {
         self.capture = Some(capture);
+        self
+    }
+
+    /// Sets the deduplication service.
+    ///
+    /// When set, candidates are checked for duplicates before capture.
+    /// Duplicates are skipped and reported in the hook output.
+    #[must_use]
+    pub fn with_deduplication(mut self, dedup: Arc<dyn Deduplicator>) -> Self {
+        self.dedup = Some(dedup);
         self
     }
 
@@ -183,19 +225,97 @@ impl PreCompactHandler {
         result
     }
 
+    /// Checks if a candidate is a duplicate and returns skip info if so.
+    ///
+    /// Returns `Some(SkippedDuplicate)` if the candidate should be skipped,
+    /// `None` if it should be captured.
+    fn check_for_duplicate(&self, candidate: &CaptureCandidate) -> Option<SkippedDuplicate> {
+        let dedup = self.dedup.as_ref()?;
+
+        match dedup.check_duplicate(&candidate.content, candidate.namespace) {
+            Ok(result) if result.is_duplicate => {
+                let reason_str = Self::reason_to_str(result.reason);
+                let matched_urn = result.matched_urn.unwrap_or_default();
+
+                tracing::debug!(
+                    namespace = %candidate.namespace.as_str(),
+                    matched_urn = %matched_urn,
+                    reason = reason_str,
+                    "Skipping duplicate candidate"
+                );
+
+                metrics::counter!(
+                    "hook_deduplication_skipped_total",
+                    "hook_type" => "PreCompact",
+                    "namespace" => candidate.namespace.as_str().to_string(),
+                    "reason" => reason_str.to_string()
+                )
+                .increment(1);
+
+                Some(SkippedDuplicate {
+                    reason: reason_str.to_string(),
+                    matched_urn,
+                    similarity_score: result.similarity_score,
+                    namespace: candidate.namespace.as_str().to_string(),
+                })
+            },
+            Ok(_) => None, // Not a duplicate
+            Err(e) => {
+                // Graceful degradation: log error and proceed with capture
+                tracing::warn!(
+                    error = %e,
+                    namespace = %candidate.namespace.as_str(),
+                    "Deduplication check failed, proceeding with capture"
+                );
+                None
+            },
+        }
+    }
+
+    /// Converts a `DuplicateReason` to a string.
+    fn reason_to_str(reason: Option<DuplicateReason>) -> &'static str {
+        reason.map_or("unknown", |r| match r {
+            DuplicateReason::ExactMatch => "exact_match",
+            DuplicateReason::SemanticSimilar => "semantic_similar",
+            DuplicateReason::RecentCapture => "recent_capture",
+        })
+    }
+
+    /// Records a successful capture in the deduplication service.
+    fn record_capture_for_dedup(&self, content: &str, memory_id: &MemoryId) {
+        if let Some(dedup) = &self.dedup {
+            let hash = crate::services::deduplication::ContentHasher::hash(content);
+            dedup.record_capture(&hash, memory_id);
+        }
+    }
+
     /// Performs the actual capture of candidates.
-    fn capture_candidates(&self, candidates: Vec<CaptureCandidate>) -> Vec<CapturedMemory> {
+    ///
+    /// If a deduplication service is configured, checks each candidate for
+    /// duplicates before capture. Returns both captured memories and skipped duplicates.
+    fn capture_candidates(
+        &self,
+        candidates: Vec<CaptureCandidate>,
+    ) -> (Vec<CapturedMemory>, Vec<SkippedDuplicate>) {
         let Some(capture) = &self.capture else {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         };
 
         let mut captured = Vec::new();
+        let mut skipped = Vec::new();
 
         for candidate in candidates {
             if candidate.confidence < 0.6 {
                 continue;
             }
 
+            // Check for duplicates
+            if let Some(skip_info) = self.check_for_duplicate(&candidate) {
+                skipped.push(skip_info);
+                continue;
+            }
+
+            // Capture the candidate
             let request = CaptureRequest {
                 content: candidate.content.clone(),
                 namespace: candidate.namespace,
@@ -205,9 +325,11 @@ impl PreCompactHandler {
                 skip_security_check: false,
             };
 
-            if let Ok(result) = capture.capture(request) {
+            if let Ok(result) = capture.capture(request.clone()) {
+                self.record_capture_for_dedup(&request.content, &result.memory_id);
+
                 captured.push(CapturedMemory {
-                    memory_id: result.memory_id.as_str().to_string(),
+                    memory_id: result.memory_id.to_string(),
                     namespace: candidate.namespace.as_str().to_string(),
                     confidence: candidate.confidence,
                 });
@@ -215,7 +337,116 @@ impl PreCompactHandler {
             // Errors are silently ignored, continue with other candidates
         }
 
-        captured
+        (captured, skipped)
+    }
+
+    /// Builds the human-readable context message for the hook response.
+    fn build_context_message(
+        captured: &[CapturedMemory],
+        skipped: &[SkippedDuplicate],
+    ) -> Option<String> {
+        if captured.is_empty() && skipped.is_empty() {
+            return None;
+        }
+
+        let mut lines = vec!["**Subcog Pre-Compact Auto-Capture**\n".to_string()];
+
+        if !captured.is_empty() {
+            lines.push(format!(
+                "Captured {} memories before context compaction:\n",
+                captured.len()
+            ));
+            for c in captured {
+                lines.push(format!(
+                    "- `{}`: {} (confidence: {:.0}%)",
+                    c.namespace,
+                    c.memory_id,
+                    c.confidence * 100.0
+                ));
+            }
+        }
+
+        if !skipped.is_empty() {
+            if !captured.is_empty() {
+                lines.push(String::new()); // blank line
+            }
+            lines.push(format!("Skipped {} duplicates:\n", skipped.len()));
+            for s in skipped {
+                let score_str = s
+                    .similarity_score
+                    .map_or(String::new(), |sc| format!(" ({:.0}% similar)", sc * 100.0));
+                lines.push(format!(
+                    "- `{}`: {} ({}{})",
+                    s.namespace, s.matched_urn, s.reason, score_str
+                ));
+            }
+        }
+
+        Some(lines.join("\n"))
+    }
+
+    /// Builds the Claude Code hook response JSON.
+    fn build_hook_response(
+        captured: &[CapturedMemory],
+        skipped: &[SkippedDuplicate],
+    ) -> serde_json::Value {
+        let metadata = serde_json::json!({
+            "captured": !captured.is_empty(),
+            "captures": captured.iter().map(|c| serde_json::json!({
+                "memory_id": c.memory_id,
+                "namespace": c.namespace,
+                "confidence": c.confidence
+            })).collect::<Vec<_>>(),
+            "skipped_duplicates": skipped.len(),
+            "duplicates": skipped.iter().map(|s| serde_json::json!({
+                "reason": s.reason,
+                "matched_urn": s.matched_urn,
+                "namespace": s.namespace,
+                "similarity_score": s.similarity_score
+            })).collect::<Vec<_>>()
+        });
+
+        Self::build_context_message(captured, skipped).map_or_else(
+            || serde_json::json!({}),
+            |ctx| {
+                let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
+                let context_with_metadata =
+                    format!("{ctx}\n\n<!-- subcog-metadata: {metadata_str} -->");
+                serde_json::json!({
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreCompact",
+                        "additionalContext": context_with_metadata
+                    }
+                })
+            },
+        )
+    }
+
+    /// Records metrics for the hook execution.
+    fn record_metrics(status: &str, duration_ms: f64, capture_count: usize, skip_count: usize) {
+        metrics::counter!(
+            "hook_executions_total",
+            "hook_type" => "PreCompact",
+            "status" => status.to_string()
+        )
+        .increment(1);
+        metrics::histogram!("hook_duration_ms", "hook_type" => "PreCompact").record(duration_ms);
+        if capture_count > 0 {
+            metrics::counter!(
+                "hook_auto_capture_total",
+                "hook_type" => "PreCompact",
+                "namespace" => "mixed"
+            )
+            .increment(capture_count as u64);
+        }
+        if skip_count > 0 {
+            metrics::counter!(
+                "hook_deduplication_skipped_total",
+                "hook_type" => "PreCompact",
+                "reason" => "aggregate"
+            )
+            .increment(skip_count as u64);
+        }
     }
 }
 
@@ -310,98 +541,40 @@ impl HookHandler for PreCompactHandler {
     )]
     fn handle(&self, input: &str) -> Result<String> {
         let start = Instant::now();
-        let (result, capture_count) = {
-            let parsed: PreCompactInput =
-                serde_json::from_str(input).unwrap_or_else(|_| PreCompactInput {
-                    context: input.to_string(),
-                    ..Default::default()
-                });
 
-            // Analyze content for capture candidates
-            let candidates = self.analyze_content(&parsed);
-
-            // Capture the candidates
-            let captured = self.capture_candidates(candidates);
-            let capture_count = captured.len();
-            let span = tracing::Span::current();
-            span.record("captures", capture_count);
-
-            // Build metadata
-            let metadata = serde_json::json!({
-                "captured": !captured.is_empty(),
-                "captures": captured.iter().map(|c| serde_json::json!({
-                    "memory_id": c.memory_id,
-                    "namespace": c.namespace,
-                    "confidence": c.confidence
-                })).collect::<Vec<_>>()
+        // Parse input
+        let parsed: PreCompactInput =
+            serde_json::from_str(input).unwrap_or_else(|_| PreCompactInput {
+                context: input.to_string(),
+                ..Default::default()
             });
 
-            // Build context message about captured memories
-            let context_message = if captured.is_empty() {
-                None
-            } else {
-                let mut lines = vec![
-                    "**Subcog Pre-Compact Auto-Capture**\n".to_string(),
-                    format!(
-                        "Captured {} memories before context compaction:\n",
-                        captured.len()
-                    ),
-                ];
-                for c in &captured {
-                    lines.push(format!(
-                        "- `{}`: {} (confidence: {:.0}%)",
-                        c.namespace,
-                        c.memory_id,
-                        c.confidence * 100.0
-                    ));
-                }
-                Some(lines.join("\n"))
-            };
+        // Analyze content for capture candidates
+        let candidates = self.analyze_content(&parsed);
 
-            // Build Claude Code hook response format per specification
-            // See: https://docs.anthropic.com/en/docs/claude-code/hooks
-            let response = context_message.map_or_else(
-                || serde_json::json!({}),
-                |ctx| {
-                    // Embed metadata as XML comment for debugging
-                    let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
-                    let context_with_metadata =
-                        format!("{ctx}\n\n<!-- subcog-metadata: {metadata_str} -->");
-                    serde_json::json!({
-                        "hookSpecificOutput": {
-                            "hookEventName": "PreCompact",
-                            "additionalContext": context_with_metadata
-                        }
-                    })
-                },
-            );
+        // Capture the candidates (with deduplication if configured)
+        let (captured, skipped) = self.capture_candidates(candidates);
+        let capture_count = captured.len();
+        let skip_count = skipped.len();
 
-            (
-                serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
-                    operation: "serialize_output".to_string(),
-                    cause: e.to_string(),
-                }),
-                capture_count,
-            )
-        };
+        // Record captures in tracing span
+        tracing::Span::current().record("captures", capture_count);
 
+        // Build response
+        let response = Self::build_hook_response(&captured, &skipped);
+        let result = serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
+            operation: "serialize_output".to_string(),
+            cause: e.to_string(),
+        });
+
+        // Record metrics
         let status = if result.is_ok() { "success" } else { "error" };
-        metrics::counter!(
-            "hook_executions_total",
-            "hook_type" => "PreCompact",
-            "status" => status
-        )
-        .increment(1);
-        metrics::histogram!("hook_duration_ms", "hook_type" => "PreCompact")
-            .record(start.elapsed().as_secs_f64() * 1000.0);
-        if capture_count > 0 {
-            metrics::counter!(
-                "hook_auto_capture_total",
-                "hook_type" => "PreCompact",
-                "namespace" => "mixed"
-            )
-            .increment(capture_count as u64);
-        }
+        Self::record_metrics(
+            status,
+            start.elapsed().as_secs_f64() * 1000.0,
+            capture_count,
+            skip_count,
+        );
 
         result
     }
@@ -487,5 +660,217 @@ mod tests {
 
         let candidates = handler.analyze_content(&input);
         assert!(!candidates.is_empty());
+    }
+
+    #[test]
+    fn test_with_deduplication_builder() {
+        use crate::services::deduplication::{Deduplicator, DuplicateCheckResult};
+
+        // Mock deduplicator that always returns not duplicate
+        struct MockDedup;
+        impl Deduplicator for MockDedup {
+            fn check_duplicate(
+                &self,
+                _content: &str,
+                _namespace: Namespace,
+            ) -> crate::Result<DuplicateCheckResult> {
+                Ok(DuplicateCheckResult::not_duplicate(0))
+            }
+            fn record_capture(&self, _hash: &str, _memory_id: &MemoryId) {}
+        }
+
+        let dedup = Arc::new(MockDedup);
+        let handler = PreCompactHandler::new().with_deduplication(dedup);
+        assert!(handler.dedup.is_some());
+    }
+
+    #[test]
+    fn test_check_for_duplicate_skips() {
+        use crate::services::deduplication::{Deduplicator, DuplicateCheckResult};
+
+        // Mock deduplicator that always returns duplicate
+        struct MockDedupAlwaysDup;
+        impl Deduplicator for MockDedupAlwaysDup {
+            fn check_duplicate(
+                &self,
+                _content: &str,
+                _namespace: Namespace,
+            ) -> crate::Result<DuplicateCheckResult> {
+                Ok(DuplicateCheckResult::exact_match(
+                    MemoryId::new("123"),
+                    "subcog://test/decisions/123".to_string(),
+                    0,
+                ))
+            }
+            fn record_capture(&self, _hash: &str, _memory_id: &MemoryId) {}
+        }
+
+        let dedup = Arc::new(MockDedupAlwaysDup);
+        let handler = PreCompactHandler::new().with_deduplication(dedup);
+
+        let candidate = CaptureCandidate {
+            content: "Test content".to_string(),
+            namespace: Namespace::Decisions,
+            confidence: 0.8,
+        };
+
+        let result = handler.check_for_duplicate(&candidate);
+        assert!(result.is_some());
+        let skip = result.unwrap();
+        assert_eq!(skip.reason, "exact_match");
+        assert_eq!(skip.matched_urn, "subcog://test/decisions/123");
+    }
+
+    #[test]
+    fn test_check_for_duplicate_passes() {
+        use crate::services::deduplication::{Deduplicator, DuplicateCheckResult};
+
+        // Mock deduplicator that returns not duplicate
+        struct MockDedupNoDup;
+        impl Deduplicator for MockDedupNoDup {
+            fn check_duplicate(
+                &self,
+                _content: &str,
+                _namespace: Namespace,
+            ) -> crate::Result<DuplicateCheckResult> {
+                Ok(DuplicateCheckResult::not_duplicate(0))
+            }
+            fn record_capture(&self, _hash: &str, _memory_id: &MemoryId) {}
+        }
+
+        let dedup = Arc::new(MockDedupNoDup);
+        let handler = PreCompactHandler::new().with_deduplication(dedup);
+
+        let candidate = CaptureCandidate {
+            content: "Test content".to_string(),
+            namespace: Namespace::Decisions,
+            confidence: 0.8,
+        };
+
+        let result = handler.check_for_duplicate(&candidate);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_check_for_duplicate_graceful_degradation() {
+        use crate::services::deduplication::{Deduplicator, DuplicateCheckResult};
+
+        // Mock deduplicator that returns an error
+        struct MockDedupError;
+        impl Deduplicator for MockDedupError {
+            fn check_duplicate(
+                &self,
+                _content: &str,
+                _namespace: Namespace,
+            ) -> crate::Result<DuplicateCheckResult> {
+                Err(crate::Error::OperationFailed {
+                    operation: "test".to_string(),
+                    cause: "simulated error".to_string(),
+                })
+            }
+            fn record_capture(&self, _hash: &str, _memory_id: &MemoryId) {}
+        }
+
+        let dedup = Arc::new(MockDedupError);
+        let handler = PreCompactHandler::new().with_deduplication(dedup);
+
+        let candidate = CaptureCandidate {
+            content: "Test content".to_string(),
+            namespace: Namespace::Decisions,
+            confidence: 0.8,
+        };
+
+        // Error should result in None (proceed with capture)
+        let result = handler.check_for_duplicate(&candidate);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_build_context_message_empty() {
+        let captured: Vec<CapturedMemory> = vec![];
+        let skipped: Vec<SkippedDuplicate> = vec![];
+
+        let result = PreCompactHandler::build_context_message(&captured, &skipped);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_build_context_message_with_captures() {
+        let captured = vec![CapturedMemory {
+            memory_id: "mem-123".to_string(),
+            namespace: "decisions".to_string(),
+            confidence: 0.85,
+        }];
+        let skipped: Vec<SkippedDuplicate> = vec![];
+
+        let result = PreCompactHandler::build_context_message(&captured, &skipped);
+        assert!(result.is_some());
+        let msg = result.unwrap();
+        assert!(msg.contains("Captured 1 memories"));
+        assert!(msg.contains("mem-123"));
+        assert!(msg.contains("85%"));
+    }
+
+    #[test]
+    fn test_build_context_message_with_skipped() {
+        let captured: Vec<CapturedMemory> = vec![];
+        let skipped = vec![SkippedDuplicate {
+            reason: "exact_match".to_string(),
+            matched_urn: "subcog://test/decisions/456".to_string(),
+            similarity_score: None,
+            namespace: "decisions".to_string(),
+        }];
+
+        let result = PreCompactHandler::build_context_message(&captured, &skipped);
+        assert!(result.is_some());
+        let msg = result.unwrap();
+        assert!(msg.contains("Skipped 1 duplicates"));
+        assert!(msg.contains("exact_match"));
+        assert!(msg.contains("subcog://test/decisions/456"));
+    }
+
+    #[test]
+    fn test_build_hook_response_empty() {
+        let captured: Vec<CapturedMemory> = vec![];
+        let skipped: Vec<SkippedDuplicate> = vec![];
+
+        let response = PreCompactHandler::build_hook_response(&captured, &skipped);
+        assert!(response.as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_build_hook_response_with_data() {
+        let captured = vec![CapturedMemory {
+            memory_id: "mem-789".to_string(),
+            namespace: "learnings".to_string(),
+            confidence: 0.9,
+        }];
+        let skipped: Vec<SkippedDuplicate> = vec![];
+
+        let response = PreCompactHandler::build_hook_response(&captured, &skipped);
+        assert!(response.get("hookSpecificOutput").is_some());
+        let hook_output = response.get("hookSpecificOutput").unwrap();
+        assert_eq!(
+            hook_output.get("hookEventName").unwrap().as_str().unwrap(),
+            "PreCompact"
+        );
+        assert!(hook_output.get("additionalContext").is_some());
+    }
+
+    #[test]
+    fn test_reason_to_str() {
+        assert_eq!(
+            PreCompactHandler::reason_to_str(Some(DuplicateReason::ExactMatch)),
+            "exact_match"
+        );
+        assert_eq!(
+            PreCompactHandler::reason_to_str(Some(DuplicateReason::SemanticSimilar)),
+            "semantic_similar"
+        );
+        assert_eq!(
+            PreCompactHandler::reason_to_str(Some(DuplicateReason::RecentCapture)),
+            "recent_capture"
+        );
+        assert_eq!(PreCompactHandler::reason_to_str(None), "unknown");
     }
 }

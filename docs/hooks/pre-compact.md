@@ -137,10 +137,77 @@ $ echo "We decided to use PostgreSQL." | \
 
 ## Deduplication
 
-The hook checks for existing similar memories:
-1. **Exact match** - Skips if identical content exists
-2. **Semantic similarity** - Skips if >90% similar memory exists
-3. **Recent capture** - Skips if captured in last 5 minutes
+The hook integrates with `DeduplicationService` to prevent duplicate captures. Three checks are performed in order (short-circuit evaluation):
+
+### 1. Exact Match
+
+Computes SHA256 hash of normalized content and searches for existing memory with matching `hash:sha256:<prefix>` tag.
+
+- **Hash format**: First 16 characters of SHA256 hex digest
+- **Normalization**: Lowercase, collapse whitespace, trim
+- **Tag search**: Uses `RecallService` tag filter
+
+### 2. Semantic Similarity
+
+Generates embedding with FastEmbed and searches vector index for similar memories.
+
+- **Model**: all-MiniLM-L6-v2 (384 dimensions)
+- **Default threshold**: 90% cosine similarity
+- **Namespace thresholds**: Configurable per namespace:
+  - `decisions`: 92%
+  - `patterns`: 90%
+  - `learnings`: 88%
+  - `blockers`: 90%
+
+### 3. Recent Capture
+
+Checks in-memory LRU cache for recently captured content.
+
+- **Cache size**: 1,000 entries
+- **TTL**: 5 minutes
+- **Key**: Content hash + namespace
+
+### Graceful Degradation
+
+If any checker fails:
+- Error is logged with `tracing::warn!`
+- Check continues to next tier
+- Capture proceeds if all checks pass or fail
+
+### Configuration
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `SUBCOG_DEDUP_ENABLED` | Enable deduplication | `true` |
+| `SUBCOG_DEDUP_DEFAULT_THRESHOLD` | Default similarity threshold | `0.90` |
+| `SUBCOG_DEDUP_DECISIONS_THRESHOLD` | Decisions namespace threshold | `0.92` |
+| `SUBCOG_DEDUP_PATTERNS_THRESHOLD` | Patterns namespace threshold | `0.90` |
+| `SUBCOG_DEDUP_LEARNINGS_THRESHOLD` | Learnings namespace threshold | `0.88` |
+| `SUBCOG_DEDUP_RECENT_TTL_SECONDS` | Recent capture TTL | `300` |
+| `SUBCOG_DEDUP_RECENT_CACHE_SIZE` | Recent cache size | `1000` |
+| `SUBCOG_DEDUP_MIN_SEMANTIC_LENGTH` | Min length for semantic check | `50` |
+
+### Skipped Duplicates
+
+When duplicates are found, they are reported in the hook response:
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreCompact",
+    "additionalContext": "**Subcog Pre-Compact Auto-Capture**\n\nCaptured 1 memory...\n\nSkipped 2 duplicates:\n- `decisions`: subcog://global/decisions/abc123 (exact_match)\n- `learnings`: subcog://global/learnings/def456 (semantic_similar, 95% similar)"
+  }
+}
+```
+
+### Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `deduplication_duplicates_found_total` | Total duplicates detected |
+| `deduplication_not_duplicates_total` | Total unique captures |
+| `deduplication_check_duration_ms` | Check latency histogram |
+| `hook_deduplication_skipped_total` | Skipped by hook (labels: namespace, reason) |
 
 ## Auto-Tagging
 

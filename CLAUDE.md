@@ -60,7 +60,16 @@ src/
 │   ├── context.rs           # ContextBuilderService
 │   ├── topic_index.rs       # TopicIndexService (topic → memory map)
 │   ├── prompt.rs            # PromptService (CRUD for prompts)
-│   └── prompt_parser.rs     # Multi-format parsing (MD, YAML, JSON)
+│   ├── prompt_parser.rs     # Multi-format parsing (MD, YAML, JSON)
+│   └── deduplication/       # Deduplication service
+│       ├── mod.rs           # Module exports, Deduplicator trait
+│       ├── types.rs         # DuplicateCheckResult, DuplicateReason
+│       ├── config.rs        # DeduplicationConfig with env loading
+│       ├── hasher.rs        # ContentHasher (SHA256 + normalization)
+│       ├── exact_match.rs   # ExactMatchChecker (hash tag lookup)
+│       ├── semantic.rs      # SemanticSimilarityChecker (embeddings)
+│       ├── recent.rs        # RecentCaptureChecker (LRU + TTL)
+│       └── service.rs       # DeduplicationService orchestrator
 │
 ├── git/                      # Git operations
 │   ├── notes.rs             # Git notes CRUD
@@ -350,6 +359,117 @@ The system degrades gracefully when components are unavailable:
 - **Embeddings down**: Falls back to text search (BM25)
 - **Index down**: Skips memory injection, continues processing
 - **Low confidence**: Reduces memory count, may skip injection
+
+## Deduplication Service
+
+The deduplication service prevents duplicate memory captures in the pre-compact hook using a three-tier detection system with short-circuit evaluation.
+
+### Detection Tiers
+
+| Tier | Method | Performance | Use Case |
+|------|--------|-------------|----------|
+| **1. Exact Match** | SHA256 hash lookup via tag | <5ms | Identical content |
+| **2. Semantic Similarity** | Embedding cosine similarity | <50ms | Paraphrased content |
+| **3. Recent Capture** | LRU cache with TTL | <1ms | Same-session duplicates |
+
+### Short-Circuit Evaluation
+
+Checks are performed in order; the first match returns immediately:
+
+```
+ExactMatch → SemanticSimilarity → RecentCapture → Not Duplicate
+    ↓               ↓                   ↓
+  (match)        (match)            (match)
+    ↓               ↓                   ↓
+  SKIP            SKIP               SKIP
+```
+
+### Content Normalization
+
+Before hashing or embedding, content is normalized:
+- Trim leading/trailing whitespace
+- Convert to lowercase
+- Collapse multiple whitespace to single space
+
+```rust
+// These produce the same hash:
+"Use PostgreSQL for storage"
+"  use   postgresql   for   storage  "
+"USE POSTGRESQL FOR STORAGE"
+```
+
+### Per-Namespace Thresholds
+
+Semantic similarity thresholds can be configured per namespace:
+
+| Namespace | Default Threshold | Rationale |
+|-----------|-------------------|-----------|
+| `decisions` | 92% | High precision for architectural choices |
+| `patterns` | 90% | Standard threshold |
+| `learnings` | 88% | Allow more variation in insights |
+| `blockers` | 90% | Standard threshold |
+| Default | 90% | Applied to all other namespaces |
+
+### Usage
+
+The `PreCompactHandler` integrates with the deduplication service:
+
+```rust
+use subcog::services::{DeduplicationService, ServiceContainer};
+
+// Create service container with deduplication
+let container = ServiceContainer::new(config)?;
+let dedup = container.deduplication()?;
+
+// Create handler with deduplication
+let handler = PreCompactHandler::new(capture_service, recall_service)
+    .with_deduplication(dedup);
+```
+
+### Configuration
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `SUBCOG_DEDUP_ENABLED` | Enable deduplication | `true` |
+| `SUBCOG_DEDUP_DEFAULT_THRESHOLD` | Default similarity threshold | `0.90` |
+| `SUBCOG_DEDUP_DECISIONS_THRESHOLD` | Decisions namespace threshold | `0.92` |
+| `SUBCOG_DEDUP_PATTERNS_THRESHOLD` | Patterns namespace threshold | `0.90` |
+| `SUBCOG_DEDUP_LEARNINGS_THRESHOLD` | Learnings namespace threshold | `0.88` |
+| `SUBCOG_DEDUP_RECENT_TTL_SECONDS` | Recent capture TTL | `300` |
+| `SUBCOG_DEDUP_RECENT_CACHE_SIZE` | Recent cache size | `1000` |
+| `SUBCOG_DEDUP_MIN_SEMANTIC_LENGTH` | Min length for semantic check | `50` |
+
+### Hook Response Format
+
+When duplicates are skipped, they appear in the hook response:
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreCompact",
+    "additionalContext": "**Subcog Pre-Compact Auto-Capture**\n\nCaptured 1 memory...\n\nSkipped 2 duplicates:\n- `decisions`: subcog://global/decisions/abc123 (exact_match)\n- `learnings`: subcog://global/learnings/def456 (semantic_similar, 95% similar)"
+  }
+}
+```
+
+### Graceful Degradation
+
+The service degrades gracefully when components fail:
+
+- **Embedding service down**: Skips semantic check, uses exact + recent only
+- **RecallService error**: Skips exact match check, logs warning
+- **Any checker fails**: Logs warning, continues to next tier
+- **All checks pass/fail**: Capture proceeds
+
+### Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `deduplication_duplicates_found_total` | Total duplicates detected |
+| `deduplication_not_duplicates_total` | Total unique captures |
+| `deduplication_check_duration_ms` | Check latency histogram |
+| `deduplication_recent_cache_size` | Current cache size |
+| `hook_deduplication_skipped_total` | Skipped by hook (labels: namespace, reason) |
 
 ## Code Style Requirements
 
@@ -665,18 +785,18 @@ The following hooks run automatically on file save:
 - [PROGRESS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/PROGRESS.md) - Implementation progress
 - always run `make ci` before commiting or declaring success ensuring all gates pass
 
-**Pre-Compact Deduplication** (in-review) - `docs/spec/active/2026-01-01-pre-compact-deduplication/`:
+**Pre-Compact Deduplication** - `docs/spec/active/2026-01-01-pre-compact-deduplication/`:
 
-- **Status**: Awaiting approval
-- **Estimated Effort**: 3-4 days
-- **Summary**: Implement documented deduplication logic for pre-compact hook
-  - Exact match (SHA256 hash comparison)
-  - Semantic similarity (>90% cosine similarity)
-  - Recent capture (5-minute LRU cache)
+- **Status**: Implementation complete, pending PR
+- **Summary**: Three-tier deduplication for pre-compact hook auto-capture
+  - Exact match (SHA256 hash tag lookup)
+  - Semantic similarity (configurable per-namespace thresholds)
+  - Recent capture (5-minute LRU cache with TTL)
 - [REQUIREMENTS.md](docs/spec/active/2026-01-01-pre-compact-deduplication/REQUIREMENTS.md) - 13 functional requirements
 - [ARCHITECTURE.md](docs/spec/active/2026-01-01-pre-compact-deduplication/ARCHITECTURE.md) - DeduplicationService design
 - [IMPLEMENTATION_PLAN.md](docs/spec/active/2026-01-01-pre-compact-deduplication/IMPLEMENTATION_PLAN.md) - 7 phases, 26 tasks
 - [DECISIONS.md](docs/spec/active/2026-01-01-pre-compact-deduplication/DECISIONS.md) - 8 ADRs
+- [PROGRESS.md](docs/spec/active/2026-01-01-pre-compact-deduplication/PROGRESS.md) - Implementation progress
 
 ### Completed Specifications
 
