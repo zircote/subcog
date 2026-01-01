@@ -1,12 +1,10 @@
 ---
-created_at: 1767234056
+created_at: 1767234060
 domain: global
-id: learnings_f838795d-46c1-450b-9b5a-f9c1fba51469
-namespace: learnings
+id: decisions_d404148b-6cce-4c30-b559-dae8a5490554
+namespace: decisions
 status: active
-tags:
-- auto-captured
-- pre-compact
-updated_at: 1767234056
+tags: []
+updated_at: 1767234060
 ---
-I learned that you should always bind container services to 0.0.0.0 for inter-container communication. This is a key caveat when running services in Docker.
+E2E test: Use Prometheus for metrics
