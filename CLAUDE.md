@@ -656,7 +656,7 @@ The following hooks run automatically on file save:
 
 ### Active Specifications
 
-Full specification in `docs/spec/active/2025-12-28-subcog-rust-rewrite/`:
+**Subcog Rust Rewrite** - `docs/spec/active/2025-12-28-subcog-rust-rewrite/`:
 
 - [REQUIREMENTS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/REQUIREMENTS.md) - Product requirements
 - [ARCHITECTURE.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/ARCHITECTURE.md) - Technical architecture
@@ -664,6 +664,19 @@ Full specification in `docs/spec/active/2025-12-28-subcog-rust-rewrite/`:
 - [DECISIONS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/DECISIONS.md) - Architecture decision records
 - [PROGRESS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/PROGRESS.md) - Implementation progress
 - always run `make ci` before commiting or declaring success ensuring all gates pass
+
+**Pre-Compact Deduplication** (in-review) - `docs/spec/active/2026-01-01-pre-compact-deduplication/`:
+
+- **Status**: Awaiting approval
+- **Estimated Effort**: 3-4 days
+- **Summary**: Implement documented deduplication logic for pre-compact hook
+  - Exact match (SHA256 hash comparison)
+  - Semantic similarity (>90% cosine similarity)
+  - Recent capture (5-minute LRU cache)
+- [REQUIREMENTS.md](docs/spec/active/2026-01-01-pre-compact-deduplication/REQUIREMENTS.md) - 13 functional requirements
+- [ARCHITECTURE.md](docs/spec/active/2026-01-01-pre-compact-deduplication/ARCHITECTURE.md) - DeduplicationService design
+- [IMPLEMENTATION_PLAN.md](docs/spec/active/2026-01-01-pre-compact-deduplication/IMPLEMENTATION_PLAN.md) - 7 phases, 26 tasks
+- [DECISIONS.md](docs/spec/active/2026-01-01-pre-compact-deduplication/DECISIONS.md) - 8 ADRs
 
 ### Completed Specifications
 
