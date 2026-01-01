@@ -1,14 +1,27 @@
 ---
-created_at: 1767230779
+created_at: 1767230826
 domain: global
-id: learnings_c69f27c2-3092-4e25-9f7b-fde35956b00d
-namespace: learnings
+id: context_cf8cd6a8-095c-4c79-9146-74ad49dc0322
+namespace: context
 status: active
 tags:
 - versions
-- dependencies
-- best-practices
+- observability
+- grafana
+- tempo
+- loki
+- prometheus
+- openai
 - global
-updated_at: 1767230779
+updated_at: 1767230826
 ---
-Always verify the latest software versions ONLINE before using them. Do not rely on cached knowledge - versions change frequently. Search for "[software name] latest version [current month year]" to get current information. This applies to all dependencies: Docker images, npm packages, Python packages, Rust crates, etc.
+Current observability stack versions (December 2025):
+- Grafana: 12.3.1 (latest)
+- Grafana Tempo: 2.9.0 (latest)
+- Grafana Loki: 3.3.2 (latest 3.x, stable)
+- Prometheus: v2.54.1
+- OpenTelemetry Collector: 0.104.0
+
+GPT models (OpenAI):
+- GPT-5.2, GPT-5-mini, GPT-5-nano (current generation)
+- Never use gpt-4o or gpt-4o-mini - these are outdated
