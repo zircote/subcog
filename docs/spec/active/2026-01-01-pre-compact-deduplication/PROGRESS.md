@@ -4,7 +4,7 @@ format_version: "1.0.0"
 project_id: SPEC-2026-01-01-001
 project_name: "Pre-Compact Deduplication"
 project_status: in-progress
-current_phase: 2
+current_phase: 3
 implementation_started: 2026-01-01T00:00:00Z
 last_session: 2026-01-01T00:00:00Z
 last_updated: 2026-01-01T00:00:00Z
@@ -31,9 +31,9 @@ This document tracks implementation progress against the spec plan.
 | 1.3  | Define DeduplicationConfig struct                 | done        | 2026-01-01 | 2026-01-01 | config.rs with env loading |
 | 1.4  | Implement content hash utility                    | done        | 2026-01-01 | 2026-01-01 | hasher.rs with SHA256 |
 | 1.5  | Add sha2 dependency                               | done        | 2026-01-01 | 2026-01-01 | + hex, lru crates |
-| 2.1  | Implement ExactMatchChecker                       | pending     |            |            |       |
-| 2.2  | Implement SemanticSimilarityChecker               | pending     |            |            |       |
-| 2.3  | Implement RecentCaptureChecker                    | pending     |            |            |       |
+| 2.1  | Implement ExactMatchChecker                       | done        | 2026-01-01 | 2026-01-01 | exact_match.rs with 7 tests |
+| 2.2  | Implement SemanticSimilarityChecker               | done        | 2026-01-01 | 2026-01-01 | semantic.rs with 11 tests |
+| 2.3  | Implement RecentCaptureChecker                    | done        | 2026-01-01 | 2026-01-01 | recent.rs with 12 tests |
 | 2.4  | Add lru dependency                                | done        | 2026-01-01 | 2026-01-01 | Added with Phase 1 |
 | 3.1  | Implement DeduplicationService core               | pending     |            |            |       |
 | 3.2  | Implement Deduplicator trait                      | done        | 2026-01-01 | 2026-01-01 | In types.rs |
@@ -60,7 +60,7 @@ This document tracks implementation progress against the spec plan.
 | Phase | Name           | Progress | Status      |
 |-------|----------------|----------|-------------|
 | 1     | Foundation     | 100%     | done        |
-| 2     | Checkers       | 25%      | in-progress |
+| 2     | Checkers       | 100%     | done        |
 | 3     | Service        | 33%      | pending     |
 | 4     | Integration    | 0%       | pending     |
 | 5     | Testing        | 0%       | pending     |
@@ -97,3 +97,14 @@ This document tracks implementation progress against the spec plan.
 - Added Serialize/Deserialize to `MemoryId` (was missing)
 - 22 unit tests passing, clippy clean
 - Phase 1 complete, ready for Phase 2 (Checkers)
+
+### 2026-01-01 - Phase 2 Complete
+
+- Implemented `ExactMatchChecker` with SHA256 tag lookup via RecallService
+- Implemented `SemanticSimilarityChecker` with FastEmbed and VectorBackend integration
+- Implemented `RecentCaptureChecker` with thread-safe LRU cache and TTL expiration
+- Added `cosine_similarity` utility function
+- All checkers use proper URN format: `subcog://{domain}/{namespace}/{id}`
+- 30 new tests (7 + 11 + 12), 52 total deduplication tests passing
+- Clippy clean with all lints
+- Phase 2 complete, ready for Phase 3 (Service orchestration)
