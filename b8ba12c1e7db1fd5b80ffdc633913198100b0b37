@@ -1,10 +1,12 @@
 ---
-created_at: 1767232248
+created_at: 1767232252
 domain: global
-id: learnings_d2913a00-8ea7-49df-a551-0c25eb935116
-namespace: learnings
+id: decisions_0b3d8457-1c09-4835-b2f3-f22d65177c08
+namespace: decisions
 status: active
-tags: []
-updated_at: 1767232248
+tags:
+- auto-captured
+- pre-compact
+updated_at: 1767232252
 ---
-E2E test: Push gateway requires trailing newline
+Excellent decisions. I'll implement the repository pattern with async/await support using sqlx as the database driver. This gives us compile-time query verification.
