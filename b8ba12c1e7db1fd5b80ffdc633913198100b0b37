@@ -1,10 +1,14 @@
 ---
-created_at: 1767230102
+created_at: 1767230779
 domain: global
-id: learnings_be477a6a-aa9b-4c93-91a5-19a08ddbaae4
+id: learnings_c69f27c2-3092-4e25-9f7b-fde35956b00d
 namespace: learnings
 status: active
-tags: []
-updated_at: 1767230102
+tags:
+- versions
+- dependencies
+- best-practices
+- global
+updated_at: 1767230779
 ---
-E2E test: Push gateway requires trailing newline
+Always verify the latest software versions ONLINE before using them. Do not rely on cached knowledge - versions change frequently. Search for "[software name] latest version [current month year]" to get current information. This applies to all dependencies: Docker images, npm packages, Python packages, Rust crates, etc.
