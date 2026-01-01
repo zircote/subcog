@@ -1,7 +1,7 @@
 ---
 created_at: 1767234225
 domain: global
-id: decisions_0d2bb4ba-4f43-4289-96f6-dd31c126c939
+id: decisions_d75a242a-5c05-44ee-b873-fc460f8b6326
 namespace: decisions
 status: active
 tags:
@@ -9,4 +9,4 @@ tags:
 - pre-compact
 updated_at: 1767234225
 ---
-We decided to use PostgreSQL with TimescaleDB extension for time-series metrics. This architectural decision will provide the scalability we need.
+The decision to use PostgreSQL with TimescaleDB provides excellent compression and retention policies for metrics. I have selected the hypertable approach for automatic partitioning.
