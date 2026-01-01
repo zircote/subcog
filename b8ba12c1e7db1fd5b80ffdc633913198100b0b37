@@ -1,27 +1,10 @@
 ---
-created_at: 1767230826
+created_at: 1767230964
 domain: global
-id: context_cf8cd6a8-095c-4c79-9146-74ad49dc0322
-namespace: context
+id: decisions_6739fdee-3583-4eaf-9fe8-58248b69f0bc
+namespace: decisions
 status: active
-tags:
-- versions
-- observability
-- grafana
-- tempo
-- loki
-- prometheus
-- openai
-- global
-updated_at: 1767230826
+tags: []
+updated_at: 1767230964
 ---
-Current observability stack versions (December 2025):
-- Grafana: 12.3.1 (latest)
-- Grafana Tempo: 2.9.0 (latest)
-- Grafana Loki: 3.3.2 (latest 3.x, stable)
-- Prometheus: v2.54.1
-- OpenTelemetry Collector: 0.104.0
-
-GPT models (OpenAI):
-- GPT-5.2, GPT-5-mini, GPT-5-nano (current generation)
-- Never use gpt-4o or gpt-4o-mini - these are outdated
+E2E test: Use Prometheus for metrics
