@@ -1,12 +1,10 @@
 ---
-created_at: 1767232252
+created_at: 1767232289
 domain: global
-id: decisions_0b3d8457-1c09-4835-b2f3-f22d65177c08
+id: decisions_bcbf2ca6-c9b2-44bf-9ff5-954d0a45bd49
 namespace: decisions
 status: active
-tags:
-- auto-captured
-- pre-compact
-updated_at: 1767232252
+tags: []
+updated_at: 1767232289
 ---
-Excellent decisions. I'll implement the repository pattern with async/await support using sqlx as the database driver. This gives us compile-time query verification.
+E2E test: Use Prometheus for metrics
