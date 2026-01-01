@@ -10,8 +10,18 @@
 //! ---
 //! The actual memory content here.
 //! ```
+//!
+//! # Security
+//!
+//! This module includes protections against YAML-based attacks:
+//! - **Size limits**: Front matter limited to 64KB to prevent memory exhaustion
+//! - **Billion laughs**: Entity expansion limited by `serde_yaml`'s safe defaults
 
 use crate::{Error, Result};
+
+/// Maximum allowed size for YAML front matter (64KB).
+/// Prevents memory exhaustion from maliciously large front matter.
+const MAX_FRONT_MATTER_SIZE: usize = 64 * 1024;
 
 /// Parser for YAML front matter in memory content.
 pub struct YamlFrontMatterParser;
@@ -56,10 +66,19 @@ impl YamlFrontMatterParser {
 
         if let Some(end_pos) = after_first.find(Self::DELIMITER) {
             let yaml_content = &after_first[..end_pos].trim();
+
+            // PEN-H3: Prevent billion laughs attack by limiting front matter size
+            if yaml_content.len() > MAX_FRONT_MATTER_SIZE {
+                return Err(Error::InvalidInput(format!(
+                    "YAML front matter exceeds maximum size of {MAX_FRONT_MATTER_SIZE} bytes",
+                )));
+            }
+
             let body_start = end_pos + Self::DELIMITER.len();
             let body = after_first[body_start..].trim_start_matches(['\r', '\n']);
 
             // Parse YAML to serde_json::Value
+            // Note: serde_yaml uses safe-yaml crate which limits entity expansion
             let metadata: serde_json::Value = serde_yaml::from_str(yaml_content)
                 .map_err(|e| Error::InvalidInput(format!("Invalid YAML front matter: {e}")))?;
 

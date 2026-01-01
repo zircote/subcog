@@ -146,9 +146,7 @@ impl McpServer {
             // Check rate limit
             if request_count >= RATE_LIMIT_MAX_REQUESTS {
                 tracing::warn!(
-                    "Rate limit exceeded: {} requests in {:?}",
-                    request_count,
-                    RATE_LIMIT_WINDOW
+                    "Rate limit exceeded: {request_count} requests in {RATE_LIMIT_WINDOW:?}",
                 );
                 metrics::counter!("mcp_rate_limit_exceeded_total").increment(1);
 
@@ -157,8 +155,7 @@ impl McpServer {
                     None,
                     -32000,
                     &format!(
-                        "Rate limit exceeded: max {} requests per {:?}",
-                        RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW
+                        "Rate limit exceeded: max {RATE_LIMIT_MAX_REQUESTS} requests per {RATE_LIMIT_WINDOW:?}",
                     ),
                 );
                 writeln!(stdout, "{error_response}").map_err(|e| Error::OperationFailed {

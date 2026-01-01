@@ -2,6 +2,12 @@
 //!
 //! A fallback backend that stores memories as individual JSON files.
 //! Useful for testing and environments without git.
+//!
+//! # Security
+//!
+//! This module includes protections against filesystem-based attacks:
+//! - **Path traversal**: Memory IDs are validated to prevent directory escape
+//! - **File size limits**: Maximum file size enforced to prevent memory exhaustion
 
 use crate::models::{Memory, MemoryId};
 use crate::storage::traits::PersistenceBackend;
@@ -9,6 +15,10 @@ use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// Maximum file size for memory files (1MB).
+/// Prevents memory exhaustion from maliciously large files.
+const MAX_FILE_SIZE: u64 = 1024 * 1024;
 
 /// Serializable memory format for filesystem storage.
 #[derive(Debug, Serialize, Deserialize)]
@@ -131,8 +141,47 @@ impl FilesystemBackend {
     }
 
     /// Returns the path for a memory file.
-    fn memory_path(&self, id: &MemoryId) -> PathBuf {
-        self.base_path.join(format!("{}.json", id.as_str()))
+    ///
+    /// # Security
+    ///
+    /// The memory ID is sanitized to prevent path traversal attacks.
+    /// Only alphanumeric characters, dashes, and underscores are allowed.
+    fn memory_path(&self, id: &MemoryId) -> Result<PathBuf> {
+        let id_str = id.as_str();
+
+        // Validate ID to prevent path traversal attacks (PEN-H2)
+        if !Self::is_safe_filename(id_str) {
+            return Err(Error::InvalidInput(format!(
+                "Memory ID contains invalid characters: {id_str}",
+            )));
+        }
+
+        let path = self.base_path.join(format!("{id_str}.json"));
+
+        // Double-check: ensure the resulting path is under base_path
+        // Note: We compare the non-canonical paths because:
+        // 1. The ID validation above prevents ".." and "/" in the filename
+        // 2. The file may not exist yet (for store operations)
+        // 3. Canonicalization would fail for non-existent files
+        // The is_safe_filename check is the primary security barrier
+        if !path.starts_with(&self.base_path) {
+            return Err(Error::InvalidInput(format!(
+                "Path traversal attempt detected for ID: {id_str}",
+            )));
+        }
+
+        Ok(path)
+    }
+
+    /// Checks if a filename is safe (no path traversal).
+    fn is_safe_filename(name: &str) -> bool {
+        // Only allow alphanumeric, dash, underscore
+        // Reject: .. / \ NUL and other special chars
+        !name.is_empty()
+            && name.len() <= 255
+            && name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
     }
 
     /// Returns the base path.
@@ -147,7 +196,7 @@ impl PersistenceBackend for FilesystemBackend {
         // Ensure directory exists before storing
         let _ = fs::create_dir_all(&self.base_path);
 
-        let path = self.memory_path(&memory.id);
+        let path = self.memory_path(&memory.id)?;
         let stored = StoredMemory::from(memory);
 
         let json = serde_json::to_string_pretty(&stored).map_err(|e| Error::OperationFailed {
@@ -164,10 +213,26 @@ impl PersistenceBackend for FilesystemBackend {
     }
 
     fn get(&self, id: &MemoryId) -> Result<Option<Memory>> {
-        let path = self.memory_path(id);
+        let path = match self.memory_path(id) {
+            Ok(p) => p,
+            Err(_) => return Ok(None), // Invalid ID means no memory
+        };
 
         if !path.exists() {
             return Ok(None);
+        }
+
+        // PEN-H4: Validate file size before reading to prevent memory exhaustion
+        let metadata = fs::metadata(&path).map_err(|e| Error::OperationFailed {
+            operation: "read_file_metadata".to_string(),
+            cause: e.to_string(),
+        })?;
+
+        if metadata.len() > MAX_FILE_SIZE {
+            return Err(Error::InvalidInput(format!(
+                "Memory file exceeds maximum size of {MAX_FILE_SIZE} bytes: {}",
+                path.display()
+            )));
         }
 
         let json = fs::read_to_string(&path).map_err(|e| Error::OperationFailed {
@@ -185,7 +250,10 @@ impl PersistenceBackend for FilesystemBackend {
     }
 
     fn delete(&mut self, id: &MemoryId) -> Result<bool> {
-        let path = self.memory_path(id);
+        let path = match self.memory_path(id) {
+            Ok(p) => p,
+            Err(_) => return Ok(false), // Invalid ID means nothing to delete
+        };
 
         if !path.exists() {
             return Ok(false);

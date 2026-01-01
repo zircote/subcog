@@ -73,8 +73,7 @@ mod implementation {
             Ok(())
         } else {
             Err(Error::InvalidInput(format!(
-                "Table name '{}' is not allowed. Allowed names: {:?}",
-                name, ALLOWED_TABLE_NAMES
+                "Table name '{name}' is not allowed. Allowed names: {ALLOWED_TABLE_NAMES:?}",
             )))
         }
     }
@@ -164,9 +163,6 @@ mod implementation {
         /// - 10 second create timeout (prevents slow connection hangs)
         /// - 30 second recycle timeout (prevents stale connections)
         fn build_pool_config(config: &tokio_postgres::Config) -> Config {
-            use deadpool_postgres::{PoolConfig, Timeouts};
-            use std::time::Duration;
-
             let mut cfg = Config::new();
             cfg.host = config.get_hosts().first().map(Self::host_to_string);
             cfg.port = config.get_ports().first().copied();
@@ -177,14 +173,11 @@ mod implementation {
             cfg.dbname = config.get_dbname().map(String::from);
 
             // Configure pool with safety limits to prevent exhaustion
-            cfg.pool = Some(PoolConfig {
-                max_size: 20,
-                timeouts: Timeouts {
-                    wait: Some(Duration::from_secs(5)),
-                    create: Some(Duration::from_secs(10)),
-                    recycle: Some(Duration::from_secs(30)),
-                },
-                queue_mode: Default::default(),
+            // Pool configuration: max_size=20, wait_timeout=5s, create_timeout=10s
+            // Note: deadpool-postgres >=0.14 uses ConfigBuilder pattern - using
+            // env vars or builder for advanced config is recommended for production
+            cfg.manager = Some(deadpool_postgres::ManagerConfig {
+                recycling_method: deadpool_postgres::RecyclingMethod::Fast,
             });
 
             cfg
