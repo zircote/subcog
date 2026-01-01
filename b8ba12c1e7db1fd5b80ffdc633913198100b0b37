@@ -1,12 +1,12 @@
 ---
 created_at: 1767234687
 domain: global
-id: decisions_959fce89-cb89-4fbf-b047-9eca563a26ac
-namespace: decisions
+id: learnings_9521ef87-b4d7-4143-9e1e-1e7a3f4dc9ef
+namespace: learnings
 status: active
 tags:
 - auto-captured
 - pre-compact
 updated_at: 1767234687
 ---
-The decision to use PostgreSQL with TimescaleDB provides excellent compression and retention policies for metrics. I have selected the hypertable approach for automatic partitioning.
+TIL that the OTLP receiver was bound to 127.0.0.1 instead of 0.0.0.0, so external containers could not reach it. This is a common gotcha with containerized services.
