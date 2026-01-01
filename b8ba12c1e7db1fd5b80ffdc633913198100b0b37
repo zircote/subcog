@@ -1,7 +1,7 @@
 ---
 created_at: 1767233121
 domain: global
-id: learnings_6940fb58-1466-43c1-9d29-f8d8e14fedb2
+id: learnings_0f2e4d89-eaf1-4f9e-a66e-54d434897985
 namespace: learnings
 status: active
 tags:
@@ -9,4 +9,4 @@ tags:
 - pre-compact
 updated_at: 1767233121
 ---
-TIL that the OTLP receiver was bound to 127.0.0.1 instead of 0.0.0.0, so external containers could not reach it. This is a common gotcha with containerized services.
+I learned that you should always bind container services to 0.0.0.0 for inter-container communication. This is a key caveat when running services in Docker.
