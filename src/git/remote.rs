@@ -122,7 +122,7 @@ impl RemoteManager {
                 );
                 Err(Error::OperationFailed {
                     operation: "fetch_notes".to_string(),
-                    cause: format!("Operation timed out after {:?}", timeout),
+                    cause: format!("Operation timed out after {timeout:?}"),
                 })
             },
             Err(mpsc::RecvTimeoutError::Disconnected) => Err(Error::OperationFailed {
@@ -201,7 +201,7 @@ impl RemoteManager {
                 );
                 Err(Error::OperationFailed {
                     operation: "push_notes".to_string(),
-                    cause: format!("Operation timed out after {:?}", timeout),
+                    cause: format!("Operation timed out after {timeout:?}"),
                 })
             },
             Err(mpsc::RecvTimeoutError::Disconnected) => Err(Error::OperationFailed {

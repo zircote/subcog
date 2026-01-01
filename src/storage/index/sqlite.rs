@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use tracing::instrument;
 
 /// Timeout for acquiring mutex lock (5 seconds).
-/// Reserved for future use when upgrading to parking_lot::Mutex.
+/// Reserved for future use when upgrading to `parking_lot::Mutex`.
 #[allow(dead_code)]
 const MUTEX_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -21,16 +21,16 @@ const MUTEX_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 /// If the mutex is poisoned (due to a panic in a previous critical section),
 /// we recover the inner value and log a warning. This prevents cascading
 /// failures when one operation panics.
-fn acquire_lock<'a, T>(mutex: &'a Mutex<T>) -> Result<MutexGuard<'a, T>> {
+fn acquire_lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     // First try to acquire lock normally
     match mutex.lock() {
-        Ok(guard) => Ok(guard),
+        Ok(guard) => guard,
         Err(poisoned) => {
             // Recover from poison - this is safe because we log the issue
             // and the connection state should still be valid
             tracing::warn!("SQLite mutex was poisoned, recovering");
             metrics::counter!("sqlite_mutex_poison_recovery_total").increment(1);
-            Ok(poisoned.into_inner())
+            poisoned.into_inner()
         },
     }
 }
@@ -43,7 +43,7 @@ fn acquire_lock<'a, T>(mutex: &'a Mutex<T>) -> Result<MutexGuard<'a, T>> {
 ///
 /// Reserved for future use - currently using simpler `acquire_lock` with poison recovery.
 #[allow(dead_code)]
-fn acquire_lock_with_timeout<'a, T>(mutex: &'a Mutex<T>, timeout: Duration) -> Result<MutexGuard<'a, T>> {
+fn acquire_lock_with_timeout<T>(mutex: &Mutex<T>, timeout: Duration) -> Result<MutexGuard<'_, T>> {
     let start = Instant::now();
     let sleep_duration = Duration::from_millis(10);
 
@@ -60,7 +60,7 @@ fn acquire_lock_with_timeout<'a, T>(mutex: &'a Mutex<T>, timeout: Duration) -> R
                     metrics::counter!("sqlite_mutex_timeout_total").increment(1);
                     return Err(Error::OperationFailed {
                         operation: "acquire_lock".to_string(),
-                        cause: format!("Lock acquisition timed out after {:?}", timeout),
+                        cause: format!("Lock acquisition timed out after {timeout:?}"),
                     });
                 }
                 std::thread::sleep(sleep_duration);
@@ -137,7 +137,13 @@ impl SqliteBackend {
 
     /// Initializes the database schema.
     fn initialize(&self) -> Result<()> {
-        let conn = acquire_lock(&self.conn)?;
+        let conn = acquire_lock(&self.conn);
+
+        // Enable WAL mode for better concurrent read performance
+        // Note: pragma_update returns the result which we ignore - journal_mode returns
+        // a string like "wal" which would cause execute_batch to fail
+        let _ = conn.pragma_update(None, "journal_mode", "WAL");
+        let _ = conn.pragma_update(None, "synchronous", "NORMAL");
 
         // Create the main table for memory metadata
         conn.execute(
@@ -160,6 +166,9 @@ impl SqliteBackend {
         // Add source column if it doesn't exist (for migration)
         let _ = conn.execute("ALTER TABLE memories ADD COLUMN source TEXT", []);
 
+        // Create indexes for common query patterns (DB-H1)
+        Self::create_indexes(&conn);
+
         // Create FTS5 virtual table for full-text search (standalone, not synced with memories)
         conn.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
@@ -175,6 +184,33 @@ impl SqliteBackend {
         })?;
 
         Ok(())
+    }
+
+    /// Creates indexes for optimized queries.
+    fn create_indexes(conn: &Connection) {
+        // Index on namespace for filtered searches
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_namespace ON memories(namespace)",
+            [],
+        );
+
+        // Index on status for filtered searches
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status)",
+            [],
+        );
+
+        // Index on created_at for time-based queries
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at DESC)",
+            [],
+        );
+
+        // Composite index for common filter patterns
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_namespace_status ON memories(namespace, status)",
+            [],
+        );
     }
 
     /// Builds a WHERE clause from a search filter with numbered parameters.
@@ -411,7 +447,7 @@ impl IndexBackend for SqliteBackend {
     fn index(&mut self, memory: &Memory) -> Result<()> {
         let start = Instant::now();
         let result = (|| {
-            let conn = acquire_lock(&self.conn)?;
+            let conn = acquire_lock(&self.conn);
 
             let tags_str = memory.tags.join(",");
             let domain_str = memory.domain.to_string();
@@ -467,7 +503,7 @@ impl IndexBackend for SqliteBackend {
     fn remove(&mut self, id: &MemoryId) -> Result<bool> {
         let start = Instant::now();
         let result = (|| {
-            let conn = acquire_lock(&self.conn)?;
+            let conn = acquire_lock(&self.conn);
 
             // Delete from FTS
             conn.execute(
@@ -507,7 +543,7 @@ impl IndexBackend for SqliteBackend {
     ) -> Result<Vec<(MemoryId, f32)>> {
         let start = Instant::now();
         let result = (|| {
-            let conn = acquire_lock(&self.conn)?;
+            let conn = acquire_lock(&self.conn);
 
             // Build filter clause with numbered parameters starting from ?2
             // ?1 is the FTS query
@@ -594,7 +630,7 @@ impl IndexBackend for SqliteBackend {
     fn clear(&mut self) -> Result<()> {
         let start = Instant::now();
         let result = (|| {
-            let conn = acquire_lock(&self.conn)?;
+            let conn = acquire_lock(&self.conn);
 
             conn.execute("DELETE FROM memories_fts", [])
                 .map_err(|e| Error::OperationFailed {
@@ -623,7 +659,7 @@ impl IndexBackend for SqliteBackend {
     fn list_all(&self, filter: &SearchFilter, limit: usize) -> Result<Vec<(MemoryId, f32)>> {
         let start = Instant::now();
         let result = (|| {
-            let conn = acquire_lock(&self.conn)?;
+            let conn = acquire_lock(&self.conn);
 
             // Build filter clause (starting at parameter 1, no FTS query)
             let (filter_clause, filter_params, next_param) =
@@ -685,7 +721,7 @@ impl IndexBackend for SqliteBackend {
     fn get_memory(&self, id: &MemoryId) -> Result<Option<Memory>> {
         let start = Instant::now();
         let result = (|| {
-            let conn = acquire_lock(&self.conn)?;
+            let conn = acquire_lock(&self.conn);
             let row = fetch_memory_row(&conn, id)?;
             Ok(row.map(build_memory_from_row))
         })();
