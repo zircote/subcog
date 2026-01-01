@@ -3,10 +3,10 @@
 //! Detects duplicates by comparing embedding vectors using cosine similarity.
 //! Uses configurable per-namespace similarity thresholds.
 
+use crate::Result;
 use crate::embedding::Embedder;
 use crate::models::{MemoryId, Namespace, SearchFilter};
 use crate::storage::traits::VectorBackend;
-use crate::Result;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::instrument;
@@ -365,7 +365,9 @@ mod tests {
         let checker = create_test_checker();
 
         // Content shorter than min_semantic_length (50) should be skipped
-        let result = checker.check("short", Namespace::Decisions, "global").unwrap();
+        let result = checker
+            .check("short", Namespace::Decisions, "global")
+            .unwrap();
         assert!(result.is_none());
     }
 
@@ -375,7 +377,9 @@ mod tests {
 
         // Content long enough but no vectors in the index
         let content = "This is a sufficiently long piece of content that should trigger semantic similarity checking in the deduplication system.";
-        let result = checker.check(content, Namespace::Decisions, "global").unwrap();
+        let result = checker
+            .check(content, Namespace::Decisions, "global")
+            .unwrap();
         assert!(result.is_none());
     }
 
@@ -388,7 +392,8 @@ mod tests {
         let config = DeduplicationConfig::default();
 
         // Add a vector to the index
-        let existing_content = "Use PostgreSQL as the primary database for storing user data and application state.";
+        let existing_content =
+            "Use PostgreSQL as the primary database for storing user data and application state.";
         let existing_embedding = embedder.embed(existing_content).unwrap();
         vector
             .upsert(&MemoryId::new("existing-memory-123"), &existing_embedding)
@@ -428,7 +433,8 @@ mod tests {
         let checker = SemanticSimilarityChecker::new(embedder, vector, config);
 
         // Check with different content - should be below threshold
-        let new_content = "Use MongoDB for document storage in the application for maximum flexibility.";
+        let new_content =
+            "Use MongoDB for document storage in the application for maximum flexibility.";
         let result = checker
             .check(new_content, Namespace::Decisions, "global")
             .unwrap();
@@ -463,5 +469,87 @@ mod tests {
         assert!(result.is_ok());
         let embedding = result.unwrap();
         assert_eq!(embedding.len(), FastEmbedEmbedder::DEFAULT_DIMENSIONS);
+    }
+
+    mod property_tests {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Normalize a vector to unit length, or return a default unit vector if too small.
+        fn normalize_vector(v: Vec<f32>) -> Vec<f32> {
+            let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+            if norm < f32::EPSILON {
+                default_unit_vector(v.len())
+            } else {
+                v.into_iter().map(|x| x / norm).collect()
+            }
+        }
+
+        /// Create a default unit vector of given dimension.
+        fn default_unit_vector(dim: usize) -> Vec<f32> {
+            let mut result = vec![0.0; dim];
+            if !result.is_empty() {
+                result[0] = 1.0;
+            }
+            result
+        }
+
+        /// Strategy for generating valid normalized vectors.
+        fn normalized_vec(dim: usize) -> impl Strategy<Value = Vec<f32>> {
+            prop::collection::vec(-1.0f32..1.0f32, dim).prop_map(normalize_vector)
+        }
+
+        proptest! {
+            /// Cosine similarity of a vector with itself is always 1.0.
+            #[test]
+            fn prop_similarity_identity(v in normalized_vec(10)) {
+                let sim = cosine_similarity(&v, &v);
+                prop_assert!((sim - 1.0).abs() < 0.001, "Self-similarity should be 1.0, got {sim}");
+            }
+
+            /// Cosine similarity is symmetric: sim(a, b) == sim(b, a).
+            #[test]
+            fn prop_similarity_symmetric(
+                v1 in normalized_vec(10),
+                v2 in normalized_vec(10)
+            ) {
+                let sim_ab = cosine_similarity(&v1, &v2);
+                let sim_ba = cosine_similarity(&v2, &v1);
+                prop_assert!(
+                    (sim_ab - sim_ba).abs() < 0.001,
+                    "Symmetry violated: sim(a,b)={sim_ab}, sim(b,a)={sim_ba}"
+                );
+            }
+
+            /// Cosine similarity is always in the range [0.0, 1.0].
+            #[test]
+            fn prop_similarity_bounded(
+                v1 in normalized_vec(10),
+                v2 in normalized_vec(10)
+            ) {
+                let sim = cosine_similarity(&v1, &v2);
+                prop_assert!(
+                    (0.0..=1.0).contains(&sim),
+                    "Similarity {sim} out of bounds [0, 1]"
+                );
+            }
+
+            /// Empty vectors should return 0.0.
+            #[test]
+            fn prop_empty_vectors_zero(_dummy: u8) {
+                let sim = cosine_similarity(&[], &[]);
+                prop_assert!(sim < f32::EPSILON, "Empty vectors should return 0.0, got {sim}");
+            }
+
+            /// Different dimension vectors should return 0.0.
+            #[test]
+            fn prop_different_dimensions_zero(
+                v1 in normalized_vec(5),
+                v2 in normalized_vec(10)
+            ) {
+                let sim = cosine_similarity(&v1, &v2);
+                prop_assert!(sim < f32::EPSILON, "Different dimension vectors should return 0.0, got {sim}");
+            }
+        }
     }
 }

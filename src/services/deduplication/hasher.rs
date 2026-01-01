@@ -263,4 +263,68 @@ mod tests {
         let hash2 = ContentHasher::hash("col1 col2");
         assert_eq!(hash1, hash2);
     }
+
+    mod property_tests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            /// Hash output is always 64 hex characters.
+            #[test]
+            fn prop_hash_length(content in any::<String>()) {
+                let hash = ContentHasher::hash(&content);
+                prop_assert_eq!(hash.len(), 64, "Hash length should be 64, got {}", hash.len());
+            }
+
+            /// Same input always produces same hash (deterministic).
+            #[test]
+            fn prop_hash_deterministic(content in any::<String>()) {
+                let hash1 = ContentHasher::hash(&content);
+                let hash2 = ContentHasher::hash(&content);
+                prop_assert_eq!(hash1, hash2, "Hash should be deterministic");
+            }
+
+            /// Normalization is idempotent: normalize(normalize(x)) == normalize(x).
+            #[test]
+            fn prop_normalize_idempotent(content in any::<String>()) {
+                let once = ContentHasher::normalize(&content);
+                let twice = ContentHasher::normalize(&once);
+                prop_assert_eq!(once, twice, "Normalization should be idempotent");
+            }
+
+            /// Normalized content produces same hash regardless of whitespace/case.
+            #[test]
+            fn prop_normalized_hash_invariant(content in "[a-z ]{1,50}") {
+                let with_spaces = format!("  {content}  ");
+                let uppercased = content.to_uppercase();
+
+                let hash_original = ContentHasher::hash(&content);
+                let hash_spaces = ContentHasher::hash(&with_spaces);
+                let hash_upper = ContentHasher::hash(&uppercased);
+
+                prop_assert_eq!(
+                    &hash_original, &hash_spaces,
+                    "Extra whitespace should not affect hash"
+                );
+                prop_assert_eq!(
+                    &hash_original, &hash_upper,
+                    "Case should not affect hash"
+                );
+            }
+
+            /// Tag format is always correct.
+            #[test]
+            fn prop_tag_format(content in any::<String>()) {
+                let tag = ContentHasher::content_to_tag(&content);
+                prop_assert!(
+                    tag.starts_with("hash:sha256:"),
+                    "Tag should start with 'hash:sha256:', got {tag}"
+                );
+                prop_assert_eq!(
+                    tag.len(), 28,
+                    "Tag length should be 28 (12 prefix + 16 hash), got {}", tag.len()
+                );
+            }
+        }
+    }
 }

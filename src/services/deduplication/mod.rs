@@ -41,6 +41,7 @@ mod exact_match;
 mod hasher;
 mod recent;
 mod semantic;
+mod service;
 mod types;
 
 pub use config::DeduplicationConfig;
@@ -48,8 +49,5 @@ pub use exact_match::ExactMatchChecker;
 pub use hasher::ContentHasher;
 pub use recent::RecentCaptureChecker;
 pub use semantic::{SemanticSimilarityChecker, cosine_similarity};
-pub use types::{DuplicateCheckResult, DuplicateReason};
-
-// Service module will be added in Phase 3
-// mod service;
-// pub use service::DeduplicationService;
+pub use service::DeduplicationService;
+pub use types::{Deduplicator, DuplicateCheckResult, DuplicateReason};

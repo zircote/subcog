@@ -169,13 +169,13 @@ impl RecentCaptureChecker {
                     duration_ms = %duration_ms,
                     "Cache entry expired or wrong namespace"
                 );
-            }
+            },
             None => {
                 tracing::debug!(
                     duration_ms = %duration_ms,
                     "No recent capture found"
                 );
-            }
+            },
         }
 
         metrics::histogram!(
@@ -235,8 +235,7 @@ impl RecentCaptureChecker {
                 "Recorded capture in recent cache"
             );
 
-            metrics::gauge!("deduplication_recent_cache_size")
-                .set(cache.len() as f64);
+            metrics::gauge!("deduplication_recent_cache_size").set(cache.len() as f64);
         }
     }
 
@@ -273,8 +272,7 @@ impl RecentCaptureChecker {
                 "Recorded capture by hash in recent cache"
             );
 
-            metrics::gauge!("deduplication_recent_cache_size")
-                .set(cache.len() as f64);
+            metrics::gauge!("deduplication_recent_cache_size").set(cache.len() as f64);
         }
     }
 

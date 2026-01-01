@@ -7,9 +7,67 @@ use crate::storage::traits::IndexBackend;
 use crate::{Error, Result};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::Instant;
+use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 use tracing::instrument;
+
+/// Timeout for acquiring mutex lock (5 seconds).
+/// Reserved for future use when upgrading to parking_lot::Mutex.
+#[allow(dead_code)]
+const MUTEX_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Helper to acquire mutex lock with poison recovery.
+///
+/// If the mutex is poisoned (due to a panic in a previous critical section),
+/// we recover the inner value and log a warning. This prevents cascading
+/// failures when one operation panics.
+fn acquire_lock<'a, T>(mutex: &'a Mutex<T>) -> Result<MutexGuard<'a, T>> {
+    // First try to acquire lock normally
+    match mutex.lock() {
+        Ok(guard) => Ok(guard),
+        Err(poisoned) => {
+            // Recover from poison - this is safe because we log the issue
+            // and the connection state should still be valid
+            tracing::warn!("SQLite mutex was poisoned, recovering");
+            metrics::counter!("sqlite_mutex_poison_recovery_total").increment(1);
+            Ok(poisoned.into_inner())
+        },
+    }
+}
+
+/// Alternative lock acquisition with spin-wait timeout.
+///
+/// Note: Rust's `std::sync::Mutex` doesn't have a native `try_lock_for`,
+/// so we implement a spin-wait with sleep. For production, consider
+/// using `parking_lot::Mutex` which has proper timed locking.
+///
+/// Reserved for future use - currently using simpler `acquire_lock` with poison recovery.
+#[allow(dead_code)]
+fn acquire_lock_with_timeout<'a, T>(mutex: &'a Mutex<T>, timeout: Duration) -> Result<MutexGuard<'a, T>> {
+    let start = Instant::now();
+    let sleep_duration = Duration::from_millis(10);
+
+    loop {
+        match mutex.try_lock() {
+            Ok(guard) => return Ok(guard),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => {
+                tracing::warn!("SQLite mutex was poisoned, recovering");
+                metrics::counter!("sqlite_mutex_poison_recovery_total").increment(1);
+                return Ok(poisoned.into_inner());
+            },
+            Err(std::sync::TryLockError::WouldBlock) => {
+                if start.elapsed() > timeout {
+                    metrics::counter!("sqlite_mutex_timeout_total").increment(1);
+                    return Err(Error::OperationFailed {
+                        operation: "acquire_lock".to_string(),
+                        cause: format!("Lock acquisition timed out after {:?}", timeout),
+                    });
+                }
+                std::thread::sleep(sleep_duration);
+            },
+        }
+    }
+}
 
 /// SQLite-based index backend with FTS5.
 pub struct SqliteBackend {
@@ -79,10 +137,7 @@ impl SqliteBackend {
 
     /// Initializes the database schema.
     fn initialize(&self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
-            operation: "lock_connection".to_string(),
-            cause: e.to_string(),
-        })?;
+        let conn = acquire_lock(&self.conn)?;
 
         // Create the main table for memory metadata
         conn.execute(
@@ -356,10 +411,7 @@ impl IndexBackend for SqliteBackend {
     fn index(&mut self, memory: &Memory) -> Result<()> {
         let start = Instant::now();
         let result = (|| {
-            let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_connection".to_string(),
-                cause: e.to_string(),
-            })?;
+            let conn = acquire_lock(&self.conn)?;
 
             let tags_str = memory.tags.join(",");
             let domain_str = memory.domain.to_string();
@@ -415,10 +467,7 @@ impl IndexBackend for SqliteBackend {
     fn remove(&mut self, id: &MemoryId) -> Result<bool> {
         let start = Instant::now();
         let result = (|| {
-            let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_connection".to_string(),
-                cause: e.to_string(),
-            })?;
+            let conn = acquire_lock(&self.conn)?;
 
             // Delete from FTS
             conn.execute(
@@ -458,10 +507,7 @@ impl IndexBackend for SqliteBackend {
     ) -> Result<Vec<(MemoryId, f32)>> {
         let start = Instant::now();
         let result = (|| {
-            let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_connection".to_string(),
-                cause: e.to_string(),
-            })?;
+            let conn = acquire_lock(&self.conn)?;
 
             // Build filter clause with numbered parameters starting from ?2
             // ?1 is the FTS query
@@ -548,10 +594,7 @@ impl IndexBackend for SqliteBackend {
     fn clear(&mut self) -> Result<()> {
         let start = Instant::now();
         let result = (|| {
-            let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_connection".to_string(),
-                cause: e.to_string(),
-            })?;
+            let conn = acquire_lock(&self.conn)?;
 
             conn.execute("DELETE FROM memories_fts", [])
                 .map_err(|e| Error::OperationFailed {
@@ -580,10 +623,7 @@ impl IndexBackend for SqliteBackend {
     fn list_all(&self, filter: &SearchFilter, limit: usize) -> Result<Vec<(MemoryId, f32)>> {
         let start = Instant::now();
         let result = (|| {
-            let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_connection".to_string(),
-                cause: e.to_string(),
-            })?;
+            let conn = acquire_lock(&self.conn)?;
 
             // Build filter clause (starting at parameter 1, no FTS query)
             let (filter_clause, filter_params, next_param) =
@@ -645,10 +685,7 @@ impl IndexBackend for SqliteBackend {
     fn get_memory(&self, id: &MemoryId) -> Result<Option<Memory>> {
         let start = Instant::now();
         let result = (|| {
-            let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_connection".to_string(),
-                cause: e.to_string(),
-            })?;
+            let conn = acquire_lock(&self.conn)?;
             let row = fetch_memory_row(&conn, id)?;
             Ok(row.map(build_memory_from_row))
         })();

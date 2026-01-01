@@ -139,7 +139,12 @@ impl DuplicateCheckResult {
     /// assert_eq!(result.similarity_score, Some(0.94));
     /// ```
     #[must_use]
-    pub const fn semantic_match(memory_id: MemoryId, urn: String, score: f32, duration_ms: u64) -> Self {
+    pub const fn semantic_match(
+        memory_id: MemoryId,
+        urn: String,
+        score: f32,
+        duration_ms: u64,
+    ) -> Self {
         Self {
             is_duplicate: true,
             reason: Some(DuplicateReason::SemanticSimilar),
@@ -223,7 +228,6 @@ impl std::fmt::Display for DuplicateReason {
 /// Trait for deduplication checking.
 ///
 /// Allows for different implementations (e.g., mock for testing).
-#[allow(dead_code)] // Used in Phase 3 when DeduplicationService is implemented
 pub trait Deduplicator: Send + Sync {
     /// Checks if content is a duplicate.
     ///
@@ -316,9 +320,6 @@ mod tests {
             DuplicateReason::SemanticSimilar.to_string(),
             "semantic_similar"
         );
-        assert_eq!(
-            DuplicateReason::RecentCapture.to_string(),
-            "recent_capture"
-        );
+        assert_eq!(DuplicateReason::RecentCapture.to_string(), "recent_capture");
     }
 }

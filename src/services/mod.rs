@@ -34,6 +34,9 @@ mod topic_index;
 pub use capture::CaptureService;
 pub use consolidation::ConsolidationService;
 pub use context::{ContextBuilderService, MemoryStatistics};
+pub use deduplication::{
+    DeduplicationConfig, DeduplicationService, Deduplicator, DuplicateCheckResult, DuplicateReason,
+};
 pub use enrichment::{EnrichmentResult, EnrichmentService, EnrichmentStats};
 pub use prompt::{PromptFilter, PromptService};
 pub use prompt_parser::{PromptFormat, PromptParser};
@@ -173,6 +176,57 @@ impl ServiceContainer {
     #[must_use]
     pub const fn repo_path(&self) -> Option<&PathBuf> {
         self.repo_path.as_ref()
+    }
+
+    /// Creates a deduplication service without embedding support.
+    ///
+    /// This variant supports:
+    /// - Exact match (SHA256 hash comparison)
+    /// - Recent capture (LRU cache with TTL)
+    ///
+    /// For full semantic similarity support, create a `DeduplicationService`
+    /// directly with an embedder and vector backend.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the recall service cannot be initialized.
+    pub fn deduplication(
+        &self,
+    ) -> Result<
+        deduplication::DeduplicationService<
+            crate::embedding::FastEmbedEmbedder,
+            crate::storage::vector::UsearchBackend,
+        >,
+    > {
+        let recall = std::sync::Arc::new(self.recall()?);
+        let config = deduplication::DeduplicationConfig::from_env();
+        Ok(deduplication::DeduplicationService::without_embeddings(
+            recall, config,
+        ))
+    }
+
+    /// Creates a deduplication service with custom configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Custom deduplication configuration
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the recall service cannot be initialized.
+    pub fn deduplication_with_config(
+        &self,
+        config: deduplication::DeduplicationConfig,
+    ) -> Result<
+        deduplication::DeduplicationService<
+            crate::embedding::FastEmbedEmbedder,
+            crate::storage::vector::UsearchBackend,
+        >,
+    > {
+        let recall = std::sync::Arc::new(self.recall()?);
+        Ok(deduplication::DeduplicationService::without_embeddings(
+            recall, config,
+        ))
     }
 
     /// Gets the index path for a domain scope.
