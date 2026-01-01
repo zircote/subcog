@@ -37,17 +37,18 @@
 //! ```
 
 mod config;
+mod exact_match;
 mod hasher;
+mod recent;
+mod semantic;
 mod types;
 
 pub use config::DeduplicationConfig;
+pub use exact_match::ExactMatchChecker;
 pub use hasher::ContentHasher;
+pub use recent::RecentCaptureChecker;
+pub use semantic::{SemanticSimilarityChecker, cosine_similarity};
 pub use types::{DuplicateCheckResult, DuplicateReason};
-
-// Checker modules will be added in Phase 2
-// mod exact_match;
-// mod recent;
-// mod semantic;
 
 // Service module will be added in Phase 3
 // mod service;
