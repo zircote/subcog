@@ -1,10 +1,12 @@
 ---
-created_at: 1767232929
+created_at: 1767233000
 domain: global
-id: learnings_88d45ac7-b5b8-4751-8963-6415842d513c
-namespace: learnings
+id: decisions_3b9cdf47-b408-4112-8600-8276b8f960e3
+namespace: decisions
 status: active
-tags: []
-updated_at: 1767232929
+tags:
+- auto-captured
+- pre-compact
+updated_at: 1767233000
 ---
-E2E test: Push gateway requires trailing newline
+We decided to use PostgreSQL with TimescaleDB extension for time-series metrics. This architectural decision will provide the scalability we need.
