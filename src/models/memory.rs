@@ -1,9 +1,11 @@
 //! Memory types and identifiers.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Unique identifier for a memory.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct MemoryId(String);
 
 impl MemoryId {

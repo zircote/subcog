@@ -22,6 +22,7 @@
 mod capture;
 mod consolidation;
 mod context;
+pub mod deduplication;
 mod enrichment;
 mod prompt;
 mod prompt_parser;
