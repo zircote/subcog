@@ -14,11 +14,13 @@ services:
     depends_on:
       - prometheus
       - tempo
+      - loki
 
   prometheus:
     image: prom/prometheus:v2.54.1
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--web.enable-remote-write-receiver"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
@@ -30,20 +32,42 @@ services:
       - "9091:9091"
 
   tempo:
-    image: grafana/tempo:2.5.0
+    image: grafana/tempo:2.9.0
     command: ["-config.file=/etc/tempo/tempo.yml"]
     volumes:
       - ./tempo/tempo.yml:/etc/tempo/tempo.yml:ro
     ports:
       - "3200:3200"
 
+  loki:
+    image: grafana/loki:3.3.2
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./loki/loki.yml:/etc/loki/loki.yml:ro
+    ports:
+      - "3100:3100"
+
+  promtail:
+    image: grafana/promtail:3.3.2
+    command: ["-config.file=/etc/promtail/promtail.yml"]
+    volumes:
+      - ./promtail/promtail.yml:/etc/promtail/promtail.yml:ro
+      - ~/.local/share/subcog/logs:/var/log/subcog:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    depends_on:
+      - loki
+
   otel-collector:
     build:
       context: ..
       dockerfile: docker/otel-collector/Dockerfile
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ~/.local/share/subcog/logs:/var/log/subcog:ro
     ports:
       - "4317:4317"
       - "4318:4318"
+      - "8889:8889"
     depends_on:
       - tempo
+      - loki

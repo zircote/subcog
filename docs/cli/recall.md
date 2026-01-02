@@ -194,6 +194,6 @@ Use PostgreSQL for primary storage...
 
 ## See Also
 
-- [capture](capture.md) - Capture new memories
+- [capture](./capture.md) - Capture new memories
 - [MCP subcog_recall](../mcp/tools.md#subcog_recall) - MCP equivalent
 - [Query Syntax](../QUERY_SYNTAX.md) - Full filter syntax reference

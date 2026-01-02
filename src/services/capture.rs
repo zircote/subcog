@@ -55,6 +55,8 @@ impl CaptureService {
         let namespace_label = request.namespace.as_str().to_string();
         let domain_label = request.domain.to_string();
 
+        tracing::info!(namespace = %namespace_label, domain = %domain_label, "Capturing memory");
+
         let result = (|| {
             // Validate content
             if request.content.trim().is_empty() {
@@ -79,16 +81,39 @@ impl CaptureService {
                 (request.content.clone(), false)
             };
 
-            // Generate memory ID
-            let memory_id = self.generate_id(&request.namespace);
-            let span = tracing::Span::current();
-            span.record("memory.id", memory_id.as_str());
-
             // Get current timestamp
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
+
+            // Store to git notes if configured and get the SHA as memory ID
+            let memory_id = if let Some(ref repo_path) = self.config.repo_path {
+                let notes = NotesManager::new(repo_path);
+
+                // Serialize memory content with initial front matter (ID will be the note SHA)
+                let metadata = serde_json::json!({
+                    "namespace": request.namespace.as_str(),
+                    "domain": request.domain.to_string(),
+                    "status": MemoryStatus::Active.as_str(),
+                    "created_at": now,
+                    "updated_at": now,
+                    "tags": request.tags
+                });
+
+                let note_content = YamlFrontMatterParser::serialize(&metadata, &content)?;
+                let note_oid = notes.add_to_head(&note_content)?;
+
+                // Use the note SHA as the memory ID (short form - first 12 chars)
+                MemoryId::new(note_oid.to_string()[..12].to_string())
+            } else {
+                // Fallback to UUID if no git repo configured (SHA only, no namespace prefix)
+                let uuid = uuid::Uuid::new_v4();
+                MemoryId::new(uuid.to_string().replace('-', "")[..12].to_string())
+            };
+
+            let span = tracing::Span::current();
+            span.record("memory.id", memory_id.as_str());
 
             // Create memory
             let memory = Memory {
@@ -104,26 +129,7 @@ impl CaptureService {
                 source: request.source,
             };
 
-            // Store to git notes if configured
-            if let Some(ref repo_path) = self.config.repo_path {
-                let notes = NotesManager::new(repo_path);
-
-                // Serialize memory with front matter
-                let metadata = serde_json::json!({
-                    "id": memory.id.as_str(),
-                    "namespace": memory.namespace.as_str(),
-                    "domain": memory.domain.to_string(),
-                    "status": memory.status.as_str(),
-                    "created_at": memory.created_at,
-                    "updated_at": memory.updated_at,
-                    "tags": memory.tags
-                });
-
-                let note_content = YamlFrontMatterParser::serialize(&metadata, &memory.content)?;
-                notes.add_to_head(&note_content)?;
-            }
-
-            // Generate URN
+            // Generate URN (always use subcog:// format)
             let urn = self.generate_urn(&memory);
 
             // Collect warnings
@@ -174,22 +180,16 @@ impl CaptureService {
         result
     }
 
-    /// Generates a unique memory ID.
-    fn generate_id(&self, namespace: &crate::models::Namespace) -> MemoryId {
-        let uuid = uuid::Uuid::new_v4();
-        MemoryId::new(format!("{}_{}", namespace.as_str(), uuid))
-    }
-
     /// Generates a URN for the memory.
     fn generate_urn(&self, memory: &Memory) -> String {
         let domain_part = if memory.domain.is_global() {
             "global".to_string()
         } else {
-            memory.domain.to_string().replace('/', ":")
+            memory.domain.to_string()
         };
 
         format!(
-            "urn:subcog:{}:{}:{}",
+            "subcog://{}/{}/{}",
             domain_part,
             memory.namespace.as_str(),
             memory.id.as_str()
@@ -276,8 +276,16 @@ mod tests {
         assert!(result.is_ok());
 
         let result = result.unwrap();
-        assert!(result.memory_id.as_str().starts_with("decisions_"));
-        assert!(result.urn.starts_with("urn:subcog:"));
+        // Memory ID is SHA only (12 hex chars), no namespace prefix
+        assert_eq!(result.memory_id.as_str().len(), 12);
+        assert!(
+            result
+                .memory_id
+                .as_str()
+                .chars()
+                .all(|c| c.is_ascii_hexdigit())
+        );
+        assert!(result.urn.starts_with("subcog://"));
         assert!(!result.content_modified);
     }
 

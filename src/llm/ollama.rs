@@ -80,21 +80,58 @@ impl OllamaClient {
             .post(format!("{}/api/generate", self.endpoint))
             .json(&request)
             .send()
-            .map_err(|e| Error::OperationFailed {
-                operation: "ollama_request".to_string(),
-                cause: e.to_string(),
+            .map_err(|e| {
+                let error_kind = if e.is_timeout() {
+                    "timeout"
+                } else if e.is_connect() {
+                    "connect"
+                } else if e.is_request() {
+                    "request"
+                } else {
+                    "unknown"
+                };
+                tracing::error!(
+                    provider = "ollama",
+                    model = %self.model,
+                    error = %e,
+                    error_kind = error_kind,
+                    is_timeout = e.is_timeout(),
+                    is_connect = e.is_connect(),
+                    "LLM request failed"
+                );
+                Error::OperationFailed {
+                    operation: "ollama_request".to_string(),
+                    cause: format!("{error_kind} error: {e}"),
+                }
             })?;
 
         if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().unwrap_or_default();
+            tracing::error!(
+                provider = "ollama",
+                model = %self.model,
+                status = %status,
+                body = %body,
+                "LLM API returned error status"
+            );
             return Err(Error::OperationFailed {
                 operation: "ollama_request".to_string(),
-                cause: format!("API returned status: {}", response.status()),
+                cause: format!("API returned status: {status} - {body}"),
             });
         }
 
-        let response: GenerateResponse = response.json().map_err(|e| Error::OperationFailed {
-            operation: "ollama_response".to_string(),
-            cause: e.to_string(),
+        let response: GenerateResponse = response.json().map_err(|e| {
+            tracing::error!(
+                provider = "ollama",
+                model = %self.model,
+                error = %e,
+                "Failed to parse LLM response"
+            );
+            Error::OperationFailed {
+                operation: "ollama_response".to_string(),
+                cause: e.to_string(),
+            }
         })?;
 
         Ok(response.response)
@@ -113,21 +150,58 @@ impl OllamaClient {
             .post(format!("{}/api/chat", self.endpoint))
             .json(&request)
             .send()
-            .map_err(|e| Error::OperationFailed {
-                operation: "ollama_chat".to_string(),
-                cause: e.to_string(),
+            .map_err(|e| {
+                let error_kind = if e.is_timeout() {
+                    "timeout"
+                } else if e.is_connect() {
+                    "connect"
+                } else if e.is_request() {
+                    "request"
+                } else {
+                    "unknown"
+                };
+                tracing::error!(
+                    provider = "ollama",
+                    model = %self.model,
+                    error = %e,
+                    error_kind = error_kind,
+                    is_timeout = e.is_timeout(),
+                    is_connect = e.is_connect(),
+                    "LLM chat request failed"
+                );
+                Error::OperationFailed {
+                    operation: "ollama_chat".to_string(),
+                    cause: format!("{error_kind} error: {e}"),
+                }
             })?;
 
         if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().unwrap_or_default();
+            tracing::error!(
+                provider = "ollama",
+                model = %self.model,
+                status = %status,
+                body = %body,
+                "LLM chat API returned error status"
+            );
             return Err(Error::OperationFailed {
                 operation: "ollama_chat".to_string(),
-                cause: format!("API returned status: {}", response.status()),
+                cause: format!("API returned status: {status} - {body}"),
             });
         }
 
-        let response: ChatResponse = response.json().map_err(|e| Error::OperationFailed {
-            operation: "ollama_chat_response".to_string(),
-            cause: e.to_string(),
+        let response: ChatResponse = response.json().map_err(|e| {
+            tracing::error!(
+                provider = "ollama",
+                model = %self.model,
+                error = %e,
+                "Failed to parse LLM chat response"
+            );
+            Error::OperationFailed {
+                operation: "ollama_chat_response".to_string(),
+                cause: e.to_string(),
+            }
         })?;
 
         Ok(response.message.content)

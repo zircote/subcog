@@ -977,12 +977,12 @@ Domains provide scope isolation:
 Memories are addressed via URNs:
 
 ```
-urn:subcog:{domain}:{namespace}:{id}
+subcog://{domain}/{namespace}/{id}
 ```
 
 Example:
 ```
-urn:subcog:zircote:subcog:decisions:decisions_abc123
+subcog://zircote/subcog/decisions/abc123
 ```
 
 ## Memory Lifecycle

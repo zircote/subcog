@@ -21,10 +21,10 @@
 //! | Domain | Backend | Location |
 //! |--------|---------|----------|
 //! | Project | Git Notes | `.git/refs/notes/_prompts` |
-//! | User | SQLite | `~/.config/subcog/_prompts/prompts.db` |
+//! | User | SQLite | `~/.config/subcog/memories.db` |
 //! | User | PostgreSQL | Configured connection |
 //! | User | Redis | Configured connection |
-//! | User | Filesystem | `~/.config/subcog/_prompts/` |
+//! | User | Filesystem | `~/.config/subcog/prompts/` |
 //! | Org | Deferred | Not yet implemented |
 
 mod filesystem;
@@ -72,7 +72,7 @@ impl PromptStorageFactory {
     /// # Domain Routing
     ///
     /// - **Project**: Git notes in the repository
-    /// - **User**: `SQLite` at `~/.config/subcog/_prompts/prompts.db` (default)
+    /// - **User**: `SQLite` at `~/.config/subcog/memories.db` (default)
     /// - **Org**: Returns an error (deferred)
     ///
     /// # Arguments
@@ -95,6 +95,42 @@ impl PromptStorageFactory {
                     .to_string(),
             )),
         }
+    }
+
+    /// Creates storage for the given scope using full subcog configuration.
+    ///
+    /// Uses the storage settings from the config file when available.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The storage backend cannot be initialized
+    /// - Required paths or connection strings are missing
+    /// - The Redis feature is not enabled for Redis backend
+    pub fn create_for_scope_with_subcog_config(
+        scope: DomainScope,
+        config: &crate::config::SubcogConfig,
+    ) -> Result<Arc<dyn PromptStorage>> {
+        use crate::config::StorageBackendType;
+
+        let storage_config = match scope {
+            DomainScope::Project => &config.storage.project,
+            DomainScope::User => &config.storage.user,
+            DomainScope::Org => &config.storage.org,
+        };
+
+        let backend = match storage_config.backend {
+            StorageBackendType::GitNotes => PromptBackendType::GitNotes,
+            StorageBackendType::Sqlite => PromptBackendType::Sqlite,
+            StorageBackendType::Filesystem => PromptBackendType::Filesystem,
+            StorageBackendType::PostgreSQL => PromptBackendType::PostgreSQL,
+            StorageBackendType::Redis => PromptBackendType::Redis,
+        };
+
+        let path = storage_config.path.as_ref().map(PathBuf::from);
+        let connection_url = storage_config.connection_string.clone();
+
+        Self::create_with_backend(backend, path, connection_url)
     }
 
     /// Creates project-scoped storage (git notes).

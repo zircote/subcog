@@ -34,7 +34,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -57,12 +57,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(mcp_requests_total{job=~\"$job\"}[5m])) by (status)",
+          "expr": "sum(mcp_requests_total{job=~\"$job\"}) by (status)",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
       ],
-      "title": "MCP Requests Rate",
+      "title": "MCP Requests Total",
       "type": "timeseries"
     },
     {
@@ -95,12 +95,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(mcp_request_duration_ms_bucket{job=~\"$job\"}[5m])) by (le))",
+          "expr": "avg(mcp_request_duration_ms{job=~\"$job\", quantile=\"0.95\"})",
           "legendFormat": "p95",
           "refId": "A"
+        },
+        {
+          "expr": "avg(mcp_request_duration_ms{job=~\"$job\", quantile=\"0.5\"})",
+          "legendFormat": "p50",
+          "refId": "B"
         }
       ],
-      "title": "MCP Request Latency p95",
+      "title": "MCP Request Latency",
       "type": "timeseries"
     },
     {
@@ -110,7 +115,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -133,12 +138,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(llm_requests_total{job=~\"$job\"}[5m])) by (status)",
+          "expr": "sum(llm_requests_total{job=~\"$job\"}) by (status)",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
       ],
-      "title": "LLM Requests Rate",
+      "title": "LLM Requests Total",
       "type": "timeseries"
     },
     {
@@ -171,12 +176,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(llm_request_duration_ms_bucket{job=~\"$job\"}[5m])) by (le))",
-          "legendFormat": "p95",
+          "expr": "avg(llm_request_duration_ms{job=~\"$job\", quantile=\"0.95\"}) by (provider)",
+          "legendFormat": "{{provider}} p95",
           "refId": "A"
+        },
+        {
+          "expr": "avg(llm_request_duration_ms{job=~\"$job\", quantile=\"0.5\"}) by (provider)",
+          "legendFormat": "{{provider}} p50",
+          "refId": "B"
         }
       ],
-      "title": "LLM Latency p95",
+      "title": "LLM Latency",
       "type": "timeseries"
     },
     {
@@ -186,7 +196,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -209,12 +219,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(hook_executions_total{job=~\"$job\"}[5m])) by (hook_type, status)",
+          "expr": "sum(hook_executions_total{job=~\"$job\"}) by (hook_type, status)",
           "legendFormat": "{{hook_type}} {{status}}",
           "refId": "A"
         }
       ],
-      "title": "Hook Executions Rate",
+      "title": "Hook Executions Total",
       "type": "timeseries"
     },
     {
@@ -224,7 +234,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -247,12 +257,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(storage_operations_total{job=~\"$job\"}[5m])) by (operation, status)",
+          "expr": "sum(storage_operations_total{job=~\"$job\"}) by (operation, status)",
           "legendFormat": "{{operation}} {{status}}",
           "refId": "A"
         }
       ],
-      "title": "Storage Operations Rate",
+      "title": "Storage Operations Total",
       "type": "timeseries"
     },
     {

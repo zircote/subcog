@@ -157,14 +157,14 @@ When disabled:
 Domain is part of the canonical URN:
 
 ```
-urn:subcog:{domain}:{namespace}:{id}
+subcog://{domain}/{namespace}/{id}
 ```
 
 Examples:
 ```
-urn:subcog:project:decisions:dc58d23a...
-urn:subcog:global:learnings:1314b968...
-urn:subcog:zircote:patterns:a1b2c3d4...
+subcog://project/decisions/dc58d23a...
+subcog://global/learnings/1314b968...
+subcog://zircote/patterns/a1b2c3d4...
 ```
 
 ## Domain Inheritance
@@ -177,7 +177,7 @@ id: abc123
 namespace: decisions
 domain: project
 references:
-  - urn:subcog:zircote:patterns:def456
+  - subcog://zircote/patterns/def456
 ---
 Follows organization pattern for error handling
 ```

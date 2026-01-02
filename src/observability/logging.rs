@@ -1,5 +1,7 @@
 //! Structured logging.
 
+use std::path::PathBuf;
+
 use tracing_subscriber::EnvFilter;
 
 use crate::config::LoggingSettings;
@@ -20,6 +22,8 @@ pub struct LoggingConfig {
     pub format: LogFormat,
     /// Log filter (e.g., `subcog=info`).
     pub filter: EnvFilter,
+    /// Optional log file path (logs to stderr if None).
+    pub file: Option<PathBuf>,
 }
 
 impl LoggingConfig {
@@ -47,9 +51,14 @@ impl LoggingConfig {
             })
             .unwrap_or_else(|| default_filter(verbose));
 
+        let file = settings
+            .and_then(|config| config.file.as_ref())
+            .map(PathBuf::from);
+
         Self {
             format: log_format_from_env_override(format),
             filter: filter_from_env_override(filter),
+            file: log_file_from_env_override(file),
         }
     }
 }
@@ -115,4 +124,13 @@ fn default_filter(verbose: bool) -> EnvFilter {
         "subcog=info"
     };
     EnvFilter::new(default_level)
+}
+
+fn log_file_from_env_override(default: Option<PathBuf>) -> Option<PathBuf> {
+    std::env::var("SUBCOG_LOG_FILE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or(default)
 }

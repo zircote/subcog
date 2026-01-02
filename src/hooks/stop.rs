@@ -138,6 +138,8 @@ impl HookHandler for StopHandler {
     fn handle(&self, input: &str) -> Result<String> {
         let start = Instant::now();
 
+        tracing::info!(hook = "Stop", "Processing stop hook");
+
         let result = {
             // Parse input as JSON
             let input_json: serde_json::Value =

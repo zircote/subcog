@@ -23,10 +23,9 @@ Subcog uses two complementary addressing schemes:
 
 | Scheme | Format | Purpose |
 |--------|--------|---------|
-| **URN** | `urn:subcog:...` | Canonical, persistent identifier for memories |
-| **URI** | `subcog://...` | MCP resource access for browsing and fetching |
+| **URN** | `subcog://...` | Canonical, persistent identifier for memories |
 
-The URN is the authoritative identifier stored with each memory. The URI scheme provides a hierarchical navigation interface for the Model Context Protocol (MCP).
+The URN is the authoritative identifier stored with each memory and provides hierarchical navigation for the Model Context Protocol (MCP).
 
 ---
 
@@ -35,7 +34,7 @@ The URN is the authoritative identifier stored with each memory. The URI scheme 
 The canonical URN format for memories is:
 
 ```
-urn:subcog:{domain}:{namespace}:{id}
+subcog://{domain}/{namespace}/{id}
 ```
 
 ### Components
@@ -49,9 +48,9 @@ urn:subcog:{domain}:{namespace}:{id}
 ### Examples
 
 ```
-urn:subcog:project:decisions:dc58d23a35876f5a59426e81aaa81d796efa7fc1
-urn:subcog:global:learnings:1314b9681301b9337559b7c5ad7af7e22dc76fc7
-urn:subcog:zircote/subcog:patterns:a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+subcog://project/decisions/dc58d23a35876f5a59426e81aaa81d796efa7fc1
+subcog://global/learnings/1314b9681301b9337559b7c5ad7af7e22dc76fc7
+subcog://zircote/subcog/patterns/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
 ```
 
 ### ID Formats
@@ -61,7 +60,7 @@ Memory IDs can be in different formats depending on the storage backend:
 | Format | Example | Source |
 |--------|---------|--------|
 | Git SHA1 | `dc58d23a35876f5a59426e81aaa81d796efa7fc1` | Git notes backend |
-| Namespaced UUID | `decisions-1767029448609097000` | Capture service |
+| Short UUID | `abc123def456` | Capture service (12 hex chars) |
 
 IDs are opaque identifiers - use them as-is without parsing.
 
@@ -189,7 +188,7 @@ Fetch endpoints (`subcog://memory/{id}`, `subcog://project/{namespace}/{id}`) re
 
 ```json
 {
-  "urn": "urn:subcog:project:decisions:dc58d23a35876f5a59426e81aaa81d796efa7fc1",
+  "urn": "subcog://project/decisions/dc58d23a35876f5a59426e81aaa81d796efa7fc1",
   "id": "dc58d23a35876f5a59426e81aaa81d796efa7fc1",
   "namespace": "decisions",
   "domain": "zircote/subcog",
@@ -291,7 +290,7 @@ The three-part URI (`subcog://project/decisions/{id}`) validates that the memory
 
 ```
 List (project)          -->  List (decisions)      -->  Full content + URN
-{count: 42, ...}             {count: 8, ...}            {urn: "urn:subcog:...", content: "..."}
+{count: 42, ...}             {count: 8, ...}            {urn: "subcog://...", content: "..."}
 ```
 
 ### Workflow 2: Cross-Domain Lookup
@@ -358,7 +357,7 @@ Memories are stored with canonical URNs and can be recalled using the same addre
     "content": "Use RRF for hybrid search fusion"
   }
 }
-// Returns: { "urn": "urn:subcog:project:decisions:dc58d23a...", "id": "dc58d23a..." }
+// Returns: { "urn": "subcog://project/decisions/dc58d23a...", "id": "dc58d23a..." }
 ```
 
 **Recall by URN components:**
@@ -418,7 +417,7 @@ subcog://_/patterns           // All patterns from all domains
 When referencing memories in documentation or code comments, use the canonical URN format:
 
 ```
-See: urn:subcog:project:decisions:dc58d23a35876f5a59426e81aaa81d796efa7fc1
+See: subcog://project/decisions/dc58d23a35876f5a59426e81aaa81d796efa7fc1
 ```
 
 ---
@@ -459,7 +458,7 @@ See: urn:subcog:project:decisions:dc58d23a35876f5a59426e81aaa81d796efa7fc1
 **Fetch Response:**
 ```json
 {
-  "urn": "urn:subcog:...",
+  "urn": "subcog://...",
   "id": "...",
   "namespace": "...",
   "domain": "...",

@@ -142,7 +142,7 @@ Response:
     "content": [
       {
         "type": "text",
-        "text": "{\"id\": \"dc58d23a...\", \"urn\": \"urn:subcog:...\"}"
+        "text": "{\"id\": \"dc58d23a...\", \"urn\": \"subcog://...\"}"
       }
     ]
   }

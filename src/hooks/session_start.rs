@@ -178,60 +178,150 @@ impl SessionStartHandler {
 
     /// Returns standard guidance text.
     fn standard_guidance() -> String {
-        r#"## Subcog Memory Protocol
+        r#"## ⚠️ MANDATORY SUBCOG PROTOCOL - EXECUTE IMMEDIATELY ⚠️
 
-You have access to subcog, a persistent memory system. MCP tools are available with the prefix `mcp__plugin_subcog_subcog__`.
+**THIS IS NOT OPTIONAL. FAILURE TO COMPLY BREAKS THE USER'S WORKFLOW.**
 
-### Available Tools
-| Short Name | Full MCP Tool Name |
-|------------|-------------------|
-| `subcog_capture` | `mcp__plugin_subcog_subcog__subcog_capture` |
-| `subcog_recall` | `mcp__plugin_subcog_subcog__subcog_recall` |
-| `subcog_status` | `mcp__plugin_subcog_subcog__subcog_status` |
-| `subcog_namespaces` | `mcp__plugin_subcog_subcog__subcog_namespaces` |
+You MUST use subcog memory tools. They are available with prefix `mcp__plugin_subcog_subcog__`.
 
-### Capture Memories
-When the user makes a decision, discovers a pattern, or learns something important:
-- Use `mcp__plugin_subcog_subcog__subcog_capture` to record it
-- Choose the appropriate namespace: decisions, patterns, learnings, context, tech-debt, blockers, apis, config, security, performance, testing
+---
 
-### Recall Memories
-Before making recommendations or decisions:
-- Use `mcp__plugin_subcog_subcog__subcog_recall` to search for relevant prior context
-- Consider past decisions and learnings that may apply
+## 🔴 RULE 1: RECALL FIRST - EVERY SINGLE TIME
 
-### Proactive Behavior
-- **Decisions**: When the user says "we'll use X" or "let's go with Y", capture it
-- **Patterns**: When identifying recurring code patterns or conventions, capture them
-- **Learnings**: When discovering gotchas, caveats, or insights, capture them
-- **Blockers**: When resolving issues or bugs, capture the solution"#
+**BEFORE you write ANY response, you MUST call:**
+```
+mcp__plugin_subcog_subcog__subcog_recall
+```
+
+**NO EXCEPTIONS.** Search for context related to the user's question FIRST.
+
+- Starting a task? → RECALL FIRST
+- Answering a question? → RECALL FIRST
+- Making a recommendation? → RECALL FIRST
+- Debugging an issue? → RECALL FIRST
+
+**DO NOT SKIP THIS STEP. DO NOT ASK PERMISSION. JUST DO IT.**
+
+---
+
+## 🔴 RULE 2: CAPTURE IMMEDIATELY - NO HESITATION
+
+**The INSTANT you detect any of these signals, CALL `mcp__plugin_subcog_subcog__subcog_capture`:**
+
+| Signal | Namespace | Example |
+|--------|-----------|---------|
+| Decision made | `decisions` | "We'll use X", "Let's go with Y", "I decided..." |
+| Pattern found | `patterns` | Code conventions, recurring structures |
+| Learning discovered | `learnings` | "TIL", "Turns out", debugging insights |
+| Bug fixed | `blockers` | "Fixed by", "The issue was", workarounds |
+| Tech debt noted | `tech-debt` | "TODO", "FIXME", "We should refactor" |
+
+**⚠️ DO NOT ASK "Should I save this?" - THE ANSWER IS ALWAYS YES.**
+**⚠️ DO NOT WAIT - CAPTURE THE MOMENT YOU DETECT THE SIGNAL.**
+
+---
+
+## 🔴 RULE 3: CONFIRM EVERY CAPTURE
+
+After EVERY capture, print this confirmation:
+```
+📝 Memory captured: subcog://{domain}/{namespace}/{id}
+   Namespace: {namespace}
+   Content: "{preview}"
+   [To remove: subcog_delete {id} | To edit: subcog_enrich {id}]
+```
+
+---
+
+## Tool Reference
+
+| Action | Tool |
+|--------|------|
+| Search memories | `mcp__plugin_subcog_subcog__subcog_recall` |
+| Save memory | `mcp__plugin_subcog_subcog__subcog_capture` |
+| Check status | `mcp__plugin_subcog_subcog__subcog_status` |
+| List namespaces | `mcp__plugin_subcog_subcog__subcog_namespaces` |
+
+---
+
+**🚨 REMEMBER: You are REQUIRED to use these tools. This is not a suggestion. The user depends on this memory system to maintain context across sessions. Your compliance is mandatory.**"#
             .to_string()
     }
 
     /// Returns detailed guidance text.
     fn detailed_guidance() -> String {
-        r#"## Subcog Memory Protocol
+        r#"# 🚨 CRITICAL: SUBCOG MEMORY PROTOCOL 🚨
 
-You have access to subcog, a persistent memory system for capturing and recalling project knowledge across sessions.
+**STOP. READ THIS ENTIRE SECTION. YOUR COMPLIANCE IS MANDATORY.**
 
-### Available MCP Tools
+The user's productivity depends on you following these rules. Failure to comply means lost context, repeated work, and frustrated users. This system exists because you forget everything between sessions - subcog is your external memory.
 
-MCP tools are available with the prefix `mcp__plugin_subcog_subcog__`.
+---
 
-| Short Name | Full MCP Tool Name | Purpose |
-|------------|-------------------|---------|
-| `subcog_capture` | `mcp__plugin_subcog_subcog__subcog_capture` | Record decisions, patterns, learnings, and context |
-| `subcog_recall` | `mcp__plugin_subcog_subcog__subcog_recall` | Search for relevant memories using semantic + text search |
-| `subcog_status` | `mcp__plugin_subcog_subcog__subcog_status` | Check memory system status and statistics |
-| `subcog_namespaces` | `mcp__plugin_subcog_subcog__subcog_namespaces` | List available memory namespaces |
-| `subcog_consolidate` | `mcp__plugin_subcog_subcog__subcog_consolidate` | Merge related memories (with LLM) |
-| `subcog_enrich` | `mcp__plugin_subcog_subcog__subcog_enrich` | Improve memory structure and tags (with LLM) |
-| `subcog_sync` | `mcp__plugin_subcog_subcog__subcog_sync` | Sync memories with git remote |
+## ⛔ NON-NEGOTIABLE RULES ⛔
 
-### Memory Namespaces
+### RULE 1: RECALL BEFORE EVERY RESPONSE
 
-| Namespace | When to Use |
-|-----------|-------------|
+**You MUST call `mcp__plugin_subcog_subcog__subcog_recall` BEFORE writing ANY substantive response.**
+
+This is not optional. This is not a suggestion. This is a requirement.
+
+```
+CORRECT: User asks question → Call subcog_recall → Read results → Respond
+WRONG:   User asks question → Respond immediately without checking memory
+```
+
+**WHY**: You have no memory between sessions. The user told you things yesterday that you've forgotten. Subcog remembers. CHECK IT.
+
+### RULE 2: CAPTURE EVERY DECISION/LEARNING/PATTERN
+
+**The INSTANT you detect ANY of these signals, you MUST call `mcp__plugin_subcog_subcog__subcog_capture`:**
+
+| 🎯 Signal Detected | 📁 Namespace | ⚡ Action |
+|-------------------|--------------|----------|
+| "We'll use...", "Let's go with...", "I decided..." | `decisions` | CAPTURE NOW |
+| "The pattern is...", "Always do...", "Convention..." | `patterns` | CAPTURE NOW |
+| "TIL...", "Turns out...", "I discovered...", "Gotcha..." | `learnings` | CAPTURE NOW |
+| "Fixed it by...", "The bug was...", "Workaround..." | `blockers` | CAPTURE NOW |
+| "TODO", "FIXME", "We should refactor...", "Tech debt..." | `tech-debt` | CAPTURE NOW |
+| API endpoints, contracts, integration notes | `apis` | CAPTURE NOW |
+| Security vulnerabilities, auth patterns, fixes | `security` | CAPTURE NOW |
+| Performance insights, optimizations, benchmarks | `performance` | CAPTURE NOW |
+
+**⚠️ NEVER ask "Should I save this?" - Asking is a FAILURE. Just capture it.**
+
+### RULE 3: CONFIRM EVERY CAPTURE TO THE USER
+
+After EVERY successful capture, you MUST display:
+```
+📝 Memory captured: subcog://{domain}/{namespace}/{id}
+   Namespace: {namespace}
+   Content: "{first 100 chars of content}..."
+   [To remove: subcog_delete {id} | To edit: subcog_enrich {id}]
+```
+
+This lets the user verify, correct, or remove incorrect captures.
+
+---
+
+## 🔧 TOOL REFERENCE
+
+| Tool | When to Use |
+|------|-------------|
+| `mcp__plugin_subcog_subcog__subcog_recall` | BEFORE every response, when searching for context |
+| `mcp__plugin_subcog_subcog__subcog_capture` | IMMEDIATELY when detecting decision/pattern/learning signals |
+| `mcp__plugin_subcog_subcog__subcog_status` | When user asks about memory system status |
+| `mcp__plugin_subcog_subcog__subcog_namespaces` | When user asks what namespaces exist |
+| `mcp__plugin_subcog_subcog__subcog_enrich` | To improve memory structure and tags |
+| `mcp__plugin_subcog_subcog__subcog_consolidate` | To merge related/duplicate memories |
+| `mcp__plugin_subcog_subcog__subcog_sync` | To sync memories with git remote |
+
+---
+
+## 📋 NAMESPACE DEFINITIONS
+
+| Namespace | Use For |
+|-----------|---------|
 | `decisions` | Architecture choices, technology selections, design decisions |
 | `patterns` | Recurring code patterns, conventions, best practices |
 | `learnings` | Discoveries, gotchas, caveats, insights, TILs |
@@ -244,56 +334,43 @@ MCP tools are available with the prefix `mcp__plugin_subcog_subcog__`.
 | `performance` | Performance insights, optimization patterns |
 | `testing` | Test patterns, coverage insights, testing strategies |
 
-### Capture Protocol
+---
 
-**Trigger phrases to detect:**
-- "We decided to...", "Let's use...", "Going with..."  → `decisions`
-- "The pattern is...", "Always do...", "Best practice..."  → `patterns`
-- "TIL...", "Turns out...", "Gotcha...", "Discovered..."  → `learnings`
-- "Fixed the bug by...", "Resolved by...", "Workaround..."  → `blockers`
-- "TODO:", "FIXME:", "Technical debt..."  → `tech-debt`
+## 🔄 SEARCH MODES
 
-**Capture command format:**
-```bash
-subcog capture --namespace <namespace> "<content>"
+| Mode | Description |
+|------|-------------|
+| `hybrid` | Combined vector + text search with RRF fusion (DEFAULT - use this) |
+| `vector` | Semantic similarity search |
+| `text` | BM25 full-text search |
+
+---
+
+## ❌ WHAT NOT TO DO
+
+1. **DON'T** respond to questions without first calling `subcog_recall`
+2. **DON'T** ask "Should I save this?" - Just save it
+3. **DON'T** ask "Should I check for prior context?" - Just check
+4. **DON'T** skip the capture confirmation message
+5. **DON'T** forget to specify the correct namespace
+
+---
+
+## ✅ CORRECT WORKFLOW EXAMPLE
+
+```
+User: "How should we implement authentication?"
+
+Your response:
+1. FIRST: Call mcp__plugin_subcog_subcog__subcog_recall with query "authentication"
+2. THEN: Read the results to see if there are prior decisions/patterns
+3. THEN: Respond to user, incorporating prior context
+4. IF the conversation produces a decision: CAPTURE IT IMMEDIATELY
 ```
 
-### Recall Protocol
+---
 
-**Before making recommendations:**
-1. Search for relevant prior decisions: `subcog recall "topic"`
-2. Check for existing patterns that apply
-3. Consider past learnings that inform the current task
-
-**Search modes:**
-- `hybrid` (default): Combined vector + text search with RRF fusion
-- `vector`: Semantic similarity search
-- `text`: BM25 full-text search
-
-### Proactive Behavior
-
-1. **Capture automatically** when detecting decision/pattern/learning signals
-2. **Recall proactively** before suggesting architectural changes
-3. **Surface related memories** after reading files to provide context
-4. **Sync memories** at session end to persist across machines
-
-### Memory Awareness
-
-**Remind the user to capture:**
-- After significant architectural discussions, ask: "Should I capture this decision?"
-- When patterns emerge in code review, suggest: "This looks like a recurring pattern. Want me to save it?"
-- When debugging reveals insights, offer: "This was a useful learning. Capture it for future reference?"
-
-**Check memories before acting:**
-- Before suggesting new patterns, recall existing patterns in this codebase
-- Before making technology recommendations, check for prior decisions
-- When encountering errors, search for similar blockers that were resolved
-- When writing new code, recall relevant security and performance patterns
-
-**Surface relevant context:**
-- When reading files, automatically surface related memories
-- When the user asks about prior work, search and present relevant memories
-- When starting new features, recall related context and decisions"#
+**🚨 FINAL WARNING: This protocol is MANDATORY. The user trusts you to maintain their knowledge base. Every time you skip a recall, you risk giving advice that contradicts prior decisions. Every time you skip a capture, you lose valuable knowledge forever.**"#
             .to_string()
     }
 
@@ -327,6 +404,8 @@ impl HookHandler for SessionStartHandler {
     fn handle(&self, input: &str) -> Result<String> {
         let start = Instant::now();
         let mut token_estimate: Option<usize> = None;
+
+        tracing::info!(hook = "SessionStart", "Processing session start hook");
 
         let result = (|| {
             // Parse input as JSON
@@ -498,20 +577,22 @@ mod tests {
     #[test]
     fn test_standard_guidance() {
         let guidance = SessionStartHandler::standard_guidance();
-        assert!(guidance.contains("Subcog Memory Protocol"));
+        assert!(guidance.contains("MANDATORY SUBCOG PROTOCOL"));
         assert!(guidance.contains("subcog_capture"));
         assert!(guidance.contains("subcog_recall"));
-        assert!(guidance.contains("Proactive Behavior"));
+        assert!(guidance.contains("RECALL FIRST"));
+        assert!(guidance.contains("CAPTURE IMMEDIATELY"));
+        assert!(guidance.contains("DO NOT ASK"));
     }
 
     #[test]
     fn test_detailed_guidance() {
         let guidance = SessionStartHandler::detailed_guidance();
-        assert!(guidance.contains("Subcog Memory Protocol"));
-        assert!(guidance.contains("Memory Namespaces"));
-        assert!(guidance.contains("Capture Protocol"));
-        assert!(guidance.contains("Recall Protocol"));
-        assert!(guidance.contains("Memory Awareness"));
+        assert!(guidance.contains("CRITICAL: SUBCOG MEMORY PROTOCOL"));
+        assert!(guidance.contains("NON-NEGOTIABLE RULES"));
+        assert!(guidance.contains("RECALL BEFORE EVERY RESPONSE"));
+        assert!(guidance.contains("CAPTURE EVERY DECISION"));
+        assert!(guidance.contains("MANDATORY"));
         assert!(guidance.contains("decisions"));
     }
 

@@ -116,7 +116,7 @@ On success, returns the memory ID and URN:
 ```json
 {
   "id": "dc58d23a35876f5a59426e81aaa81d796efa7fc1",
-  "urn": "urn:subcog:project:decisions:dc58d23a35876f5a59426e81aaa81d796efa7fc1"
+  "urn": "subcog://project/decisions/dc58d23a35876f5a59426e81aaa81d796efa7fc1"
 }
 ```
 
@@ -141,6 +141,6 @@ If secrets are detected:
 
 ## See Also
 
-- [recall](recall.md) - Search memories
-- [status](status.md) - Check capture statistics
+- [recall](./recall.md) - Search memories
+- [status](./status.md) - Check capture statistics
 - [MCP subcog_capture](../mcp/tools.md#subcog_capture) - MCP equivalent

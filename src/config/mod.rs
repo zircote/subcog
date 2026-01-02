@@ -7,6 +7,45 @@ pub use features::FeatureFlags;
 use serde::Deserialize;
 use std::path::PathBuf;
 
+/// Expands environment variable references in a string.
+///
+/// Supports `${VAR_NAME}` syntax. If the variable is not set, the original
+/// reference is preserved (e.g., `${MISSING_VAR}` stays as-is).
+///
+/// # Examples
+///
+/// ```ignore
+/// // If OPENAI_API_KEY=sk-xxx in environment
+/// expand_env_vars("${OPENAI_API_KEY}") // Returns "sk-xxx"
+/// expand_env_vars("prefix-${VAR}-suffix") // Expands VAR in the middle
+/// expand_env_vars("no vars here") // Returns unchanged
+/// ```
+fn expand_env_vars(input: &str) -> String {
+    let mut result = input.to_string();
+    let mut start = 0;
+
+    while let Some(var_start) = result[start..].find("${") {
+        let var_start = start + var_start;
+        if let Some(var_end) = result[var_start..].find('}') {
+            let var_end = var_start + var_end;
+            let var_name = &result[var_start + 2..var_end];
+            if let Ok(value) = std::env::var(var_name) {
+                result.replace_range(var_start..=var_end, &value);
+                // Continue from where we inserted the value
+                start = var_start + value.len();
+            } else {
+                // Skip past this ${...} if var not found
+                start = var_end + 1;
+            }
+        } else {
+            // No closing brace, stop processing
+            break;
+        }
+    }
+
+    result
+}
+
 /// Main configuration for subcog.
 #[derive(Debug, Clone)]
 pub struct SubcogConfig {
@@ -28,6 +67,10 @@ pub struct SubcogConfig {
     pub observability: ObservabilitySettings,
     /// Prompt customization settings.
     pub prompt: PromptConfig,
+    /// Storage configuration.
+    pub storage: StorageConfig,
+    /// Config files that were loaded (for debugging).
+    pub config_sources: Vec<PathBuf>,
 }
 
 /// LLM provider configuration.
@@ -83,6 +126,8 @@ pub struct LoggingSettings {
     pub level: Option<String>,
     /// Full filter override (e.g. "subcog=debug,hyper=info").
     pub filter: Option<String>,
+    /// Path to log file (logs to stderr if not set).
+    pub file: Option<String>,
 }
 
 /// Tracing configuration settings.
@@ -150,6 +195,170 @@ pub struct SearchIntentConfig {
     pub max_count: usize,
     /// Maximum tokens for injected memories.
     pub max_tokens: usize,
+    /// Namespace weights configuration.
+    pub weights: NamespaceWeightsConfig,
+}
+
+/// Runtime namespace weights configuration.
+///
+/// Contains weight multipliers for each intent type. Values are
+/// stored as `HashMap<String, f32>` where keys are namespace names
+/// (lowercase) and values are boost multipliers.
+#[derive(Debug, Clone, Default)]
+pub struct NamespaceWeightsConfig {
+    /// Weights for `HowTo` intent.
+    pub howto: std::collections::HashMap<String, f32>,
+    /// Weights for `Troubleshoot` intent.
+    pub troubleshoot: std::collections::HashMap<String, f32>,
+    /// Weights for `Location` intent.
+    pub location: std::collections::HashMap<String, f32>,
+    /// Weights for `Explanation` intent.
+    pub explanation: std::collections::HashMap<String, f32>,
+    /// Weights for `Comparison` intent.
+    pub comparison: std::collections::HashMap<String, f32>,
+    /// Weights for `General` intent.
+    pub general: std::collections::HashMap<String, f32>,
+}
+
+impl NamespaceWeightsConfig {
+    /// Creates a new config with default weights (matches hard-coded behavior).
+    #[must_use]
+    pub fn with_defaults() -> Self {
+        use std::collections::HashMap;
+
+        // Location/Explanation share the same weights
+        let location_weights = HashMap::from([
+            ("decisions".to_string(), 1.5),
+            ("context".to_string(), 1.3),
+            ("patterns".to_string(), 1.0),
+        ]);
+
+        Self {
+            // HowTo: patterns 1.5, learnings 1.3, decisions 1.0
+            howto: HashMap::from([
+                ("patterns".to_string(), 1.5),
+                ("learnings".to_string(), 1.3),
+                ("decisions".to_string(), 1.0),
+            ]),
+            // Troubleshoot: blockers 1.5, learnings 1.3, decisions 1.0
+            troubleshoot: HashMap::from([
+                ("blockers".to_string(), 1.5),
+                ("learnings".to_string(), 1.3),
+                ("decisions".to_string(), 1.0),
+            ]),
+            // Location: decisions 1.5, context 1.3, patterns 1.0
+            location: location_weights.clone(),
+            // Explanation: decisions 1.5, context 1.3, patterns 1.0
+            explanation: location_weights,
+            // Comparison: decisions 1.5, patterns 1.3, learnings 1.0
+            comparison: HashMap::from([
+                ("decisions".to_string(), 1.5),
+                ("patterns".to_string(), 1.3),
+                ("learnings".to_string(), 1.0),
+            ]),
+            // General: decisions 1.2, patterns 1.2, learnings 1.0
+            general: HashMap::from([
+                ("decisions".to_string(), 1.2),
+                ("patterns".to_string(), 1.2),
+                ("learnings".to_string(), 1.0),
+            ]),
+        }
+    }
+
+    /// Gets the weight for a namespace and intent type.
+    ///
+    /// Returns 1.0 if no weight is configured.
+    #[must_use]
+    pub fn get_weight(&self, intent_type: &str, namespace: &str) -> f32 {
+        let weights = match intent_type.to_lowercase().as_str() {
+            "howto" => &self.howto,
+            "troubleshoot" => &self.troubleshoot,
+            "location" => &self.location,
+            "explanation" => &self.explanation,
+            "comparison" => &self.comparison,
+            _ => &self.general,
+        };
+        weights.get(namespace).copied().unwrap_or(1.0)
+    }
+
+    /// Gets all namespace weights for a given intent type.
+    ///
+    /// Returns a vector of (`namespace_name`, weight) pairs.
+    #[must_use]
+    pub fn get_intent_weights(&self, intent_type: &str) -> Vec<(String, f32)> {
+        let weights = match intent_type.to_lowercase().as_str() {
+            "howto" => &self.howto,
+            "troubleshoot" => &self.troubleshoot,
+            "location" => &self.location,
+            "explanation" => &self.explanation,
+            "comparison" => &self.comparison,
+            _ => &self.general,
+        };
+        weights.iter().map(|(k, v)| (k.clone(), *v)).collect()
+    }
+
+    /// Merges config file weights into this config.
+    ///
+    /// Only overrides values that are explicitly set in the file config.
+    pub fn merge_from_file(&mut self, file: &ConfigFileNamespaceWeights) {
+        if let Some(ref howto) = file.howto {
+            Self::merge_intent_weights(&mut self.howto, howto);
+        }
+        if let Some(ref troubleshoot) = file.troubleshoot {
+            Self::merge_intent_weights(&mut self.troubleshoot, troubleshoot);
+        }
+        if let Some(ref location) = file.location {
+            Self::merge_intent_weights(&mut self.location, location);
+        }
+        if let Some(ref explanation) = file.explanation {
+            Self::merge_intent_weights(&mut self.explanation, explanation);
+        }
+        if let Some(ref comparison) = file.comparison {
+            Self::merge_intent_weights(&mut self.comparison, comparison);
+        }
+        if let Some(ref general) = file.general {
+            Self::merge_intent_weights(&mut self.general, general);
+        }
+    }
+
+    fn merge_intent_weights(
+        target: &mut std::collections::HashMap<String, f32>,
+        source: &ConfigFileIntentWeights,
+    ) {
+        if let Some(v) = source.decisions {
+            target.insert("decisions".to_string(), v);
+        }
+        if let Some(v) = source.patterns {
+            target.insert("patterns".to_string(), v);
+        }
+        if let Some(v) = source.learnings {
+            target.insert("learnings".to_string(), v);
+        }
+        if let Some(v) = source.context {
+            target.insert("context".to_string(), v);
+        }
+        if let Some(v) = source.tech_debt {
+            target.insert("tech-debt".to_string(), v);
+        }
+        if let Some(v) = source.blockers {
+            target.insert("blockers".to_string(), v);
+        }
+        if let Some(v) = source.apis {
+            target.insert("apis".to_string(), v);
+        }
+        if let Some(v) = source.config {
+            target.insert("config".to_string(), v);
+        }
+        if let Some(v) = source.security {
+            target.insert("security".to_string(), v);
+        }
+        if let Some(v) = source.performance {
+            target.insert("performance".to_string(), v);
+        }
+        if let Some(v) = source.testing {
+            target.insert("testing".to_string(), v);
+        }
+    }
 }
 
 impl Default for SearchIntentConfig {
@@ -162,6 +371,7 @@ impl Default for SearchIntentConfig {
             base_count: 5,
             max_count: 15,
             max_tokens: 4000,
+            weights: NamespaceWeightsConfig::with_defaults(),
         }
     }
 }
@@ -227,6 +437,9 @@ impl SearchIntentConfig {
         }
         if let Some(max_tokens) = config.max_tokens {
             settings.max_tokens = max_tokens;
+        }
+        if let Some(ref weights) = config.weights {
+            settings.weights.merge_from_file(weights);
         }
 
         settings
@@ -302,6 +515,8 @@ pub struct ConfigFile {
     pub observability: Option<ObservabilitySettings>,
     /// Prompt customization.
     pub prompt: Option<ConfigFilePrompt>,
+    /// Storage configuration.
+    pub storage: Option<ConfigFileStorage>,
 }
 
 /// Features section in config file.
@@ -373,6 +588,59 @@ pub struct ConfigFileSearchIntent {
     pub max_count: Option<usize>,
     /// Maximum tokens for injected memories.
     pub max_tokens: Option<usize>,
+    /// Namespace weights configuration.
+    pub weights: Option<ConfigFileNamespaceWeights>,
+}
+
+/// Namespace weights configuration in config file.
+///
+/// Allows customizing the boost multipliers applied to search results
+/// based on intent type and namespace. Higher values prioritize that
+/// namespace for the given intent type.
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct ConfigFileNamespaceWeights {
+    /// Weights for `HowTo` intent (e.g., "how do I implement X?").
+    pub howto: Option<ConfigFileIntentWeights>,
+    /// Weights for `Troubleshoot` intent (e.g., "why is X failing?").
+    pub troubleshoot: Option<ConfigFileIntentWeights>,
+    /// Weights for `Location` intent (e.g., "where is X defined?").
+    pub location: Option<ConfigFileIntentWeights>,
+    /// Weights for `Explanation` intent (e.g., "what is X?").
+    pub explanation: Option<ConfigFileIntentWeights>,
+    /// Weights for `Comparison` intent (e.g., "X vs Y?").
+    pub comparison: Option<ConfigFileIntentWeights>,
+    /// Weights for `General` intent (fallback for other queries).
+    pub general: Option<ConfigFileIntentWeights>,
+}
+
+/// Per-intent namespace weight multipliers.
+///
+/// Each field is a boost multiplier (default 1.0). Values > 1.0 boost
+/// that namespace, values < 1.0 reduce priority.
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct ConfigFileIntentWeights {
+    /// Weight for decisions namespace.
+    pub decisions: Option<f32>,
+    /// Weight for patterns namespace.
+    pub patterns: Option<f32>,
+    /// Weight for learnings namespace.
+    pub learnings: Option<f32>,
+    /// Weight for context namespace.
+    pub context: Option<f32>,
+    /// Weight for tech-debt namespace.
+    pub tech_debt: Option<f32>,
+    /// Weight for blockers namespace.
+    pub blockers: Option<f32>,
+    /// Weight for apis namespace.
+    pub apis: Option<f32>,
+    /// Weight for config namespace.
+    pub config: Option<f32>,
+    /// Weight for security namespace.
+    pub security: Option<f32>,
+    /// Weight for performance namespace.
+    pub performance: Option<f32>,
+    /// Weight for testing namespace.
+    pub testing: Option<f32>,
 }
 
 /// Prompt customization section in config file.
@@ -403,6 +671,128 @@ pub struct ConfigFilePrompt {
 pub struct ConfigFilePromptOperation {
     /// Additional guidance for this specific operation.
     pub additional_guidance: Option<String>,
+}
+
+/// Storage configuration section in config file.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ConfigFileStorage {
+    /// Project-scoped storage configuration.
+    pub project: Option<ConfigFileStorageBackend>,
+    /// User-scoped storage configuration.
+    pub user: Option<ConfigFileStorageBackend>,
+    /// Organization-scoped storage configuration.
+    pub org: Option<ConfigFileStorageBackend>,
+}
+
+/// Storage backend configuration.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ConfigFileStorageBackend {
+    /// Backend type: sqlite, filesystem, git\_notes, postgresql, redis.
+    pub backend: Option<String>,
+    /// Path for file-based backends (sqlite, filesystem).
+    pub path: Option<String>,
+    /// Connection string for database backends (postgresql).
+    pub connection_string: Option<String>,
+    /// Redis URL for redis backend.
+    pub redis_url: Option<String>,
+}
+
+/// Runtime storage configuration.
+#[derive(Debug, Clone, Default)]
+pub struct StorageConfig {
+    /// Project storage settings.
+    pub project: StorageBackendConfig,
+    /// User storage settings.
+    pub user: StorageBackendConfig,
+    /// Org storage settings.
+    pub org: StorageBackendConfig,
+}
+
+/// Runtime storage backend configuration.
+#[derive(Debug, Clone, Default)]
+pub struct StorageBackendConfig {
+    /// Backend type.
+    pub backend: StorageBackendType,
+    /// Path for file-based backends.
+    pub path: Option<String>,
+    /// Connection string for database backends.
+    pub connection_string: Option<String>,
+}
+
+/// Storage backend types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StorageBackendType {
+    /// Git notes (default for project).
+    GitNotes,
+    /// `SQLite` database (default for user).
+    #[default]
+    Sqlite,
+    /// Filesystem.
+    Filesystem,
+    /// PostgreSQL.
+    PostgreSQL,
+    /// Redis.
+    Redis,
+}
+
+impl StorageBackendType {
+    /// Parses a backend type from string.
+    ///
+    /// Defaults to `Sqlite` for unknown values.
+    #[must_use]
+    pub fn parse(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "git_notes" | "gitnotes" | "git-notes" => Self::GitNotes,
+            "filesystem" | "fs" | "file" => Self::Filesystem,
+            "postgresql" | "postgres" | "pg" => Self::PostgreSQL,
+            "redis" => Self::Redis,
+            // sqlite is the default for any unrecognized value
+            _ => Self::Sqlite,
+        }
+    }
+}
+
+impl StorageConfig {
+    /// Creates storage config from config file settings.
+    #[must_use]
+    pub fn from_config_file(file: &ConfigFileStorage) -> Self {
+        let mut config = Self::default();
+
+        if let Some(ref project) = file.project {
+            if let Some(ref backend) = project.backend {
+                config.project.backend = StorageBackendType::parse(backend);
+            }
+            config.project.path.clone_from(&project.path);
+            config
+                .project
+                .connection_string
+                .clone_from(&project.connection_string);
+        }
+
+        if let Some(ref user) = file.user {
+            if let Some(ref backend) = user.backend {
+                config.user.backend = StorageBackendType::parse(backend);
+            }
+            config.user.path.clone_from(&user.path);
+            config
+                .user
+                .connection_string
+                .clone_from(&user.connection_string);
+        }
+
+        if let Some(ref org) = file.org {
+            if let Some(ref backend) = org.backend {
+                config.org.backend = StorageBackendType::parse(backend);
+            }
+            config.org.path.clone_from(&org.path);
+            config
+                .org
+                .connection_string
+                .clone_from(&org.connection_string);
+        }
+
+        config
+    }
 }
 
 /// Runtime prompt configuration.
@@ -437,10 +827,22 @@ impl PromptConfig {
             identity_addendum: file.identity_addendum.clone(),
             additional_guidance: file.additional_guidance.clone(),
             operation_guidance: PromptOperationConfig {
-                capture: file.capture.as_ref().and_then(|c| c.additional_guidance.clone()),
-                search: file.search.as_ref().and_then(|c| c.additional_guidance.clone()),
-                enrichment: file.enrichment.as_ref().and_then(|c| c.additional_guidance.clone()),
-                consolidation: file.consolidation.as_ref().and_then(|c| c.additional_guidance.clone()),
+                capture: file
+                    .capture
+                    .as_ref()
+                    .and_then(|c| c.additional_guidance.clone()),
+                search: file
+                    .search
+                    .as_ref()
+                    .and_then(|c| c.additional_guidance.clone()),
+                enrichment: file
+                    .enrichment
+                    .as_ref()
+                    .and_then(|c| c.additional_guidance.clone()),
+                consolidation: file
+                    .consolidation
+                    .as_ref()
+                    .and_then(|c| c.additional_guidance.clone()),
             },
         }
     }
@@ -482,6 +884,8 @@ impl Default for SubcogConfig {
             search_intent: SearchIntentConfig::default(),
             observability: ObservabilitySettings::default(),
             prompt: PromptConfig::default(),
+            storage: StorageConfig::default(),
+            config_sources: Vec::new(),
         }
     }
 }
@@ -513,15 +917,15 @@ impl SubcogConfig {
 
         let mut config = Self::default();
         config.apply_config_file(file);
+        config.config_sources.push(path.to_path_buf());
         config.apply_env_overrides();
         Ok(config)
     }
 
     /// Loads configuration from the default location.
     ///
-    /// Checks the following paths in order:
-    /// 1. Platform-specific config dir (`~/Library/Application Support/subcog/` on macOS)
-    /// 2. XDG config dir (`~/.config/subcog/` for Unix compatibility)
+    /// Config location: `~/.config/subcog/config.toml`
+    /// Data location: `~/.config/subcog/`
     ///
     /// Returns default configuration if no config file is found.
     #[must_use]
@@ -532,33 +936,17 @@ impl SubcogConfig {
             return config;
         };
 
-        let mut config = Self::default();
+        // Single config location: ~/.config/subcog/
+        let config_dir = base_dirs.home_dir().join(".config").join("subcog");
 
-        let system_config = std::path::Path::new("/etc")
-            .join("subcog")
-            .join("config.toml");
-        let _ = apply_config_path(&mut config, &system_config);
+        let mut config = Self {
+            data_dir: config_dir.clone(),
+            ..Self::default()
+        };
 
-        let xdg_config = base_dirs
-            .home_dir()
-            .join(".config")
-            .join("subcog")
-            .join("config.toml");
-        let _ = apply_config_path(&mut config, &xdg_config);
-
-        let platform_config = base_dirs.config_dir().join("subcog").join("config.toml");
-        let _ = apply_config_path(&mut config, &platform_config);
-
-        if let Ok(cwd) = std::env::current_dir() {
-            let project_config = cwd.join(".subcog").join("config.toml");
-            let applied_project = apply_config_path(&mut config, &project_config);
-            let repo_config = (!applied_project)
-                .then(|| crate::storage::index::find_repo_root(&cwd).ok())
-                .flatten()
-                .map(|root| root.join(".subcog").join("config.toml"));
-            let _ = repo_config
-                .as_ref()
-                .map(|path| apply_config_path(&mut config, path));
+        let config_path = config_dir.join("config.toml");
+        if apply_config_path(&mut config, &config_path) {
+            config.config_sources.push(config_path);
         }
 
         config.apply_env_overrides();
@@ -619,7 +1007,8 @@ impl SubcogConfig {
                 self.llm.model = Some(model);
             }
             if let Some(api_key) = llm.api_key.filter(|value| !value.trim().is_empty()) {
-                self.llm.api_key = Some(api_key);
+                // Expand environment variable references like ${OPENAI_API_KEY}
+                self.llm.api_key = Some(expand_env_vars(&api_key));
             }
             if let Some(base_url) = llm.base_url.filter(|value| !value.trim().is_empty()) {
                 self.llm.base_url = Some(base_url);
@@ -664,6 +1053,9 @@ impl SubcogConfig {
         if let Some(prompt) = file.prompt {
             self.prompt = PromptConfig::from_config_file(&prompt);
         }
+        if let Some(storage) = file.storage {
+            self.storage = StorageConfig::from_config_file(&storage);
+        }
     }
 
     /// Sets the repository path.
@@ -682,11 +1074,18 @@ impl SubcogConfig {
 }
 
 fn apply_config_path(config: &mut SubcogConfig, path: &std::path::Path) -> bool {
-    if let Ok(file) = load_config_file(path) {
-        config.apply_config_file(file);
-        return true;
+    match load_config_file(path) {
+        Ok(file) => {
+            tracing::debug!(path = %path.display(), "Loaded config file");
+            config.apply_config_file(file);
+            true
+        },
+        Err(e) => {
+            // Log error so config parsing issues are visible
+            tracing::warn!(path = %path.display(), error = %e, "Failed to load config file");
+            false
+        },
     }
-    false
 }
 
 fn load_config_file(path: &std::path::Path) -> crate::Result<ConfigFile> {
@@ -768,5 +1167,75 @@ impl From<SubcogConfig> for Config {
                 auto_sync: false,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expand_env_vars_with_existing_var() {
+        // Use HOME which is always set on Unix/macOS
+        // On Windows, use USERPROFILE instead
+        let var_name = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+        if let Ok(expected) = std::env::var(var_name) {
+            let input = format!("${{{var_name}}}");
+            let result = expand_env_vars(&input);
+            assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
+    fn test_expand_env_vars_with_prefix_suffix() {
+        // Use PATH which is always set
+        if let Ok(path_value) = std::env::var("PATH") {
+            let result = expand_env_vars("prefix-${PATH}-suffix");
+            assert_eq!(result, format!("prefix-{path_value}-suffix"));
+        }
+    }
+
+    #[test]
+    fn test_expand_env_vars_no_vars() {
+        let result = expand_env_vars("no variables here");
+        assert_eq!(result, "no variables here");
+    }
+
+    #[test]
+    fn test_expand_env_vars_missing_var_preserved() {
+        let result = expand_env_vars("${DEFINITELY_NOT_SET_12345_SUBCOG_TEST}");
+        assert_eq!(result, "${DEFINITELY_NOT_SET_12345_SUBCOG_TEST}");
+    }
+
+    #[test]
+    fn test_expand_env_vars_multiple_existing() {
+        // Use HOME and PATH which are always set
+        let home_var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+        if let (Ok(home), Ok(path)) = (std::env::var(home_var), std::env::var("PATH")) {
+            let input = format!("${{{home_var}}}:${{PATH}}");
+            let result = expand_env_vars(&input);
+            assert_eq!(result, format!("{home}:{path}"));
+        }
+    }
+
+    #[test]
+    fn test_expand_env_vars_unclosed_brace() {
+        let result = expand_env_vars("${UNCLOSED");
+        assert_eq!(result, "${UNCLOSED");
+    }
+
+    #[test]
+    fn test_expand_env_vars_empty_braces() {
+        // Empty var name - should preserve since no var named ""
+        let result = expand_env_vars("${}");
+        assert_eq!(result, "${}");
+    }
+
+    #[test]
+    fn test_expand_env_vars_nested_braces() {
+        // Nested braces - only outer should be processed
+        let result = expand_env_vars("${${INNER}}");
+        // First finds ${${INNER} - var name is "${INNER", which won't exist
+        assert_eq!(result, "${${INNER}}");
     }
 }

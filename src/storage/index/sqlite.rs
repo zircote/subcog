@@ -659,6 +659,57 @@ impl IndexBackend for SqliteBackend {
     }
 }
 
+// Implement PersistenceBackend for SqliteBackend so it can be used with ConsolidationService
+impl crate::storage::traits::PersistenceBackend for SqliteBackend {
+    fn store(&mut self, memory: &Memory) -> Result<()> {
+        // Delegate to index() which stores the full memory
+        self.index(memory)
+    }
+
+    fn get(&self, id: &MemoryId) -> Result<Option<Memory>> {
+        self.get_memory(id)
+    }
+
+    fn delete(&mut self, id: &MemoryId) -> Result<bool> {
+        self.remove(id)
+    }
+
+    fn list_ids(&self) -> Result<Vec<MemoryId>> {
+        let start = Instant::now();
+        let result = (|| {
+            let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_connection".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            let mut stmt = conn
+                .prepare("SELECT id FROM memories")
+                .map_err(|e| Error::OperationFailed {
+                    operation: "prepare_list_ids".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            let ids: Vec<MemoryId> = stmt
+                .query_map([], |row| {
+                    let id: String = row.get(0)?;
+                    Ok(MemoryId::new(&id))
+                })
+                .map_err(|e| Error::OperationFailed {
+                    operation: "list_ids".to_string(),
+                    cause: e.to_string(),
+                })?
+                .filter_map(std::result::Result::ok)
+                .collect();
+
+            Ok(ids)
+        })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        self.record_operation_metrics("list_ids", start, status);
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

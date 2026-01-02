@@ -357,3 +357,161 @@ mod graceful_degradation_tests {
         assert!(context.topics.contains(&"topic1".to_string()));
     }
 }
+
+/// Hook handler integration tests.
+///
+/// Tests all 5 Claude Code hooks to ensure they execute correctly
+/// and produce valid output for observability dashboards.
+mod hook_handler_tests {
+    use subcog::hooks::{
+        HookHandler, PostToolUseHandler, PreCompactHandler, SessionStartHandler, StopHandler,
+        UserPromptHandler,
+    };
+
+    #[test]
+    fn test_session_start_hook_executes() {
+        let handler = SessionStartHandler::new();
+        let result = handler.handle("");
+
+        assert!(result.is_ok(), "SessionStart hook should succeed");
+        let output = result.unwrap();
+        assert!(
+            output.contains("hookSpecificOutput"),
+            "Should have hook output"
+        );
+        assert!(
+            output.contains("SessionStart"),
+            "Should identify as SessionStart"
+        );
+    }
+
+    #[test]
+    fn test_user_prompt_submit_hook_executes() {
+        let handler = UserPromptHandler::new();
+        let input = r#"{"prompt": "How do I implement authentication?"}"#;
+        let result = handler.handle(input);
+
+        assert!(result.is_ok(), "UserPromptSubmit hook should succeed");
+        let output = result.unwrap();
+        assert!(
+            output.contains("hookSpecificOutput"),
+            "Should have hook output"
+        );
+        assert!(
+            output.contains("UserPromptSubmit"),
+            "Should identify as UserPromptSubmit"
+        );
+    }
+
+    #[test]
+    fn test_post_tool_use_hook_executes() {
+        let handler = PostToolUseHandler::new();
+        let input = r#"{"tool_name": "Read", "tool_input": {"file_path": "/test.rs"}, "tool_output": "contents"}"#;
+        let result = handler.handle(input);
+
+        assert!(result.is_ok(), "PostToolUse hook should succeed");
+    }
+
+    #[test]
+    fn test_pre_compact_hook_executes() {
+        let handler = PreCompactHandler::new();
+        let input = r#"{"sections": [{"role": "user", "content": "Test content"}]}"#;
+        let result = handler.handle(input);
+
+        assert!(result.is_ok(), "PreCompact hook should succeed");
+    }
+
+    #[test]
+    fn test_pre_compact_hook_with_decision_content() {
+        let handler = PreCompactHandler::new();
+        let input = r#"{
+            "sections": [
+                {"role": "user", "content": "We need to decide on a database. Should we use PostgreSQL?"},
+                {"role": "assistant", "content": "I recommend PostgreSQL for better JSON support."},
+                {"role": "user", "content": "OK, let's use PostgreSQL with pgbouncer for connection pooling."},
+                {"role": "assistant", "content": "Great choice! I'll set that up."}
+            ]
+        }"#;
+        let result = handler.handle(input);
+
+        assert!(
+            result.is_ok(),
+            "PreCompact hook with decisions should succeed"
+        );
+        let output = result.unwrap();
+        // May or may not capture depending on LLM availability
+        assert!(
+            output.contains("hookSpecificOutput") || output == "{}",
+            "Should have valid output"
+        );
+    }
+
+    #[test]
+    fn test_stop_hook_executes() {
+        let handler = StopHandler::new();
+        let input = r#"{"session_duration_seconds": 120}"#;
+        let result = handler.handle(input);
+
+        assert!(result.is_ok(), "Stop hook should succeed");
+        let output = result.unwrap();
+        assert!(
+            output.contains("hookSpecificOutput"),
+            "Should have hook output"
+        );
+        assert!(output.contains("Stop"), "Should identify as Stop");
+    }
+
+    #[test]
+    fn test_all_hooks_return_valid_json() {
+        // SessionStart
+        let session_handler = SessionStartHandler::new();
+        let session_output = session_handler.handle("").unwrap();
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&session_output).is_ok(),
+            "SessionStart should return valid JSON"
+        );
+
+        // UserPromptSubmit
+        let prompt_handler = UserPromptHandler::new();
+        let prompt_output = prompt_handler.handle(r#"{"prompt": "test"}"#).unwrap();
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&prompt_output).is_ok(),
+            "UserPromptSubmit should return valid JSON"
+        );
+
+        // PostToolUse
+        let tool_handler = PostToolUseHandler::new();
+        let tool_output = tool_handler
+            .handle(r#"{"tool_name": "Test", "tool_input": {}, "tool_output": ""}"#)
+            .unwrap();
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&tool_output).is_ok(),
+            "PostToolUse should return valid JSON"
+        );
+
+        // PreCompact
+        let compact_handler = PreCompactHandler::new();
+        let compact_output = compact_handler.handle(r#"{"sections": []}"#).unwrap();
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&compact_output).is_ok(),
+            "PreCompact should return valid JSON"
+        );
+
+        // Stop
+        let stop_handler = StopHandler::new();
+        let stop_output = stop_handler.handle(r"{}").unwrap();
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&stop_output).is_ok(),
+            "Stop should return valid JSON"
+        );
+    }
+
+    #[test]
+    fn test_hook_event_types() {
+        assert_eq!(SessionStartHandler::new().event_type(), "SessionStart");
+        assert_eq!(UserPromptHandler::new().event_type(), "UserPromptSubmit");
+        assert_eq!(PostToolUseHandler::new().event_type(), "PostToolUse");
+        assert_eq!(PreCompactHandler::new().event_type(), "PreCompact");
+        assert_eq!(StopHandler::new().event_type(), "Stop");
+    }
+}

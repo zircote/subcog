@@ -259,6 +259,6 @@ Error: Undefined variable: {{reviewer}}
 
 ## See Also
 
-- [Overview](overview.md) - Template concepts
+- [Overview](./overview.md) - Template concepts
 - [Formats](formats.md) - Template file formats
 - [MCP prompt_run](../mcp/tools.md#prompt_run) - MCP execution

@@ -63,7 +63,7 @@ subcog serve --transport http --port 8080
     "content": [
       {
         "type": "text",
-        "text": "{\"id\": \"dc58d23a...\", \"urn\": \"urn:subcog:...\"}"
+        "text": "{\"id\": \"dc58d23a...\", \"urn\": \"subcog://...\"}"
       }
     ]
   }
@@ -196,7 +196,7 @@ Execute a tool.
     "content": [
       {
         "type": "text",
-        "text": "{\"id\": \"dc58d23a...\", \"urn\": \"urn:subcog:project:decisions:dc58d23a...\"}"
+        "text": "{\"id\": \"dc58d23a...\", \"urn\": \"subcog://project/decisions/dc58d23a...\"}"
       }
     ]
   }
@@ -479,5 +479,5 @@ Log levels: `debug`, `info`, `warning`, `error`
 
 - [Tools](tools.md) - Available MCP tools
 - [Resources](resources.md) - Available MCP resources
-- [Prompts](prompts.md) - Available MCP prompts
+- [Prompts](./prompts.md) - Available MCP prompts
 - [MCP Specification](https://modelcontextprotocol.io/) - Official MCP documentation

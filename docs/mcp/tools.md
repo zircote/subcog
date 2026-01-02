@@ -66,7 +66,7 @@ Capture a memory to persistent storage.
 ```json
 {
   "id": "dc58d23a35876f5a59426e81aaa81d796efa7fc1",
-  "urn": "urn:subcog:project:decisions:dc58d23a35876f5a59426e81aaa81d796efa7fc1"
+  "urn": "subcog://project/decisions/dc58d23a35876f5a59426e81aaa81d796efa7fc1"
 }
 ```
 

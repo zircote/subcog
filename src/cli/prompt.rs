@@ -9,7 +9,7 @@
 // The if-let-else pattern is clearer for nested conditionals
 #![allow(clippy::option_if_let_else)]
 
-use crate::config::Config;
+use crate::config::SubcogConfig;
 use crate::models::{PromptTemplate, PromptVariable, substitute_variables};
 use crate::services::{PromptFilter, PromptFormat, PromptParser, PromptService};
 use crate::storage::index::DomainScope;
@@ -82,11 +82,13 @@ const fn domain_scope_to_display(scope: DomainScope) -> &'static str {
     }
 }
 
-/// Creates a [`PromptService`] with repo path configured.
+/// Creates a [`PromptService`] with full config loaded.
+///
+/// Uses `SubcogConfig` to respect storage settings from config file.
 fn create_prompt_service() -> Result<PromptService, Box<dyn std::error::Error>> {
     let cwd = std::env::current_dir()?;
-    let config = Config::new().with_repo_path(cwd.clone());
-    Ok(PromptService::new(config).with_repo_path(cwd))
+    let config = SubcogConfig::load_default().with_repo_path(&cwd);
+    Ok(PromptService::with_subcog_config(config).with_repo_path(cwd))
 }
 
 /// Executes the `prompt save` subcommand.

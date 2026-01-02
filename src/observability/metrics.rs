@@ -8,6 +8,7 @@ use metrics_exporter_prometheus::PrometheusRecorder;
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_TYPE;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::{Arc, OnceLock};
 use std::thread;
 
 /// Push gateway configuration.
@@ -92,6 +93,36 @@ pub struct MetricsHandle {
     push_gateway: Option<PushGatewayConfig>,
 }
 
+/// Global metrics handle for flush-on-demand.
+static GLOBAL_METRICS: OnceLock<Arc<MetricsHandle>> = OnceLock::new();
+
+/// Global metrics instance label for push gateway grouping.
+static METRICS_INSTANCE: OnceLock<String> = OnceLock::new();
+
+/// Sets the metrics instance label for push gateway grouping.
+///
+/// This allows hooks and MCP server to push to separate metric groups.
+/// Must be called before any metrics are flushed. Only the first call
+/// takes effect (subsequent calls are ignored).
+pub fn set_instance_label(label: &str) {
+    let _ = METRICS_INSTANCE.set(label.to_string());
+}
+
+/// Gets the configured instance label, if any.
+fn get_instance_label() -> Option<&'static str> {
+    METRICS_INSTANCE.get().map(String::as_str)
+}
+
+/// Flushes metrics to the push gateway if configured.
+///
+/// This can be called from anywhere to push metrics immediately,
+/// useful for short-lived processes like MCP server requests.
+pub fn flush_global() {
+    if let Some(handle) = GLOBAL_METRICS.get() {
+        flush(handle);
+    }
+}
+
 /// Installs the Prometheus metrics recorder and HTTP listener.
 pub fn install_prometheus(config: &MetricsConfig, expose: bool) -> Result<Option<MetricsHandle>> {
     if !config.enabled {
@@ -99,7 +130,7 @@ pub fn install_prometheus(config: &MetricsConfig, expose: bool) -> Result<Option
     }
 
     let builder = PrometheusBuilder::new();
-    let handle = if expose {
+    let prometheus_handle = if expose {
         let builder = builder.with_http_listener(config.listen_addr);
         install_listener(builder)?
     } else {
@@ -111,39 +142,125 @@ pub fn install_prometheus(config: &MetricsConfig, expose: bool) -> Result<Option
             })?
     };
 
-    Ok(Some(MetricsHandle {
-        prometheus: handle,
+    let handle = MetricsHandle {
+        prometheus: prometheus_handle,
         push_gateway: config.push_gateway.clone(),
-    }))
+    };
+
+    // Store globally for flush_global() access
+    let _ = GLOBAL_METRICS.set(Arc::new(MetricsHandle {
+        prometheus: handle.prometheus.clone(),
+        push_gateway: handle.push_gateway.clone(),
+    }));
+
+    Ok(Some(handle))
 }
 
 /// Flushes metrics to the push gateway if configured.
+///
+/// When called from within a tokio runtime, this spawns a separate thread
+/// to avoid runtime nesting issues with `reqwest::blocking::Client`.
 pub fn flush(handle: &MetricsHandle) {
     let Some(push_gateway) = &handle.push_gateway else {
+        tracing::debug!("No push gateway configured, skipping flush");
         return;
     };
 
-    let client = Client::new();
-    let payload = handle.prometheus.render();
-    let request = if push_gateway.use_http_post {
-        client.post(&push_gateway.endpoint)
+    let mut payload = handle.prometheus.render();
+
+    // Ensure payload ends with newline (required by push gateway)
+    if !payload.ends_with('\n') {
+        payload.push('\n');
+    }
+
+    // Support instance label for push gateway grouping
+    // This allows hooks and MCP server to push to separate metric groups
+    let endpoint = get_instance_label().map_or_else(
+        || push_gateway.endpoint.clone(),
+        |instance| {
+            format!(
+                "{}/instance/{instance}",
+                push_gateway.endpoint.trim_end_matches('/')
+            )
+        },
+    );
+    let use_http_post = push_gateway.use_http_post;
+    let username = push_gateway.username.clone();
+    let password = push_gateway.password.clone();
+
+    tracing::debug!(
+        bytes = payload.len(),
+        endpoint = %endpoint,
+        instance = ?get_instance_label(),
+        "Pushing metrics to push gateway"
+    );
+
+    // Check if we're in a tokio runtime - if so, spawn a thread to avoid
+    // runtime nesting issues with reqwest::blocking::Client
+    if tokio::runtime::Handle::try_current().is_ok() {
+        // Spawn thread and wait for completion to ensure metrics are pushed
+        let handle = thread::spawn(move || {
+            flush_to_gateway(
+                &endpoint,
+                payload,
+                use_http_post,
+                username.as_deref(),
+                password.as_deref(),
+            );
+        });
+        // Wait for the flush to complete (with timeout)
+        let _ = handle.join();
     } else {
-        client.put(&push_gateway.endpoint)
+        flush_to_gateway(
+            &endpoint,
+            payload,
+            use_http_post,
+            username.as_deref(),
+            password.as_deref(),
+        );
+    }
+}
+
+/// Internal function to push metrics to the gateway.
+fn flush_to_gateway(
+    endpoint: &str,
+    payload: String,
+    use_http_post: bool,
+    username: Option<&str>,
+    password: Option<&str>,
+) {
+    let client = Client::new();
+
+    let request = if use_http_post {
+        client.post(endpoint)
+    } else {
+        client.put(endpoint)
     };
 
-    let request = if let Some(ref username) = push_gateway.username {
-        request.basic_auth(username, push_gateway.password.as_ref())
+    let request = if let Some(username) = username {
+        request.basic_auth(username, password)
     } else {
         request
     };
 
+    // Use timeout to ensure connection is properly established
     let response = request
         .header(CONTENT_TYPE, "text/plain; version=0.0.4")
+        .timeout(std::time::Duration::from_secs(5))
         .body(payload)
         .send();
 
-    if let Err(err) = response {
-        tracing::warn!("Failed to push metrics: {err}");
+    match response {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                tracing::debug!(status = %resp.status(), "Metrics pushed successfully");
+            } else {
+                tracing::warn!(status = %resp.status(), "Metrics push failed");
+            }
+        },
+        Err(err) => {
+            tracing::warn!("Failed to push metrics: {err}");
+        },
     }
 }
 
@@ -232,7 +349,9 @@ fn parse_push_gateway_settings(settings: &MetricsPushGatewaySettings) -> Option<
         .as_ref()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
-    let use_http_post = settings.use_http_post.unwrap_or(false);
+    // Default to POST (accumulates metrics) instead of PUT (replaces all metrics)
+    // POST is better for multi-hook scenarios where each hook pushes independently
+    let use_http_post = settings.use_http_post.unwrap_or(true);
 
     Some(PushGatewayConfig {
         endpoint,

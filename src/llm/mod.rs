@@ -15,11 +15,10 @@ pub use ollama::OllamaClient;
 pub use openai::OpenAiClient;
 pub use resilience::{LlmResilienceConfig, ResilientLlmProvider};
 pub use system_prompt::{
-    ArchiveCandidate, ConsolidationAnalysis, ContradictionAssessment, ContradictionDetail,
+    ArchiveCandidate, BASE_SYSTEM_PROMPT, CAPTURE_ANALYSIS_PROMPT, CONSOLIDATION_PROMPT,
+    ConsolidationAnalysis, ContradictionAssessment, ContradictionDetail, ENRICHMENT_PROMPT,
     ExtendedCaptureAnalysis, ExtendedSearchIntent, MergeCandidate, OperationMode,
-    SecurityAssessment, build_system_prompt, build_system_prompt_with_config,
-    BASE_SYSTEM_PROMPT, CAPTURE_ANALYSIS_PROMPT, CONSOLIDATION_PROMPT, ENRICHMENT_PROMPT,
-    SEARCH_INTENT_PROMPT,
+    SEARCH_INTENT_PROMPT, SecurityAssessment, build_system_prompt, build_system_prompt_with_config,
 };
 
 use crate::Result;

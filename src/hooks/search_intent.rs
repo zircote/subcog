@@ -823,6 +823,9 @@ fn run_llm_with_timeout(
     let (tx, rx) = mpsc::channel();
     let parent_span = tracing::Span::current();
 
+    // Record that we're starting an LLM call
+    metrics::counter!("search_intent_llm_started").increment(1);
+
     std::thread::spawn(move || {
         let _parent = parent_span.enter();
         let span = tracing::info_span!("search_intent.llm");
@@ -831,9 +834,20 @@ fn run_llm_with_timeout(
         let _ = tx.send(result);
     });
 
+    // Record completion based on whether we received a result within timeout
     match rx.recv_timeout(timeout) {
-        Ok(Ok(intent)) => Some(intent),
-        _ => None,
+        Ok(Ok(intent)) => {
+            metrics::counter!("search_intent_llm_completed", "status" => "success").increment(1);
+            Some(intent)
+        },
+        Ok(Err(_)) => {
+            metrics::counter!("search_intent_llm_completed", "status" => "error").increment(1);
+            None
+        },
+        Err(_) => {
+            metrics::counter!("search_intent_llm_completed", "status" => "timeout").increment(1);
+            None
+        },
     }
 }
 

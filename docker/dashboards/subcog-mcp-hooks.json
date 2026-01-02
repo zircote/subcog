@@ -57,12 +57,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(mcp_requests_total{job=~\"$job\", method=~\"$method\"}[5m])) by (method, status)",
+          "expr": "sum(mcp_requests_total{job=~\"$job\", method=~\"$method\"}) by (method, status)",
           "legendFormat": "{{method}} {{status}}",
           "refId": "A"
         }
       ],
-      "title": "MCP Requests Rate by Method",
+      "title": "MCP Requests Total by Method",
       "type": "timeseries"
     },
     {
@@ -95,12 +95,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(mcp_request_duration_ms_bucket{job=~\"$job\", method=~\"$method\"}[5m])) by (le, method))",
-          "legendFormat": "{{method}}",
+          "expr": "avg(mcp_request_duration_ms{job=~\"$job\", quantile=\"0.95\"}) by (method)",
+          "legendFormat": "{{method}} p95",
           "refId": "A"
+        },
+        {
+          "expr": "avg(mcp_request_duration_ms{job=~\"$job\", quantile=\"0.5\"}) by (method)",
+          "legendFormat": "{{method}} p50",
+          "refId": "B"
         }
       ],
-      "title": "MCP Request Latency p95 by Method",
+      "title": "MCP Request Latency by Method",
       "type": "timeseries"
     },
     {
@@ -133,12 +138,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(mcp_tool_calls_total{job=~\"$job\", tool=~\"$tool\"}[5m])) by (tool, status)",
+          "expr": "sum(mcp_tool_calls_total{job=~\"$job\", tool=~\"$tool\"}) by (tool, status)",
           "legendFormat": "{{tool}} {{status}}",
           "refId": "A"
         }
       ],
-      "title": "MCP Tool Calls Rate",
+      "title": "MCP Tool Calls Total",
       "type": "timeseries"
     },
     {
@@ -171,12 +176,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(mcp_tool_duration_ms_bucket{job=~\"$job\", tool=~\"$tool\"}[5m])) by (le, tool))",
-          "legendFormat": "{{tool}}",
+          "expr": "avg(mcp_tool_duration_ms{job=~\"$job\", quantile=\"0.95\"}) by (tool)",
+          "legendFormat": "{{tool}} p95",
           "refId": "A"
+        },
+        {
+          "expr": "avg(mcp_tool_duration_ms{job=~\"$job\", quantile=\"0.5\"}) by (tool)",
+          "legendFormat": "{{tool}} p50",
+          "refId": "B"
         }
       ],
-      "title": "MCP Tool Latency p95",
+      "title": "MCP Tool Latency",
       "type": "timeseries"
     },
     {
@@ -209,12 +219,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(mcp_tool_errors_total{job=~\"$job\", tool=~\"$tool\"}[5m])) by (tool)",
+          "expr": "sum(mcp_tool_errors_total{job=~\"$job\", tool=~\"$tool\"}) by (tool)",
           "legendFormat": "{{tool}}",
           "refId": "A"
         }
       ],
-      "title": "MCP Tool Errors Rate",
+      "title": "MCP Tool Errors Total",
       "type": "timeseries"
     },
     {
@@ -247,12 +257,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(mcp_resource_reads_total{job=~\"$job\"}[5m])) by (resource_kind, status)",
+          "expr": "sum(mcp_resource_reads_total{job=~\"$job\"}) by (resource_kind, status)",
           "legendFormat": "{{resource_kind}} {{status}}",
           "refId": "A"
         }
       ],
-      "title": "MCP Resource Reads Rate",
+      "title": "MCP Resource Reads Total",
       "type": "timeseries"
     },
     {
@@ -285,12 +295,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(hook_executions_total{job=~\"$job\", hook_type=~\"$hook_type\"}[5m])) by (hook_type, status)",
+          "expr": "sum(hook_executions_total{job=~\"$job\", hook_type=~\"$hook_type\"}) by (hook_type, status)",
           "legendFormat": "{{hook_type}} {{status}}",
           "refId": "A"
         }
       ],
-      "title": "Hook Executions Rate",
+      "title": "Hook Executions Total",
       "type": "timeseries"
     },
     {
@@ -323,12 +333,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(hook_duration_ms_bucket{job=~\"$job\", hook_type=~\"$hook_type\"}[5m])) by (le, hook_type))",
-          "legendFormat": "{{hook_type}}",
+          "expr": "avg(hook_duration_ms{job=~\"$job\", quantile=\"0.95\"}) by (hook_type)",
+          "legendFormat": "{{hook_type}} p95",
           "refId": "A"
+        },
+        {
+          "expr": "avg(hook_duration_ms{job=~\"$job\", quantile=\"0.5\"}) by (hook_type)",
+          "legendFormat": "{{hook_type}} p50",
+          "refId": "B"
         }
       ],
-      "title": "Hook Duration p95",
+      "title": "Hook Duration",
       "type": "timeseries"
     },
     {
@@ -361,12 +376,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(hook_memory_lookup_total{job=~\"$job\", hook_type=~\"$hook_type\"}[5m])) by (hook_type, result)",
+          "expr": "sum(hook_memory_lookup_total{job=~\"$job\", hook_type=~\"$hook_type\"}) by (hook_type, result)",
           "legendFormat": "{{hook_type}} {{result}}",
           "refId": "A"
         }
       ],
-      "title": "Hook Memory Lookup Rate",
+      "title": "Hook Memory Lookup Total",
       "type": "timeseries"
     },
     {
@@ -399,12 +414,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(hook_auto_capture_total{job=~\"$job\"}[5m])) by (hook_type, namespace)",
+          "expr": "sum(hook_auto_capture_total{job=~\"$job\"}) by (hook_type, namespace)",
           "legendFormat": "{{hook_type}} {{namespace}}",
           "refId": "A"
         }
       ],
-      "title": "Hook Auto Capture Rate",
+      "title": "Hook Auto Capture Total",
       "type": "timeseries"
     },
     {
@@ -437,12 +452,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(hook_context_tokens_estimate_bucket{job=~\"$job\", hook_type=~\"$hook_type\"}[5m])) by (le, hook_type))",
-          "legendFormat": "{{hook_type}}",
+          "expr": "avg(hook_context_tokens_estimate{job=~\"$job\", hook_type=~\"$hook_type\", quantile=\"0.95\"}) by (hook_type)",
+          "legendFormat": "{{hook_type}} p95",
           "refId": "A"
+        },
+        {
+          "expr": "avg(hook_context_tokens_estimate{job=~\"$job\", hook_type=~\"$hook_type\", quantile=\"0.5\"}) by (hook_type)",
+          "legendFormat": "{{hook_type}} p50",
+          "refId": "B"
         }
       ],
-      "title": "Hook Context Tokens Estimate p95",
+      "title": "Hook Context Tokens Estimate",
       "type": "timeseries"
     }
   ],

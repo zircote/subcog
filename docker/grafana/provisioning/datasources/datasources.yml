@@ -17,5 +17,36 @@ datasources:
     editable: false
     jsonData:
       httpMethod: GET
+      nodeGraph:
+        enabled: true
       serviceMap:
         datasourceUid: prometheus
+      search:
+        hide: false
+      traceQuery:
+        timeShiftEnabled: true
+        spanStartTimeShift: '-1h'
+        spanEndTimeShift: '1h'
+      tracesToLogs:
+        datasourceUid: loki
+        tags: ['job', 'instance']
+        mappedTags: [{ key: 'service.name', value: 'job' }]
+        mapTagNamesEnabled: true
+        spanStartTimeShift: '-1h'
+        spanEndTimeShift: '1h'
+        filterByTraceID: true
+        filterBySpanID: false
+        lokiSearch: true
+
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      derivedFields:
+        - name: TraceID
+          matcherRegex: '"trace_id":"([^"]+)"'
+          url: '${__value.raw}'
+          datasourceUid: tempo

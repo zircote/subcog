@@ -66,11 +66,12 @@ impl LmStudioClient {
 
     /// Makes a request to the LM Studio API.
     fn request(&self, messages: Vec<ChatMessage>) -> Result<String> {
+        let model = self
+            .model
+            .clone()
+            .unwrap_or_else(|| "local-model".to_string());
         let request = ChatCompletionRequest {
-            model: self
-                .model
-                .clone()
-                .unwrap_or_else(|| "local-model".to_string()),
+            model: model.clone(),
             messages,
             max_tokens: Some(1024),
             temperature: Some(0.7),
@@ -82,23 +83,59 @@ impl LmStudioClient {
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
-            .map_err(|e| Error::OperationFailed {
-                operation: "lmstudio_request".to_string(),
-                cause: e.to_string(),
+            .map_err(|e| {
+                let error_kind = if e.is_timeout() {
+                    "timeout"
+                } else if e.is_connect() {
+                    "connect"
+                } else if e.is_request() {
+                    "request"
+                } else {
+                    "unknown"
+                };
+                tracing::error!(
+                    provider = "lmstudio",
+                    model = %model,
+                    error = %e,
+                    error_kind = error_kind,
+                    is_timeout = e.is_timeout(),
+                    is_connect = e.is_connect(),
+                    "LLM request failed"
+                );
+                Error::OperationFailed {
+                    operation: "lmstudio_request".to_string(),
+                    cause: format!("{error_kind} error: {e}"),
+                }
             })?;
 
         if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().unwrap_or_default();
+            tracing::error!(
+                provider = "lmstudio",
+                model = %model,
+                status = %status,
+                body = %body,
+                "LLM API returned error status"
+            );
             return Err(Error::OperationFailed {
                 operation: "lmstudio_request".to_string(),
-                cause: format!("API returned status: {}", response.status()),
+                cause: format!("API returned status: {status} - {body}"),
             });
         }
 
-        let response: ChatCompletionResponse =
-            response.json().map_err(|e| Error::OperationFailed {
+        let response: ChatCompletionResponse = response.json().map_err(|e| {
+            tracing::error!(
+                provider = "lmstudio",
+                model = %model,
+                error = %e,
+                "Failed to parse LLM response"
+            );
+            Error::OperationFailed {
                 operation: "lmstudio_response".to_string(),
                 cause: e.to_string(),
-            })?;
+            }
+        })?;
 
         // Extract content from first choice
         response
