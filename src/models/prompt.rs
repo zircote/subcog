@@ -22,6 +22,124 @@ static VALIDATION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\{\{([^}]*)\}\}").unwrap_or_else(|_| unreachable!())
 });
 
+/// Regex pattern for detecting fenced code blocks (``` with optional language identifier).
+static CODE_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    // Matches: ``` followed by optional language, then content, then ```
+    // SAFETY: This regex is compile-time verified and cannot fail
+    Regex::new(r"```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```").unwrap_or_else(|_| unreachable!())
+});
+
+/// Represents a fenced code block region in content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeBlockRegion {
+    /// Start byte position (inclusive).
+    pub start: usize,
+    /// End byte position (exclusive).
+    pub end: usize,
+    /// Optional language identifier (e.g., "rust", "markdown").
+    pub language: Option<String>,
+}
+
+impl CodeBlockRegion {
+    /// Creates a new code block region.
+    #[must_use]
+    pub fn new(start: usize, end: usize, language: Option<String>) -> Self {
+        Self {
+            start,
+            end,
+            language,
+        }
+    }
+
+    /// Checks if a byte position falls within this region.
+    #[must_use]
+    pub fn contains(&self, position: usize) -> bool {
+        position >= self.start && position < self.end
+    }
+}
+
+/// Detects fenced code blocks in content.
+///
+/// Returns regions sorted by start position. Handles:
+/// - Code blocks with language identifiers (```rust, ```markdown)
+/// - Empty code blocks
+/// - Multiple code blocks
+///
+/// # Returns
+///
+/// A list of code block regions in order of appearance.
+#[must_use]
+pub fn detect_code_blocks(content: &str) -> Vec<CodeBlockRegion> {
+    let mut regions = Vec::new();
+
+    for cap in CODE_BLOCK_PATTERN.captures_iter(content) {
+        if let Some(full_match) = cap.get(0) {
+            let language = cap.get(1).and_then(|m| {
+                let lang = m.as_str().trim();
+                if lang.is_empty() {
+                    None
+                } else {
+                    Some(lang.to_string())
+                }
+            });
+
+            regions.push(CodeBlockRegion::new(
+                full_match.start(),
+                full_match.end(),
+                language,
+            ));
+        }
+    }
+
+    // Sort by start position (should already be sorted, but ensure it)
+    regions.sort_by_key(|r| r.start);
+    regions
+}
+
+/// Checks if a byte position falls within any exclusion region.
+///
+/// # Arguments
+///
+/// * `position` - The byte position to check.
+/// * `regions` - The list of exclusion regions (e.g., code blocks).
+///
+/// # Returns
+///
+/// `true` if the position is inside any exclusion region.
+#[must_use]
+pub fn is_in_exclusion(position: usize, regions: &[CodeBlockRegion]) -> bool {
+    regions.iter().any(|r| r.contains(position))
+}
+
+/// Extracts variables from prompt content, excluding those inside code blocks.
+///
+/// This is the internal implementation that takes pre-computed exclusion regions.
+fn extract_variables_with_exclusions(
+    content: &str,
+    exclusions: &[CodeBlockRegion],
+) -> Vec<ExtractedVariable> {
+    let mut seen = HashSet::new();
+    let mut variables = Vec::new();
+
+    for cap in VARIABLE_PATTERN.captures_iter(content) {
+        if let Some(name_match) = cap.get(1) {
+            let position = cap.get(0).map_or(0, |m| m.start());
+
+            // Skip variables inside exclusion regions (code blocks)
+            if is_in_exclusion(position, exclusions) {
+                continue;
+            }
+
+            let name = name_match.as_str().to_string();
+            if seen.insert(name.clone()) {
+                variables.push(ExtractedVariable { name, position });
+            }
+        }
+    }
+
+    variables
+}
+
 /// A user-defined prompt template.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PromptTemplate {
@@ -201,27 +319,16 @@ pub struct ExtractedVariable {
 /// Variables are identified by the pattern `{{variable_name}}` where `variable_name`
 /// consists of alphanumeric characters and underscores.
 ///
+/// **Important**: Variables inside fenced code blocks (``` ```) are automatically
+/// excluded to avoid capturing example/documentation patterns.
+///
 /// # Returns
 ///
 /// A list of extracted variables in order of first appearance, deduplicated.
 #[must_use]
 pub fn extract_variables(content: &str) -> Vec<ExtractedVariable> {
-    let mut seen = HashSet::new();
-    let mut variables = Vec::new();
-
-    for cap in VARIABLE_PATTERN.captures_iter(content) {
-        if let Some(name_match) = cap.get(1) {
-            let name = name_match.as_str().to_string();
-            if seen.insert(name.clone()) {
-                variables.push(ExtractedVariable {
-                    name,
-                    position: cap.get(0).map_or(0, |m| m.start()),
-                });
-            }
-        }
-    }
-
-    variables
+    let code_blocks = detect_code_blocks(content);
+    extract_variables_with_exclusions(content, &code_blocks)
 }
 
 /// Substitutes variables in prompt content.
@@ -730,5 +837,205 @@ mod tests {
 
         assert!(!result.is_valid);
         assert!(result.issues.iter().any(|i| i.message.contains("__")));
+    }
+
+    // ============================================================
+    // Task 1.4: Unit Tests for Code Block Detection
+    // ============================================================
+
+    #[test]
+    fn test_detect_code_blocks_single() {
+        let content = "Before\n```rust\nlet x = 1;\n```\nAfter";
+        let blocks = detect_code_blocks(content);
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].language, Some("rust".to_string()));
+        assert!(blocks[0].start < blocks[0].end);
+    }
+
+    #[test]
+    fn test_detect_code_blocks_multiple() {
+        let content = "```python\nprint('hello')\n```\n\nSome text\n\n```javascript\nconsole.log('hi');\n```";
+        let blocks = detect_code_blocks(content);
+
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].language, Some("python".to_string()));
+        assert_eq!(blocks[1].language, Some("javascript".to_string()));
+        assert!(blocks[0].end <= blocks[1].start);
+    }
+
+    #[test]
+    fn test_detect_code_blocks_with_language_identifier() {
+        let content = "```markdown\n# Header\n```";
+        let blocks = detect_code_blocks(content);
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].language, Some("markdown".to_string()));
+    }
+
+    #[test]
+    fn test_detect_code_blocks_empty() {
+        let content = "```\n```";
+        let blocks = detect_code_blocks(content);
+
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].language.is_none());
+    }
+
+    #[test]
+    fn test_detect_code_blocks_no_language() {
+        let content = "```\nplain code\n```";
+        let blocks = detect_code_blocks(content);
+
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].language.is_none());
+    }
+
+    #[test]
+    fn test_detect_code_blocks_none() {
+        let content = "No code blocks here, just regular text.";
+        let blocks = detect_code_blocks(content);
+
+        assert!(blocks.is_empty());
+    }
+
+    #[test]
+    fn test_detect_code_blocks_unclosed() {
+        // Unclosed code blocks should not match (regex requires closing ```)
+        let content = "```rust\nunclosed code block without ending";
+        let blocks = detect_code_blocks(content);
+
+        assert!(blocks.is_empty());
+    }
+
+    #[test]
+    fn test_code_block_region_contains() {
+        let region = CodeBlockRegion::new(10, 50, Some("rust".to_string()));
+
+        assert!(!region.contains(9));  // Before
+        assert!(region.contains(10));  // Start (inclusive)
+        assert!(region.contains(30));  // Middle
+        assert!(region.contains(49));  // End - 1
+        assert!(!region.contains(50)); // End (exclusive)
+        assert!(!region.contains(51)); // After
+    }
+
+    // ============================================================
+    // Task 1.5: Unit Tests for Context-Aware Extraction
+    // ============================================================
+
+    #[test]
+    fn test_extract_variables_outside_code_block() {
+        let content = "Process {{file}} for issues.";
+        let vars = extract_variables(content);
+
+        assert_eq!(vars.len(), 1);
+        assert_eq!(vars[0].name, "file");
+    }
+
+    #[test]
+    fn test_extract_variables_inside_code_block_not_extracted() {
+        let content = "Text before\n```\n{{timestamp}}\n```\nText after";
+        let vars = extract_variables(content);
+
+        // Variable inside code block should NOT be extracted
+        assert!(vars.is_empty());
+    }
+
+    #[test]
+    fn test_extract_variables_mixed_inside_outside() {
+        let content = "Scan {{PROJECT_ROOT_PATH}} for issues.\n\n## Example Output\n```markdown\n**Generated:** {{timestamp}}\n**Files:** {{count}}\n```";
+        let vars = extract_variables(content);
+
+        // Only the variable OUTSIDE the code block should be extracted
+        assert_eq!(vars.len(), 1);
+        assert_eq!(vars[0].name, "PROJECT_ROOT_PATH");
+    }
+
+    #[test]
+    fn test_extract_variables_multiple_code_blocks() {
+        let content = "Use {{var1}} here.\n\n```\n{{inside1}}\n```\n\nThen {{var2}}.\n\n```rust\n{{inside2}}\n```\n\nFinally {{var3}}.";
+        let vars = extract_variables(content);
+
+        // Only variables outside code blocks should be extracted
+        assert_eq!(vars.len(), 3);
+        let names: Vec<&str> = vars.iter().map(|v| v.name.as_str()).collect();
+        assert!(names.contains(&"var1"));
+        assert!(names.contains(&"var2"));
+        assert!(names.contains(&"var3"));
+        assert!(!names.contains(&"inside1"));
+        assert!(!names.contains(&"inside2"));
+    }
+
+    #[test]
+    fn test_extract_variables_at_boundary() {
+        // Variable immediately before code block
+        let content = "{{before}}```\ncode\n```{{after}}";
+        let vars = extract_variables(content);
+
+        // Both should be extracted (they're outside the code block)
+        assert_eq!(vars.len(), 2);
+        let names: Vec<&str> = vars.iter().map(|v| v.name.as_str()).collect();
+        assert!(names.contains(&"before"));
+        assert!(names.contains(&"after"));
+    }
+
+    #[test]
+    fn test_extract_variables_backward_compatible_no_code_blocks() {
+        let content = "Hello {{name}}, your {{item}} is ready for {{action}}.";
+        let vars = extract_variables(content);
+
+        // Should work exactly as before when there are no code blocks
+        assert_eq!(vars.len(), 3);
+        assert_eq!(vars[0].name, "name");
+        assert_eq!(vars[1].name, "item");
+        assert_eq!(vars[2].name, "action");
+    }
+
+    #[test]
+    fn test_extract_variables_empty_content() {
+        let content = "";
+        let vars = extract_variables(content);
+
+        assert!(vars.is_empty());
+    }
+
+    #[test]
+    fn test_is_in_exclusion_helper() {
+        let regions = vec![
+            CodeBlockRegion::new(10, 20, None),
+            CodeBlockRegion::new(50, 80, Some("rust".to_string())),
+        ];
+
+        assert!(!is_in_exclusion(5, &regions));   // Before all
+        assert!(is_in_exclusion(10, &regions));   // Start of first
+        assert!(is_in_exclusion(15, &regions));   // Inside first
+        assert!(!is_in_exclusion(20, &regions));  // End of first (exclusive)
+        assert!(!is_in_exclusion(30, &regions));  // Between regions
+        assert!(is_in_exclusion(50, &regions));   // Start of second
+        assert!(is_in_exclusion(70, &regions));   // Inside second
+        assert!(!is_in_exclusion(80, &regions));  // End of second (exclusive)
+        assert!(!is_in_exclusion(100, &regions)); // After all
+    }
+
+    #[test]
+    fn test_is_in_exclusion_empty_regions() {
+        let regions: Vec<CodeBlockRegion> = vec![];
+
+        assert!(!is_in_exclusion(0, &regions));
+        assert!(!is_in_exclusion(100, &regions));
+    }
+
+    #[test]
+    fn test_prompt_template_with_code_blocks_extracts_correctly() {
+        let content = "Review {{file}} for {{issue_type}} issues.\n\n```example\nOutput: {{example_var}}\n```";
+        let template = PromptTemplate::new("review", content);
+
+        // Only variables outside code blocks should be in the template
+        assert_eq!(template.variables.len(), 2);
+        let var_names: Vec<&str> = template.variables.iter().map(|v| v.name.as_str()).collect();
+        assert!(var_names.contains(&"file"));
+        assert!(var_names.contains(&"issue_type"));
+        assert!(!var_names.contains(&"example_var"));
     }
 }
