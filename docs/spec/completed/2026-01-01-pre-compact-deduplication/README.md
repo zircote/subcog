@@ -2,11 +2,13 @@
 project_id: SPEC-2026-01-01-001
 project_name: "Pre-Compact Deduplication"
 slug: pre-compact-deduplication
-status: in-progress
+status: completed
 created: 2026-01-01T00:00:00Z
 approved: null
 started: 2026-01-01T00:00:00Z
-completed: null
+completed: 2026-01-02T00:00:00Z
+final_effort: 8 hours
+outcome: success
 expires: 2026-04-01T00:00:00Z
 superseded_by: null
 tags: [hooks, deduplication, pre-compact, semantic-similarity]

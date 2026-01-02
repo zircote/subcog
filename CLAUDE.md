@@ -61,6 +61,7 @@ src/
 │   ├── topic_index.rs       # TopicIndexService (topic → memory map)
 │   ├── prompt.rs            # PromptService (CRUD for prompts)
 │   ├── prompt_parser.rs     # Multi-format parsing (MD, YAML, JSON)
+│   ├── prompt_enrichment.rs # LLM-assisted metadata enrichment
 │   └── deduplication/       # Deduplication service
 │       ├── mod.rs           # Module exports, Deduplicator trait
 │       ├── types.rs         # DuplicateCheckResult, DuplicateReason
@@ -256,11 +257,75 @@ tags: [review, quality]
 **MCP Tools**:
 | Tool | Description |
 |------|-------------|
-| `prompt_save` | Save a new prompt template |
+| `prompt_save` | Save a new prompt template (with optional LLM enrichment) |
 | `prompt_list` | List prompts with optional filtering |
 | `prompt_get` | Get a specific prompt by name |
 | `prompt_run` | Execute a prompt with variable substitution |
 | `prompt_delete` | Delete a prompt |
+
+### Context-Aware Variable Extraction
+
+Variable extraction is context-aware and skips `{{variable}}` patterns inside fenced code blocks:
+
+```markdown
+This prompt uses {{active_variable}} which will be extracted.
+
+```python
+# This is a code example showing syntax
+template = "Hello {{code_example_variable}}"
+```
+
+The {{another_active_variable}} after the code block is also extracted.
+```
+
+In the above example, only `active_variable` and `another_active_variable` are extracted as template variables. The `code_example_variable` inside the fenced code block is treated as literal documentation.
+
+**Supported Code Block Syntaxes**:
+- Triple backticks: ` ```language ... ``` `
+- Triple tildes: `~~~ language ... ~~~`
+- Nested code blocks (backticks within tildes)
+
+### LLM-Assisted Metadata Enrichment
+
+When saving prompts, Subcog can automatically generate or enhance metadata using an LLM:
+
+**CLI Usage**:
+```bash
+# Default: LLM enrichment enabled (if provider configured)
+subcog prompt save my-prompt --content "Review {{file}} for issues"
+
+# Skip enrichment
+subcog prompt save my-prompt --content "..." --no-enrich
+
+# Preview enrichment without saving
+subcog prompt save my-prompt --content "..." --dry-run
+```
+
+**MCP Tool**:
+```json
+{
+  "name": "subcog_prompt_save",
+  "arguments": {
+    "name": "my-prompt",
+    "content": "Review {{file}} for issues",
+    "skip_enrichment": false
+  }
+}
+```
+
+**Enrichment Behavior**:
+| Status | Description |
+|--------|-------------|
+| `Full` | LLM successfully generated/enhanced metadata |
+| `Fallback` | LLM unavailable; used extracted variables only |
+| `Skipped` | Enrichment explicitly disabled via `--no-enrich` |
+
+**What Gets Enriched**:
+- **Description**: Generated if missing, based on prompt content
+- **Tags**: Inferred from content (e.g., "security", "review", "debugging")
+- **Variables**: Descriptions and defaults for extracted variables
+
+**User Values Preserved**: Explicitly provided metadata (description, tags, variables) is preserved and merged with LLM suggestions.
 
 ## Proactive Memory Surfacing
 
@@ -785,20 +850,34 @@ The following hooks run automatically on file save:
 - [PROGRESS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/PROGRESS.md) - Implementation progress
 - always run `make ci` before commiting or declaring success ensuring all gates pass
 
-**Pre-Compact Deduplication** - `docs/spec/active/2026-01-01-pre-compact-deduplication/`:
-
-- **Status**: Implementation complete, pending PR
-- **Summary**: Three-tier deduplication for pre-compact hook auto-capture
-  - Exact match (SHA256 hash tag lookup)
-  - Semantic similarity (configurable per-namespace thresholds)
-  - Recent capture (5-minute LRU cache with TTL)
-- [REQUIREMENTS.md](docs/spec/active/2026-01-01-pre-compact-deduplication/REQUIREMENTS.md) - 13 functional requirements
-- [ARCHITECTURE.md](docs/spec/active/2026-01-01-pre-compact-deduplication/ARCHITECTURE.md) - DeduplicationService design
-- [IMPLEMENTATION_PLAN.md](docs/spec/active/2026-01-01-pre-compact-deduplication/IMPLEMENTATION_PLAN.md) - 7 phases, 26 tasks
-- [DECISIONS.md](docs/spec/active/2026-01-01-pre-compact-deduplication/DECISIONS.md) - 8 ADRs
-- [PROGRESS.md](docs/spec/active/2026-01-01-pre-compact-deduplication/PROGRESS.md) - Implementation progress
-
 ### Completed Specifications
+
+- **[Pre-Compact Deduplication](docs/spec/completed/2026-01-01-pre-compact-deduplication/)** (2026-01-02)
+  - **Completed**: 2026-01-02
+  - **Outcome**: Success - All 7 phases delivered (25/26 tasks, 1 deferred)
+  - **Effort**: 8 hours (planned 20-32 hours, 67% under budget)
+  - **Features**:
+    - Three-tier deduplication: exact match (SHA256 hash tag lookup), semantic similarity (configurable per-namespace thresholds), recent capture (5-minute LRU cache with TTL)
+    - DeduplicationService with short-circuit evaluation (exact → semantic → recent)
+    - Graceful degradation when embeddings/recall unavailable
+    - 64+ deduplication tests + 10 property-based tests (619 total tests)
+    - Comprehensive observability (5 metrics, tracing, debug logging)
+  - **Key docs**: REQUIREMENTS.md, ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, DECISIONS.md, PROGRESS.md, RETROSPECTIVE.md
+
+- **[Prompt Variable Context-Aware Extraction](docs/spec/completed/2026-01-01-prompt-variable-context-awareness/)** (2026-01-02)
+  - **GitHub Issue**: [#29](https://github.com/zircote/subcog/issues/29)
+  - **Completed**: 2026-01-02
+  - **Outcome**: Success - All 4 phases delivered (20/20 tasks)
+  - **Effort**: 8 hours (planned 16-24 hours, ~50% under budget)
+  - **Features**:
+    - Code block detection (triple backticks and tildes) with regex pattern
+    - Context-aware variable extraction skipping code blocks (fixes Issue #29)
+    - LLM-assisted metadata enrichment (description, tags, variable definitions)
+    - Graceful fallback when LLM unavailable (EnrichmentStatus::Fallback)
+    - CLI `--no-enrich` and `--dry-run` flags
+    - MCP `skip_enrichment` parameter
+    - 685 tests passing, clippy clean
+  - **Key docs**: REQUIREMENTS.md, ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, DECISIONS.md, PROGRESS.md, RETROSPECTIVE.md
 
 - **[User Prompt Management](docs/spec/completed/2025-12-30-prompt-management/)** (2025-12-30)
   - **Issues**: [#6](https://github.com/zircote/subcog/issues/6), [#8](https://github.com/zircote/subcog/issues/8), [#9](https://github.com/zircote/subcog/issues/9), [#10](https://github.com/zircote/subcog/issues/10), [#11](https://github.com/zircote/subcog/issues/11), [#12](https://github.com/zircote/subcog/issues/12), [#13](https://github.com/zircote/subcog/issues/13), [#14](https://github.com/zircote/subcog/issues/14)

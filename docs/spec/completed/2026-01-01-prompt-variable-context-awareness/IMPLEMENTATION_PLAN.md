@@ -1,9 +1,9 @@
 ---
 document_type: implementation_plan
 project_id: SPEC-2026-01-01-002
-version: 1.0.0
-last_updated: 2026-01-01
-status: draft
+version: 1.1.0
+last_updated: 2026-01-02
+status: complete
 estimated_effort: 2-3 days
 ---
 
@@ -118,10 +118,10 @@ This plan implements two features in four phases:
 **Description**: Define request/response types for enrichment
 
 **Acceptance Criteria**:
-- [ ] `EnrichmentRequest` struct
-- [ ] `EnrichmentResult` struct
-- [ ] `PartialMetadata` for preserving user-provided values
-- [ ] Serde traits for JSON handling
+- [x] `EnrichmentRequest` struct
+- [x] `EnrichmentResult` struct
+- [x] `PartialMetadata` for preserving user-provided values
+- [x] Serde traits for JSON handling
 
 **Estimated Effort**: 30 minutes
 
@@ -132,10 +132,10 @@ This plan implements two features in four phases:
 **Description**: Add system prompt for frontmatter enrichment
 
 **Acceptance Criteria**:
-- [ ] `PROMPT_ENRICHMENT_PROMPT` constant
-- [ ] Clear JSON schema in prompt
-- [ ] Examples of good output
-- [ ] Security: XML tags to isolate user content
+- [x] `PROMPT_ENRICHMENT_PROMPT` constant
+- [x] Clear JSON schema in prompt
+- [x] Examples of good output
+- [x] Security: XML tags to isolate user content
 
 **Estimated Effort**: 30 minutes
 
@@ -146,10 +146,10 @@ This plan implements two features in four phases:
 **Description**: Core enrichment logic using LLM
 
 **Acceptance Criteria**:
-- [ ] `PromptEnrichmentService<P: LlmProvider>` struct
-- [ ] `enrich()` method that calls LLM
-- [ ] JSON parsing of LLM response
-- [ ] Merge with existing metadata (don't overwrite user values)
+- [x] `PromptEnrichmentService<P: LlmProvider>` struct
+- [x] `enrich()` method that calls LLM
+- [x] JSON parsing of LLM response
+- [x] Merge with existing metadata (don't overwrite user values)
 
 **Estimated Effort**: 2 hours
 
@@ -160,10 +160,10 @@ This plan implements two features in four phases:
 **Description**: Graceful fallback when LLM fails
 
 **Acceptance Criteria**:
-- [ ] `EnrichmentResult::basic_from_variables()` fallback constructor
-- [ ] Timeout handling (5 second max)
-- [ ] Retry once on parse failure
-- [ ] Logging of fallback reasons
+- [x] `EnrichmentResult::basic_from_variables()` fallback constructor
+- [x] Timeout handling (5 second max)
+- [x] Retry once on parse failure
+- [x] Logging of fallback reasons
 
 **Estimated Effort**: 1 hour
 
@@ -174,8 +174,8 @@ This plan implements two features in four phases:
 **Description**: Export enrichment service
 
 **Acceptance Criteria**:
-- [ ] `pub mod prompt_enrichment;`
-- [ ] Re-export key types
+- [x] `pub mod prompt_enrichment;`
+- [x] Re-export key types
 
 **Estimated Effort**: 15 minutes
 
@@ -186,11 +186,11 @@ This plan implements two features in four phases:
 **Description**: Tests with mock LLM provider
 
 **Test Cases**:
-- [ ] Successful enrichment with valid JSON
-- [ ] Fallback on LLM error
-- [ ] Fallback on invalid JSON
-- [ ] Partial metadata preservation
-- [ ] Empty variables list
+- [x] Successful enrichment with valid JSON
+- [x] Fallback on LLM error
+- [x] Fallback on invalid JSON
+- [x] Partial metadata preservation
+- [x] Empty variables list
 
 **Estimated Effort**: 1.5 hours
 
@@ -207,9 +207,9 @@ This plan implements two features in four phases:
 **Description**: Add enrichment to save flow
 
 **Acceptance Criteria**:
-- [ ] `save_with_enrichment()` method
-- [ ] Option to skip enrichment
-- [ ] Uses `PromptEnrichmentService`
+- [x] `save_with_enrichment()` method
+- [x] Option to skip enrichment
+- [x] Uses `PromptEnrichmentService`
 
 **Estimated Effort**: 1 hour
 
@@ -220,10 +220,10 @@ This plan implements two features in four phases:
 **Description**: Add `--no-enrich` and `--dry-run` flags
 
 **Acceptance Criteria**:
-- [ ] `--no-enrich` flag skips LLM call
-- [ ] `--dry-run` shows enrichment without saving
-- [ ] Display enriched metadata in output
-- [ ] Error message if LLM unavailable (with fallback note)
+- [x] `--no-enrich` flag skips LLM call
+- [x] `--dry-run` shows enrichment without saving
+- [x] Display enriched metadata in output
+- [x] Error message if LLM unavailable (with fallback note)
 
 **Estimated Effort**: 1 hour
 
@@ -234,9 +234,9 @@ This plan implements two features in four phases:
 **Description**: Add `skip_enrichment` parameter
 
 **Acceptance Criteria**:
-- [ ] New parameter in schema
-- [ ] Pass through to service
-- [ ] Include enriched metadata in response
+- [x] New parameter in schema
+- [x] Pass through to service
+- [x] Include enriched metadata in response
 
 **Estimated Effort**: 45 minutes
 
@@ -247,9 +247,9 @@ This plan implements two features in four phases:
 **Description**: End-to-end CLI tests
 
 **Test Cases**:
-- [ ] Save with enrichment (mock LLM)
-- [ ] Save with `--no-enrich`
-- [ ] Save prompt with code blocks
+- [x] Save with enrichment (mock LLM)
+- [x] Save with `--no-enrich`
+- [x] Save prompt with code blocks
 
 **Estimated Effort**: 1 hour
 
@@ -260,9 +260,9 @@ This plan implements two features in four phases:
 **Description**: End-to-end MCP tests
 
 **Test Cases**:
-- [ ] `prompt_save` with enrichment
-- [ ] `prompt_save` with `skip_enrichment: true`
-- [ ] Verify response includes enriched metadata
+- [x] `prompt_save` with enrichment
+- [x] `prompt_save` with `skip_enrichment: true`
+- [x] Verify response includes enriched metadata
 
 **Estimated Effort**: 1 hour
 
@@ -277,9 +277,9 @@ This plan implements two features in four phases:
 **Command**: `cargo test --all-features`
 
 **Acceptance Criteria**:
-- [ ] All existing tests pass
-- [ ] All new tests pass
-- [ ] No clippy warnings
+- [x] All existing tests pass
+- [x] All new tests pass
+- [x] No clippy warnings
 
 **Estimated Effort**: 30 minutes
 
@@ -290,9 +290,9 @@ This plan implements two features in four phases:
 **Description**: Document new behavior
 
 **Acceptance Criteria**:
-- [ ] Note about code block exclusion
-- [ ] Document enrichment feature
-- [ ] Update CLI command reference
+- [x] Note about code block exclusion
+- [x] Document enrichment feature
+- [x] Update CLI command reference
 
 **Estimated Effort**: 30 minutes
 
@@ -303,9 +303,9 @@ This plan implements two features in four phases:
 **Description**: Update user-facing help
 
 **Acceptance Criteria**:
-- [ ] Explain code block handling
-- [ ] Document enrichment behavior
-- [ ] Examples of prompts with code blocks
+- [x] Explain code block handling
+- [x] Document enrichment behavior
+- [x] Examples of prompts with code blocks
 
 **Estimated Effort**: 30 minutes
 
@@ -316,9 +316,9 @@ This plan implements two features in four phases:
 **Description**: Document changes for release
 
 **Acceptance Criteria**:
-- [ ] Bug fix entry for Issue #29
-- [ ] Feature entry for enrichment
-- [ ] Breaking changes (if any)
+- [x] Bug fix entry for Issue #29
+- [x] Feature entry for enrichment
+- [x] Breaking changes (if any)
 
 **Estimated Effort**: 15 minutes
 
@@ -361,25 +361,25 @@ Phase 4 (Finalization):
 
 ## Testing Checklist
 
-- [ ] Unit tests for code block detection (1.4)
-- [ ] Unit tests for variable extraction (1.5)
-- [ ] Unit tests for enrichment service (2.6)
-- [ ] Integration tests for CLI (3.4)
-- [ ] Integration tests for MCP (3.5)
-- [ ] Full test suite passes (4.1)
+- [x] Unit tests for code block detection (1.4)
+- [x] Unit tests for variable extraction (1.5)
+- [x] Unit tests for enrichment service (2.6)
+- [x] Integration tests for CLI (3.4)
+- [x] Integration tests for MCP (3.5)
+- [x] Full test suite passes (4.1)
 
 ## Documentation Tasks
 
-- [ ] Update CLAUDE.md (4.2)
-- [ ] Update help content (4.3)
-- [ ] Update CHANGELOG (4.4)
+- [x] Update CLAUDE.md (4.2)
+- [x] Update help content (4.3)
+- [x] Update CHANGELOG (4.4)
 - [ ] Close Issue #29 with PR reference
 
 ## Launch Checklist
 
-- [ ] All tests passing
-- [ ] No clippy warnings
-- [ ] Documentation complete
-- [ ] CHANGELOG updated
+- [x] All tests passing
+- [x] No clippy warnings
+- [x] Documentation complete
+- [x] CHANGELOG updated
 - [ ] PR created and reviewed
 - [ ] Issue #29 closed

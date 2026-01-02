@@ -22,7 +22,7 @@ static VALIDATION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\{\{([^}]*)\}\}").unwrap_or_else(|_| unreachable!())
 });
 
-/// Regex pattern for detecting fenced code blocks (``` with optional language identifier).
+/// Regex pattern for detecting fenced code blocks (triple backticks with optional language identifier).
 static CODE_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     // Matches: ``` followed by optional language, then content, then ```
     // SAFETY: This regex is compile-time verified and cannot fail
@@ -42,6 +42,9 @@ pub struct CodeBlockRegion {
 
 impl CodeBlockRegion {
     /// Creates a new code block region.
+    ///
+    /// Note: This cannot be `const` because `Option<String>` is not a `Copy` type.
+    #[allow(clippy::missing_const_for_fn)]
     #[must_use]
     pub fn new(start: usize, end: usize, language: Option<String>) -> Self {
         Self {
@@ -53,7 +56,7 @@ impl CodeBlockRegion {
 
     /// Checks if a byte position falls within this region.
     #[must_use]
-    pub fn contains(&self, position: usize) -> bool {
+    pub const fn contains(&self, position: usize) -> bool {
         position >= self.start && position < self.end
     }
 }
@@ -74,14 +77,11 @@ pub fn detect_code_blocks(content: &str) -> Vec<CodeBlockRegion> {
 
     for cap in CODE_BLOCK_PATTERN.captures_iter(content) {
         if let Some(full_match) = cap.get(0) {
-            let language = cap.get(1).and_then(|m| {
-                let lang = m.as_str().trim();
-                if lang.is_empty() {
-                    None
-                } else {
-                    Some(lang.to_string())
-                }
-            });
+            let language = cap
+                .get(1)
+                .map(|m| m.as_str().trim())
+                .filter(|lang| !lang.is_empty())
+                .map(ToString::to_string);
 
             regions.push(CodeBlockRegion::new(
                 full_match.start(),
@@ -855,7 +855,8 @@ mod tests {
 
     #[test]
     fn test_detect_code_blocks_multiple() {
-        let content = "```python\nprint('hello')\n```\n\nSome text\n\n```javascript\nconsole.log('hi');\n```";
+        let content =
+            "```python\nprint('hello')\n```\n\nSome text\n\n```javascript\nconsole.log('hi');\n```";
         let blocks = detect_code_blocks(content);
 
         assert_eq!(blocks.len(), 2);
@@ -912,10 +913,10 @@ mod tests {
     fn test_code_block_region_contains() {
         let region = CodeBlockRegion::new(10, 50, Some("rust".to_string()));
 
-        assert!(!region.contains(9));  // Before
-        assert!(region.contains(10));  // Start (inclusive)
-        assert!(region.contains(30));  // Middle
-        assert!(region.contains(49));  // End - 1
+        assert!(!region.contains(9)); // Before
+        assert!(region.contains(10)); // Start (inclusive)
+        assert!(region.contains(30)); // Middle
+        assert!(region.contains(49)); // End - 1
         assert!(!region.contains(50)); // End (exclusive)
         assert!(!region.contains(51)); // After
     }
@@ -1007,14 +1008,14 @@ mod tests {
             CodeBlockRegion::new(50, 80, Some("rust".to_string())),
         ];
 
-        assert!(!is_in_exclusion(5, &regions));   // Before all
-        assert!(is_in_exclusion(10, &regions));   // Start of first
-        assert!(is_in_exclusion(15, &regions));   // Inside first
-        assert!(!is_in_exclusion(20, &regions));  // End of first (exclusive)
-        assert!(!is_in_exclusion(30, &regions));  // Between regions
-        assert!(is_in_exclusion(50, &regions));   // Start of second
-        assert!(is_in_exclusion(70, &regions));   // Inside second
-        assert!(!is_in_exclusion(80, &regions));  // End of second (exclusive)
+        assert!(!is_in_exclusion(5, &regions)); // Before all
+        assert!(is_in_exclusion(10, &regions)); // Start of first
+        assert!(is_in_exclusion(15, &regions)); // Inside first
+        assert!(!is_in_exclusion(20, &regions)); // End of first (exclusive)
+        assert!(!is_in_exclusion(30, &regions)); // Between regions
+        assert!(is_in_exclusion(50, &regions)); // Start of second
+        assert!(is_in_exclusion(70, &regions)); // Inside second
+        assert!(!is_in_exclusion(80, &regions)); // End of second (exclusive)
         assert!(!is_in_exclusion(100, &regions)); // After all
     }
 

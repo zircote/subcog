@@ -254,6 +254,14 @@ enum PromptAction {
         /// Read prompt from stdin.
         #[arg(long)]
         from_stdin: bool,
+
+        /// Skip LLM-powered metadata enrichment.
+        #[arg(long)]
+        no_enrich: bool,
+
+        /// Show enriched template without saving.
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// List saved prompts.
@@ -1436,6 +1444,8 @@ fn cmd_prompt(action: PromptAction) -> Result<(), Box<dyn std::error::Error>> {
             domain,
             from_file,
             from_stdin,
+            no_enrich,
+            dry_run,
         } => cmd_prompt_save(
             name,
             content,
@@ -1444,6 +1454,8 @@ fn cmd_prompt(action: PromptAction) -> Result<(), Box<dyn std::error::Error>> {
             domain,
             from_file,
             from_stdin,
+            no_enrich,
+            dry_run,
         ),
 
         PromptAction::List {
