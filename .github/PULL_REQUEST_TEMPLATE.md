@@ -78,7 +78,7 @@ cargo deny check
 ### Commit Hygiene
 
 - [ ] My commits follow conventional commit format
-- [ ] I have rebased on the latest main branch
+- [ ] I have rebased on the latest develop branch
 - [ ] I have squashed fixup commits
 
 ## API Changes

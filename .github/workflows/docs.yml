@@ -5,7 +5,7 @@ name: Documentation
 
 on:
   push:
-    branches: [main, master]
+    branches: [develop, main]
     paths:
       - 'src/**'
       - 'Cargo.toml'
