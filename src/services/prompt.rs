@@ -28,6 +28,22 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+// Relevance scoring weights for prompt search
+/// Score boost for exact name match.
+const SCORE_EXACT_NAME_MATCH: f32 = 10.0;
+/// Score boost for partial name match.
+const SCORE_PARTIAL_NAME_MATCH: f32 = 5.0;
+/// Score boost for description match.
+const SCORE_DESCRIPTION_MATCH: f32 = 3.0;
+/// Score boost for content match.
+const SCORE_CONTENT_MATCH: f32 = 1.0;
+/// Score boost for tag match.
+const SCORE_TAG_MATCH: f32 = 2.0;
+/// Divisor for usage count boost calculation.
+const USAGE_BOOST_DIVISOR: f32 = 100.0;
+/// Maximum usage boost multiplier.
+const USAGE_BOOST_MAX: f32 = 0.5;
+
 /// Filter for listing prompts.
 #[derive(Debug, Clone, Default)]
 pub struct PromptFilter {
@@ -386,30 +402,30 @@ impl PromptService {
 
         // Exact name match
         if template.name.to_lowercase() == query {
-            score += 10.0;
+            score += SCORE_EXACT_NAME_MATCH;
         } else if template.name.to_lowercase().contains(query) {
-            score += 5.0;
+            score += SCORE_PARTIAL_NAME_MATCH;
         }
 
         // Description match
         if template.description.to_lowercase().contains(query) {
-            score += 3.0;
+            score += SCORE_DESCRIPTION_MATCH;
         }
 
         // Content match
         if template.content.to_lowercase().contains(query) {
-            score += 1.0;
+            score += SCORE_CONTENT_MATCH;
         }
 
         // Tag match
         for tag in &template.tags {
             if tag.to_lowercase().contains(query) {
-                score += 2.0;
+                score += SCORE_TAG_MATCH;
             }
         }
 
         // Boost by usage
-        score *= 1.0 + (template.usage_count as f32 / 100.0).min(0.5);
+        score *= 1.0 + (template.usage_count as f32 / USAGE_BOOST_DIVISOR).min(USAGE_BOOST_MAX);
 
         score
     }

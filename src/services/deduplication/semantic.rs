@@ -258,10 +258,24 @@ mod tests {
     use crate::storage::vector::UsearchBackend;
     use std::sync::RwLock;
 
+    /// Creates a usearch backend for tests.
+    /// Handles the Result return type when usearch-hnsw feature is enabled.
+    #[cfg(not(feature = "usearch-hnsw"))]
+    fn create_usearch_backend(dimensions: usize) -> UsearchBackend {
+        UsearchBackend::in_memory(dimensions)
+    }
+
+    /// Creates a usearch backend for tests.
+    /// Handles the Result return type when usearch-hnsw feature is enabled.
+    #[cfg(feature = "usearch-hnsw")]
+    fn create_usearch_backend(dimensions: usize) -> UsearchBackend {
+        UsearchBackend::in_memory(dimensions).expect("Failed to create usearch backend")
+    }
+
     /// Helper to create a test checker with in-memory backend.
     fn create_test_checker() -> SemanticSimilarityChecker<FastEmbedEmbedder, RwLockWrapper> {
         let embedder = Arc::new(FastEmbedEmbedder::new());
-        let vector = Arc::new(RwLockWrapper::new(UsearchBackend::in_memory(
+        let vector = Arc::new(RwLockWrapper::new(create_usearch_backend(
             FastEmbedEmbedder::DEFAULT_DIMENSIONS,
         )));
         let config = DeduplicationConfig::default();
@@ -386,7 +400,7 @@ mod tests {
     #[test]
     fn test_check_with_match() {
         let embedder = Arc::new(FastEmbedEmbedder::new());
-        let vector = Arc::new(RwLockWrapper::new(UsearchBackend::in_memory(
+        let vector = Arc::new(RwLockWrapper::new(create_usearch_backend(
             FastEmbedEmbedder::DEFAULT_DIMENSIONS,
         )));
         let config = DeduplicationConfig::default();
@@ -416,7 +430,7 @@ mod tests {
     #[test]
     fn test_check_below_threshold() {
         let embedder = Arc::new(FastEmbedEmbedder::new());
-        let vector = Arc::new(RwLockWrapper::new(UsearchBackend::in_memory(
+        let vector = Arc::new(RwLockWrapper::new(create_usearch_backend(
             FastEmbedEmbedder::DEFAULT_DIMENSIONS,
         )));
 

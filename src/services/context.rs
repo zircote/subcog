@@ -7,6 +7,32 @@ use crate::models::{Memory, Namespace, SearchFilter, SearchMode};
 use crate::services::RecallService;
 use std::collections::HashMap;
 
+// Context building limits - tunable parameters for memory selection
+/// Maximum memories to fetch for decisions (high priority).
+const CONTEXT_DECISIONS_LIMIT: usize = 5;
+/// Maximum memories to fetch for patterns.
+const CONTEXT_PATTERNS_LIMIT: usize = 3;
+/// Maximum memories to fetch for project context.
+const CONTEXT_PROJECT_LIMIT: usize = 3;
+/// Maximum memories to fetch for tech debt.
+const CONTEXT_TECH_DEBT_LIMIT: usize = 2;
+/// Default search result limit.
+const SEARCH_RESULT_LIMIT: usize = 10;
+/// Maximum recent memories to fetch for statistics.
+const RECENT_MEMORIES_LIMIT: usize = 100;
+/// Maximum top tags to return.
+const TOP_TAGS_LIMIT: usize = 10;
+/// Maximum topics to track.
+const MAX_TOPICS: usize = 10;
+/// Tokens per character approximation (for context truncation).
+const TOKENS_PER_CHAR: usize = 4;
+/// Maximum length for memory content preview in formatted output.
+const MEMORY_CONTENT_PREVIEW_LENGTH: usize = 200;
+/// Maximum words to extract for topic summary.
+const TOPIC_WORDS_LIMIT: usize = 5;
+/// Maximum length for topic display.
+const MAX_TOPIC_DISPLAY_LENGTH: usize = 50;
+
 /// Statistics about memories in the system.
 #[derive(Debug, Clone, Default)]
 pub struct MemoryStatistics {
@@ -48,33 +74,39 @@ impl ContextBuilderService {
     /// Returns an error if context building fails.
     pub fn build_context(&self, max_tokens: usize) -> Result<String> {
         // Estimate tokens per character (rough approximation)
-        let max_chars = max_tokens * 4;
+        let max_chars = max_tokens * TOKENS_PER_CHAR;
 
         let mut context_parts = Vec::new();
 
         // Add recent decisions (high priority)
-        if let Some(decisions) = self.get_relevant_memories(Namespace::Decisions, 5)? {
+        if let Some(decisions) =
+            self.get_relevant_memories(Namespace::Decisions, CONTEXT_DECISIONS_LIMIT)?
+        {
             if !decisions.is_empty() {
                 context_parts.push(format_section("Recent Decisions", &decisions));
             }
         }
 
         // Add active patterns
-        if let Some(patterns) = self.get_relevant_memories(Namespace::Patterns, 3)? {
+        if let Some(patterns) =
+            self.get_relevant_memories(Namespace::Patterns, CONTEXT_PATTERNS_LIMIT)?
+        {
             if !patterns.is_empty() {
                 context_parts.push(format_section("Active Patterns", &patterns));
             }
         }
 
         // Add relevant context
-        if let Some(ctx) = self.get_relevant_memories(Namespace::Context, 3)? {
+        if let Some(ctx) = self.get_relevant_memories(Namespace::Context, CONTEXT_PROJECT_LIMIT)? {
             if !ctx.is_empty() {
                 context_parts.push(format_section("Project Context", &ctx));
             }
         }
 
         // Add known tech debt
-        if let Some(debt) = self.get_relevant_memories(Namespace::TechDebt, 2)? {
+        if let Some(debt) =
+            self.get_relevant_memories(Namespace::TechDebt, CONTEXT_TECH_DEBT_LIMIT)?
+        {
             if !debt.is_empty() {
                 context_parts.push(format_section("Known Tech Debt", &debt));
             }
@@ -96,7 +128,7 @@ impl ContextBuilderService {
     ///
     /// Returns an error if context building fails.
     pub fn build_query_context(&self, query: &str, max_tokens: usize) -> Result<String> {
-        let max_chars = max_tokens * 4;
+        let max_chars = max_tokens * TOKENS_PER_CHAR;
 
         let recall = self
             .recall
@@ -107,7 +139,12 @@ impl ContextBuilderService {
             })?;
 
         // Search for relevant memories
-        let result = recall.search(query, SearchMode::Hybrid, &SearchFilter::new(), 10)?;
+        let result = recall.search(
+            query,
+            SearchMode::Hybrid,
+            &SearchFilter::new(),
+            SEARCH_RESULT_LIMIT,
+        )?;
 
         if result.memories.is_empty() {
             return Ok(String::new());
@@ -154,8 +191,8 @@ impl ContextBuilderService {
     /// Estimates the token count for a string.
     #[must_use]
     pub const fn estimate_tokens(text: &str) -> usize {
-        // Rough estimation: ~4 characters per token for English text
-        text.len() / 4
+        // Rough estimation: uses TOKENS_PER_CHAR for English text
+        text.len() / TOKENS_PER_CHAR
     }
 
     /// Gets memory statistics for session context.
@@ -170,7 +207,12 @@ impl ContextBuilderService {
         };
 
         // Search for all memories (broad query)
-        let result = recall.search("*", SearchMode::Text, &SearchFilter::new(), 100)?;
+        let result = recall.search(
+            "*",
+            SearchMode::Text,
+            &SearchFilter::new(),
+            RECENT_MEMORIES_LIMIT,
+        )?;
 
         let mut namespace_counts: HashMap<String, usize> = HashMap::new();
         let mut tag_counts: HashMap<String, usize> = HashMap::new();
@@ -198,7 +240,7 @@ impl ContextBuilderService {
         // Sort tags by count
         let mut top_tags: Vec<(String, usize)> = tag_counts.into_iter().collect();
         top_tags.sort_by(|a, b| b.1.cmp(&a.1));
-        top_tags.truncate(10);
+        top_tags.truncate(TOP_TAGS_LIMIT);
 
         Ok(MemoryStatistics {
             total_count: result.memories.len(),
@@ -224,7 +266,7 @@ fn format_section(title: &str, memories: &[Memory]) -> String {
             "- **{}** ({}): {}",
             memory.namespace,
             memory.id.as_str(),
-            truncate_content(&memory.content, 200)
+            truncate_content(&memory.content, MEMORY_CONTENT_PREVIEW_LENGTH)
         ));
     }
 
@@ -242,7 +284,7 @@ fn truncate_content(content: &str, max_len: usize) -> String {
 
 /// Adds a topic to the list if it's unique and list has space.
 fn add_topic_if_unique(topics: &mut Vec<String>, topic: String) {
-    if !topics.contains(&topic) && topics.len() < 10 {
+    if !topics.contains(&topic) && topics.len() < MAX_TOPICS {
         topics.push(topic);
     }
 }
@@ -253,7 +295,7 @@ fn extract_topic(content: &str) -> Option<String> {
     let words: Vec<&str> = content
         .split_whitespace()
         .filter(|w| w.len() > 2)
-        .take(5)
+        .take(TOPIC_WORDS_LIMIT)
         .collect();
 
     if words.is_empty() {
@@ -261,8 +303,8 @@ fn extract_topic(content: &str) -> Option<String> {
     }
 
     let topic = words.join(" ");
-    if topic.len() > 50 {
-        Some(format!("{}...", &topic[..47]))
+    if topic.len() > MAX_TOPIC_DISPLAY_LENGTH {
+        Some(format!("{}...", &topic[..MAX_TOPIC_DISPLAY_LENGTH - 3]))
     } else {
         Some(topic)
     }

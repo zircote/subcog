@@ -12,9 +12,9 @@
 |----------|-------|-------|-----------|
 | Critical | 18 | 14 | 4 |
 | High | 47 | 47 | 0 |
-| Medium | 68 | 51 | 17 |
+| Medium | 68 | 54 | 14 |
 | Low | 36 | 36 | 0 |
-| **Total** | **169** | **148** | **21** |
+| **Total** | **169** | **151** | **18** |
 
 ---
 
@@ -490,7 +490,9 @@
 
 ### Code Quality (9)
 - [x] CQ-M1: Magic numbers without constants ✓
-  - Status: Deferred - requires codebase audit; existing constants cover critical values
+  - File: `src/services/context.rs`
+  - Action: Added 10 named constants for context limits (CONTEXT_DECISIONS_LIMIT, etc.)
+  - Fixed: 2026-01-01
 
 - [x] CQ-M2: Inconsistent error construction ✓
   - Status: Deferred - style consistency; all errors use thiserror
@@ -727,6 +729,9 @@ All Low severity items are style/polish improvements. Deferred for future cleanu
 | 2026-01-01 | COMP-H10 | Docs | - | SECURITY_AWARENESS.md template created |
 | 2026-01-01 | COMP-H11 | Docs | - | MONITORING_ALERTING.md template created |
 | 2026-01-01 | COMP-H12 | Docs | - | VULNERABILITY_MANAGEMENT.md template created |
+| 2026-01-01 | ARCH-M1 | N/A | - | recall.rs reviewed - 506 lines, well-structured |
+| 2026-01-01 | ARCH-M2 | N/A | - | sqlite.rs reviewed - 1218 lines, schema inline is acceptable |
+| 2026-01-01 | CQ-M1 | Fixed | - | Added 10 named constants to context.rs |
 
 ---
 

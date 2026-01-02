@@ -48,6 +48,21 @@ impl FilesystemPromptStorage {
             .map(|d| d.home_dir().join(".config").join("subcog").join("prompts"))
     }
 
+    /// Returns the default org-scope path.
+    ///
+    /// Returns `~/.config/subcog/orgs/{org}/prompts/`.
+    #[must_use]
+    pub fn default_org_path(org: &str) -> Option<PathBuf> {
+        directories::BaseDirs::new().map(|d| {
+            d.home_dir()
+                .join(".config")
+                .join("subcog")
+                .join("orgs")
+                .join(org)
+                .join("prompts")
+        })
+    }
+
     /// Returns the base path.
     #[must_use]
     pub fn base_path(&self) -> &Path {
@@ -343,6 +358,18 @@ mod tests {
         // Should return Some on most systems
         if let Some(p) = path {
             assert!(p.to_string_lossy().contains("subcog"));
+            assert!(p.to_string_lossy().ends_with("prompts"));
+        }
+    }
+
+    #[test]
+    fn test_default_org_path() {
+        let path = FilesystemPromptStorage::default_org_path("test-org");
+        // Should return Some on most systems
+        if let Some(p) = path {
+            assert!(p.to_string_lossy().contains("subcog"));
+            assert!(p.to_string_lossy().contains("orgs"));
+            assert!(p.to_string_lossy().contains("test-org"));
             assert!(p.to_string_lossy().ends_with("prompts"));
         }
     }

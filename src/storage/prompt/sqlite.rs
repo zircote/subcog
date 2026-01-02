@@ -85,6 +85,21 @@ impl SqlitePromptStorage {
         })
     }
 
+    /// Returns the default org-scope database path.
+    ///
+    /// Returns `~/.config/subcog/orgs/{org}/memories.db`.
+    #[must_use]
+    pub fn default_org_path(org: &str) -> Option<PathBuf> {
+        directories::BaseDirs::new().map(|d| {
+            d.home_dir()
+                .join(".config")
+                .join("subcog")
+                .join("orgs")
+                .join(org)
+                .join("memories.db")
+        })
+    }
+
     /// Returns the database path.
     #[must_use]
     pub fn db_path(&self) -> &Path {

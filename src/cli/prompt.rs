@@ -597,6 +597,251 @@ fn determine_export_format(format: Option<&str>, output: Option<&PathBuf>) -> Ou
     OutputFormat::Markdown
 }
 
+/// Executes the `prompt import` subcommand.
+///
+/// # Arguments
+///
+/// * `source` - Source file path or URL.
+/// * `domain` - Target domain scope.
+/// * `name` - Optional name override.
+/// * `no_validate` - Skip validation.
+///
+/// # Errors
+///
+/// Returns an error if import fails.
+pub fn cmd_prompt_import(
+    source: String,
+    domain: String,
+    name: Option<String>,
+    no_validate: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut service = create_prompt_service()?;
+
+    // Load template from source
+    let mut template = load_template_from_source(&source)?;
+
+    // Override name if provided
+    if let Some(override_name) = name {
+        template.name = override_name;
+    }
+
+    // Validate unless skipped
+    if !no_validate {
+        validate_template(&template)?;
+    }
+
+    let scope = parse_domain_scope(Some(&domain));
+    let id = service.save(&template, scope)?;
+
+    println!("Prompt imported:");
+    println!("  Name: {}", template.name);
+    println!("  ID: {id}");
+    println!("  Domain: {}", domain_scope_to_display(scope));
+    println!("  Source: {source}");
+    if !template.variables.is_empty() {
+        println!(
+            "  Variables: {}",
+            format_variables_summary(&template.variables)
+        );
+    }
+    if !template.tags.is_empty() {
+        println!("  Tags: {}", template.tags.join(", "));
+    }
+
+    Ok(())
+}
+
+/// Infers the prompt format from a file path or URL extension.
+fn infer_format_from_path(source: &str) -> PromptFormat {
+    let path = std::path::Path::new(source);
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map_or(PromptFormat::Markdown, |ext| {
+            match ext.to_lowercase().as_str() {
+                "json" => PromptFormat::Json,
+                "yaml" | "yml" => PromptFormat::Yaml,
+                _ => PromptFormat::Markdown,
+            }
+        })
+}
+
+/// Loads a template from a file path or URL.
+fn load_template_from_source(source: &str) -> Result<PromptTemplate, Box<dyn std::error::Error>> {
+    if source.starts_with("http://") || source.starts_with("https://") {
+        // URL source - fetch and parse
+        let response = reqwest::blocking::get(source)?;
+        if !response.status().is_success() {
+            return Err(format!("Failed to fetch URL: HTTP {}", response.status()).into());
+        }
+
+        let content = response.text()?;
+
+        // Determine format from URL extension
+        let format = infer_format_from_path(source);
+
+        PromptParser::parse(&content, format).map_err(|e| e.to_string().into())
+    } else {
+        // File source
+        let path = PathBuf::from(source);
+        PromptParser::from_file(&path).map_err(|e| e.to_string().into())
+    }
+}
+
+/// Validates a template for required fields and variable syntax.
+fn validate_template(template: &PromptTemplate) -> Result<(), Box<dyn std::error::Error>> {
+    // Check name is not empty
+    if template.name.trim().is_empty() {
+        return Err("Template name cannot be empty".into());
+    }
+
+    // Check content is not empty
+    if template.content.trim().is_empty() {
+        return Err("Template content cannot be empty".into());
+    }
+
+    // Validate variable names
+    for var in &template.variables {
+        if var.name.trim().is_empty() {
+            return Err("Variable name cannot be empty".into());
+        }
+        if var.name.starts_with("subcog_")
+            || var.name.starts_with("system_")
+            || var.name.starts_with("__")
+        {
+            return Err(format!(
+                "Variable name '{}' uses reserved prefix (subcog_, system_, __)",
+                var.name
+            )
+            .into());
+        }
+    }
+
+    Ok(())
+}
+
+/// Executes the `prompt share` subcommand.
+///
+/// # Arguments
+///
+/// * `name` - Prompt name to share.
+/// * `output` - Optional output file path.
+/// * `format` - Export format.
+/// * `domain` - Optional domain scope to search.
+/// * `include_stats` - Include usage statistics.
+///
+/// # Errors
+///
+/// Returns an error if sharing fails.
+pub fn cmd_prompt_share(
+    name: String,
+    output: Option<PathBuf>,
+    format: String,
+    domain: Option<String>,
+    include_stats: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut service = create_prompt_service()?;
+
+    let scope = domain.as_deref().map(|d| parse_domain_scope(Some(d)));
+    let prompt = service.get(&name, scope)?;
+
+    let Some(template) = prompt else {
+        return Err(format!("Prompt not found: {name}").into());
+    };
+
+    // Build shareable content with metadata
+    let share_content = build_share_content(&template, include_stats, &format)?;
+
+    // Write to file or stdout
+    if let Some(path) = output {
+        std::fs::write(&path, &share_content)?;
+        println!("Shared to: {}", path.display());
+        println!("  Name: {}", template.name);
+        println!("  Format: {format}");
+        if include_stats {
+            println!("  Usage count: {}", template.usage_count);
+        }
+    } else {
+        println!("{share_content}");
+    }
+
+    Ok(())
+}
+
+/// Formats a Unix timestamp as a full datetime string.
+fn format_timestamp(ts: u64) -> String {
+    chrono::DateTime::from_timestamp(i64::try_from(ts).unwrap_or(0), 0).map_or_else(
+        || "unknown".to_string(),
+        |dt| dt.format("%Y-%m-%d %H:%M:%S").to_string(),
+    )
+}
+
+/// Formats a Unix timestamp as a short date string.
+fn format_timestamp_short(ts: u64) -> String {
+    chrono::DateTime::from_timestamp(i64::try_from(ts).unwrap_or(0), 0).map_or_else(
+        || "unknown".to_string(),
+        |dt| dt.format("%Y-%m-%d").to_string(),
+    )
+}
+
+/// Builds shareable content with full metadata.
+fn build_share_content(
+    template: &PromptTemplate,
+    include_stats: bool,
+    format: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let output_format = OutputFormat::parse(format);
+
+    match output_format {
+        OutputFormat::Yaml => {
+            // Include stats as metadata comments
+            let yaml = PromptParser::serialize(template, PromptFormat::Yaml)?;
+            if include_stats {
+                let created = format_timestamp(template.created_at);
+                let updated = format_timestamp(template.updated_at);
+                let stats_header = format!(
+                    "# Subcog Prompt Share\n# Usage count: {}\n# Created: {}\n# Last used: {}\n\n",
+                    template.usage_count, created, updated,
+                );
+                Ok(format!("{stats_header}{yaml}"))
+            } else {
+                Ok(yaml)
+            }
+        },
+        OutputFormat::Json => {
+            if include_stats {
+                // Include stats in JSON output
+                let mut json_value: serde_json::Value = serde_json::to_value(template)?;
+                if let Some(obj) = json_value.as_object_mut() {
+                    obj.insert(
+                        "_share_metadata".to_string(),
+                        serde_json::json!({
+                            "exported_at": chrono::Utc::now().to_rfc3339(),
+                            "usage_count": template.usage_count,
+                        }),
+                    );
+                }
+                Ok(serde_json::to_string_pretty(&json_value)?)
+            } else {
+                Ok(serde_json::to_string_pretty(template)?)
+            }
+        },
+        OutputFormat::Markdown | OutputFormat::Table | OutputFormat::Template => {
+            let md = PromptParser::serialize(template, PromptFormat::Markdown)?;
+            if include_stats {
+                let created = format_timestamp_short(template.created_at);
+                let updated = format_timestamp_short(template.updated_at);
+                let stats_footer = format!(
+                    "\n---\n\n*Usage count: {} | Created: {} | Last used: {}*",
+                    template.usage_count, created, updated,
+                );
+                Ok(format!("{md}{stats_footer}"))
+            } else {
+                Ok(md)
+            }
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -755,5 +1000,115 @@ mod tests {
     fn test_output_format_default() {
         let default_format = OutputFormat::default();
         assert!(matches!(default_format, OutputFormat::Table));
+    }
+
+    #[test]
+    fn test_infer_format_from_path_json() {
+        assert!(matches!(
+            infer_format_from_path("prompt.json"),
+            PromptFormat::Json
+        ));
+        assert!(matches!(
+            infer_format_from_path("/path/to/prompt.JSON"),
+            PromptFormat::Json
+        ));
+    }
+
+    #[test]
+    fn test_infer_format_from_path_yaml() {
+        assert!(matches!(
+            infer_format_from_path("prompt.yaml"),
+            PromptFormat::Yaml
+        ));
+        assert!(matches!(
+            infer_format_from_path("prompt.yml"),
+            PromptFormat::Yaml
+        ));
+        assert!(matches!(
+            infer_format_from_path("https://example.com/prompt.YAML"),
+            PromptFormat::Yaml
+        ));
+    }
+
+    #[test]
+    fn test_infer_format_from_path_markdown() {
+        assert!(matches!(
+            infer_format_from_path("prompt.md"),
+            PromptFormat::Markdown
+        ));
+        assert!(matches!(
+            infer_format_from_path("prompt.txt"),
+            PromptFormat::Markdown
+        ));
+        assert!(matches!(
+            infer_format_from_path("prompt"),
+            PromptFormat::Markdown
+        ));
+    }
+
+    #[test]
+    fn test_validate_template_valid() {
+        let template = PromptTemplate {
+            name: "test-prompt".to_string(),
+            content: "Test content".to_string(),
+            ..Default::default()
+        };
+        assert!(validate_template(&template).is_ok());
+    }
+
+    #[test]
+    fn test_validate_template_empty_name() {
+        let template = PromptTemplate {
+            name: String::new(),
+            content: "Test content".to_string(),
+            ..Default::default()
+        };
+        assert!(validate_template(&template).is_err());
+    }
+
+    #[test]
+    fn test_validate_template_empty_content() {
+        let template = PromptTemplate {
+            name: "test".to_string(),
+            content: "   ".to_string(),
+            ..Default::default()
+        };
+        assert!(validate_template(&template).is_err());
+    }
+
+    #[test]
+    fn test_validate_template_reserved_variable_prefix() {
+        let template = PromptTemplate {
+            name: "test".to_string(),
+            content: "Test {{subcog_internal}}".to_string(),
+            variables: vec![PromptVariable {
+                name: "subcog_internal".to_string(),
+                description: None,
+                default: None,
+                required: false,
+            }],
+            ..Default::default()
+        };
+        assert!(validate_template(&template).is_err());
+    }
+
+    #[test]
+    fn test_format_timestamp() {
+        // Test with epoch timestamp
+        let result = format_timestamp(0);
+        assert!(result.contains("1970-01-01"));
+
+        // Test with a known timestamp (2024-01-01 00:00:00 UTC)
+        let result = format_timestamp(1_704_067_200);
+        assert!(result.contains("2024-01-01"));
+    }
+
+    #[test]
+    fn test_format_timestamp_short() {
+        let result = format_timestamp_short(0);
+        assert_eq!(result, "1970-01-01");
+
+        let result = format_timestamp_short(1_704_067_200);
+        assert_eq!(result, "2024-01-01");
     }
 }
