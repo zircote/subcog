@@ -1,8 +1,9 @@
 # Subcog Deficiency Remediation Plan
 
-**Source:** [FEATURES_REPORT.md](./FEATURES_REPORT.md)
+**Source:** [FEATURES_REPORT.md](./FEATURES_REPORT.md), [CODE_REVIEW_REPORT.md](./CODE_REVIEW_REPORT.md)
 **Created:** 2026-01-01
-**Target:** Close all 14 identified deficiencies
+**Updated:** 2026-01-01 (Code Review findings integrated)
+**Target:** Close all deficiencies and critical code review findings
 
 ---
 
@@ -10,10 +11,113 @@
 
 | Priority | Category | Tasks | Effort |
 |----------|----------|-------|--------|
+| P0 | Critical Code Review Findings | 5 items | High |
 | P1 | STUB Implementations | 2 items | High |
 | P2 | PARTIAL Implementations | 4 items | Medium-High |
 | P3 | MISSING Features | 6 items | Low-Medium |
-| **Total** | | **14 items** | |
+| **Total** | | **17 items** | |
+
+---
+
+## Phase 0: Critical Code Review Findings (P0)
+
+> **BLOCK RELEASE** - These issues must be fixed before any release.
+> See [CODE_REVIEW_REPORT.md](./CODE_REVIEW_REPORT.md) for full details.
+
+### 0.1 Audit Log Silent Failures
+
+**File:** `src/security/audit.rs:186`
+**Severity:** CRITICAL
+**Impact:** Compliance violation, lost audit trail
+
+#### Tasks
+
+- [ ] **0.1.1** Fix error handling in `append_to_file`
+  - [ ] Remove `let _ =` pattern that discards errors
+  - [ ] Propagate errors to caller with proper `Result`
+  - [ ] Add fallback logging to stderr for audit preservation
+  - [ ] Add tracing span for audit operations
+
+- [ ] **0.1.2** Add tests for audit failure scenarios
+  - [ ] Test file write failure handling
+  - [ ] Test fallback behavior
+  - [ ] Verify audit trail completeness
+
+---
+
+### 0.2 N+1 Query in RecallService
+
+**File:** `src/services/recall.rs:156`
+**Severity:** CRITICAL
+**Impact:** 1000 queries for 1000 memories, unusable at scale
+
+#### Tasks
+
+- [ ] **0.2.1** Refactor `list_all` to batch fetch
+  - [ ] Replace individual queries with single batch query
+  - [ ] Use `IN` clause or prepared statement batching
+  - [ ] Add pagination support for large result sets
+
+- [ ] **0.2.2** Add performance tests
+  - [ ] Benchmark with 1k, 10k, 100k memories
+  - [ ] Add CI check to prevent regression
+
+---
+
+### 0.3 N+1 Query in ConsolidationService
+
+**File:** `src/services/consolidation.rs:89`
+**Severity:** HIGH
+**Impact:** O(n²) comparisons for contradiction detection
+
+#### Tasks
+
+- [ ] **0.3.1** Use vector similarity for candidate pairs
+  - [ ] Pre-filter with embedding similarity threshold
+  - [ ] Only compare high-similarity pairs
+  - [ ] Add configurable similarity threshold
+
+- [ ] **0.3.2** Add batch processing
+  - [ ] Process in chunks to limit memory
+  - [ ] Add progress reporting for large sets
+
+---
+
+### 0.4 Database Migration Error Handling
+
+**File:** `src/storage/index/sqlite.rs:89`
+**Severity:** HIGH
+**Impact:** Corrupted state possible on failed migration
+
+#### Tasks
+
+- [ ] **0.4.1** Propagate migration errors
+  - [ ] Return `Result` instead of swallowing errors
+  - [ ] Add transaction rollback on failure
+  - [ ] Log migration steps for debugging
+
+- [ ] **0.4.2** Add migration tests
+  - [ ] Test migration from each prior version
+  - [ ] Test recovery from failed migration
+
+---
+
+### 0.5 Filesystem Backend Directory Creation
+
+**File:** `src/storage/prompt/filesystem.rs:67`
+**Severity:** HIGH
+**Impact:** Prompts silently not saved
+
+#### Tasks
+
+- [ ] **0.5.1** Propagate directory creation errors
+  - [ ] Return `Result` from `create_dir_all`
+  - [ ] Add descriptive error messages
+  - [ ] Verify permissions before write
+
+- [ ] **0.5.2** Add tests for filesystem edge cases
+  - [ ] Test with read-only directories
+  - [ ] Test with missing parent directories
 
 ---
 
@@ -405,6 +509,14 @@
 
 ### Phase Completion Gates
 
+#### Phase 0 Complete When (BLOCK RELEASE):
+- [ ] Audit log errors are propagated with fallback
+- [ ] RecallService batch fetch verified with 10k+ memories
+- [ ] ConsolidationService uses vector pre-filtering
+- [ ] Migration errors cause clean failure, not silent corruption
+- [ ] Filesystem backend reports directory creation failures
+- [ ] `make ci` passes
+
 #### Phase 1 Complete When:
 - [x] Redis Vector backend passes integration tests
 - [x] HTTP transport serves MCP requests
@@ -474,9 +586,20 @@ These task groups can be executed in parallel:
 | STUB items | 0 (down from 2) |
 | PARTIAL items | 0 (down from 6) |
 | MISSING items | 0 (down from 6) |
+| Critical code review findings | 0 (down from 3) |
+| High code review findings | 0 (down from 7) |
 | All tests passing | Yes |
 | CI pipeline green | Yes |
+| Code review score | ≥8.0/10 (up from 6.8/10) |
 
 ---
 
-*Plan generated from FEATURES_REPORT.md audit.*
+## Related Documents
+
+- [FEATURES_REPORT.md](./FEATURES_REPORT.md) - Feature audit (source for Phases 1-3)
+- [CODE_REVIEW_REPORT.md](./CODE_REVIEW_REPORT.md) - Code review findings (source for Phase 0)
+- [RESEARCH_PLAN.md](./RESEARCH_PLAN.md) - Audit methodology
+
+---
+
+*Plan generated from FEATURES_REPORT.md audit and CODE_REVIEW_REPORT.md findings.*
