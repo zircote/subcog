@@ -42,11 +42,15 @@
 // Allow match_same_arms for explicit enum handling with default fallback.
 #![allow(clippy::match_same_arms)]
 
+mod auth;
+mod help_content;
 mod prompts;
 mod resources;
 mod server;
+mod tool_types;
 mod tools;
 
+pub use auth::{Claims, JwtAuthenticator, JwtConfig};
 pub use prompts::{PromptArgument, PromptContent, PromptDefinition, PromptMessage, PromptRegistry};
 pub use resources::{HelpCategory, ResourceContent, ResourceDefinition, ResourceHandler};
 pub use server::{McpServer, Transport};

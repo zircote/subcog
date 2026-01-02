@@ -22,7 +22,10 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Arc;
+use subcog::cli::{
+    build_anthropic_client, build_hook_llm_provider, build_lmstudio_client, build_ollama_client,
+    build_openai_client, build_resilience_config,
+};
 use subcog::config::SubcogConfig;
 use subcog::hooks::{
     AdaptiveContextConfig, HookHandler, PostToolUseHandler, PreCompactHandler, SessionStartHandler,
@@ -849,65 +852,7 @@ fn cmd_enrich(
     }
 }
 
-fn build_http_config(llm_config: &subcog::config::LlmConfig) -> subcog::llm::LlmHttpConfig {
-    subcog::llm::LlmHttpConfig::from_config(llm_config).with_env_overrides()
-}
-
-fn build_resilience_config(
-    llm_config: &subcog::config::LlmConfig,
-) -> subcog::llm::LlmResilienceConfig {
-    subcog::llm::LlmResilienceConfig::from_config(llm_config).with_env_overrides()
-}
-
-fn build_openai_client(llm_config: &subcog::config::LlmConfig) -> subcog::llm::OpenAiClient {
-    let mut client = subcog::llm::OpenAiClient::new();
-    if let Some(ref api_key) = llm_config.api_key {
-        client = client.with_api_key(api_key);
-    }
-    if let Some(ref model) = llm_config.model {
-        client = client.with_model(model);
-    }
-    if let Some(ref base_url) = llm_config.base_url {
-        client = client.with_endpoint(base_url);
-    }
-    client.with_http_config(build_http_config(llm_config))
-}
-
-fn build_anthropic_client(llm_config: &subcog::config::LlmConfig) -> subcog::llm::AnthropicClient {
-    let mut client = subcog::llm::AnthropicClient::new();
-    if let Some(ref api_key) = llm_config.api_key {
-        client = client.with_api_key(api_key);
-    }
-    if let Some(ref model) = llm_config.model {
-        client = client.with_model(model);
-    }
-    if let Some(ref base_url) = llm_config.base_url {
-        client = client.with_endpoint(base_url);
-    }
-    client.with_http_config(build_http_config(llm_config))
-}
-
-fn build_ollama_client(llm_config: &subcog::config::LlmConfig) -> subcog::llm::OllamaClient {
-    let mut client = subcog::llm::OllamaClient::new();
-    if let Some(ref model) = llm_config.model {
-        client = client.with_model(model);
-    }
-    if let Some(ref base_url) = llm_config.base_url {
-        client = client.with_endpoint(base_url);
-    }
-    client.with_http_config(build_http_config(llm_config))
-}
-
-fn build_lmstudio_client(llm_config: &subcog::config::LlmConfig) -> subcog::llm::LmStudioClient {
-    let mut client = subcog::llm::LmStudioClient::new();
-    if let Some(ref model) = llm_config.model {
-        client = client.with_model(model);
-    }
-    if let Some(ref base_url) = llm_config.base_url {
-        client = client.with_endpoint(base_url);
-    }
-    client.with_http_config(build_http_config(llm_config))
-}
+// LLM factory functions imported from cli module
 
 fn run_enrich_with_client<P: subcog::llm::LlmProvider>(
     client: P,
@@ -928,49 +873,6 @@ fn run_enrich_with_client<P: subcog::llm::LlmProvider>(
         dry_run,
         cwd,
     )
-}
-
-fn build_hook_llm_provider(config: &SubcogConfig) -> Option<Arc<dyn subcog::llm::LlmProvider>> {
-    use subcog::config::LlmProvider as Provider;
-    use subcog::llm::{LlmProvider as LlmProviderTrait, ResilientLlmProvider};
-
-    if !config.search_intent.use_llm {
-        return None;
-    }
-
-    let llm_config = &config.llm;
-    let provider: Arc<dyn LlmProviderTrait> = match llm_config.provider {
-        Provider::OpenAi => {
-            let resilience_config = build_resilience_config(llm_config);
-            Arc::new(ResilientLlmProvider::new(
-                build_openai_client(llm_config),
-                resilience_config,
-            ))
-        },
-        Provider::Anthropic => {
-            let resilience_config = build_resilience_config(llm_config);
-            Arc::new(ResilientLlmProvider::new(
-                build_anthropic_client(llm_config),
-                resilience_config,
-            ))
-        },
-        Provider::Ollama => {
-            let resilience_config = build_resilience_config(llm_config);
-            Arc::new(ResilientLlmProvider::new(
-                build_ollama_client(llm_config),
-                resilience_config,
-            ))
-        },
-        Provider::LmStudio => {
-            let resilience_config = build_resilience_config(llm_config);
-            Arc::new(ResilientLlmProvider::new(
-                build_lmstudio_client(llm_config),
-                resilience_config,
-            ))
-        },
-    };
-
-    Some(provider)
 }
 
 /// Runs the enrichment operation with the given service.

@@ -2,6 +2,7 @@
 //!
 //! Searches for memories using hybrid (vector + BM25) search with RRF fusion.
 
+use crate::current_timestamp;
 use crate::models::{
     Memory, MemoryEvent, MemoryId, MemoryStatus, SearchFilter, SearchHit, SearchMode, SearchResult,
 };
@@ -10,7 +11,7 @@ use crate::storage::index::SqliteBackend;
 use crate::storage::traits::IndexBackend;
 use crate::{Error, Result};
 use std::collections::HashMap;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 use tracing::instrument;
 
 /// Service for searching and retrieving memories.
@@ -134,11 +135,16 @@ impl RecallService {
 
             let results = index.list_all(filter, limit)?;
 
-            // Fetch memory to get namespace. Content cleared - details via drill-down.
+            // PERF-C1: Use batch query instead of N+1 individual get_memory calls
+            let ids: Vec<_> = results.iter().map(|(id, _)| id.clone()).collect();
+            let batch_memories = index.get_memories_batch(&ids)?;
+
+            // Zip results with fetched memories, clearing content for lightweight response
             let memories: Vec<SearchHit> = results
                 .into_iter()
-                .filter_map(|(id, score)| {
-                    index.get_memory(&id).ok().flatten().map(|mut memory| {
+                .zip(batch_memories)
+                .filter_map(|((_, score), memory_opt)| {
+                    memory_opt.map(|mut memory| {
                         // Clear content for lightweight response
                         memory.content = String::new();
                         SearchHit {
@@ -203,19 +209,24 @@ impl RecallService {
 
         let results = index.search(query, filter, limit)?;
 
-        // Convert to SearchHits - fetch full memories from index
-        let mut hits = Vec::with_capacity(results.len());
-        for (id, score) in results {
-            let memory = index
-                .get_memory(&id)?
-                .unwrap_or_else(|| create_placeholder_memory(id));
-            hits.push(SearchHit {
-                memory,
-                score,
-                vector_score: None,
-                bm25_score: Some(score),
-            });
-        }
+        // PERF-C1: Use batch query instead of N+1 individual get_memory calls
+        let ids: Vec<_> = results.iter().map(|(id, _)| id.clone()).collect();
+        let batch_memories = index.get_memories_batch(&ids)?;
+
+        // Convert to SearchHits - zip with fetched memories
+        let hits: Vec<SearchHit> = results
+            .into_iter()
+            .zip(batch_memories)
+            .map(|((id, score), memory_opt)| {
+                let memory = memory_opt.unwrap_or_else(|| create_placeholder_memory(id));
+                SearchHit {
+                    memory,
+                    score,
+                    vector_score: None,
+                    bm25_score: Some(score),
+                }
+            })
+            .collect();
 
         Ok(hits)
     }
@@ -342,13 +353,6 @@ fn domain_label(filter: &SearchFilter) -> String {
         1 => filter.domains[0].to_string(),
         _ => "multi".to_string(),
     }
-}
-
-fn current_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 /// Merges a vector score into an existing search hit.

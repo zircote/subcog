@@ -69,4 +69,17 @@ pub trait IndexBackend: Send + Sync {
     ///
     /// Returns an error if the operation fails.
     fn get_memory(&self, id: &MemoryId) -> Result<Option<Memory>>;
+
+    /// Retrieves multiple memories by their IDs in a single batch query.
+    ///
+    /// This is more efficient than calling `get_memory` in a loop (N+1 query pattern).
+    /// Returns memories in the same order as the input IDs, with None for missing IDs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    fn get_memories_batch(&self, ids: &[MemoryId]) -> Result<Vec<Option<Memory>>> {
+        // Default implementation falls back to individual queries
+        ids.iter().map(|id| self.get_memory(id)).collect()
+    }
 }

@@ -2,8 +2,9 @@
 
 use super::HookHandler;
 use crate::Result;
+use crate::current_timestamp;
 use crate::services::SyncService;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 use tracing::instrument;
 
 /// Handles Stop hook events.
@@ -110,14 +111,6 @@ impl StopHandler {
             }),
         }
     }
-}
-
-/// Gets the current Unix timestamp.
-fn current_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 impl Default for StopHandler {

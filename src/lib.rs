@@ -89,6 +89,8 @@ pub enum Error {
     NotImplemented(String),
     /// Feature not enabled (requires feature flag).
     FeatureNotEnabled(String),
+    /// Authentication failed (SEC-H1).
+    Unauthorized(String),
 }
 
 impl fmt::Display for Error {
@@ -110,6 +112,7 @@ impl fmt::Display for Error {
                     "feature not enabled: {feature} (compile with --features {feature})"
                 )
             },
+            Self::Unauthorized(msg) => write!(f, "unauthorized: {msg}"),
         }
     }
 }
@@ -118,6 +121,29 @@ impl StdError for Error {}
 
 /// Result type alias for subcog operations.
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// Returns the current Unix timestamp in seconds.
+///
+/// This is a centralized utility function to avoid duplicate implementations
+/// across the codebase (CQ-H1). Uses `SystemTime::now()` with fallback to 0
+/// if the system clock is before the Unix epoch.
+///
+/// # Examples
+///
+/// ```rust
+/// use subcog::current_timestamp;
+///
+/// let ts = current_timestamp();
+/// assert!(ts > 0); // Should be a reasonable Unix timestamp
+/// ```
+#[must_use]
+pub fn current_timestamp() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
 
 /// Adds two numbers together.
 ///
@@ -251,7 +277,8 @@ mod tests {
             Error::OperationFailed { .. }
             | Error::NotImplemented(_)
             | Error::ContentBlocked { .. }
-            | Error::FeatureNotEnabled(_) => {
+            | Error::FeatureNotEnabled(_)
+            | Error::Unauthorized(_) => {
                 unreachable!("Expected InvalidInput error")
             },
         }
