@@ -157,6 +157,6 @@ Time depends on LLM provider latency.
 
 ## See Also
 
-- [capture](capture.md) - Capture memories
-- [recall](recall.md) - Search memories
+- [capture](./capture.md) - Capture memories
+- [recall](./recall.md) - Search memories
 - [MCP subcog_consolidate](../mcp/tools.md#subcog_consolidate) - MCP equivalent

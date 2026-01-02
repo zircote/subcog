@@ -138,6 +138,14 @@ impl fmt::Display for Namespace {
     }
 }
 
+impl std::str::FromStr for Namespace {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| format!("unknown namespace: {s}"))
+    }
+}
+
 /// Domain separation for memories.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Domain {

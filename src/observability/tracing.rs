@@ -1,12 +1,14 @@
-//! Distributed tracing.
+//! Distributed tracing and OTLP logging.
 
 use crate::config::TracingSettings;
 use crate::{Error, Result};
 use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider as _;
-use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig};
+use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+use opentelemetry_otlp::{LogExporter, Protocol, SpanExporter, WithExportConfig};
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::{RandomIdGenerator, Sampler, SdkTracerProvider};
 use tracing_opentelemetry::OpenTelemetryLayer;
@@ -79,6 +81,11 @@ pub struct TracingInit {
     pub layer: OpenTelemetryLayer<Registry, opentelemetry_sdk::trace::Tracer>,
     /// Tracer provider for shutdown flushing.
     pub provider: SdkTracerProvider,
+    /// OTLP logging layer for tracing subscriber.
+    pub logs_layer:
+        OpenTelemetryTracingBridge<SdkLoggerProvider, opentelemetry_sdk::logs::SdkLogger>,
+    /// Logger provider for shutdown flushing.
+    pub logger_provider: SdkLoggerProvider,
     /// Tokio runtime for gRPC exporters when no runtime exists.
     pub runtime: Option<tokio::runtime::Runtime>,
 }
@@ -129,10 +136,12 @@ pub fn build_tracing(config: &TracingConfig) -> Result<Option<TracingInit>> {
     };
 
     let _guard = runtime.as_ref().map(tokio::runtime::Runtime::enter);
-    let exporter = match config.otlp.protocol {
+
+    // Build trace exporter
+    let trace_exporter = match config.otlp.protocol {
         OtlpProtocol::Grpc => SpanExporter::builder()
             .with_tonic()
-            .with_endpoint(endpoint)
+            .with_endpoint(&endpoint)
             .build()
             .map_err(|e| Error::OperationFailed {
                 operation: "otlp_exporter_build".to_string(),
@@ -141,10 +150,31 @@ pub fn build_tracing(config: &TracingConfig) -> Result<Option<TracingInit>> {
         OtlpProtocol::Http => SpanExporter::builder()
             .with_http()
             .with_protocol(Protocol::HttpBinary)
-            .with_endpoint(endpoint)
+            .with_endpoint(&endpoint)
             .build()
             .map_err(|e| Error::OperationFailed {
                 operation: "otlp_exporter_build".to_string(),
+                cause: e.to_string(),
+            })?,
+    };
+
+    // Build logs exporter
+    let log_exporter = match config.otlp.protocol {
+        OtlpProtocol::Grpc => LogExporter::builder()
+            .with_tonic()
+            .with_endpoint(&endpoint)
+            .build()
+            .map_err(|e| Error::OperationFailed {
+                operation: "otlp_log_exporter_build".to_string(),
+                cause: e.to_string(),
+            })?,
+        OtlpProtocol::Http => LogExporter::builder()
+            .with_http()
+            .with_protocol(Protocol::HttpBinary)
+            .with_endpoint(&endpoint)
+            .build()
+            .map_err(|e| Error::OperationFailed {
+                operation: "otlp_log_exporter_build".to_string(),
                 cause: e.to_string(),
             })?,
     };
@@ -156,12 +186,20 @@ pub fn build_tracing(config: &TracingConfig) -> Result<Option<TracingInit>> {
     attributes.extend(config.resource_attributes.clone());
 
     let sampler = build_sampler(config.sample_ratio);
-    let resource = Resource::builder().with_attributes(attributes).build();
+    let resource = Resource::builder()
+        .with_attributes(attributes.clone())
+        .build();
     let provider = SdkTracerProvider::builder()
         .with_sampler(sampler)
         .with_id_generator(RandomIdGenerator::default())
+        .with_resource(resource.clone())
+        .with_batch_exporter(trace_exporter)
+        .build();
+
+    // Build logger provider
+    let logger_provider = SdkLoggerProvider::builder()
         .with_resource(resource)
-        .with_batch_exporter(exporter)
+        .with_batch_exporter(log_exporter)
         .build();
 
     global::set_text_map_propagator(TraceContextPropagator::new());
@@ -169,10 +207,13 @@ pub fn build_tracing(config: &TracingConfig) -> Result<Option<TracingInit>> {
 
     let tracer = provider.tracer(config.service_name.clone());
     let layer = OpenTelemetryLayer::new(tracer);
+    let logs_layer = OpenTelemetryTracingBridge::new(&logger_provider);
 
     Ok(Some(TracingInit {
         layer,
         provider,
+        logs_layer,
+        logger_provider,
         runtime,
     }))
 }

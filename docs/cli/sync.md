@@ -168,5 +168,5 @@ git notes --ref=subcog merge origin/refs/notes/subcog
 
 ## See Also
 
-- [status](status.md) - Check sync status
+- [status](./status.md) - Check sync status
 - [MCP subcog_sync](../mcp/tools.md#subcog_sync) - MCP equivalent

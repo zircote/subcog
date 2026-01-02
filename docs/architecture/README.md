@@ -6,7 +6,7 @@ Subcog is a persistent memory system for AI coding assistants, built with a modu
 
 | Topic | Description |
 |-------|-------------|
-| [Overview](overview.md) | High-level architecture |
+| [Overview](./overview.md) | High-level architecture |
 | [Data Models](models.md) | Core data structures |
 | [Services](services.md) | Business logic layer |
 | [Search](search.md) | Hybrid search system |
@@ -130,7 +130,7 @@ src/
 
 ## See Also
 
-- [Overview](overview.md) - Detailed architecture overview
+- [Overview](./overview.md) - Detailed architecture overview
 - [Storage](../storage/README.md) - Storage layer details
 - [MCP](../mcp/README.md) - MCP integration
 - [Hooks](../hooks/README.md) - Claude Code hooks

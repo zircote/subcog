@@ -186,11 +186,25 @@ impl PostToolUseHandler {
             .memories
             .into_iter()
             .filter(|hit| hit.score >= self.min_relevance)
-            .map(|hit| RelatedMemory {
-                id: hit.memory.id.as_str().to_string(),
-                namespace: hit.memory.namespace.as_str().to_string(),
-                content: truncate_content(&hit.memory.content, 200),
-                relevance: hit.score,
+            .map(|hit| {
+                // Build full URN: subcog://{domain}/{namespace}/{id}
+                let domain_part = if hit.memory.domain.is_global() {
+                    "global".to_string()
+                } else {
+                    hit.memory.domain.to_string()
+                };
+                let urn = format!(
+                    "subcog://{}/{}/{}",
+                    domain_part,
+                    hit.memory.namespace.as_str(),
+                    hit.memory.id.as_str()
+                );
+                RelatedMemory {
+                    urn,
+                    namespace: hit.memory.namespace.as_str().to_string(),
+                    content: truncate_content(&hit.memory.content, 200),
+                    relevance: hit.score,
+                }
             })
             .collect();
 
@@ -221,7 +235,7 @@ impl PostToolUseHandler {
             .iter()
             .map(|m| {
                 serde_json::json!({
-                    "id": m.id,
+                    "urn": m.urn,
                     "namespace": m.namespace,
                     "content": m.content,
                     "relevance": m.relevance
@@ -239,8 +253,8 @@ impl PostToolUseHandler {
         let mut lines = vec!["**Related Subcog Memories**\n".to_string()];
         for m in memories {
             lines.push(format!(
-                "- **[{}]** (relevance: {:.0}%): {}",
-                m.namespace,
+                "- **{}** (relevance: {:.0}%): {}",
+                m.urn,
                 m.relevance * 100.0,
                 m.content
             ));
@@ -375,8 +389,8 @@ impl HookHandler for PostToolUseHandler {
 /// A related memory surfaced by the handler.
 #[derive(Debug, Clone)]
 pub struct RelatedMemory {
-    /// Memory ID.
-    pub id: String,
+    /// Full URN (`subcog://{domain}/{namespace}/{id}`).
+    pub urn: String,
     /// Namespace.
     pub namespace: String,
     /// Truncated content.

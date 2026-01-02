@@ -41,11 +41,11 @@ impl FilesystemPromptStorage {
 
     /// Returns the default user-scope path.
     ///
-    /// Returns `~/.config/subcog/_prompts/` on Unix systems,
-    /// or the platform-specific config directory.
+    /// Returns `~/.config/subcog/prompts/`.
     #[must_use]
     pub fn default_user_path() -> Option<PathBuf> {
-        directories::BaseDirs::new().map(|d| d.config_dir().join("subcog").join("_prompts"))
+        directories::BaseDirs::new()
+            .map(|d| d.home_dir().join(".config").join("subcog").join("prompts"))
     }
 
     /// Returns the base path.
@@ -350,7 +350,8 @@ mod tests {
         let path = FilesystemPromptStorage::default_user_path();
         // Should return Some on most systems
         if let Some(p) = path {
-            assert!(p.to_string_lossy().contains("_prompts"));
+            assert!(p.to_string_lossy().contains("subcog"));
+            assert!(p.to_string_lossy().ends_with("prompts"));
         }
     }
 

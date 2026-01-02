@@ -220,6 +220,6 @@ Output:
 
 ## See Also
 
-- [capture](capture.md) - Capture memories with namespaces
-- [recall](recall.md) - Search by namespace
+- [capture](./capture.md) - Capture memories with namespaces
+- [recall](./recall.md) - Search by namespace
 - [MCP subcog_namespaces](../mcp/tools.md#subcog_namespaces) - MCP equivalent

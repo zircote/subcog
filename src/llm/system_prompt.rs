@@ -713,10 +713,7 @@ mod tests {
         let analysis: ExtendedCaptureAnalysis = serde_json::from_str(json).unwrap();
         assert!(analysis.should_capture);
         assert!((analysis.confidence - 0.85).abs() < f32::EPSILON);
-        assert_eq!(
-            analysis.suggested_namespace,
-            Some("decisions".to_string())
-        );
+        assert_eq!(analysis.suggested_namespace, Some("decisions".to_string()));
         assert_eq!(analysis.suggested_tags.len(), 2);
         assert!((analysis.security_assessment.injection_risk - 0.1).abs() < f32::EPSILON);
     }
@@ -740,7 +737,16 @@ mod tests {
         assert_eq!(intent.intent_type, "howto");
         assert!((intent.confidence - 0.9).abs() < f32::EPSILON);
         assert_eq!(intent.topics.len(), 2);
-        assert!((intent.namespace_weights.get("patterns").copied().unwrap_or(0.0) - 0.3).abs() < f32::EPSILON);
+        assert!(
+            (intent
+                .namespace_weights
+                .get("patterns")
+                .copied()
+                .unwrap_or(0.0)
+                - 0.3)
+                .abs()
+                < f32::EPSILON
+        );
     }
 
     #[test]
@@ -770,10 +776,7 @@ mod tests {
         assert_eq!(analysis.merge_candidates.len(), 1);
         assert!(analysis.archive_candidates.is_empty());
         assert_eq!(analysis.contradictions.len(), 1);
-        assert_eq!(
-            analysis.contradictions[0].contradiction_type,
-            "direct"
-        );
+        assert_eq!(analysis.contradictions[0].contradiction_type, "direct");
     }
 
     #[test]
@@ -784,11 +787,8 @@ mod tests {
             operation_guidance: crate::config::PromptOperationConfig::default(),
         };
 
-        let prompt = build_system_prompt_with_config(
-            OperationMode::CaptureAnalysis,
-            None,
-            Some(&config),
-        );
+        let prompt =
+            build_system_prompt_with_config(OperationMode::CaptureAnalysis, None, Some(&config));
 
         assert!(prompt.contains("<user_identity_context>"));
         assert!(prompt.contains("HIPAA-compliant"));
@@ -803,11 +803,8 @@ mod tests {
             operation_guidance: crate::config::PromptOperationConfig::default(),
         };
 
-        let prompt = build_system_prompt_with_config(
-            OperationMode::CaptureAnalysis,
-            None,
-            Some(&config),
-        );
+        let prompt =
+            build_system_prompt_with_config(OperationMode::CaptureAnalysis, None, Some(&config));
 
         assert!(prompt.contains("<user_guidance>"));
         assert!(prompt.contains("prioritize security"));
@@ -827,11 +824,8 @@ mod tests {
             },
         };
 
-        let prompt = build_system_prompt_with_config(
-            OperationMode::CaptureAnalysis,
-            None,
-            Some(&config),
-        );
+        let prompt =
+            build_system_prompt_with_config(OperationMode::CaptureAnalysis, None, Some(&config));
 
         assert!(prompt.contains("<user_operation_guidance>"));
         assert!(prompt.contains("extra cautious with PII"));
@@ -871,7 +865,8 @@ mod tests {
     #[test]
     fn test_build_system_prompt_without_config_matches_original() {
         let prompt_without = build_system_prompt(OperationMode::CaptureAnalysis, None);
-        let prompt_with_none = build_system_prompt_with_config(OperationMode::CaptureAnalysis, None, None);
+        let prompt_with_none =
+            build_system_prompt_with_config(OperationMode::CaptureAnalysis, None, None);
 
         assert_eq!(prompt_without, prompt_with_none);
     }

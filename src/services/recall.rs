@@ -58,6 +58,8 @@ impl RecallService {
         let domain_label = domain_label(filter);
         let mode_label = mode.as_str();
 
+        tracing::info!(mode = %mode_label, query_length = query.len(), limit = limit, "Searching memories");
+
         let result = (|| {
             // Validate query
             if query.trim().is_empty() {

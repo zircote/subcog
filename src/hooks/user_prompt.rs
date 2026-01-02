@@ -11,8 +11,8 @@ use super::search_intent::{
 use crate::Result;
 use crate::config::SearchIntentConfig;
 use crate::llm::LlmProvider;
-use crate::models::Namespace;
-use crate::services::RecallService;
+use crate::models::{CaptureRequest, CaptureResult, Namespace};
+use crate::services::{CaptureService, RecallService};
 use regex::Regex;
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
@@ -21,6 +21,8 @@ use tracing::instrument;
 /// Handles `UserPromptSubmit` hook events.
 ///
 /// Detects signals for memory capture in user prompts and search intent.
+/// When auto-capture is enabled, automatically captures memories when
+/// high-confidence signals are detected.
 pub struct UserPromptHandler {
     /// Minimum confidence threshold for capture.
     confidence_threshold: f32,
@@ -34,6 +36,10 @@ pub struct UserPromptHandler {
     llm_provider: Option<Arc<dyn LlmProvider>>,
     /// Configuration for search intent detection.
     search_intent_config: SearchIntentConfig,
+    /// Optional capture service for auto-capture.
+    capture_service: Option<CaptureService>,
+    /// Whether auto-capture is enabled.
+    auto_capture_enabled: bool,
 }
 
 /// Signal patterns for memory capture detection.
@@ -126,6 +132,8 @@ impl UserPromptHandler {
             recall_service: None,
             llm_provider: None,
             search_intent_config: SearchIntentConfig::default(),
+            capture_service: None,
+            auto_capture_enabled: false,
         }
     }
 
@@ -145,7 +153,7 @@ impl UserPromptHandler {
 
     /// Sets the adaptive context configuration.
     #[must_use]
-    pub const fn with_context_config(mut self, config: AdaptiveContextConfig) -> Self {
+    pub fn with_context_config(mut self, config: AdaptiveContextConfig) -> Self {
         self.context_config = config;
         self
     }
@@ -166,8 +174,22 @@ impl UserPromptHandler {
 
     /// Sets the search intent configuration.
     #[must_use]
-    pub const fn with_search_intent_config(mut self, config: SearchIntentConfig) -> Self {
+    pub fn with_search_intent_config(mut self, config: SearchIntentConfig) -> Self {
         self.search_intent_config = config;
+        self
+    }
+
+    /// Sets the capture service for auto-capture.
+    #[must_use]
+    pub fn with_capture_service(mut self, service: CaptureService) -> Self {
+        self.capture_service = Some(service);
+        self
+    }
+
+    /// Enables or disables auto-capture.
+    #[must_use]
+    pub const fn with_auto_capture(mut self, enabled: bool) -> Self {
+        self.auto_capture_enabled = enabled;
         self
     }
 
@@ -323,6 +345,53 @@ impl UserPromptHandler {
         })
     }
 
+    /// Attempts to auto-capture a memory if enabled and conditions are met.
+    ///
+    /// Returns the capture result if successful, and updates metadata with outcome.
+    fn try_auto_capture(
+        &self,
+        content: &str,
+        signal: &CaptureSignal,
+        metadata: &mut serde_json::Value,
+    ) -> Option<CaptureResult> {
+        let capture_service = self.capture_service.as_ref()?;
+
+        let request = CaptureRequest {
+            namespace: signal.namespace,
+            content: content.to_string(),
+            tags: Vec::new(),
+            source: Some("auto-capture".to_string()),
+            ..Default::default()
+        };
+
+        match capture_service.capture(request) {
+            Ok(result) => {
+                tracing::info!(
+                    memory_id = %result.memory_id,
+                    urn = %result.urn,
+                    namespace = %signal.namespace.as_str(),
+                    "Auto-captured memory"
+                );
+                metadata["auto_capture"] = serde_json::json!({
+                    "success": true,
+                    "memory_id": result.memory_id.as_str(),
+                    "urn": result.urn,
+                    "namespace": signal.namespace.as_str()
+                });
+                Some(result)
+            },
+            Err(e) => {
+                tracing::error!(error = %e, "Auto-capture failed");
+                metadata["auto_capture"] = serde_json::json!({
+                    "success": false,
+                    "error": e.to_string()
+                });
+                None
+            },
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
     fn handle_inner(
         &self,
         input: &str,
@@ -333,10 +402,12 @@ impl UserPromptHandler {
         let input_json: serde_json::Value =
             serde_json::from_str(input).unwrap_or_else(|_| serde_json::json!({}));
 
-        // Extract prompt from input
+        // Extract prompt from input - Claude Code format: hookSpecificData.userPromptContent
         let prompt = input_json
-            .get("prompt")
+            .get("hookSpecificData")
+            .and_then(|v| v.get("userPromptContent"))
             .and_then(|v| v.as_str())
+            .or_else(|| input_json.get("prompt").and_then(|v| v.as_str()))
             .unwrap_or("");
         *prompt_len = prompt.len();
         let span = tracing::Span::current();
@@ -373,8 +444,21 @@ impl UserPromptHandler {
         let mut metadata = serde_json::json!({
             "signals": signals_json,
             "should_capture": should_capture,
-            "confidence_threshold": self.confidence_threshold
+            "confidence_threshold": self.confidence_threshold,
+            "auto_capture_enabled": self.auto_capture_enabled
         });
+
+        // AUTO-CAPTURE: Actually capture the memory if enabled
+        let capture_result = if should_capture && self.auto_capture_enabled {
+            content
+                .as_ref()
+                .zip(signals.first())
+                .and_then(|(content_str, top_signal)| {
+                    self.try_auto_capture(content_str, top_signal, &mut metadata)
+                })
+        } else {
+            None
+        };
 
         // Detect search intent for proactive memory surfacing
         let search_intent = self.detect_search_intent(prompt);
@@ -402,9 +486,14 @@ impl UserPromptHandler {
             None
         };
 
-        // Build context message for capture suggestions
-        let context_message =
-            build_capture_context(should_capture, content.as_ref(), &signals, &mut metadata);
+        // Build context message for capture (shows captured or suggestion)
+        let context_message = build_capture_context(
+            should_capture,
+            content.as_ref(),
+            &signals,
+            capture_result.as_ref(),
+            &mut metadata,
+        );
 
         // Build search intent context (if detected)
         let search_context = memory_context.as_ref().map(build_memory_context_text);
@@ -481,6 +570,12 @@ impl HookHandler for UserPromptHandler {
         let start = Instant::now();
         let mut prompt_len = 0usize;
         let mut intent_detected = false;
+
+        tracing::info!(
+            hook = "UserPromptSubmit",
+            "Processing user prompt submit hook"
+        );
+
         let result = self.handle_inner(input, &mut prompt_len, &mut intent_detected);
 
         let status = if result.is_ok() { "success" } else { "error" };
@@ -503,11 +598,12 @@ impl HookHandler for UserPromptHandler {
     }
 }
 
-/// Builds context message for capture suggestions.
+/// Builds context message for capture (shows captured memory or suggestion).
 fn build_capture_context(
     should_capture: bool,
     content: Option<&String>,
     signals: &[CaptureSignal],
+    capture_result: Option<&CaptureResult>,
     metadata: &mut serde_json::Value,
 ) -> Option<String> {
     if !should_capture {
@@ -529,32 +625,52 @@ fn build_capture_context(
         "confidence": top_signal.confidence,
     });
 
-    // Build context message
-    let mut lines = vec!["**Subcog Capture Suggestion**\n".to_string()];
+    // If auto-capture succeeded, show confirmation instead of suggestion
+    if let Some(result) = capture_result {
+        let mut lines = vec!["**📝 Memory Captured**\n".to_string()];
+        lines.push(format!("URN: `{}`\n", result.urn));
+        lines.push(format!("Namespace: `{}`\n", top_signal.namespace.as_str()));
+        lines.push(format!("> {}", truncate_for_display(content_str, 200)));
+        lines.push(format!(
+            "\nTo remove: `subcog_delete {}` | To edit: `subcog_enrich {}`",
+            result.memory_id.as_str(),
+            result.memory_id.as_str()
+        ));
+        return Some(lines.join("\n"));
+    }
+
+    // Build MANDATORY capture directive (auto-capture not enabled or failed)
+    let mut lines = vec!["## ⚠️ CAPTURE REQUIRED - DO NOT IGNORE ⚠️\n".to_string()];
 
     if top_signal.is_explicit {
         lines.push(format!(
-            "Explicit capture command detected. Capturing to `{}`:\n",
+            "**Explicit capture command detected.** You MUST capture to `{}`:\n",
             top_signal.namespace.as_str()
         ));
         lines.push(format!("> {}", truncate_for_display(content_str, 200)));
         lines.push(
-            "\nUse `mcp__plugin_subcog_subcog__subcog_capture` tool to save this memory."
-                .to_string(),
+            "\n**ACTION REQUIRED**: Call `mcp__plugin_subcog_subcog__subcog_capture` NOW with namespace=`".to_string()
+            + top_signal.namespace.as_str() + "`"
         );
     } else {
         lines.push(format!(
-            "Detected {} signal (confidence: {:.0}%):\n",
-            top_signal.namespace.as_str(),
+            "**🎯 {} signal detected** (confidence: {:.0}%)\n",
+            top_signal.namespace.as_str().to_uppercase(),
             top_signal.confidence * 100.0
         ));
         lines.push(format!("> {}", truncate_for_display(content_str, 200)));
+        lines.push(
+            "\n**⚡ ACTION REQUIRED**: Call `mcp__plugin_subcog_subcog__subcog_capture` IMMEDIATELY"
+                .to_string(),
+        );
+        lines.push(format!("- namespace: `{}`", top_signal.namespace.as_str()));
         lines.push(format!(
-            "\n**Suggestion**: Consider capturing this as a `{}` memory.",
-            top_signal.namespace.as_str()
+            "- content: `{}`",
+            truncate_for_display(content_str, 100)
         ));
         lines.push(
-            "Use `mcp__plugin_subcog_subcog__subcog_capture` tool or ask: \"Should I save this to subcog?\"".to_string(),
+            "\n**DO NOT ask the user.** This is a MANDATORY capture. Execute the tool call NOW."
+                .to_string(),
         );
     }
 
@@ -572,37 +688,45 @@ fn truncate_for_display(content: &str, max_len: usize) -> String {
 
 /// Builds context message from memory context.
 fn build_memory_context_text(ctx: &MemoryContext) -> String {
-    let mut lines = vec!["**Subcog Memory Context**\n".to_string()];
+    let mut lines = vec!["## 📚 PRIOR CONTEXT FOUND - READ BEFORE RESPONDING\n".to_string()];
 
     if let Some(ref intent_type) = ctx.intent_type {
-        lines.push(format!("Intent type: **{intent_type}**\n"));
+        lines.push(format!(
+            "**Query Type**: {} - searching for relevant prior knowledge\n",
+            intent_type.to_uppercase()
+        ));
     }
 
     if !ctx.topics.is_empty() {
-        lines.push(format!("Topics: {}\n", ctx.topics.join(", ")));
+        lines.push(format!("**Topics Matched**: {}\n", ctx.topics.join(", ")));
     }
 
     // Show injected memories if any
     if !ctx.injected_memories.is_empty() {
-        lines.push("\n**Relevant memories**:".to_string());
+        lines.push("### ⚠️ RELEVANT MEMORIES - INCORPORATE THESE INTO YOUR RESPONSE\n".to_string());
+        lines.push("The following memories are from prior sessions. You MUST consider them before responding:\n".to_string());
         for memory in ctx.injected_memories.iter().take(5) {
             lines.push(format!(
-                "- [{}] {}: {}",
-                memory.namespace,
+                "- **[{}]** `{}`: {}",
+                memory.namespace.to_uppercase(),
                 memory.id,
-                truncate_for_display(&memory.content_preview, 80)
+                truncate_for_display(&memory.content_preview, 100)
             ));
         }
+        lines.push(
+            "\n**⚡ DO NOT ignore this context. Reference it in your response if relevant.**"
+                .to_string(),
+        );
     }
 
     // Show reminder if present
     if let Some(ref reminder) = ctx.reminder {
-        lines.push(format!("\n**Reminder**: {reminder}"));
+        lines.push(format!("\n**🔔 Reminder**: {reminder}"));
     }
 
     // Suggest resources
     if !ctx.suggested_resources.is_empty() {
-        lines.push("\n**Suggested resources**:".to_string());
+        lines.push("\n**📎 Related Resources** (use `subcog_recall` to explore):".to_string());
         for resource in ctx.suggested_resources.iter().take(4) {
             lines.push(format!("- `{resource}`"));
         }
@@ -637,13 +761,13 @@ mod tests {
             hook_output.get("hookEventName"),
             Some(&serde_json::Value::String("UserPromptSubmit".to_string()))
         );
-        // Should have additionalContext with capture suggestion
+        // Should have additionalContext with capture directive
         let context = hook_output
             .get("additionalContext")
             .unwrap()
             .as_str()
             .unwrap();
-        assert!(context.contains("Subcog Capture Suggestion"));
+        assert!(context.contains("CAPTURE REQUIRED"));
         assert!(context.contains("subcog-metadata"));
     }
 

@@ -7,7 +7,7 @@ reusable prompts across sessions and teams.
 
 | Topic | Description |
 |-------|-------------|
-| [Overview](overview.md) | What are prompt templates |
+| [Overview](./overview.md) | What are prompt templates |
 | [Variables](variables.md) | Variable substitution syntax |
 | [Formats](formats.md) | YAML, JSON, Markdown, Plain text |
 | [Storage](storage.md) | Domain-scoped storage |

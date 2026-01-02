@@ -57,12 +57,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(llm_requests_total{job=~\"$job\", provider=~\"$provider\", operation=~\"$llm_operation\"}[5m])) by (provider, operation, status)",
+          "expr": "sum(llm_requests_total{job=~\"$job\", provider=~\"$provider\", operation=~\"$llm_operation\"}) by (provider, operation, status)",
           "legendFormat": "{{provider}} {{operation}} {{status}}",
           "refId": "A"
         }
       ],
-      "title": "LLM Requests Rate",
+      "title": "LLM Requests Total",
       "type": "timeseries"
     },
     {
@@ -95,12 +95,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(llm_request_duration_ms_bucket{job=~\"$job\", provider=~\"$provider\", operation=~\"$llm_operation\"}[5m])) by (le, provider, operation))",
-          "legendFormat": "{{provider}} {{operation}}",
+          "expr": "avg(llm_request_duration_ms{job=~\"$job\", provider=~\"$provider\", operation=~\"$llm_operation\", quantile=\"0.95\"}) by (provider, operation)",
+          "legendFormat": "{{provider}} {{operation}} p95",
           "refId": "A"
+        },
+        {
+          "expr": "avg(llm_request_duration_ms{job=~\"$job\", provider=~\"$provider\", operation=~\"$llm_operation\", quantile=\"0.5\"}) by (provider, operation)",
+          "legendFormat": "{{provider}} {{operation}} p50",
+          "refId": "B"
         }
       ],
-      "title": "LLM Latency p95",
+      "title": "LLM Latency",
       "type": "timeseries"
     },
     {
@@ -133,12 +138,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(llm_timeouts_total{job=~\"$job\", provider=~\"$provider\", operation=~\"$llm_operation\"}[5m])) by (provider, operation)",
+          "expr": "sum(llm_timeouts_total{job=~\"$job\", provider=~\"$provider\", operation=~\"$llm_operation\"}) by (provider, operation)",
           "legendFormat": "{{provider}} {{operation}}",
           "refId": "A"
         }
       ],
-      "title": "LLM Timeouts Rate",
+      "title": "LLM Timeouts Total",
       "type": "timeseries"
     },
     {
@@ -171,12 +176,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(llm_retries_total{job=~\"$job\", provider=~\"$provider\", operation=~\"$llm_operation\"}[5m])) by (provider, operation)",
+          "expr": "sum(llm_retries_total{job=~\"$job\", provider=~\"$provider\", operation=~\"$llm_operation\"}) by (provider, operation)",
           "legendFormat": "{{provider}} {{operation}}",
           "refId": "A"
         }
       ],
-      "title": "LLM Retries Rate",
+      "title": "LLM Retries Total",
       "type": "timeseries"
     },
     {
@@ -209,12 +214,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(llm_latency_budget_exceeded_total{job=~\"$job\", provider=~\"$provider\", operation=~\"$llm_operation\"}[5m])) by (provider, operation)",
+          "expr": "sum(llm_latency_budget_exceeded_total{job=~\"$job\", provider=~\"$provider\", operation=~\"$llm_operation\"}) by (provider, operation)",
           "legendFormat": "{{provider}} {{operation}}",
           "refId": "A"
         }
       ],
-      "title": "LLM Latency Budget Exceeded Rate",
+      "title": "LLM Latency Budget Exceeded Total",
       "type": "timeseries"
     },
     {
@@ -365,12 +370,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(storage_operations_total{job=~\"$job\"}[5m])) by (operation, status)",
+          "expr": "sum(storage_operations_total{job=~\"$job\"}) by (operation, status)",
           "legendFormat": "{{operation}} {{status}}",
           "refId": "A"
         }
       ],
-      "title": "Storage Operations Rate",
+      "title": "Storage Operations Total",
       "type": "timeseries"
     },
     {
@@ -403,12 +408,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(storage_operation_duration_ms_bucket{job=~\"$job\"}[5m])) by (le, operation))",
-          "legendFormat": "{{operation}}",
+          "expr": "avg(storage_operation_duration_ms{job=~\"$job\", quantile=\"0.95\"}) by (operation)",
+          "legendFormat": "{{operation}} p95",
           "refId": "A"
+        },
+        {
+          "expr": "avg(storage_operation_duration_ms{job=~\"$job\", quantile=\"0.5\"}) by (operation)",
+          "legendFormat": "{{operation}} p50",
+          "refId": "B"
         }
       ],
-      "title": "Storage Operation Latency p95",
+      "title": "Storage Operation Latency",
       "type": "timeseries"
     },
     {
@@ -441,12 +451,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(memory_operations_total{job=~\"$job\"}[5m])) by (operation, status)",
+          "expr": "sum(memory_operations_total{job=~\"$job\"}) by (operation, status)",
           "legendFormat": "{{operation}} {{status}}",
           "refId": "A"
         }
       ],
-      "title": "Memory Operations Rate",
+      "title": "Memory Operations Total",
       "type": "timeseries"
     },
     {
@@ -479,12 +489,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(memory_search_total{job=~\"$job\"}[5m])) by (mode, status)",
+          "expr": "sum(memory_search_total{job=~\"$job\"}) by (mode, status)",
           "legendFormat": "{{mode}} {{status}}",
           "refId": "A"
         }
       ],
-      "title": "Memory Search Rate",
+      "title": "Memory Search Total",
       "type": "timeseries"
     },
     {
@@ -517,12 +527,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(memory_search_duration_ms_bucket{job=~\"$job\"}[5m])) by (le, mode))",
-          "legendFormat": "{{mode}}",
+          "expr": "avg(memory_search_duration_ms{job=~\"$job\", quantile=\"0.95\"}) by (mode)",
+          "legendFormat": "{{mode}} p95",
           "refId": "A"
+        },
+        {
+          "expr": "avg(memory_search_duration_ms{job=~\"$job\", quantile=\"0.5\"}) by (mode)",
+          "legendFormat": "{{mode}} p50",
+          "refId": "B"
         }
       ],
-      "title": "Memory Search Latency p95",
+      "title": "Memory Search Latency",
       "type": "timeseries"
     },
     {
@@ -555,12 +570,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(memory_sync_total{job=~\"$job\"}[5m])) by (direction, status)",
+          "expr": "sum(memory_sync_total{job=~\"$job\"}) by (direction, status)",
           "legendFormat": "{{direction}} {{status}}",
           "refId": "A"
         }
       ],
-      "title": "Memory Sync Rate",
+      "title": "Memory Sync Total",
       "type": "timeseries"
     },
     {
@@ -593,12 +608,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(memory_sync_duration_ms_bucket{job=~\"$job\"}[5m])) by (le, direction))",
-          "legendFormat": "{{direction}}",
+          "expr": "avg(memory_sync_duration_ms{job=~\"$job\", quantile=\"0.95\"}) by (direction)",
+          "legendFormat": "{{direction}} p95",
           "refId": "A"
+        },
+        {
+          "expr": "avg(memory_sync_duration_ms{job=~\"$job\", quantile=\"0.5\"}) by (direction)",
+          "legendFormat": "{{direction}} p50",
+          "refId": "B"
         }
       ],
-      "title": "Memory Sync Latency p95",
+      "title": "Memory Sync Latency",
       "type": "timeseries"
     }
   ],

@@ -1,0 +1,72 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Subcog application logs
+  - job_name: subcog
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: subcog
+          __path__: /var/log/subcog/*.log
+
+    pipeline_stages:
+      # Parse JSON logs
+      - json:
+          expressions:
+            level: level
+            target: target
+            message: message
+            timestamp: timestamp
+            span_id: span_id
+            trace_id: trace_id
+
+      # Extract labels from JSON
+      - labels:
+          level:
+          target:
+          span_id:
+          trace_id:
+
+      # Parse timestamp
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+
+      # Use message as log line
+      - output:
+          source: message
+
+  # Docker container logs (if running in container)
+  - job_name: containers
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: docker
+          __path__: /var/lib/docker/containers/*/*.log
+
+    pipeline_stages:
+      - json:
+          expressions:
+            log: log
+            stream: stream
+            time: time
+
+      - labels:
+          stream:
+
+      - timestamp:
+          source: time
+          format: RFC3339Nano
+
+      - output:
+          source: log

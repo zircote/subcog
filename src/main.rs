@@ -29,7 +29,7 @@ use subcog::hooks::{
     StopHandler, UserPromptHandler,
 };
 use subcog::mcp::{McpServer, Transport};
-use subcog::observability::{self, InitOptions};
+use subcog::observability::{self, InitOptions, flush_metrics};
 use subcog::security::AuditConfig;
 use subcog::services::ContextBuilderService;
 use subcog::storage::index::SqliteBackend;
@@ -189,6 +189,19 @@ enum HookEvent {
     Stop,
 }
 
+impl HookEvent {
+    /// Returns the hook event as a lowercase hyphenated string.
+    const fn as_str(&self) -> &'static str {
+        match self {
+            Self::SessionStart => "session-start",
+            Self::UserPromptSubmit => "user-prompt-submit",
+            Self::PostToolUse => "post-tool-use",
+            Self::PreCompact => "pre-compact",
+            Self::Stop => "stop",
+        }
+    }
+}
+
 /// Prompt subcommands.
 #[derive(Subcommand)]
 enum PromptAction {
@@ -324,7 +337,7 @@ async fn main() -> ExitCode {
     };
 
     let expose_metrics = matches!(cli.command, Commands::Serve { .. });
-    let _observability = match observability::init_from_config(
+    let mut observability_handle = match observability::init_from_config(
         &config.observability,
         InitOptions {
             verbose: cli.verbose,
@@ -339,6 +352,9 @@ async fn main() -> ExitCode {
     };
 
     let result = run_command(cli, config);
+
+    // Explicitly shutdown observability before async runtime exits
+    observability_handle.shutdown();
 
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -374,9 +390,9 @@ fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::error:
 
         Commands::Status => cmd_status(&config),
 
-        Commands::Sync { push, fetch } => cmd_sync(push, fetch),
+        Commands::Sync { push, fetch } => cmd_sync(&config, push, fetch),
 
-        Commands::Consolidate => cmd_consolidate(),
+        Commands::Consolidate => cmd_consolidate(&config),
 
         Commands::Reindex { repo } => cmd_reindex(repo),
 
@@ -616,8 +632,15 @@ fn check_git_notes_status(repo_path: &std::path::Path) -> &'static str {
 }
 
 /// Sync command.
-fn cmd_sync(push: bool, fetch: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let service = SyncService::default();
+fn cmd_sync(
+    config: &SubcogConfig,
+    push: bool,
+    fetch: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Get current directory as repo path, or use config
+    let cwd = std::env::current_dir()?;
+    let service_config = subcog::config::Config::from(config.clone()).with_repo_path(&cwd);
+    let service = SyncService::new(service_config);
 
     if push && fetch {
         // Full sync
@@ -663,11 +686,77 @@ fn cmd_sync(push: bool, fetch: bool) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Consolidate command.
-fn cmd_consolidate() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Consolidation requires a configured storage backend.");
-    println!("Configure storage in config.toml or use environment variables.");
+fn cmd_consolidate(config: &SubcogConfig) -> Result<(), Box<dyn std::error::Error>> {
+    use subcog::config::StorageBackendType;
+    use subcog::services::ConsolidationService;
+    use subcog::storage::index::SqliteBackend;
+    use subcog::storage::persistence::FilesystemBackend;
+
+    let data_dir = &config.data_dir;
+    let storage_config = &config.storage.project;
+
+    // Ensure data directory exists
+    if !data_dir.exists() {
+        std::fs::create_dir_all(data_dir)?;
+    }
+
+    println!("Running memory consolidation...");
+    println!("Data directory: {}", data_dir.display());
+    println!("Storage backend: {:?}", storage_config.backend);
+    println!();
+
+    // Run consolidation based on configured backend
+    match storage_config.backend {
+        StorageBackendType::Sqlite => {
+            let db_path = storage_config
+                .path
+                .as_ref()
+                .map_or_else(|| data_dir.join("memories.db"), std::path::PathBuf::from);
+            println!("SQLite path: {}", db_path.display());
+
+            let backend = SqliteBackend::new(&db_path)?;
+            let mut service = ConsolidationService::new(backend);
+            run_consolidation(&mut service)?;
+        },
+        StorageBackendType::Filesystem | StorageBackendType::GitNotes => {
+            let backend = FilesystemBackend::new(data_dir);
+            let mut service = ConsolidationService::new(backend);
+            run_consolidation(&mut service)?;
+        },
+        StorageBackendType::PostgreSQL => {
+            eprintln!("PostgreSQL consolidation not yet implemented");
+            return Err("PostgreSQL consolidation not yet implemented".into());
+        },
+        StorageBackendType::Redis => {
+            eprintln!("Redis consolidation not yet implemented");
+            return Err("Redis consolidation not yet implemented".into());
+        },
+    }
 
     Ok(())
+}
+
+/// Runs consolidation and prints results.
+fn run_consolidation<P: subcog::storage::PersistenceBackend>(
+    service: &mut subcog::services::ConsolidationService<P>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match service.consolidate() {
+        Ok(stats) => {
+            println!("Consolidation completed:");
+            println!("  {}", stats.summary());
+            if stats.contradictions > 0 {
+                println!(
+                    "  Note: {} potential contradiction(s) detected - review recommended",
+                    stats.contradictions
+                );
+            }
+            Ok(())
+        },
+        Err(e) => {
+            eprintln!("Consolidation failed: {e}");
+            Err(e.into())
+        },
+    }
 }
 
 /// Reindex command.
@@ -958,6 +1047,157 @@ fn run_enrichment<P: subcog::llm::LlmProvider>(
     Ok(())
 }
 
+/// Helper to display tracing configuration.
+fn display_tracing_config(config: &SubcogConfig) {
+    let tracing_enabled = config
+        .observability
+        .tracing
+        .as_ref()
+        .and_then(|t| t.enabled)
+        .unwrap_or(false);
+    println!(
+        "  Tracing: {}",
+        if tracing_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
+    let Some(ref tracing) = config.observability.tracing else {
+        return;
+    };
+    if !tracing_enabled {
+        return;
+    }
+    if let Some(ref otlp) = tracing.otlp {
+        if let Some(ref endpoint) = otlp.endpoint {
+            println!("    OTLP Endpoint: {endpoint}");
+        }
+        if let Some(ref protocol) = otlp.protocol {
+            println!("    Protocol: {protocol}");
+        }
+    }
+    if let Some(ratio) = tracing.sample_ratio {
+        println!("    Sample Ratio: {ratio}");
+    }
+}
+
+/// Helper to display metrics configuration.
+fn display_metrics_config(config: &SubcogConfig) {
+    let metrics_enabled = config
+        .observability
+        .metrics
+        .as_ref()
+        .and_then(|m| m.enabled)
+        .unwrap_or(false);
+    println!(
+        "  Metrics: {}",
+        if metrics_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
+    let Some(ref metrics) = config.observability.metrics else {
+        return;
+    };
+    if !metrics_enabled {
+        return;
+    }
+    if let Some(port) = metrics.port {
+        println!("    Prometheus Port: {port}");
+    }
+    if let Some(ref push_gw) = metrics.push_gateway {
+        if let Some(ref endpoint) = push_gw.endpoint {
+            println!("    Push Gateway: {endpoint}");
+        }
+    }
+}
+
+/// Helper to display logging configuration.
+fn display_logging_config(config: &SubcogConfig) {
+    let Some(ref logging) = config.observability.logging else {
+        return;
+    };
+    println!("  Logging:");
+    if let Some(ref format) = logging.format {
+        println!("    Format: {format}");
+    }
+    if let Some(ref level) = logging.level {
+        println!("    Level: {level}");
+    }
+    if let Some(ref filter) = logging.filter {
+        println!("    Filter: {filter}");
+    }
+}
+
+/// Helper to display storage configuration.
+fn display_storage_config(config: &SubcogConfig) {
+    use subcog::config::StorageBackendType;
+
+    let storage = &config.storage;
+
+    // Project storage
+    print!("  Project: {:?}", storage.project.backend);
+    if let Some(ref path) = storage.project.path {
+        print!(" (path: {path})");
+    }
+    if let Some(ref conn) = storage.project.connection_string {
+        let display = if conn.len() > 30 {
+            format!("{}...", &conn[..30])
+        } else {
+            conn.clone()
+        };
+        print!(" (connection: {display})");
+    }
+    println!();
+
+    // User storage
+    print!("  User: {:?}", storage.user.backend);
+    match storage.user.backend {
+        StorageBackendType::Sqlite => {
+            if let Some(ref path) = storage.user.path {
+                print!(" (path: {path})");
+            } else {
+                print!(" (path: ~/.config/subcog/memories.db)");
+            }
+        },
+        StorageBackendType::Filesystem => {
+            if let Some(ref path) = storage.user.path {
+                print!(" (path: {path})");
+            } else {
+                print!(" (path: ~/.config/subcog/prompts/)");
+            }
+        },
+        StorageBackendType::PostgreSQL | StorageBackendType::Redis => {
+            if let Some(ref conn) = storage.user.connection_string {
+                let display = if conn.len() > 30 {
+                    format!("{}...", &conn[..30])
+                } else {
+                    conn.clone()
+                };
+                print!(" (connection: {display})");
+            }
+        },
+        StorageBackendType::GitNotes => {
+            print!(" (project-local git notes)");
+        },
+    }
+    println!();
+
+    // Org storage
+    print!("  Org: {:?}", storage.org.backend);
+    if let Some(ref conn) = storage.org.connection_string {
+        let display = if conn.len() > 30 {
+            format!("{}...", &conn[..30])
+        } else {
+            conn.clone()
+        };
+        print!(" (connection: {display})");
+    }
+    println!(" (not yet implemented)");
+}
+
 /// Config command.
 fn cmd_config(
     config: SubcogConfig,
@@ -968,11 +1208,30 @@ fn cmd_config(
         println!("Current Configuration");
         println!("=====================");
         println!();
+
+        // Show config file sources
+        println!("Config Files Loaded:");
+        if config.config_sources.is_empty() {
+            println!("  (none - using defaults)");
+        } else {
+            for source in &config.config_sources {
+                println!("  - {}", source.display());
+            }
+        }
+        println!();
+
         println!("Repository Path: {}", config.repo_path.display());
         println!("Data Directory: {}", config.data_dir.display());
         println!("Max Results: {}", config.max_results);
         println!("Default Search Mode: {:?}", config.default_search_mode);
         println!();
+
+        println!("Observability:");
+        display_tracing_config(&config);
+        display_metrics_config(&config);
+        display_logging_config(&config);
+        println!();
+
         println!("Feature Flags:");
         println!("  Secrets Filter: {}", config.features.secrets_filter);
         println!("  PII Filter: {}", config.features.pii_filter);
@@ -992,6 +1251,56 @@ fn cmd_config(
             "  Base URL: {}",
             config.llm.base_url.as_deref().unwrap_or("(default)")
         );
+
+        println!("\nSearch Intent:");
+        println!("  Enabled: {}", config.search_intent.enabled);
+        println!("  Use LLM: {}", config.search_intent.use_llm);
+        println!("  LLM Timeout: {}ms", config.search_intent.llm_timeout_ms);
+        println!(
+            "  Min Confidence: {:.2}",
+            config.search_intent.min_confidence
+        );
+        println!(
+            "  Memory Count: {}-{}",
+            config.search_intent.base_count, config.search_intent.max_count
+        );
+        println!("  Max Tokens: {}", config.search_intent.max_tokens);
+
+        // Prompt customization
+        let has_prompt_config = config.prompt.identity_addendum.is_some()
+            || config.prompt.additional_guidance.is_some()
+            || config.prompt.operation_guidance.capture.is_some()
+            || config.prompt.operation_guidance.search.is_some()
+            || config.prompt.operation_guidance.enrichment.is_some()
+            || config.prompt.operation_guidance.consolidation.is_some();
+
+        if has_prompt_config {
+            println!("\nPrompt Customization:");
+            if let Some(ref addendum) = config.prompt.identity_addendum {
+                let preview: String = addendum.chars().take(50).collect();
+                println!("  Identity Addendum: {}...", preview.replace('\n', " "));
+            }
+            if let Some(ref guidance) = config.prompt.additional_guidance {
+                let preview: String = guidance.chars().take(50).collect();
+                println!("  Additional Guidance: {}...", preview.replace('\n', " "));
+            }
+            if config.prompt.operation_guidance.capture.is_some() {
+                println!("  Capture Guidance: (configured)");
+            }
+            if config.prompt.operation_guidance.search.is_some() {
+                println!("  Search Guidance: (configured)");
+            }
+            if config.prompt.operation_guidance.enrichment.is_some() {
+                println!("  Enrichment Guidance: (configured)");
+            }
+            if config.prompt.operation_guidance.consolidation.is_some() {
+                println!("  Consolidation Guidance: (configured)");
+            }
+        }
+
+        // Storage info
+        println!("\nStorage:");
+        display_storage_config(&config);
     } else {
         println!("Use --show to display configuration");
         println!("Use --set KEY=VALUE to set a value");
@@ -1002,6 +1311,9 @@ fn cmd_config(
 
 /// Serve command.
 fn cmd_serve(transport: String, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    // Set instance label for metrics to prevent MCP from overwriting hook metrics
+    crate::observability::set_instance_label("mcp");
+
     let transport_type = match transport.as_str() {
         "http" => Transport::Http,
         _ => Transport::Stdio,
@@ -1018,6 +1330,11 @@ fn cmd_serve(transport: String, port: u16) -> Result<(), Box<dyn std::error::Err
 
 /// Hook command.
 fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn std::error::Error>> {
+    // Set instance label for metrics including hook type to prevent metric collision
+    // Each hook type gets its own instance (hooks-session-start, hooks-user-prompt-submit, etc.)
+    let instance_label = format!("hooks-{}", event.as_str());
+    crate::observability::set_instance_label(&instance_label);
+
     // Read input from stdin as a string
     let input = read_hook_input()?;
 
@@ -1030,7 +1347,7 @@ fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn std::
     if let Some(path) = cwd.as_ref() {
         capture_config = capture_config.with_repo_path(path);
     }
-    let capture_service = CaptureService::new(capture_config);
+    let capture_service = CaptureService::new(capture_config.clone());
     let sync_service = SyncService::default();
 
     let response = match event {
@@ -1047,9 +1364,13 @@ fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn std::
         HookEvent::UserPromptSubmit => {
             let context_config =
                 AdaptiveContextConfig::from_search_intent_config(&config.search_intent);
+            // Create separate capture service for auto-capture in this handler
+            let handler_capture_service = CaptureService::new(capture_config);
             let mut handler = UserPromptHandler::new()
                 .with_search_intent_config(config.search_intent.clone())
-                .with_context_config(context_config);
+                .with_context_config(context_config)
+                .with_capture_service(handler_capture_service)
+                .with_auto_capture(config.features.auto_capture);
             if let Some(provider) = build_hook_llm_provider(config) {
                 handler = handler.with_llm_provider(provider);
             }
@@ -1078,6 +1399,15 @@ fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn std::
 
     // Output response (already JSON string)
     println!("{response}");
+
+    // Delay to ensure spawned threads complete metric recording.
+    // Note: LLM threads use recv_timeout, so if HTTP timeout < search_intent timeout,
+    // the thread will complete before recv_timeout expires. This delay is just a buffer
+    // for any remaining metric recording after channel communication.
+    std::thread::sleep(std::time::Duration::from_millis(250));
+
+    // Flush metrics to push gateway before exit
+    flush_metrics();
 
     Ok(())
 }

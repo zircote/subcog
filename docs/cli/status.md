@@ -197,5 +197,5 @@ When verbose mode is enabled, the following health checks are performed:
 ## See Also
 
 - [config](config.md) - Manage configuration
-- [sync](sync.md) - Synchronize with remote
+- [sync](./sync.md) - Synchronize with remote
 - [MCP subcog_status](../mcp/tools.md#subcog_status) - MCP equivalent

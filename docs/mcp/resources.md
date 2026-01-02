@@ -125,7 +125,7 @@ Validates that the memory exists in the specified namespace. Returns error if no
 {
   "uri": "subcog://memory/dc58d23a...",
   "mimeType": "application/json",
-  "text": "{\"urn\": \"urn:subcog:project:decisions:dc58d23a...\", \"id\": \"dc58d23a...\", \"namespace\": \"decisions\", \"domain\": \"zircote/subcog\", \"content\": \"Use PostgreSQL for primary storage...\", \"tags\": [\"database\", \"architecture\"], \"source\": \"ARCHITECTURE.md\", \"status\": \"active\", \"created_at\": 1703894400, \"updated_at\": 1703894400}"
+  "text": "{\"urn\": \"subcog://project/decisions/dc58d23a...\", \"id\": \"dc58d23a...\", \"namespace\": \"decisions\", \"domain\": \"zircote/subcog\", \"content\": \"Use PostgreSQL for primary storage...\", \"tags\": [\"database\", \"architecture\"], \"source\": \"ARCHITECTURE.md\", \"status\": \"active\", \"created_at\": 1703894400, \"updated_at\": 1703894400}"
 }
 ```
 
@@ -298,4 +298,4 @@ Error Response:
 
 - [URN Guide](../URN-GUIDE.md) - Complete URN/URI documentation
 - [Tools](tools.md) - MCP tools reference
-- [Prompts](prompts.md) - MCP prompts reference
+- [Prompts](./prompts.md) - MCP prompts reference

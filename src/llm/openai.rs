@@ -21,7 +21,7 @@ impl OpenAiClient {
     pub const DEFAULT_ENDPOINT: &'static str = "https://api.openai.com/v1";
 
     /// Default model.
-    pub const DEFAULT_MODEL: &'static str = "gpt-4o-mini";
+    pub const DEFAULT_MODEL: &'static str = "gpt-5-mini";
 
     /// Creates a new `OpenAI` client.
     #[must_use]
@@ -88,6 +88,8 @@ impl OpenAiClient {
     fn request(&self, messages: Vec<ChatMessage>) -> Result<String> {
         self.validate()?;
 
+        tracing::info!(provider = "openai", model = %self.model, "Making LLM request");
+
         let api_key = self
             .api_key
             .as_ref()
@@ -123,25 +125,59 @@ impl OpenAiClient {
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
-            .map_err(|e| Error::OperationFailed {
-                operation: "openai_request".to_string(),
-                cause: e.to_string(),
+            .map_err(|e| {
+                let error_kind = if e.is_timeout() {
+                    "timeout"
+                } else if e.is_connect() {
+                    "connect"
+                } else if e.is_request() {
+                    "request"
+                } else {
+                    "unknown"
+                };
+                tracing::error!(
+                    provider = "openai",
+                    model = %self.model,
+                    error = %e,
+                    error_kind = error_kind,
+                    is_timeout = e.is_timeout(),
+                    is_connect = e.is_connect(),
+                    "LLM request failed"
+                );
+                Error::OperationFailed {
+                    operation: "openai_request".to_string(),
+                    cause: format!("{error_kind} error: {e}"),
+                }
             })?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().unwrap_or_default();
+            tracing::error!(
+                provider = "openai",
+                model = %self.model,
+                status = %status,
+                body = %body,
+                "LLM API returned error status"
+            );
             return Err(Error::OperationFailed {
                 operation: "openai_request".to_string(),
                 cause: format!("API returned status: {status} - {body}"),
             });
         }
 
-        let response: ChatCompletionResponse =
-            response.json().map_err(|e| Error::OperationFailed {
+        let response: ChatCompletionResponse = response.json().map_err(|e| {
+            tracing::error!(
+                provider = "openai",
+                model = %self.model,
+                error = %e,
+                "Failed to parse LLM response"
+            );
+            Error::OperationFailed {
                 operation: "openai_response".to_string(),
                 cause: e.to_string(),
-            })?;
+            }
+        })?;
 
         // Extract content from first choice
         response

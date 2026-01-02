@@ -19,7 +19,7 @@
 //! | User | Filesystem | `~/.config/subcog/_prompts/` (fallback) |
 //! | Org | Deferred | Not yet implemented |
 
-use crate::config::Config;
+use crate::config::{Config, SubcogConfig};
 use crate::models::PromptTemplate;
 use crate::storage::index::DomainScope;
 use crate::storage::prompt::{PromptStorage, PromptStorageFactory};
@@ -86,8 +86,10 @@ impl PromptFilter {
 ///
 /// Uses [`PromptStorageFactory`] to get domain-scoped storage backends.
 pub struct PromptService {
-    /// Configuration.
+    /// Simple configuration (for backwards compatibility).
     config: Config,
+    /// Full subcog configuration (for storage config).
+    subcog_config: Option<SubcogConfig>,
     /// Cached storage backends per domain.
     storage_cache: HashMap<DomainScope, Arc<dyn PromptStorage>>,
 }
@@ -98,6 +100,19 @@ impl PromptService {
     pub fn new(config: Config) -> Self {
         Self {
             config,
+            subcog_config: None,
+            storage_cache: HashMap::new(),
+        }
+    }
+
+    /// Creates a new prompt service with full subcog configuration.
+    ///
+    /// This allows the service to use storage settings from the config file.
+    #[must_use]
+    pub fn with_subcog_config(subcog_config: SubcogConfig) -> Self {
+        Self {
+            config: Config::from(subcog_config.clone()),
+            subcog_config: Some(subcog_config),
             storage_cache: HashMap::new(),
         }
     }
@@ -124,7 +139,12 @@ impl PromptService {
         }
 
         // Create new storage via factory
-        let storage = PromptStorageFactory::create_for_scope(domain, &self.config)?;
+        // Use SubcogConfig if available (respects config file settings)
+        let storage = if let Some(ref subcog_config) = self.subcog_config {
+            PromptStorageFactory::create_for_scope_with_subcog_config(domain, subcog_config)?
+        } else {
+            PromptStorageFactory::create_for_scope(domain, &self.config)?
+        };
 
         // Cache it
         self.storage_cache.insert(domain, Arc::clone(&storage));

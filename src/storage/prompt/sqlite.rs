@@ -1,6 +1,6 @@
 //! SQLite-based prompt storage for user scope.
 //!
-//! Stores prompts in `~/.config/subcog/_prompts/prompts.db`.
+//! Stores prompts in `~/.config/subcog/memories.db`.
 
 use super::PromptStorage;
 use crate::models::PromptTemplate;
@@ -74,15 +74,14 @@ impl SqlitePromptStorage {
 
     /// Returns the default user-scope database path.
     ///
-    /// Returns `~/.config/subcog/_prompts/prompts.db` on Unix systems,
-    /// or the platform-specific config directory.
+    /// Returns `~/.config/subcog/memories.db`.
     #[must_use]
     pub fn default_user_path() -> Option<PathBuf> {
         directories::BaseDirs::new().map(|d| {
-            d.config_dir()
+            d.home_dir()
+                .join(".config")
                 .join("subcog")
-                .join("_prompts")
-                .join("prompts.db")
+                .join("memories.db")
         })
     }
 
@@ -506,8 +505,8 @@ mod tests {
         let path = SqlitePromptStorage::default_user_path();
         // Should return Some on most systems
         if let Some(p) = path {
-            assert!(p.to_string_lossy().contains("_prompts"));
-            assert!(p.to_string_lossy().ends_with("prompts.db"));
+            assert!(p.to_string_lossy().contains("subcog"));
+            assert!(p.to_string_lossy().ends_with("memories.db"));
         }
     }
 }

@@ -1,0 +1,70 @@
+# E2E Test Configuration with full observability enabled
+
+repo_path = "."
+data_dir = ".subcog"
+max_results = 10
+default_search_mode = "hybrid"
+
+[features]
+secrets_filter = false
+pii_filter = false
+multi_domain = false
+audit_log = false
+llm_features = true
+auto_capture = true
+consolidation = false
+
+[llm]
+provider = "openai"
+model = "gpt-5-mini"
+api_key = ""
+base_url = "https://api.openai.com/v1"
+# HTTP timeout must be SHORTER than search_intent.llm_timeout_ms (5000)
+# to ensure spawned thread completes before search intent times out,
+# allowing ResilientLlmProvider metrics to be recorded
+timeout_ms = 4000
+connect_timeout_ms = 2000
+max_retries = 0
+retry_backoff_ms = 100
+breaker_failure_threshold = 3
+breaker_reset_ms = 30000
+breaker_half_open_max_calls = 1
+latency_slo_ms = 2000
+error_budget_ratio = 0.05
+error_budget_window_secs = 300
+
+[search_intent]
+enabled = true
+use_llm = true
+llm_timeout_ms = 5000
+min_confidence = 0.5
+base_count = 5
+max_count = 15
+max_tokens = 4000
+
+[observability.logging]
+format = "json"
+level = "debug"
+filter = "subcog=debug"
+
+[observability.tracing]
+enabled = true
+sample_ratio = 1.0
+service_name = "subcog"
+resource_attributes = []
+
+[observability.tracing.otlp]
+endpoint = "http://localhost:4317"
+protocol = "grpc"
+
+[observability.metrics]
+enabled = true
+port = 0
+
+[observability.metrics.push_gateway]
+endpoint = "http://localhost:9091/metrics/job/subcog"
+username = ""
+password = ""
+use_http_post = true
+
+[prompt]

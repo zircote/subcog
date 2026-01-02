@@ -5,6 +5,34 @@ data_dir = ".subcog"
 max_results = 10
 default_search_mode = "hybrid" # text, vector, hybrid
 
+# Storage configuration for each domain scope.
+# Available backends: sqlite, filesystem, git_notes, postgresql, redis
+[storage]
+
+[storage.project]
+backend = "git_notes"
+# path = "."  # optional, defaults to current directory
+
+[storage.user]
+backend = "sqlite"
+path = "~/.config/subcog/memories.db"
+# Alternative: filesystem
+# backend = "filesystem"
+# path = "~/.config/subcog/prompts/"
+# Alternative: postgresql
+# backend = "postgresql"
+# connection_string = "postgresql://user:pass@localhost/subcog"
+# Alternative: redis (requires 'redis' feature)
+# backend = "redis"
+# connection_string = "redis://localhost:6379"
+
+[storage.org]
+backend = "sqlite"
+# Not yet fully implemented - organization-scoped storage is planned.
+# For shared storage, use postgresql:
+# backend = "postgresql"
+# connection_string = "postgresql://user:pass@localhost/subcog_org"
+
 [features]
 secrets_filter = false
 pii_filter = false
@@ -39,10 +67,45 @@ base_count = 5
 max_count = 15
 max_tokens = 4000
 
+# Namespace weights for intent-based search prioritization.
+# Weights are multipliers applied to relevance scores. Higher = more priority.
+# Default is 1.0. Configure per-intent to boost specific namespaces.
+#
+# [search_intent.weights.howto]
+# patterns = 1.5       # How-to questions prioritize patterns
+# learnings = 1.3
+# decisions = 1.0
+#
+# [search_intent.weights.troubleshoot]
+# blockers = 1.5       # Troubleshooting prioritizes blockers
+# learnings = 1.3
+# decisions = 1.0
+#
+# [search_intent.weights.location]
+# decisions = 1.5      # Location queries prioritize decisions/context
+# context = 1.3
+# patterns = 1.0
+#
+# [search_intent.weights.explanation]
+# decisions = 1.5      # Explanation queries prioritize decisions
+# context = 1.3
+# patterns = 1.0
+#
+# [search_intent.weights.comparison]
+# decisions = 1.5      # Comparisons prioritize decisions/patterns
+# patterns = 1.3
+# learnings = 1.0
+#
+# [search_intent.weights.general]
+# decisions = 1.2      # General queries have balanced weights
+# patterns = 1.2
+# learnings = 1.0
+
 [observability.logging]
 format = "json" # json, pretty
 level = "info"
 filter = "subcog=info"
+# file = "/opt/homebrew/var/log/subcog/subcog.log" # Homebrew: /opt/homebrew/var/log/ (Apple Silicon) or /usr/local/var/log/ (Intel)
 
 [observability.tracing]
 enabled = false
@@ -62,7 +125,7 @@ port = 9090
 endpoint = "" # full push gateway URL, including /metrics/job/<job>
 username = ""
 password = ""
-use_http_post = false
+use_http_post = true # POST accumulates metrics, PUT replaces all (default: true)
 
 # Prompt customization - extend or override the default LLM system prompts.
 # Use this to add domain-specific guidance, compliance requirements, or custom behaviors.

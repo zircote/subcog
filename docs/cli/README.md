@@ -6,16 +6,16 @@ Subcog provides a comprehensive command-line interface for managing memories, ru
 
 | Command | Description |
 |---------|-------------|
-| [capture](capture.md) | Capture a memory to persistent storage |
-| [recall](recall.md) | Search and retrieve memories |
-| [status](status.md) | Display system status and statistics |
-| [sync](sync.md) | Synchronize memories with git remote |
+| [capture](./capture.md) | Capture a memory to persistent storage |
+| [recall](./recall.md) | Search and retrieve memories |
+| [status](./status.md) | Display system status and statistics |
+| [sync](./sync.md) | Synchronize memories with git remote |
 | [consolidate](consolidate.md) | Merge and deduplicate similar memories |
 | [config](config.md) | Manage configuration settings |
 | [serve](serve.md) | Run the MCP server |
 | [hook](hook.md) | Handle Claude Code hook events |
 | [prompt](prompt.md) | Manage prompt templates |
-| [namespaces](namespaces.md) | List available memory namespaces |
+| [namespaces](./namespaces.md) | List available memory namespaces |
 
 ## Global Options
 
@@ -90,13 +90,13 @@ subcog completions powershell > subcog.ps1
 ## Command Categories
 
 ### Memory Operations
-- [capture](capture.md) - Store new memories
-- [recall](recall.md) - Search existing memories
+- [capture](./capture.md) - Store new memories
+- [recall](./recall.md) - Search existing memories
 - [consolidate](consolidate.md) - Merge similar memories
 
 ### System Operations
-- [status](status.md) - Check system health
-- [sync](sync.md) - Synchronize with remotes
+- [status](./status.md) - Check system health
+- [sync](./sync.md) - Synchronize with remotes
 - [config](config.md) - Manage configuration
 
 ### Integration
@@ -105,4 +105,4 @@ subcog completions powershell > subcog.ps1
 
 ### Utilities
 - [prompt](prompt.md) - Prompt templates
-- [namespaces](namespaces.md) - List namespaces
+- [namespaces](./namespaces.md) - List namespaces

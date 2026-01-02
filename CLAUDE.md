@@ -323,6 +323,25 @@ SUBCOG_SEARCH_INTENT_LLM_TIMEOUT_MS=200 # LLM timeout in milliseconds
 SUBCOG_SEARCH_INTENT_MIN_CONFIDENCE=0.5 # Minimum confidence threshold
 ```
 
+Namespace weights (config file only):
+
+```toml
+[search_intent]
+base_count = 5      # Memories for low-confidence matches
+max_count = 15      # Memories for high-confidence matches
+max_tokens = 4000   # Token budget for context
+
+# Per-intent namespace weight multipliers (default: 1.0)
+[search_intent.weights.troubleshoot]
+blockers = 2.0      # Boost blockers for debugging queries
+learnings = 1.5
+tech-debt = 1.2
+
+[search_intent.weights.howto]
+patterns = 2.0      # Boost patterns for how-to queries
+learnings = 1.5
+```
+
 ### Graceful Degradation
 
 The system degrades gracefully when components are unavailable:

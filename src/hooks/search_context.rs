@@ -3,7 +3,7 @@
 //! Builds memory context based on detected search intent for proactive surfacing.
 
 use crate::Result;
-use crate::config::SearchIntentConfig;
+use crate::config::{NamespaceWeightsConfig, SearchIntentConfig};
 use crate::hooks::search_intent::{SearchIntent, SearchIntentType};
 use crate::models::{Namespace, SearchFilter, SearchMode};
 use crate::services::RecallService;
@@ -23,6 +23,8 @@ pub struct AdaptiveContextConfig {
     pub preview_length: usize,
     /// Minimum confidence threshold for injection.
     pub min_confidence: f32,
+    /// Namespace weights configuration.
+    pub weights: NamespaceWeightsConfig,
 }
 
 impl Default for AdaptiveContextConfig {
@@ -33,6 +35,7 @@ impl Default for AdaptiveContextConfig {
             max_tokens: 4000,
             preview_length: 200,
             min_confidence: 0.5,
+            weights: NamespaceWeightsConfig::with_defaults(),
         }
     }
 }
@@ -81,14 +84,22 @@ impl AdaptiveContextConfig {
 
     /// Builds context configuration from search intent settings.
     #[must_use]
-    pub const fn from_search_intent_config(config: &SearchIntentConfig) -> Self {
+    pub fn from_search_intent_config(config: &SearchIntentConfig) -> Self {
         Self {
             base_count: config.base_count,
             max_count: config.max_count,
             max_tokens: config.max_tokens,
             preview_length: 200,
             min_confidence: config.min_confidence,
+            weights: config.weights.clone(),
         }
+    }
+
+    /// Sets custom namespace weights.
+    #[must_use]
+    pub fn with_weights(mut self, weights: NamespaceWeightsConfig) -> Self {
+        self.weights = weights;
+        self
     }
 
     /// Calculates the number of memories to retrieve based on confidence.
@@ -117,40 +128,88 @@ impl NamespaceWeights {
         Self::default()
     }
 
-    /// Creates namespace weights for a specific intent type.
+    /// Creates namespace weights for a specific intent type using hard-coded defaults.
     #[must_use]
     pub fn for_intent(intent_type: SearchIntentType) -> Self {
+        Self::for_intent_with_config(intent_type, &NamespaceWeightsConfig::default())
+    }
+
+    /// Creates namespace weights for a specific intent type using config overrides.
+    ///
+    /// Config weights take precedence over hard-coded defaults. If a namespace
+    /// is not specified in config, the hard-coded default is used.
+    #[must_use]
+    pub fn for_intent_with_config(
+        intent_type: SearchIntentType,
+        config: &NamespaceWeightsConfig,
+    ) -> Self {
         let mut weights = HashMap::new();
 
-        match intent_type {
-            SearchIntentType::HowTo => {
-                weights.insert(Namespace::Patterns, 1.5);
-                weights.insert(Namespace::Learnings, 1.3);
-                weights.insert(Namespace::Decisions, 1.0);
-            },
-            SearchIntentType::Troubleshoot => {
-                weights.insert(Namespace::Blockers, 1.5);
-                weights.insert(Namespace::Learnings, 1.3);
-                weights.insert(Namespace::Decisions, 1.0);
-            },
-            SearchIntentType::Location | SearchIntentType::Explanation => {
-                weights.insert(Namespace::Decisions, 1.5);
-                weights.insert(Namespace::Context, 1.3);
-                weights.insert(Namespace::Patterns, 1.0);
-            },
-            SearchIntentType::Comparison => {
-                weights.insert(Namespace::Decisions, 1.5);
-                weights.insert(Namespace::Patterns, 1.3);
-                weights.insert(Namespace::Learnings, 1.0);
-            },
-            SearchIntentType::General => {
-                weights.insert(Namespace::Decisions, 1.2);
-                weights.insert(Namespace::Patterns, 1.2);
-                weights.insert(Namespace::Learnings, 1.0);
-            },
+        // Get the intent name for config lookup
+        let intent_name = match intent_type {
+            SearchIntentType::HowTo => "howto",
+            SearchIntentType::Troubleshoot => "troubleshoot",
+            SearchIntentType::Location => "location",
+            SearchIntentType::Explanation => "explanation",
+            SearchIntentType::Comparison => "comparison",
+            SearchIntentType::General => "general",
+        };
+
+        // Apply hard-coded defaults first
+        let defaults = Self::get_defaults(intent_type);
+        for (ns, weight) in defaults {
+            weights.insert(ns, weight);
+        }
+
+        // Apply config overrides
+        for (ns_str, weight) in config.get_intent_weights(intent_name) {
+            if let Ok(ns) = ns_str.parse::<Namespace>() {
+                weights.insert(ns, weight);
+            }
         }
 
         Self { weights }
+    }
+
+    /// Gets the hard-coded default weights for an intent type.
+    fn get_defaults(intent_type: SearchIntentType) -> Vec<(Namespace, f32)> {
+        match intent_type {
+            SearchIntentType::HowTo => {
+                vec![
+                    (Namespace::Patterns, 1.5),
+                    (Namespace::Learnings, 1.3),
+                    (Namespace::Decisions, 1.0),
+                ]
+            },
+            SearchIntentType::Troubleshoot => {
+                vec![
+                    (Namespace::Blockers, 1.5),
+                    (Namespace::Learnings, 1.3),
+                    (Namespace::Decisions, 1.0),
+                ]
+            },
+            SearchIntentType::Location | SearchIntentType::Explanation => {
+                vec![
+                    (Namespace::Decisions, 1.5),
+                    (Namespace::Context, 1.3),
+                    (Namespace::Patterns, 1.0),
+                ]
+            },
+            SearchIntentType::Comparison => {
+                vec![
+                    (Namespace::Decisions, 1.5),
+                    (Namespace::Patterns, 1.3),
+                    (Namespace::Learnings, 1.0),
+                ]
+            },
+            SearchIntentType::General => {
+                vec![
+                    (Namespace::Decisions, 1.2),
+                    (Namespace::Patterns, 1.2),
+                    (Namespace::Learnings, 1.0),
+                ]
+            },
+        }
     }
 
     /// Gets the weight for a namespace (defaults to 1.0).
@@ -270,7 +329,7 @@ impl<'a> SearchContextBuilder<'a> {
 
     /// Sets the configuration.
     #[must_use]
-    pub const fn with_config(mut self, config: AdaptiveContextConfig) -> Self {
+    pub fn with_config(mut self, config: AdaptiveContextConfig) -> Self {
         self.config = config;
         self
     }
@@ -320,7 +379,8 @@ impl<'a> SearchContextBuilder<'a> {
         intent: &SearchIntent,
     ) -> Result<Vec<InjectedMemory>> {
         let limit = self.config.memories_for_confidence(intent.confidence);
-        let weights = NamespaceWeights::for_intent(intent.intent_type);
+        let weights =
+            NamespaceWeights::for_intent_with_config(intent.intent_type, &self.config.weights);
 
         // Build query from topics and keywords
         let query = build_search_query(intent);

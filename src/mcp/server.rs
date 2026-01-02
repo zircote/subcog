@@ -3,6 +3,7 @@
 //! Implements a JSON-RPC based MCP server over stdio or HTTP transport.
 
 use crate::mcp::{PromptRegistry, ResourceHandler, ToolRegistry};
+use crate::observability::flush_metrics;
 use crate::services::ServiceContainer;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -61,6 +62,7 @@ impl McpServer {
     ///
     /// Uses domain-scoped index (project-local `.subcog/index.db`).
     fn try_init_resources() -> ResourceHandler {
+        use crate::config::SubcogConfig;
         use crate::services::PromptService;
 
         let mut handler = ResourceHandler::new();
@@ -71,9 +73,11 @@ impl McpServer {
                 handler = handler.with_recall_service(recall);
             }
 
-            // Try to add PromptService with repo path
+            // Try to add PromptService with full config (respects storage settings)
             if let Some(repo_path) = services.repo_path() {
-                let prompt_service = PromptService::default().with_repo_path(repo_path);
+                let config = SubcogConfig::load_default().with_repo_path(repo_path);
+                let prompt_service =
+                    PromptService::with_subcog_config(config).with_repo_path(repo_path);
                 handler = handler.with_prompt_service(prompt_service);
             }
         }
@@ -134,6 +138,10 @@ impl McpServer {
                 operation: "flush_stdout".to_string(),
                 cause: e.to_string(),
             })?;
+
+            // Flush metrics to push gateway after each request
+            // This ensures metrics are captured even if process is killed
+            flush_metrics();
         }
 
         Ok(())
@@ -178,6 +186,8 @@ impl McpServer {
                     let id_str = id.to_string();
                     span.record("rpc.id", id_str.as_str());
                 }
+
+                tracing::info!(method = %method_label, transport = transport_label, "Processing MCP request");
 
                 let result = self.dispatch_method(&req.method, req.params);
                 status_label = if result.is_ok() { "success" } else { "error" };

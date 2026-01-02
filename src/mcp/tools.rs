@@ -2,6 +2,7 @@
 //!
 //! Provides tool handlers for the Model Context Protocol.
 
+use crate::config::SubcogConfig;
 use crate::models::{
     CaptureRequest, DetailLevel, Domain, MemoryStatus, Namespace, PromptTemplate, SearchFilter,
     SearchMode, substitute_variables,
@@ -14,6 +15,13 @@ use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::path::Path;
+
+/// Creates a properly configured `PromptService` with storage settings from config.
+fn create_prompt_service(repo_path: &Path) -> PromptService {
+    let config = SubcogConfig::load_default().with_repo_path(repo_path);
+    PromptService::with_subcog_config(config).with_repo_path(repo_path)
+}
 
 /// Registry of MCP tools.
 pub struct ToolRegistry {
@@ -548,12 +556,16 @@ impl ToolRegistry {
                 format!(" [{}]", hit.memory.tags.join(", "))
             };
 
-            // Build rich URN: subcog://{scope}/{namespace}/{id}
-            // Scope: project (default), org/{name}, or global
-            let scope = hit.memory.domain.to_scope_string();
+            // Build URN: subcog://{domain}/{namespace}/{id}
+            // Domain: global, project, or org/repo path
+            let domain_part = if hit.memory.domain.is_global() {
+                "global".to_string()
+            } else {
+                hit.memory.domain.to_string()
+            };
             let urn = format!(
                 "subcog://{}/{}/{}",
-                scope, hit.memory.namespace, hit.memory.id
+                domain_part, hit.memory.namespace, hit.memory.id
             );
 
             output.push_str(&format!(
@@ -654,18 +666,31 @@ impl ToolRegistry {
             });
         }
 
-        // Build context for sampling request
+        // Build context for sampling request - use full URNs
         let memories_text: String = result
             .memories
             .iter()
             .enumerate()
-            .map(|(i, hit)| format!("{}. [ID: {}] {}", i + 1, hit.memory.id, hit.memory.content))
+            .map(|(i, hit)| {
+                let domain_part = if hit.memory.domain.is_global() {
+                    "global".to_string()
+                } else {
+                    hit.memory.domain.to_string()
+                };
+                let urn = format!(
+                    "subcog://{}/{}/{}",
+                    domain_part,
+                    hit.memory.namespace.as_str(),
+                    hit.memory.id.as_str()
+                );
+                format!("{}. [{}] {}", i + 1, urn, hit.memory.content)
+            })
             .collect::<Vec<_>>()
             .join("\n\n");
 
         let sampling_prompt = match strategy {
             "merge" => format!(
-                "Analyze these {} memories from the '{}' namespace and identify groups that should be merged:\n\n{}\n\nFor each group, provide:\n1. IDs to merge\n2. Merged content\n3. Rationale",
+                "Analyze these {} memories from the '{}' namespace and identify groups that should be merged:\n\n{}\n\nFor each group, provide:\n1. URNs to merge\n2. Merged content\n3. Rationale",
                 result.memories.len(),
                 args.namespace,
                 memories_text
@@ -870,7 +895,7 @@ impl ToolRegistry {
             .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
             .clone();
 
-        let mut prompt_service = PromptService::default().with_repo_path(&repo_path);
+        let mut prompt_service = create_prompt_service(&repo_path);
         let memory_id = prompt_service.save(&template, domain)?;
 
         Ok(ToolResult {
@@ -929,7 +954,7 @@ impl ToolRegistry {
             .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
             .clone();
 
-        let mut prompt_service = PromptService::default().with_repo_path(&repo_path);
+        let mut prompt_service = create_prompt_service(&repo_path);
         let prompts = prompt_service.list(&filter)?;
 
         if prompts.is_empty() {
@@ -1003,7 +1028,7 @@ impl ToolRegistry {
             .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
             .clone();
 
-        let mut prompt_service = PromptService::default().with_repo_path(&repo_path);
+        let mut prompt_service = create_prompt_service(&repo_path);
         let prompt = prompt_service.get(&args.name, domain)?;
 
         match prompt {
@@ -1064,7 +1089,7 @@ impl ToolRegistry {
             .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
             .clone();
 
-        let mut prompt_service = PromptService::default().with_repo_path(&repo_path);
+        let mut prompt_service = create_prompt_service(&repo_path);
         let prompt = prompt_service.get(&args.name, domain)?;
 
         match prompt {
@@ -1140,7 +1165,7 @@ impl ToolRegistry {
             .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
             .clone();
 
-        let mut prompt_service = PromptService::default().with_repo_path(&repo_path);
+        let mut prompt_service = create_prompt_service(&repo_path);
         let deleted = prompt_service.delete(&args.name, domain)?;
 
         if deleted {

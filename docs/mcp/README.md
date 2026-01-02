@@ -10,7 +10,7 @@ The MCP server exposes three types of capabilities:
 |------|-------------|-------|
 | [Tools](tools.md) | Callable functions for memory operations | 13 |
 | [Resources](resources.md) | URI-based data access | 26+ |
-| [Prompts](prompts.md) | Pre-defined prompt templates | 11 |
+| [Prompts](./prompts.md) | Pre-defined prompt templates | 11 |
 
 ## Quick Reference
 
