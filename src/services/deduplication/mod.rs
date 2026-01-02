@@ -44,10 +44,8 @@ mod semantic;
 mod service;
 mod types;
 
+// Public API: Only expose what users need to interact with the service
 pub use config::DeduplicationConfig;
-pub use exact_match::ExactMatchChecker;
 pub use hasher::ContentHasher;
-pub use recent::RecentCaptureChecker;
-pub use semantic::{SemanticSimilarityChecker, cosine_similarity};
 pub use service::DeduplicationService;
 pub use types::{Deduplicator, DuplicateCheckResult, DuplicateReason};

@@ -4,6 +4,48 @@
 //! - Prompt-level description
 //! - Tags for categorization
 //! - Variable descriptions, defaults, and required flags
+//!
+//! # Fallback Behavior
+//!
+//! The enrichment service degrades gracefully when the LLM is unavailable:
+//!
+//! | Condition | Behavior | Result Status |
+//! |-----------|----------|---------------|
+//! | LLM available, success | Full metadata generated | `Full` |
+//! | LLM available, timeout | Use extracted variables only | `Fallback` |
+//! | LLM available, error | Use extracted variables only | `Fallback` |
+//! | No LLM configured | Use extracted variables only | `Fallback` |
+//! | User passed `--no-enrich` | Skip enrichment entirely | `Skipped` |
+//!
+//! ## Fallback Metadata
+//!
+//! When enrichment fails or is unavailable, minimal metadata is generated:
+//!
+//! - **description**: Empty string (user can edit later)
+//! - **tags**: Empty array
+//! - **variables**: Names preserved, descriptions set to "No description"
+//!
+//! ## User Values Take Precedence
+//!
+//! User-provided metadata is never overwritten by LLM enrichment:
+//!
+//! ```text
+//! User provides: description="My review prompt", tags=["review"]
+//! LLM generates: description="Code review assistant", tags=["code", "review", "quality"]
+//!
+//! Result: description="My review prompt", tags=["review"]  (user values preserved)
+//! ```
+//!
+//! ## Error Handling
+//!
+//! | Error Type | Logging | User Impact |
+//! |------------|---------|-------------|
+//! | Timeout (5s) | WARN | Prompt saved with fallback metadata |
+//! | Parse error | WARN | Prompt saved with fallback metadata |
+//! | Network error | WARN | Prompt saved with fallback metadata |
+//! | No LLM config | DEBUG | Prompt saved with fallback metadata |
+//!
+//! The service never fails a prompt save due to enrichment errors.
 
 use crate::llm::LlmProvider;
 use crate::models::PromptVariable;

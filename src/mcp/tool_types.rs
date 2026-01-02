@@ -10,50 +10,70 @@ use std::collections::HashMap;
 /// Arguments for the capture tool.
 #[derive(Debug, Deserialize)]
 pub struct CaptureArgs {
+    /// The memory content to capture.
     pub content: String,
+    /// Memory category (e.g., "decisions", "patterns", "learnings").
     pub namespace: String,
+    /// Optional tags for categorization and filtering.
     pub tags: Option<Vec<String>>,
+    /// Optional source reference (file path, URL, etc.).
     pub source: Option<String>,
 }
 
 /// Arguments for the recall tool.
 #[derive(Debug, Deserialize)]
 pub struct RecallArgs {
+    /// Search query text.
     pub query: String,
+    /// GitHub-style filter query (e.g., "ns:decisions tag:rust -tag:test since:7d").
     pub filter: Option<String>,
+    /// Filter by namespace (deprecated: use `filter` instead).
     pub namespace: Option<String>,
+    /// Search mode: "hybrid" (default), "vector", or "text".
     pub mode: Option<String>,
+    /// Detail level: "light", "medium" (default), or "everything".
     pub detail: Option<String>,
+    /// Maximum number of results to return (default: 10).
     pub limit: Option<usize>,
 }
 
 /// Arguments for the consolidate tool.
 #[derive(Debug, Deserialize)]
 pub struct ConsolidateArgs {
+    /// Namespace to consolidate (required).
     pub namespace: String,
+    /// Optional query to filter memories for consolidation.
     pub query: Option<String>,
+    /// Consolidation strategy: "merge", "summarize", or "dedupe".
     pub strategy: Option<String>,
+    /// If true, show what would be consolidated without making changes.
     pub dry_run: Option<bool>,
 }
 
 /// Arguments for the enrich tool.
 #[derive(Debug, Deserialize)]
 pub struct EnrichArgs {
+    /// ID of the memory to enrich.
     pub memory_id: String,
+    /// Generate or improve tags (default: true).
     pub enrich_tags: Option<bool>,
+    /// Restructure content for clarity (default: true).
     pub enrich_structure: Option<bool>,
+    /// Add inferred context and rationale (default: false).
     pub add_context: Option<bool>,
 }
 
 /// Arguments for the sync tool.
 #[derive(Debug, Deserialize)]
 pub struct SyncArgs {
+    /// Sync direction: "push", "fetch", or "full" (default: "full").
     pub direction: Option<String>,
 }
 
 /// Arguments for the reindex tool.
 #[derive(Debug, Deserialize)]
 pub struct ReindexArgs {
+    /// Path to git repository (default: current directory).
     pub repo_path: Option<String>,
 }
 
@@ -64,12 +84,19 @@ pub struct ReindexArgs {
 /// Arguments for the prompt.save tool.
 #[derive(Debug, Deserialize)]
 pub struct PromptSaveArgs {
+    /// Unique prompt name (kebab-case, e.g., "code-review").
     pub name: String,
+    /// Prompt content with `{{variable}}` placeholders.
     pub content: Option<String>,
+    /// Path to file containing prompt (alternative to content).
     pub file_path: Option<String>,
+    /// Human-readable description of the prompt.
     pub description: Option<String>,
+    /// Tags for categorization and search.
     pub tags: Option<Vec<String>>,
+    /// Storage scope: "project" (default), "user", or "org".
     pub domain: Option<String>,
+    /// Explicit variable definitions with metadata.
     pub variables: Option<Vec<PromptVariableArg>>,
     /// Skip LLM-powered metadata enrichment.
     #[serde(default)]
@@ -79,40 +106,55 @@ pub struct PromptSaveArgs {
 /// Variable definition argument for prompt.save.
 #[derive(Debug, Deserialize)]
 pub struct PromptVariableArg {
+    /// Variable name (without braces).
     pub name: String,
+    /// Human-readable description for elicitation.
     pub description: Option<String>,
+    /// Default value if not provided.
     pub default: Option<String>,
+    /// Whether variable is required (default: true).
     pub required: Option<bool>,
 }
 
 /// Arguments for the prompt.list tool.
 #[derive(Debug, Deserialize)]
 pub struct PromptListArgs {
+    /// Filter by domain scope: "project", "user", or "org".
     pub domain: Option<String>,
+    /// Filter by tags (AND logic - must have all).
     pub tags: Option<Vec<String>>,
+    /// Filter by name pattern (glob-style, e.g., "code-*").
     pub name_pattern: Option<String>,
+    /// Maximum number of results (default: 20, max: 100).
     pub limit: Option<usize>,
 }
 
 /// Arguments for the prompt.get tool.
 #[derive(Debug, Deserialize)]
 pub struct PromptGetArgs {
+    /// Prompt name to retrieve.
     pub name: String,
+    /// Domain to search (if not specified, searches Project → User → Org).
     pub domain: Option<String>,
 }
 
 /// Arguments for the prompt.run tool.
 #[derive(Debug, Deserialize)]
 pub struct PromptRunArgs {
+    /// Prompt name to execute.
     pub name: String,
+    /// Variable values to substitute (key: value pairs).
     pub variables: Option<HashMap<String, String>>,
+    /// Domain to search for the prompt.
     pub domain: Option<String>,
 }
 
 /// Arguments for the prompt.delete tool.
 #[derive(Debug, Deserialize)]
 pub struct PromptDeleteArgs {
+    /// Prompt name to delete.
     pub name: String,
+    /// Domain scope to delete from (required for safety).
     pub domain: String,
 }
 

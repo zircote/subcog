@@ -2,6 +2,46 @@
 //!
 //! This module defines configuration for the deduplication service,
 //! including per-namespace similarity thresholds and cache settings.
+//!
+//! # Threshold Rationale
+//!
+//! Per-namespace thresholds balance precision (avoiding false duplicates) against
+//! recall (catching true duplicates). The defaults are tuned based on:
+//!
+//! ## Decisions (0.92 - High Threshold)
+//!
+//! Architectural decisions are high-value captures where even slightly different
+//! phrasings may represent distinct rationale. A false positive (marking a unique
+//! decision as duplicate) is worse than a false negative (allowing similar decisions).
+//!
+//! **Example**: "Use PostgreSQL for persistence" vs "Use PostgreSQL for ACID guarantees"
+//! are semantically similar (~91%) but capture different reasoning.
+//!
+//! ## Patterns (0.90 - Standard Threshold)
+//!
+//! Code patterns have moderate variation. Similar patterns often represent the same
+//! concept, but edge cases exist where context differs meaningfully.
+//!
+//! ## Learnings (0.88 - Lower Threshold)
+//!
+//! Learnings are frequently paraphrased differently when rediscovered. A lower threshold
+//! catches these reformulations while still allowing genuinely distinct learnings.
+//!
+//! **Example**: "TIL: Rust closures capture by reference by default" vs
+//! "Learned that closures in Rust borrow by default" are the same learning (~87% similar).
+//!
+//! ## Other Namespaces (0.90 - Default)
+//!
+//! Unconfigured namespaces use 90% as a balanced default that works well for most content.
+//!
+//! # Tuning Guidelines
+//!
+//! | Symptom | Adjustment |
+//! |---------|------------|
+//! | Too many duplicates skipped | Lower threshold (e.g., 0.85) |
+//! | Duplicate content still captured | Raise threshold (e.g., 0.95) |
+//! | Short content triggers false positives | Increase `min_semantic_length` |
+//! | Same content captured repeatedly in session | Extend `recent_window` |
 
 use crate::models::Namespace;
 use std::collections::HashMap;

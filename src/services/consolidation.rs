@@ -122,6 +122,11 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     }
 
     /// Calculates the retention score for a memory.
+    ///
+    /// # Precision Notes
+    /// The u32 and u64 to f32 casts are acceptable here as exact precision
+    /// is not required for retention score calculations (values are normalized 0.0-1.0).
+    #[allow(clippy::cast_precision_loss)]
     fn calculate_retention_score(&self, memory_id: &str, now: u64) -> RetentionScore {
         // Access frequency: normalized by max observed accesses
         let access_count = self.access_counts.get(memory_id).copied().unwrap_or(0);

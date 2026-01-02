@@ -78,6 +78,76 @@
 //! timeout_ms = 30000
 //! max_retries = 3
 //! ```
+//!
+//! # Implementing a New Provider
+//!
+//! To add a new LLM provider:
+//!
+//! 1. Create a new module (e.g., `src/llm/newprovider.rs`)
+//! 2. Implement the [`LlmProvider`] trait
+//! 3. Export the client from this module
+//!
+//! ## Required Trait Methods
+//!
+//! | Method | Purpose |
+//! |--------|---------|
+//! | [`LlmProvider::name`] | Return provider identifier (e.g., "anthropic") |
+//! | [`LlmProvider::complete`] | Generate completion for a prompt |
+//! | [`LlmProvider::analyze_for_capture`] | Analyze content for memory capture |
+//!
+//! ## Optional Methods (with defaults)
+//!
+//! | Method | Default Behavior |
+//! |--------|------------------|
+//! | `complete_with_system` | Concatenates system and user prompts |
+//! | `analyze_for_capture_extended` | Uses unified system prompt |
+//! | `classify_search_intent` | Uses unified system prompt |
+//! | `analyze_for_consolidation` | Uses unified system prompt |
+//!
+//! ## Example Implementation
+//!
+//! ```rust,ignore
+//! use subcog::llm::{LlmProvider, CaptureAnalysis};
+//! use subcog::Result;
+//!
+//! pub struct MyProvider {
+//!     api_key: String,
+//!     model: String,
+//! }
+//!
+//! impl LlmProvider for MyProvider {
+//!     fn name(&self) -> &'static str {
+//!         "myprovider"
+//!     }
+//!
+//!     fn complete(&self, prompt: &str) -> Result<String> {
+//!         // Make API call to your provider
+//!         todo!()
+//!     }
+//!
+//!     fn analyze_for_capture(&self, content: &str) -> Result<CaptureAnalysis> {
+//!         // Use CAPTURE_ANALYSIS_PROMPT or custom prompt
+//!         let prompt = format!(
+//!             "{}\n\nContent: {content}",
+//!             subcog::llm::CAPTURE_ANALYSIS_PROMPT
+//!         );
+//!         let response = self.complete(&prompt)?;
+//!         // Parse JSON response into CaptureAnalysis
+//!         todo!()
+//!     }
+//! }
+//! ```
+//!
+//! ## HTTP Client Guidelines
+//!
+//! Use [`build_http_client`] with [`LlmHttpConfig`] for consistent timeout handling:
+//!
+//! ```rust,ignore
+//! use subcog::llm::{build_http_client, LlmHttpConfig};
+//!
+//! let config = LlmHttpConfig::from_env();
+//! let client = build_http_client(config);
+//! ```
 
 mod anthropic;
 mod lmstudio;

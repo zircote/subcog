@@ -2,9 +2,16 @@
 //!
 //! Stores prompts in PostgreSQL with full-text search support.
 //! Includes embedded migrations that auto-upgrade the schema on startup.
+//!
+//! # Code Structure
+//!
+//! The nesting in this module is inherent to the async PostgreSQL pattern:
+//! `impl PromptStorage` → method body → `block_on(async { ... })` → query logic.
+//! This results in 4+ levels of nesting which is unavoidable without fundamentally
+//! changing the sync-to-async bridge approach.
 
 #[cfg(feature = "postgres")]
-#[allow(clippy::excessive_nesting)]
+#[allow(clippy::excessive_nesting)] // See module docs for rationale
 mod implementation {
     use crate::models::PromptTemplate;
     use crate::storage::prompt::PromptStorage;

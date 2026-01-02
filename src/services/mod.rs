@@ -1,23 +1,36 @@
 //! Business logic services.
 //!
 //! Services orchestrate storage backends and provide high-level operations.
+//!
+//! # Clippy Lints
+//!
+//! The following lints are allowed at module level due to their pervasive nature
+//! in service code. Each has a documented rationale:
+//!
+//! | Lint | Rationale |
+//! |------|-----------|
+//! | `cast_precision_loss` | Metrics/score calculations don't require exact precision |
+//! | `unused_self` | Methods retained for API consistency or future extension |
+//! | `option_if_let_else` | If-let chains often clearer than nested `map_or_else` |
+//! | `manual_let_else` | Match patterns with logging clearer than `let...else` |
+//! | `unnecessary_wraps` | Result types for API consistency across trait impls |
+//! | `or_fun_call` | Entry API with closures for lazy initialization |
+//! | `significant_drop_tightening` | Drop timing not critical for correctness |
 
-// Allow cast_precision_loss for score calculations where exact precision is not critical.
+// Metrics and scoring calculations don't require exact precision
 #![allow(clippy::cast_precision_loss)]
-// Allow option_if_let_else for clearer code in some contexts.
-#![allow(clippy::option_if_let_else)]
-// Allow significant_drop_tightening as dropping slightly early provides no benefit.
-#![allow(clippy::significant_drop_tightening)]
-// Allow unused_self for methods kept for API consistency.
+// Methods kept for API consistency or future self usage
 #![allow(clippy::unused_self)]
-// Allow trivially_copy_pass_by_ref for namespace references.
-#![allow(clippy::trivially_copy_pass_by_ref)]
-// Allow unnecessary_wraps for const fn methods returning Result.
-#![allow(clippy::unnecessary_wraps)]
-// Allow manual_let_else for clearer error handling patterns.
+// If-let chains often clearer than nested map_or_else
+#![allow(clippy::option_if_let_else)]
+// Match patterns with logging are clearer than let-else
 #![allow(clippy::manual_let_else)]
-// Allow or_fun_call for entry API with closures.
+// Result types maintained for API consistency across trait implementations
+#![allow(clippy::unnecessary_wraps)]
+// Entry API with closures for lazy initialization
 #![allow(clippy::or_fun_call)]
+// Drop timing not critical for correctness in service code
+#![allow(clippy::significant_drop_tightening)]
 
 mod capture;
 mod consolidation;
@@ -50,6 +63,7 @@ pub use recall::RecallService;
 pub use sync::SyncService;
 pub use topic_index::{TopicIndexService, TopicInfo};
 
+use crate::config::SubcogConfig;
 use crate::git::{NotesManager, YamlFrontMatterParser};
 use crate::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace};
 use crate::storage::index::{
@@ -58,19 +72,124 @@ use crate::storage::index::{
 };
 use crate::storage::traits::IndexBackend;
 use crate::{Error, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+
+// ============================================================================
+// Service Factory Functions
+// ============================================================================
+
+/// Creates a [`PromptService`] for the given repository path.
+///
+/// This is the canonical way to create a `PromptService` from MCP or CLI layers.
+/// Configuration is loaded from the default location and merged with repo settings.
+///
+/// # Arguments
+///
+/// * `repo_path` - Path to or within a git repository
+///
+/// # Returns
+///
+/// A fully configured `PromptService` with storage backends initialized.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use subcog::services::prompt_service_for_repo;
+///
+/// let service = prompt_service_for_repo("/path/to/repo")?;
+/// let prompts = service.list(PromptFilter::new())?;
+/// ```
+#[must_use]
+pub fn prompt_service_for_repo(repo_path: impl AsRef<Path>) -> PromptService {
+    let repo_path = repo_path.as_ref();
+    let config = SubcogConfig::load_default().with_repo_path(repo_path);
+    PromptService::with_subcog_config(config).with_repo_path(repo_path)
+}
+
+/// Creates a [`PromptService`] for the current working directory.
+///
+/// This is a convenience function for CLI commands that operate on the current directory.
+///
+/// # Errors
+///
+/// Returns an error if the current working directory cannot be determined.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use subcog::services::prompt_service_for_cwd;
+///
+/// let service = prompt_service_for_cwd()?;
+/// let prompts = service.list(PromptFilter::new())?;
+/// ```
+pub fn prompt_service_for_cwd() -> Result<PromptService> {
+    let cwd = std::env::current_dir().map_err(|e| Error::OperationFailed {
+        operation: "get_current_dir".to_string(),
+        cause: e.to_string(),
+    })?;
+    Ok(prompt_service_for_repo(&cwd))
+}
+
+// ============================================================================
+// Service Container
+// ============================================================================
 
 /// Container for initialized services with configured backends.
 ///
 /// Unlike the previous singleton design, this can be instantiated per-context
 /// with domain-scoped indices.
+///
+/// # `DomainIndexManager` Complexity
+///
+/// The `index_manager` field uses [`DomainIndexManager`] to provide multi-domain
+/// index support with lazy initialization. Key complexity points:
+///
+/// ## Architecture
+///
+/// ```text
+/// ServiceContainer
+///   └── Mutex<DomainIndexManager>
+///         ├── Project index (.subcog/index.db)   // per-repo
+///         ├── User index (~/.subcog/index.db)    // per-user
+///         └── Org index (configured path)         // optional
+/// ```
+///
+/// ## Lazy Initialization
+///
+/// Indices are created on-demand via `index_for_scope()`:
+/// 1. Lock the `Mutex<DomainIndexManager>`
+/// 2. Check if index exists for requested `DomainScope`
+/// 3. If missing, create `SQLite` database at scope-specific path
+/// 4. Return reference to the index
+///
+/// ## Thread Safety
+///
+/// - `Mutex` guards the manager, not individual indices
+/// - Each index has its own internal locking via `SqliteBackend`
+/// - Callers should minimize lock hold time
+///
+/// ## Path Resolution
+///
+/// | Scope | Path |
+/// |-------|------|
+/// | Project | `{repo}/.subcog/index.db` |
+/// | User | `~/.subcog/index.db` |
+/// | Org | Configured via `OrgIndexConfig` |
+///
+/// ## Error Handling
+///
+/// - Missing repo returns `Error::OperationFailed`
+/// - `SQLite` initialization errors propagate as `Error::OperationFailed`
+/// - Index creation is idempotent (safe to call multiple times)
 pub struct ServiceContainer {
     /// Capture service.
     capture: CaptureService,
     /// Sync service.
     sync: SyncService,
     /// Domain index manager for multi-domain indices.
+    ///
+    /// See struct-level documentation for complexity notes.
     index_manager: Mutex<DomainIndexManager>,
     /// Repository path (if known).
     repo_path: Option<PathBuf>,
@@ -134,17 +253,19 @@ impl ServiceContainer {
     ///
     /// Returns an error if the index cannot be initialized.
     pub fn recall_for_scope(&self, scope: DomainScope) -> Result<RecallService> {
-        let manager = self
-            .index_manager
-            .lock()
-            .map_err(|e| Error::OperationFailed {
-                operation: "lock_index_manager".to_string(),
-                cause: e.to_string(),
-            })?;
+        // Get index path while holding the lock, then release before I/O
+        let index_path = {
+            let manager = self
+                .index_manager
+                .lock()
+                .map_err(|e| Error::OperationFailed {
+                    operation: "lock_index_manager".to_string(),
+                    cause: e.to_string(),
+                })?;
+            manager.get_index_path(scope)?
+        }; // Lock released here
 
-        let index_path = manager.get_index_path(scope)?;
-
-        // Ensure parent directory exists
+        // Ensure parent directory exists (I/O outside mutex)
         if let Some(parent) = index_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| Error::OperationFailed {
                 operation: "create_index_dir".to_string(),
@@ -347,130 +468,6 @@ impl ServiceContainer {
         }
 
         Ok(results)
-    }
-}
-
-// Legacy compatibility: Keep a global instance for backward compatibility
-use once_cell::sync::OnceCell;
-static LEGACY_SERVICES: OnceCell<LegacyServiceContainer> = OnceCell::new();
-
-/// Legacy service container for backward compatibility.
-///
-/// Deprecated: Use `ServiceContainer::for_repo()` instead.
-pub struct LegacyServiceContainer {
-    recall: RecallService,
-    capture: CaptureService,
-    sync: SyncService,
-    index: Mutex<SqliteBackend>,
-    data_dir: PathBuf,
-}
-
-impl LegacyServiceContainer {
-    /// Initializes the legacy service container.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if backends cannot be initialized.
-    #[deprecated(note = "Use ServiceContainer::for_repo() instead")]
-    pub fn init(data_dir: Option<PathBuf>) -> Result<&'static Self> {
-        LEGACY_SERVICES.get_or_try_init(|| {
-            let data_dir = data_dir.unwrap_or_else(|| {
-                directories::BaseDirs::new()
-                    .map_or_else(|| PathBuf::from("."), |b| b.data_local_dir().to_path_buf())
-                    .join("subcog")
-            });
-
-            std::fs::create_dir_all(&data_dir).map_err(|e| Error::OperationFailed {
-                operation: "create_data_dir".to_string(),
-                cause: e.to_string(),
-            })?;
-
-            let db_path = data_dir.join("index.db");
-            let index = SqliteBackend::new(&db_path)?;
-            let recall_index = SqliteBackend::new(&db_path)?;
-
-            Ok(Self {
-                recall: RecallService::with_index(recall_index),
-                capture: CaptureService::default(),
-                sync: SyncService::default(),
-                index: Mutex::new(index),
-                data_dir,
-            })
-        })
-    }
-
-    /// Gets the legacy service container.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if initialization fails.
-    #[deprecated(note = "Use ServiceContainer::for_repo() instead")]
-    #[allow(deprecated)]
-    pub fn get() -> Result<&'static Self> {
-        Self::init(None)
-    }
-
-    /// Returns the recall service.
-    #[must_use]
-    pub const fn recall(&self) -> &RecallService {
-        &self.recall
-    }
-
-    /// Returns the capture service.
-    #[must_use]
-    pub const fn capture(&self) -> &CaptureService {
-        &self.capture
-    }
-
-    /// Returns the sync service.
-    #[must_use]
-    pub const fn sync(&self) -> &SyncService {
-        &self.sync
-    }
-
-    /// Returns the data directory path.
-    #[must_use]
-    pub const fn data_dir(&self) -> &PathBuf {
-        &self.data_dir
-    }
-
-    /// Reindexes memories from git notes.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if notes cannot be read or indexing fails.
-    pub fn reindex(&self, repo_path: &std::path::Path) -> Result<usize> {
-        let notes = NotesManager::new(repo_path);
-        let all_notes = notes.list()?;
-
-        if all_notes.is_empty() {
-            return Ok(0);
-        }
-
-        let mut memories = Vec::with_capacity(all_notes.len());
-        for (note_id, content) in &all_notes {
-            match parse_note_to_memory(note_id, content) {
-                Ok(memory) => memories.push(memory),
-                Err(e) => {
-                    tracing::warn!("Failed to parse note {note_id}: {e}");
-                },
-            }
-        }
-
-        if memories.is_empty() {
-            return Ok(0);
-        }
-
-        let mut index = self.index.lock().map_err(|e| Error::OperationFailed {
-            operation: "lock_index".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        index.clear()?;
-        let count = memories.len();
-        index.reindex(&memories)?;
-
-        Ok(count)
     }
 }
 

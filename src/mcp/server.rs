@@ -236,8 +236,10 @@ impl McpServer {
     /// Requires the `http` feature and `SUBCOG_MCP_JWT_SECRET` environment variable.
     #[cfg(feature = "http")]
     fn run_http(&mut self) -> Result<()> {
+        use axum::http::header;
         use axum::{Router, routing::post};
         use std::sync::{Arc, Mutex};
+        use tower_http::set_header::SetResponseHeaderLayer;
         use tower_http::trace::TraceLayer;
 
         // Ensure JWT authenticator is configured
@@ -248,17 +250,39 @@ impl McpServer {
             }
         })?;
 
-        // Create shared state for the server
+        // Create shared state for the server with per-client rate limiting
         let server = Arc::new(Mutex::new(McpHttpState {
             tools: std::mem::take(&mut self.tools),
             resources: std::mem::take(&mut self.resources),
             prompts: std::mem::take(&mut self.prompts),
             authenticator,
+            rate_limits: std::collections::HashMap::new(),
         }));
 
-        // Build the router
+        // Build the router with security headers
         let app = Router::new()
             .route("/mcp", post(handle_http_request))
+            // Security headers (OWASP recommendations)
+            .layer(SetResponseHeaderLayer::overriding(
+                header::X_CONTENT_TYPE_OPTIONS,
+                header::HeaderValue::from_static("nosniff"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::X_FRAME_OPTIONS,
+                header::HeaderValue::from_static("DENY"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::CONTENT_SECURITY_POLICY,
+                header::HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::CACHE_CONTROL,
+                header::HeaderValue::from_static("no-store"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::HeaderName::from_static("x-permitted-cross-domain-policies"),
+                header::HeaderValue::from_static("none"),
+            ))
             .layer(TraceLayer::new_for_http())
             .with_state(server);
 
@@ -695,12 +719,32 @@ mod http_transport {
     };
     use std::sync::{Arc, Mutex};
 
+    /// Per-client rate limit state.
+    #[derive(Debug, Clone)]
+    pub struct ClientRateLimit {
+        /// Number of requests in the current window.
+        pub request_count: usize,
+        /// Start of the current rate limit window.
+        pub window_start: std::time::Instant,
+    }
+
+    impl Default for ClientRateLimit {
+        fn default() -> Self {
+            Self {
+                request_count: 0,
+                window_start: std::time::Instant::now(),
+            }
+        }
+    }
+
     /// Shared state for HTTP transport.
     pub struct McpHttpState {
         pub tools: ToolRegistry,
         pub resources: ResourceHandler,
         pub prompts: PromptRegistry,
         pub authenticator: JwtAuthenticator,
+        /// Per-client rate limits keyed by JWT subject/issuer.
+        pub rate_limits: std::collections::HashMap<String, ClientRateLimit>,
     }
 
     /// HTTP request handler with JWT authentication.
@@ -740,8 +784,8 @@ mod http_transport {
             },
         };
 
-        // Validate JWT token
-        let Ok(state_guard) = state.lock() else {
+        // Validate JWT token and extract client identifier
+        let Ok(mut state_guard) = state.lock() else {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({
@@ -754,22 +798,72 @@ mod http_transport {
             );
         };
 
-        if let Err(e) = state_guard.authenticator.validate_header(auth_header) {
-            tracing::warn!(error = %e, "JWT authentication failed");
-            metrics::counter!("mcp_auth_failures_total", "transport" => "http").increment(1);
+        let claims = match state_guard.authenticator.validate_header(auth_header) {
+            Ok(claims) => claims,
+            Err(e) => {
+                tracing::warn!(error = %e, "JWT authentication failed");
+                metrics::counter!("mcp_auth_failures_total", "transport" => "http").increment(1);
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "error": {
+                            "code": -32000,
+                            "message": format!("Authentication failed: {e}")
+                        }
+                    })),
+                );
+            },
+        };
+
+        metrics::counter!("mcp_auth_success_total", "transport" => "http").increment(1);
+
+        // Per-client rate limiting using JWT subject as client identifier
+        #[allow(clippy::redundant_clone)] // claims.sub used after entry() via client_id reference
+        let client_id = claims.sub.clone();
+        let rate_limit = state_guard
+            .rate_limits
+            .entry(client_id.clone())
+            .or_default();
+
+        // Reset window if expired
+        if rate_limit.window_start.elapsed() > super::RATE_LIMIT_WINDOW {
+            rate_limit.request_count = 0;
+            rate_limit.window_start = std::time::Instant::now();
+        }
+
+        // Check rate limit
+        if rate_limit.request_count >= super::RATE_LIMIT_MAX_REQUESTS {
+            tracing::warn!(
+                client = %client_id,
+                requests = rate_limit.request_count,
+                "Per-client rate limit exceeded"
+            );
+            #[allow(clippy::redundant_clone)]
+            // metrics macro requires owned String for label value
+            metrics::counter!(
+                "mcp_rate_limit_exceeded_total",
+                "transport" => "http",
+                "client" => client_id.clone()
+            )
+            .increment(1);
             return (
-                StatusCode::UNAUTHORIZED,
+                StatusCode::TOO_MANY_REQUESTS,
                 Json(serde_json::json!({
                     "jsonrpc": "2.0",
                     "error": {
                         "code": -32000,
-                        "message": format!("Authentication failed: {e}")
+                        "message": format!(
+                            "Rate limit exceeded: max {} requests per {:?}",
+                            super::RATE_LIMIT_MAX_REQUESTS,
+                            super::RATE_LIMIT_WINDOW
+                        )
                     }
                 })),
             );
         }
 
-        metrics::counter!("mcp_auth_success_total", "transport" => "http").increment(1);
+        rate_limit.request_count += 1;
 
         // Parse JSON-RPC request
         let parsed: std::result::Result<JsonRpcRequest, _> = serde_json::from_str(&body);

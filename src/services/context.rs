@@ -174,6 +174,10 @@ impl ContextBuilderService {
     }
 
     /// Gets relevant memories for a namespace.
+    ///
+    /// Returns `None` if recall service is not configured, otherwise returns
+    /// an empty vector (placeholder for full storage integration).
+    #[allow(clippy::unnecessary_wraps)] // Returns Result for API consistency with other methods
     const fn get_relevant_memories(
         &self,
         _namespace: Namespace,
@@ -201,9 +205,8 @@ impl ContextBuilderService {
     ///
     /// Returns an error if statistics gathering fails.
     pub fn get_statistics(&self) -> Result<MemoryStatistics> {
-        let recall = match &self.recall {
-            Some(r) => r,
-            None => return Ok(MemoryStatistics::default()),
+        let Some(recall) = &self.recall else {
+            return Ok(MemoryStatistics::default());
         };
 
         // Search for all memories (broad query)
@@ -311,6 +314,7 @@ fn extract_topic(content: &str) -> Option<String> {
 }
 
 /// Truncates context to fit within a character limit.
+#[allow(clippy::option_if_let_else)] // if-let chain is clearer than nested map_or_else
 fn truncate_context(context: &str, max_chars: usize) -> String {
     if context.len() <= max_chars {
         return context.to_string();

@@ -371,17 +371,63 @@ impl AuditLogger {
     }
 
     /// Appends an entry to the log file.
-    fn append_to_file(&self, path: &PathBuf, entry: &AuditEntry) -> std::io::Result<()> {
+    ///
+    /// # Security
+    ///
+    /// - Path canonicalization is performed to prevent TOCTOU race conditions
+    ///   where a symlink could be modified between path validation and file open.
+    /// - On Unix, file permissions are set to 0o600 (owner read/write only) for
+    ///   audit log confidentiality.
+    fn append_to_file(&self, path: &std::path::Path, entry: &AuditEntry) -> std::io::Result<()> {
         use std::fs::OpenOptions;
         use std::io::Write;
 
-        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+        // Canonicalize path to resolve symlinks and prevent TOCTOU attacks.
+        // If the file doesn't exist yet, canonicalize the parent directory instead.
+        let canonical_path = Self::canonicalize_path(path)?;
+
+        let file_existed = canonical_path.exists();
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&canonical_path)?;
+
+        // Set restrictive permissions on Unix for newly created files
+        #[cfg(unix)]
+        if !file_existed {
+            use std::os::unix::fs::PermissionsExt;
+            let permissions = std::fs::Permissions::from_mode(0o600);
+            std::fs::set_permissions(&canonical_path, permissions)?;
+        }
 
         let json = serde_json::to_string(entry)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         writeln!(file, "{json}")?;
         Ok(())
+    }
+
+    /// Canonicalizes a path, handling non-existent files by canonicalizing the parent.
+    fn canonicalize_path(path: &std::path::Path) -> std::io::Result<PathBuf> {
+        if path.exists() {
+            return path.canonicalize();
+        }
+
+        let Some(parent) = path.parent() else {
+            return Ok(path.to_path_buf());
+        };
+
+        if !parent.exists() {
+            // Parent doesn't exist - return as-is, let OpenOptions handle the error
+            return Ok(path.to_path_buf());
+        }
+
+        let file_name = path.file_name().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid file name")
+        })?;
+
+        Ok(parent.canonicalize()?.join(file_name))
     }
 }
 

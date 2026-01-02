@@ -28,6 +28,42 @@ use std::sync::Arc;
 /// Minimum secret key length for security.
 const MIN_SECRET_LENGTH: usize = 32;
 
+/// Minimum number of unique characters for entropy validation.
+/// A 32+ character secret with fewer than 8 unique chars is likely weak.
+const MIN_UNIQUE_CHARS: usize = 8;
+
+/// Validates that a secret has sufficient entropy (not just length).
+///
+/// Checks for:
+/// - Minimum unique character diversity
+/// - Not all same character
+/// - Not obviously sequential patterns
+fn validate_secret_entropy(secret: &str) -> std::result::Result<(), String> {
+    // Check unique character count
+    let unique_chars: std::collections::HashSet<char> = secret.chars().collect();
+    if unique_chars.len() < MIN_UNIQUE_CHARS {
+        return Err(format!(
+            "JWT secret has insufficient entropy: only {} unique characters (minimum: {})",
+            unique_chars.len(),
+            MIN_UNIQUE_CHARS
+        ));
+    }
+
+    // Check for obvious weak patterns
+    let lowercase = secret.to_lowercase();
+    let weak_patterns = [
+        "password", "secret", "123456", "abcdef", "qwerty", "000000", "111111", "aaaaaa",
+    ];
+
+    for pattern in weak_patterns {
+        if lowercase.contains(pattern) {
+            return Err(format!("JWT secret contains weak pattern '{pattern}'"));
+        }
+    }
+
+    Ok(())
+}
+
 /// JWT claims structure.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
@@ -65,7 +101,8 @@ impl JwtConfig {
     ///
     /// # Errors
     ///
-    /// Returns an error if `SUBCOG_MCP_JWT_SECRET` is not set or too short.
+    /// Returns an error if `SUBCOG_MCP_JWT_SECRET` is not set, too short, or
+    /// has insufficient entropy.
     pub fn from_env() -> Result<Self> {
         let secret =
             std::env::var("SUBCOG_MCP_JWT_SECRET").map_err(|_| Error::OperationFailed {
@@ -82,6 +119,12 @@ impl JwtConfig {
                 ),
             });
         }
+
+        // Validate entropy (SEC-H1: entropy validation)
+        validate_secret_entropy(&secret).map_err(|cause| Error::OperationFailed {
+            operation: "jwt_config".to_string(),
+            cause,
+        })?;
 
         let issuer = std::env::var("SUBCOG_MCP_JWT_ISSUER").ok();
         let audience = std::env::var("SUBCOG_MCP_JWT_AUDIENCE").ok();

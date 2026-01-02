@@ -1,6 +1,64 @@
 //! Prompt template models.
 //!
 //! Provides data structures for user-defined prompt templates with variable substitution.
+//!
+//! # Code Block Detection Edge Cases
+//!
+//! Variable extraction automatically skips `{{variable}}` patterns inside fenced code blocks
+//! to avoid capturing documentation examples. This section documents edge cases and behaviors.
+//!
+//! ## Supported Code Block Syntaxes
+//!
+//! | Syntax | Supported | Notes |
+//! |--------|-----------|-------|
+//! | ` ```language ... ``` ` | ✓ | Standard fenced code block |
+//! | ` ``` ... ``` ` | ✓ | Code block without language |
+//! | ` ~~~ ... ~~~ ` | ✓ | Tilde fenced code block |
+//! | Indented code (4 spaces) | ✗ | Only fenced blocks detected |
+//!
+//! ## Edge Cases
+//!
+//! ### 1. Unclosed Code Blocks
+//!
+//! Input: triple-backtick rust, `let x = "{{var}}";`, no closing triple-backtick
+//!
+//! **Behavior**: Unclosed blocks are not detected, so variables inside ARE extracted.
+//! This is intentional - malformed content shouldn't silently exclude variables.
+//!
+//! ### 2. Nested Code Blocks (within markdown)
+//!
+//! Input: Outer tilde block containing inner backtick block with `{{inner_var}}`
+//!
+//! **Behavior**: Both tilde and backtick blocks are detected. Variables inside
+//! either syntax are excluded. Nested blocks are handled correctly.
+//!
+//! ### 3. Variables at Block Boundaries
+//!
+//! Input: `{{before}}` immediately before triple-backtick, `{{after}}` immediately after
+//!
+//! **Behavior**: Both `{{before}}` and `{{after}}` are extracted. Only content
+//! strictly between the opening and closing triple-backticks is excluded.
+//!
+//! ### 4. Inline Code (single backticks)
+//!
+//! Input: `Use {{var}} syntax for variables.` (single backticks around var)
+//!
+//! **Behavior**: Single backticks DO NOT exclude variables. Only triple-backtick
+//! fenced blocks are detected. `{{var}}` IS extracted.
+//!
+//! ### 5. Empty Code Blocks
+//!
+//! Input: Empty triple-backtick block
+//!
+//! **Behavior**: Empty blocks are detected but contain no variables to exclude.
+//!
+//! ## Workarounds
+//!
+//! If you need a `{{variable}}` pattern in your actual prompt output (not as a variable):
+//!
+//! 1. **Escape it**: Use `\{\{literal\}\}` (will be preserved literally)
+//! 2. **Put it in a code block**: Variables in fenced blocks are not substituted
+//! 3. **Use a variable with literal value**: Define `open_brace`/`close_brace` variables
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -10,24 +68,33 @@ use std::sync::LazyLock;
 
 use crate::{Error, Result};
 
+/// Creates a compile-time verified regex wrapped in [`LazyLock`].
+///
+/// # Safety
+///
+/// The regex pattern is verified at compile time and cannot fail at runtime.
+/// The `unreachable!()` branch exists only for type checking.
+macro_rules! lazy_regex {
+    ($pattern:expr) => {
+        LazyLock::new(|| Regex::new($pattern).unwrap_or_else(|_| unreachable!()))
+    };
+}
+
 /// Regex pattern for extracting template variables: `{{variable_name}}`.
-static VARIABLE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    // SAFETY: This regex is compile-time verified and cannot fail
-    Regex::new(r"\{\{(\w+)\}\}").unwrap_or_else(|_| unreachable!())
-});
+static VARIABLE_PATTERN: LazyLock<Regex> = lazy_regex!(r"\{\{(\w+)\}\}");
 
 /// Regex pattern for detecting any content between `{{` and `}}`.
-static VALIDATION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    // SAFETY: This regex is compile-time verified and cannot fail
-    Regex::new(r"\{\{([^}]*)\}\}").unwrap_or_else(|_| unreachable!())
-});
+static VALIDATION_PATTERN: LazyLock<Regex> = lazy_regex!(r"\{\{([^}]*)\}\}");
 
 /// Regex pattern for detecting fenced code blocks (triple backticks with optional language identifier).
-static CODE_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    // Matches: ``` followed by optional language, then content, then ```
-    // SAFETY: This regex is compile-time verified and cannot fail
-    Regex::new(r"```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```").unwrap_or_else(|_| unreachable!())
-});
+/// Matches: ``` followed by optional language, then content, then ```
+static CODE_BLOCK_BACKTICK_PATTERN: LazyLock<Regex> =
+    lazy_regex!(r"```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```");
+
+/// Regex pattern for detecting tilde fenced code blocks.
+/// Matches: ~~~ followed by optional language, then content, then ~~~
+static CODE_BLOCK_TILDE_PATTERN: LazyLock<Regex> =
+    lazy_regex!(r"~~~([a-zA-Z0-9_-]*)\n?([\s\S]*?)~~~");
 
 /// Represents a fenced code block region in content.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,9 +131,10 @@ impl CodeBlockRegion {
 /// Detects fenced code blocks in content.
 ///
 /// Returns regions sorted by start position. Handles:
-/// - Code blocks with language identifiers (```rust, ```markdown)
+/// - Code blocks with language identifiers (```rust, ```markdown, ~~~rust, ~~~markdown)
 /// - Empty code blocks
 /// - Multiple code blocks
+/// - Both backtick (\`\`\`) and tilde (~~~) syntax
 ///
 /// # Returns
 ///
@@ -75,7 +143,8 @@ impl CodeBlockRegion {
 pub fn detect_code_blocks(content: &str) -> Vec<CodeBlockRegion> {
     let mut regions = Vec::new();
 
-    for cap in CODE_BLOCK_PATTERN.captures_iter(content) {
+    // Detect backtick code blocks (```)
+    for cap in CODE_BLOCK_BACKTICK_PATTERN.captures_iter(content) {
         if let Some(full_match) = cap.get(0) {
             let language = cap
                 .get(1)
@@ -91,7 +160,24 @@ pub fn detect_code_blocks(content: &str) -> Vec<CodeBlockRegion> {
         }
     }
 
-    // Sort by start position (should already be sorted, but ensure it)
+    // Detect tilde code blocks (~~~)
+    for cap in CODE_BLOCK_TILDE_PATTERN.captures_iter(content) {
+        if let Some(full_match) = cap.get(0) {
+            let language = cap
+                .get(1)
+                .map(|m| m.as_str().trim())
+                .filter(|lang| !lang.is_empty())
+                .map(ToString::to_string);
+
+            regions.push(CodeBlockRegion::new(
+                full_match.start(),
+                full_match.end(),
+                language,
+            ));
+        }
+    }
+
+    // Sort by start position (combines backtick and tilde blocks in order)
     regions.sort_by_key(|r| r.start);
     regions
 }
@@ -1038,5 +1124,117 @@ mod tests {
         assert!(var_names.contains(&"file"));
         assert!(var_names.contains(&"issue_type"));
         assert!(!var_names.contains(&"example_var"));
+    }
+
+    // ============================================================
+    // Tilde Code Block Tests
+    // ============================================================
+
+    #[test]
+    fn test_detect_tilde_code_blocks_single() {
+        let content = "Before\n~~~rust\nlet x = 1;\n~~~\nAfter";
+        let blocks = detect_code_blocks(content);
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].language, Some("rust".to_string()));
+        assert!(blocks[0].start < blocks[0].end);
+    }
+
+    #[test]
+    fn test_detect_tilde_code_blocks_no_language() {
+        let content = "~~~\nplain code\n~~~";
+        let blocks = detect_code_blocks(content);
+
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].language.is_none());
+    }
+
+    #[test]
+    fn test_detect_tilde_code_blocks_empty() {
+        let content = "~~~\n~~~";
+        let blocks = detect_code_blocks(content);
+
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].language.is_none());
+    }
+
+    #[test]
+    fn test_detect_mixed_backtick_and_tilde_blocks() {
+        let content =
+            "```python\nprint('hello')\n```\n\nSome text\n\n~~~javascript\nconsole.log('hi');\n~~~";
+        let blocks = detect_code_blocks(content);
+
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].language, Some("python".to_string()));
+        assert_eq!(blocks[1].language, Some("javascript".to_string()));
+        assert!(blocks[0].end <= blocks[1].start);
+    }
+
+    #[test]
+    fn test_extract_variables_inside_tilde_block_not_extracted() {
+        let content = "Text before\n~~~\n{{timestamp}}\n~~~\nText after";
+        let vars = extract_variables(content);
+
+        // Variable inside tilde code block should NOT be extracted
+        assert!(vars.is_empty());
+    }
+
+    #[test]
+    fn test_extract_variables_mixed_tilde_and_backtick() {
+        let content = "Use {{var1}} here.\n\n~~~\n{{inside_tilde}}\n~~~\n\nThen {{var2}}.\n\n```rust\n{{inside_backtick}}\n```\n\nFinally {{var3}}.";
+        let vars = extract_variables(content);
+
+        // Only variables outside both code block types should be extracted
+        assert_eq!(vars.len(), 3);
+        let names: Vec<&str> = vars.iter().map(|v| v.name.as_str()).collect();
+        assert!(names.contains(&"var1"));
+        assert!(names.contains(&"var2"));
+        assert!(names.contains(&"var3"));
+        assert!(!names.contains(&"inside_tilde"));
+        assert!(!names.contains(&"inside_backtick"));
+    }
+
+    #[test]
+    fn test_detect_tilde_code_blocks_unclosed() {
+        // Unclosed tilde code blocks should not match (regex requires closing ~~~)
+        let content = "~~~rust\nunclosed code block without ending";
+        let blocks = detect_code_blocks(content);
+
+        assert!(blocks.is_empty());
+    }
+
+    #[test]
+    fn test_extract_variables_at_tilde_boundary() {
+        // Variable immediately before/after tilde code block
+        let content = "{{before}}~~~\ncode\n~~~{{after}}";
+        let vars = extract_variables(content);
+
+        // Both should be extracted (they're outside the code block)
+        assert_eq!(vars.len(), 2);
+        let names: Vec<&str> = vars.iter().map(|v| v.name.as_str()).collect();
+        assert!(names.contains(&"before"));
+        assert!(names.contains(&"after"));
+    }
+
+    #[test]
+    fn test_nested_tilde_within_backtick() {
+        // Backtick block containing tilde syntax (tilde inside should be literal)
+        let content = "{{outside}}\n```markdown\n~~~\n{{inside}}\n~~~\n```";
+        let vars = extract_variables(content);
+
+        // Only outside variable should be extracted
+        assert_eq!(vars.len(), 1);
+        assert_eq!(vars[0].name, "outside");
+    }
+
+    #[test]
+    fn test_nested_backtick_within_tilde() {
+        // Tilde block containing backtick syntax (backtick inside should be literal)
+        let content = "{{outside}}\n~~~markdown\n```\n{{inside}}\n```\n~~~";
+        let vars = extract_variables(content);
+
+        // Only outside variable should be extracted
+        assert_eq!(vars.len(), 1);
+        assert_eq!(vars[0].name, "outside");
     }
 }

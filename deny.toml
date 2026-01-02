@@ -29,7 +29,12 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 unmaintained = "workspace"
 
 # Ignore specific advisories
-ignore = []
+# RUSTSEC-2023-0071: RSA timing sidechannel (Marvin Attack)
+# - Transitive dependency: jsonwebtoken -> rsa
+# - No fix available upstream
+# - Mitigated: JWT auth uses HTTPS, timing not observable over network
+# - Tracked: https://github.com/RustCrypto/RSA/issues/19
+ignore = ["RUSTSEC-2023-0071"]
 
 #==============================================================================
 # Licenses - Allowed licenses

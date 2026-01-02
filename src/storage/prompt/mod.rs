@@ -15,6 +15,43 @@
 //! - `subcog://user/_prompts/api-design`
 //! - `subcog://org/_prompts/team-review`
 //!
+//! # Backend Selection Logic
+//!
+//! The backend is selected based on configuration and domain:
+//!
+//! ```text
+//! 1. Check explicit backend type in config/env
+//!     ├─► PostgreSQL if SUBCOG_POSTGRES_URL set + domain supports it
+//!     ├─► Redis if SUBCOG_REDIS_URL set + domain supports it
+//!     └─► Continue to step 2
+//!
+//! 2. Check domain scope
+//!     ├─► Project → Git Notes (portable, versioned with repo)
+//!     ├─► User → SQLite (local, performant, no server required)
+//!     └─► Org → SQLite with org-prefixed path
+//!
+//! 3. Fallback
+//!     └─► Filesystem (always available, human-readable YAML files)
+//! ```
+//!
+//! ## Selection Priority by Domain
+//!
+//! | Domain | Priority Order | Rationale |
+//! |--------|----------------|-----------|
+//! | Project | Git Notes → Filesystem | Version control integration |
+//! | User | `PostgreSQL` → `Redis` → `SQLite` → Filesystem | Configured external, then local |
+//! | Org | `PostgreSQL` → `Redis` → `SQLite` → Filesystem | Shared org database preferred |
+//!
+//! ## Backend Capabilities
+//!
+//! | Backend | ACID | Shared | Versioned | Query | Setup |
+//! |---------|------|--------|-----------|-------|-------|
+//! | Git Notes | No | Via git | Yes | Tags only | Git repo |
+//! | PostgreSQL | Yes | Yes | No | Full SQL | Server |
+//! | Redis | No | Yes | No | Pattern | Server |
+//! | `SQLite` | Yes | No | No | Full SQL | None |
+//! | Filesystem | No | Via sync | No | Glob only | None |
+//!
 //! # Domain Routing
 //!
 //! Each domain scope maps to an appropriate storage backend:

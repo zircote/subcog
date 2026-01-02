@@ -413,3 +413,323 @@ mod stub {
 
 #[cfg(not(feature = "postgres"))]
 pub use stub::PostgresBackend;
+
+#[cfg(all(test, feature = "postgres"))]
+mod tests {
+    use super::*;
+    use crate::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace};
+    use crate::storage::traits::PersistenceBackend;
+    use std::env;
+
+    /// Gets test database URL from environment or skips test.
+    fn get_test_db_url() -> Option<String> {
+        env::var("SUBCOG_TEST_POSTGRES_URL").ok()
+    }
+
+    /// Creates a test memory with given ID.
+    fn create_test_memory(id: &str) -> Memory {
+        Memory {
+            id: MemoryId::new(id),
+            content: format!("Test content for {id}"),
+            namespace: Namespace::Decisions,
+            domain: Domain {
+                organization: Some("test-org".to_string()),
+                project: Some("test-project".to_string()),
+                repository: Some("test-repo".to_string()),
+            },
+            status: MemoryStatus::Active,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            embedding: None,
+            tags: vec!["test".to_string(), "integration".to_string()],
+            source: Some("test.rs".to_string()),
+        }
+    }
+
+    /// Creates a unique table name for test isolation.
+    fn unique_table_name() -> String {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        format!("test_memories_{ts}")
+    }
+
+    #[test]
+    fn test_store_and_retrieve_memory() {
+        let Some(url) = get_test_db_url() else {
+            eprintln!("Skipping: SUBCOG_TEST_POSTGRES_URL not set");
+            return;
+        };
+
+        let table = unique_table_name();
+        let mut backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+
+        let memory = create_test_memory("test-store-retrieve");
+        backend.store(&memory).expect("Failed to store memory");
+
+        let retrieved = backend
+            .get(&MemoryId::new("test-store-retrieve"))
+            .expect("Failed to get memory");
+
+        assert!(retrieved.is_some());
+        let retrieved = retrieved.unwrap();
+        assert_eq!(retrieved.id.as_str(), "test-store-retrieve");
+        assert_eq!(retrieved.namespace, Namespace::Decisions);
+        assert_eq!(retrieved.status, MemoryStatus::Active);
+        assert!(retrieved.content.contains("test-store-retrieve"));
+    }
+
+    #[test]
+    fn test_get_nonexistent_memory() {
+        let Some(url) = get_test_db_url() else {
+            eprintln!("Skipping: SUBCOG_TEST_POSTGRES_URL not set");
+            return;
+        };
+
+        let table = unique_table_name();
+        let backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+
+        let result = backend
+            .get(&MemoryId::new("nonexistent-id"))
+            .expect("Failed to query");
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_update_existing_memory() {
+        let Some(url) = get_test_db_url() else {
+            eprintln!("Skipping: SUBCOG_TEST_POSTGRES_URL not set");
+            return;
+        };
+
+        let table = unique_table_name();
+        let mut backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+
+        let mut memory = create_test_memory("test-update");
+        backend.store(&memory).expect("Failed to store initial");
+
+        // Update the memory
+        memory.content = "Updated content".to_string();
+        memory.status = MemoryStatus::Archived;
+        memory.updated_at = 1_700_001_000;
+        backend.store(&memory).expect("Failed to store update");
+
+        let retrieved = backend
+            .get(&MemoryId::new("test-update"))
+            .expect("Failed to get")
+            .expect("Memory not found");
+
+        assert_eq!(retrieved.content, "Updated content");
+        assert_eq!(retrieved.status, MemoryStatus::Archived);
+        assert_eq!(retrieved.updated_at, 1_700_001_000);
+    }
+
+    #[test]
+    fn test_delete_memory() {
+        let Some(url) = get_test_db_url() else {
+            eprintln!("Skipping: SUBCOG_TEST_POSTGRES_URL not set");
+            return;
+        };
+
+        let table = unique_table_name();
+        let mut backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+
+        let memory = create_test_memory("test-delete");
+        backend.store(&memory).expect("Failed to store");
+
+        let deleted = backend
+            .delete(&MemoryId::new("test-delete"))
+            .expect("Failed to delete");
+        assert!(deleted);
+
+        let retrieved = backend
+            .get(&MemoryId::new("test-delete"))
+            .expect("Failed to get");
+        assert!(retrieved.is_none());
+    }
+
+    #[test]
+    fn test_delete_nonexistent_memory() {
+        let Some(url) = get_test_db_url() else {
+            eprintln!("Skipping: SUBCOG_TEST_POSTGRES_URL not set");
+            return;
+        };
+
+        let table = unique_table_name();
+        let mut backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+
+        let deleted = backend
+            .delete(&MemoryId::new("never-existed"))
+            .expect("Failed to delete");
+        assert!(!deleted);
+    }
+
+    #[test]
+    fn test_list_ids() {
+        let Some(url) = get_test_db_url() else {
+            eprintln!("Skipping: SUBCOG_TEST_POSTGRES_URL not set");
+            return;
+        };
+
+        let table = unique_table_name();
+        let mut backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+
+        // Initially empty
+        let ids = backend.list_ids().expect("Failed to list");
+        assert!(ids.is_empty());
+
+        // Add some memories
+        for i in 1..=3 {
+            let memory = create_test_memory(&format!("list-test-{i}"));
+            backend.store(&memory).expect("Failed to store");
+        }
+
+        let ids = backend.list_ids().expect("Failed to list");
+        assert_eq!(ids.len(), 3);
+    }
+
+    #[test]
+    fn test_memory_with_embedding() {
+        let Some(url) = get_test_db_url() else {
+            eprintln!("Skipping: SUBCOG_TEST_POSTGRES_URL not set");
+            return;
+        };
+
+        let table = unique_table_name();
+        let mut backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+
+        let mut memory = create_test_memory("test-embedding");
+        memory.embedding = Some(vec![0.1, 0.2, 0.3, 0.4, 0.5]);
+
+        backend.store(&memory).expect("Failed to store");
+
+        let retrieved = backend
+            .get(&MemoryId::new("test-embedding"))
+            .expect("Failed to get")
+            .expect("Memory not found");
+
+        assert!(retrieved.embedding.is_some());
+        let emb = retrieved.embedding.unwrap();
+        assert_eq!(emb.len(), 5);
+        assert!((emb[0] - 0.1).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_all_namespaces() {
+        let Some(url) = get_test_db_url() else {
+            eprintln!("Skipping: SUBCOG_TEST_POSTGRES_URL not set");
+            return;
+        };
+
+        let table = unique_table_name();
+        let mut backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+
+        let namespaces = [
+            Namespace::Decisions,
+            Namespace::Patterns,
+            Namespace::Learnings,
+            Namespace::Context,
+            Namespace::TechDebt,
+            Namespace::Apis,
+            Namespace::Config,
+            Namespace::Security,
+            Namespace::Performance,
+            Namespace::Testing,
+        ];
+
+        for (i, ns) in namespaces.iter().enumerate() {
+            let mut memory = create_test_memory(&format!("ns-test-{i}"));
+            memory.namespace = *ns;
+            backend.store(&memory).expect("Failed to store");
+
+            let retrieved = backend
+                .get(&MemoryId::new(format!("ns-test-{i}")))
+                .expect("Failed to get")
+                .expect("Memory not found");
+
+            assert_eq!(retrieved.namespace, *ns);
+        }
+    }
+}
+
+#[cfg(all(test, not(feature = "postgres")))]
+mod stub_tests {
+    use super::*;
+    use crate::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace};
+    use crate::storage::traits::PersistenceBackend;
+
+    fn create_test_memory() -> Memory {
+        Memory {
+            id: MemoryId::new("test-id"),
+            content: "Test content".to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            status: MemoryStatus::Active,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            embedding: None,
+            tags: vec![],
+            source: None,
+        }
+    }
+
+    #[test]
+    fn test_stub_store_returns_not_implemented() {
+        let mut backend = PostgresBackend::with_defaults();
+        let memory = create_test_memory();
+        let result = backend.store(&memory);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::Error::NotImplemented(_)
+        ));
+    }
+
+    #[test]
+    fn test_stub_get_returns_not_implemented() {
+        let backend = PostgresBackend::with_defaults();
+        let result = backend.get(&MemoryId::new("test"));
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::Error::NotImplemented(_)
+        ));
+    }
+
+    #[test]
+    fn test_stub_delete_returns_not_implemented() {
+        let mut backend = PostgresBackend::with_defaults();
+        let result = backend.delete(&MemoryId::new("test"));
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::Error::NotImplemented(_)
+        ));
+    }
+
+    #[test]
+    fn test_stub_list_ids_returns_not_implemented() {
+        let backend = PostgresBackend::with_defaults();
+        let result = backend.list_ids();
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::Error::NotImplemented(_)
+        ));
+    }
+
+    #[test]
+    fn test_stub_new_creates_instance() {
+        // Stub constructor always succeeds (returns stub, not Result)
+        let _backend = PostgresBackend::new("postgresql://custom", "custom_table");
+    }
+
+    #[test]
+    fn test_stub_with_defaults_creates_instance() {
+        // with_defaults() always succeeds (returns stub, not Result)
+        let _backend = PostgresBackend::with_defaults();
+    }
+}

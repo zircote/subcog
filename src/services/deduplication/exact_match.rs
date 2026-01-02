@@ -85,6 +85,8 @@ impl ExactMatchChecker {
             content_length = content.len()
         )
     )]
+    #[allow(clippy::cast_precision_loss)] // Precision loss acceptable for duration metrics
+    #[allow(clippy::option_if_let_else)] // if-let is clearer for this pattern
     pub fn check(
         &self,
         content: &str,

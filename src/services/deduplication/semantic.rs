@@ -48,7 +48,7 @@ use super::config::DeduplicationConfig;
 ///     println!("Semantic match found: {} (score: {:.2})", urn, score);
 /// }
 /// ```
-pub struct SemanticSimilarityChecker<E: Embedder, V: VectorBackend> {
+pub struct SemanticSimilarityChecker<E: Embedder + Send + Sync, V: VectorBackend + Send + Sync> {
     /// Embedder for generating vectors.
     embedder: Arc<E>,
     /// Vector backend for similarity search.
@@ -57,7 +57,7 @@ pub struct SemanticSimilarityChecker<E: Embedder, V: VectorBackend> {
     config: DeduplicationConfig,
 }
 
-impl<E: Embedder, V: VectorBackend> SemanticSimilarityChecker<E, V> {
+impl<E: Embedder + Send + Sync, V: VectorBackend + Send + Sync> SemanticSimilarityChecker<E, V> {
     /// Creates a new semantic similarity checker.
     ///
     /// # Arguments
@@ -207,6 +207,7 @@ impl<E: Embedder, V: VectorBackend> SemanticSimilarityChecker<E, V> {
     /// # Errors
     ///
     /// Returns an error if embedding generation fails.
+    #[cfg(test)]
     pub fn embed(&self, content: &str) -> Result<Vec<f32>> {
         self.embedder.embed(content)
     }
@@ -216,39 +217,11 @@ impl<E: Embedder, V: VectorBackend> SemanticSimilarityChecker<E, V> {
     /// # Arguments
     ///
     /// * `namespace` - The namespace to get threshold for
+    #[cfg(test)]
     #[must_use]
     pub fn get_threshold(&self, namespace: Namespace) -> f32 {
         self.config.get_threshold(namespace)
     }
-}
-
-/// Computes cosine similarity between two vectors.
-///
-/// # Arguments
-///
-/// * `a` - First vector
-/// * `b` - Second vector
-///
-/// # Returns
-///
-/// Cosine similarity normalized to [0, 1] range.
-/// Returns 0.0 if vectors have different dimensions or zero magnitude.
-#[must_use]
-pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    if a.len() != b.len() {
-        return 0.0;
-    }
-
-    let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-
-    if norm_a == 0.0 || norm_b == 0.0 {
-        return 0.0;
-    }
-
-    // Cosine similarity ranges from -1 to 1, normalize to 0 to 1
-    f32::midpoint(dot_product / (norm_a * norm_b), 1.0)
 }
 
 #[cfg(test)]
@@ -257,6 +230,36 @@ mod tests {
     use crate::embedding::FastEmbedEmbedder;
     use crate::storage::vector::UsearchBackend;
     use std::sync::RwLock;
+
+    /// Computes cosine similarity between two vectors.
+    ///
+    /// Used only for testing similarity calculations.
+    ///
+    /// # Arguments
+    ///
+    /// * `a` - First vector
+    /// * `b` - Second vector
+    ///
+    /// # Returns
+    ///
+    /// Cosine similarity normalized to [0, 1] range.
+    /// Returns 0.0 if vectors have different dimensions or zero magnitude.
+    fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+        if a.len() != b.len() {
+            return 0.0;
+        }
+
+        let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+        let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+
+        if norm_a == 0.0 || norm_b == 0.0 {
+            return 0.0;
+        }
+
+        // Cosine similarity ranges from -1 to 1, normalize to 0 to 1
+        f32::midpoint(dot_product / (norm_a * norm_b), 1.0)
+    }
 
     /// Creates a usearch backend for tests.
     /// Handles the Result return type when usearch-hnsw feature is enabled.

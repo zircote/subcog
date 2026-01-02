@@ -2,10 +2,70 @@
 //!
 //! Detects user intent to search for information and extracts topics for memory injection.
 //!
+//! # Architecture Note
+//!
+//! This module resides in `hooks/` because it is specifically designed for the
+//! `UserPromptSubmit` hook and tightly integrated with the hook pipeline. While
+//! the types (`SearchIntentType`, `SearchIntent`, `SearchIntentResult`) could
+//! theoretically move to `models/`, and `IntentDetector` to `services/`, the
+//! current placement offers:
+//!
+//! - **Cohesion**: All intent-related code in one place
+//! - **Encapsulation**: Hook-specific logic stays with hooks
+//! - **Simplicity**: No cross-module coordination needed
+//!
+//! Future refactoring should only move this if other modules need intent detection.
+//!
 //! This module supports three detection modes:
 //! - **Keyword**: Fast pattern-based detection using regex signals
 //! - **LLM**: High-accuracy classification using language models (with timeout)
 //! - **Hybrid**: Combined keyword + LLM detection with merged results
+//!
+//! # Intent Types and Detection
+//!
+//! | Intent | Trigger Patterns | Namespace Weights |
+//! |--------|------------------|-------------------|
+//! | `HowTo` | "how do I", "how to", "implement", "create" | patterns (2.0), learnings (1.5) |
+//! | `Location` | "where is", "find", "locate" | context (1.5), patterns (1.2) |
+//! | `Explanation` | "what is", "explain", "describe" | decisions (1.5), context (1.2) |
+//! | `Comparison` | "difference between", "vs", "compare" | decisions (2.0), patterns (1.5) |
+//! | `Troubleshoot` | "error", "fix", "not working", "debug" | blockers (2.0), learnings (1.5) |
+//! | `General` | "search", "show me" | All namespaces weighted equally |
+//!
+//! # Detection Flow
+//!
+//! ```text
+//! User Prompt
+//!     │
+//!     ├─► Keyword Detection (<10ms)
+//!     │       │
+//!     │       └─► Intent + Confidence + Topics
+//!     │
+//!     └─► LLM Classification (200ms timeout) [optional]
+//!             │
+//!             └─► Intent + Confidence + Topics
+//!                     │
+//!                     └─► Merge Results (hybrid mode)
+//!                             │
+//!                             └─► Final Intent + Topics
+//! ```
+//!
+//! # Confidence-Based Memory Injection
+//!
+//! | Confidence | Memory Count | Behavior |
+//! |------------|--------------|----------|
+//! | ≥ 0.8 (high) | 15 memories | Full context injection |
+//! | ≥ 0.5 (medium) | 10 memories | Standard injection |
+//! | < 0.5 (low) | 5 memories | Minimal injection |
+//!
+//! # Configuration
+//!
+//! | Environment Variable | Description | Default |
+//! |---------------------|-------------|---------|
+//! | `SUBCOG_SEARCH_INTENT_ENABLED` | Enable intent detection | `true` |
+//! | `SUBCOG_SEARCH_INTENT_USE_LLM` | Enable LLM classification | `true` |
+//! | `SUBCOG_SEARCH_INTENT_LLM_TIMEOUT_MS` | LLM timeout | `200` |
+//! | `SUBCOG_SEARCH_INTENT_MIN_CONFIDENCE` | Minimum confidence | `0.5` |
 
 use super::search_patterns::{SEARCH_SIGNALS, STOP_WORDS, SearchSignal};
 use serde::{Deserialize, Serialize};
