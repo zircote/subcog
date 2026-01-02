@@ -386,6 +386,7 @@ impl AuditLogger {
         // If the file doesn't exist yet, canonicalize the parent directory instead.
         let canonical_path = Self::canonicalize_path(path)?;
 
+        #[cfg(unix)]
         let file_existed = canonical_path.exists();
 
         let mut file = OpenOptions::new()
