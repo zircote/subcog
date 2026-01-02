@@ -11,11 +11,11 @@
 
 | Priority | Category | Tasks | Effort |
 |----------|----------|-------|--------|
-| P0 | Critical Code Review Findings | 5 items | High |
+| P0 | Critical Code Review Findings | 6 items | High |
 | P1 | STUB Implementations | 2 items | High |
 | P2 | PARTIAL Implementations | 4 items | Medium-High |
 | P3 | MISSING Features | 6 items | Low-Medium |
-| **Total** | | **17 items** | |
+| **Total** | | **18 items** | |
 
 ---
 
@@ -118,6 +118,41 @@
 - [ ] **0.5.2** Add tests for filesystem edge cases
   - [ ] Test with read-only directories
   - [ ] Test with missing parent directories
+
+---
+
+### 0.6 Lint Suppressions Cleanup
+
+**Reference:** [CODE_REVIEW_REPORT.md Appendix A](./CODE_REVIEW_REPORT.md#appendix-a-lint-suppressions-catalog)
+**Severity:** MEDIUM-HIGH
+**Impact:** Technical debt, potential hidden bugs
+
+#### Tasks
+
+- [ ] **0.6.1** Remove critical `let _ =` error discards
+  - [ ] `src/storage/persistence/filesystem.rs:111` - Propagate `create_dir_all` error
+  - [ ] `src/storage/persistence/filesystem.rs:148` - Propagate `create_dir_all` error
+  - [ ] `src/storage/index/sqlite.rs:106` - Handle migration `ALTER TABLE` result
+  - [ ] `src/storage/vector/usearch.rs:255` - Log or propagate `save()` error in Drop
+
+- [ ] **0.6.2** Narrow blanket module suppressions
+  - [ ] `src/services/mod.rs:6-20` - Move 7 `#![allow(...)]` to specific functions
+  - [ ] `src/storage/mod.rs:9-20` - Move 6 `#![allow(...)]` to specific functions
+  - [ ] `src/mcp/mod.rs:33-43` - Move 6 `#![allow(...)]` to specific functions
+  - [ ] `src/security/mod.rs:6-16` - Move 6 `#![allow(...)]` to specific functions
+
+- [ ] **0.6.3** Address deprecated API usage
+  - [ ] `src/services/mod.rs:348` - Remove `#[allow(deprecated)]` and update API call
+
+- [ ] **0.6.4** Review `#![allow(clippy::todo)]` in lib.rs
+  - [ ] `src/lib.rs:37` - Find and complete all TODO items or convert to issues
+  - [ ] Remove the blanket `#![allow(clippy::todo)]` when done
+
+- [ ] **0.6.5** Verify static regex `.expect()` patterns
+  - [ ] `src/hooks/search_intent.rs` - Confirm all 26 regex are compile-time constants
+  - [ ] `src/hooks/user_prompt.rs` - Confirm regex is compile-time constant
+  - [ ] `src/security/secrets.rs` - Confirm all 14 regex are compile-time constants
+  - [ ] `src/security/pii.rs` - Confirm all 8 regex are compile-time constants
 
 ---
 
@@ -515,6 +550,8 @@
 - [ ] ConsolidationService uses vector pre-filtering
 - [ ] Migration errors cause clean failure, not silent corruption
 - [ ] Filesystem backend reports directory creation failures
+- [ ] All critical `let _ =` patterns removed or converted to proper error handling
+- [ ] Blanket module suppressions narrowed to function-level
 - [ ] `make ci` passes
 
 #### Phase 1 Complete When:
