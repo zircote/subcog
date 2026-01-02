@@ -71,6 +71,9 @@ pub struct PromptSaveArgs {
     pub tags: Option<Vec<String>>,
     pub domain: Option<String>,
     pub variables: Option<Vec<PromptVariableArg>>,
+    /// Skip LLM-powered metadata enrichment.
+    #[serde(default)]
+    pub skip_enrichment: bool,
 }
 
 /// Variable definition argument for prompt.save.

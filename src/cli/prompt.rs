@@ -11,7 +11,10 @@
 
 use crate::config::SubcogConfig;
 use crate::models::{PromptTemplate, PromptVariable, substitute_variables};
-use crate::services::{PromptFilter, PromptFormat, PromptParser, PromptService};
+use crate::services::{
+    EnrichmentStatus, PartialMetadata, PromptFilter, PromptFormat, PromptParser, PromptService,
+    SaveOptions,
+};
 use crate::storage::index::DomainScope;
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -102,10 +105,13 @@ fn create_prompt_service() -> Result<PromptService, Box<dyn std::error::Error>> 
 /// * `domain` - Optional domain scope.
 /// * `from_file` - Optional file path to load from.
 /// * `from_stdin` - Whether to read from stdin.
+/// * `no_enrich` - Skip LLM-powered enrichment.
+/// * `dry_run` - Show enriched template without saving.
 ///
 /// # Errors
 ///
 /// Returns an error if saving fails.
+#[allow(clippy::too_many_arguments)]
 pub fn cmd_prompt_save(
     name: String,
     content: Option<String>,
@@ -114,39 +120,98 @@ pub fn cmd_prompt_save(
     domain: Option<String>,
     from_file: Option<PathBuf>,
     from_stdin: bool,
+    no_enrich: bool,
+    dry_run: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut service = create_prompt_service()?;
-
-    // Build template from input source
-    let mut template = build_template_from_input(name, content, from_file, from_stdin)?;
-
-    // Apply overrides
-    if let Some(desc) = description {
-        template.description = desc;
-    }
-    if let Some(tag_str) = tags {
-        template.tags = tag_str.split(',').map(|s| s.trim().to_string()).collect();
-    }
-
     let scope = parse_domain_scope(domain.as_deref());
 
-    let id = service.save(&template, scope)?;
+    // Build template from input source to get content
+    let base_template = build_template_from_input(name.clone(), content, from_file, from_stdin)?;
 
-    println!("Prompt saved:");
-    println!("  Name: {}", template.name);
-    println!("  ID: {id}");
+    // Build partial metadata from user-provided values
+    let existing = build_partial_metadata(description, tags, &base_template);
+
+    // Configure save options
+    let options = SaveOptions::new()
+        .with_skip_enrichment(no_enrich)
+        .with_dry_run(dry_run);
+
+    // Use save_with_enrichment (no LLM provider for now - fallback mode)
+    // Future: Add LLM provider integration when API keys are available
+    let result = service.save_with_enrichment::<crate::llm::OllamaClient>(
+        &name,
+        &base_template.content,
+        scope,
+        &options,
+        None, // No LLM provider - uses fallback
+        if existing.is_empty() {
+            None
+        } else {
+            Some(existing)
+        },
+    )?;
+
+    // Display output
+    if dry_run {
+        println!("Dry run - template would be saved as:");
+    } else {
+        println!("Prompt saved:");
+    }
+    println!("  Name: {}", result.template.name);
+    if !dry_run {
+        println!("  ID: {}", result.id);
+    }
     println!("  Domain: {}", domain_scope_to_display(scope));
-    if !template.variables.is_empty() {
+
+    // Show enrichment status
+    match result.enrichment_status {
+        EnrichmentStatus::Full => println!("  Enrichment: LLM-enhanced"),
+        EnrichmentStatus::Fallback => println!("  Enrichment: Basic (LLM unavailable)"),
+        EnrichmentStatus::Skipped => println!("  Enrichment: Skipped"),
+    }
+
+    if !result.template.description.is_empty() {
+        println!("  Description: {}", result.template.description);
+    }
+    if !result.template.variables.is_empty() {
         println!(
             "  Variables: {}",
-            format_variables_summary(&template.variables)
+            format_variables_summary(&result.template.variables)
         );
     }
-    if !template.tags.is_empty() {
-        println!("  Tags: {}", template.tags.join(", "));
+    if !result.template.tags.is_empty() {
+        println!("  Tags: {}", result.template.tags.join(", "));
     }
 
     Ok(())
+}
+
+/// Builds partial metadata from user-provided values.
+fn build_partial_metadata(
+    description: Option<String>,
+    tags: Option<String>,
+    base_template: &PromptTemplate,
+) -> PartialMetadata {
+    let mut meta = PartialMetadata::new();
+
+    // User-provided description
+    if let Some(desc) = description {
+        meta = meta.with_description(desc);
+    }
+
+    // User-provided tags
+    if let Some(tag_str) = tags {
+        let tag_list: Vec<String> = tag_str.split(',').map(|s| s.trim().to_string()).collect();
+        meta = meta.with_tags(tag_list);
+    }
+
+    // Variables from base template (if loaded from file with existing metadata)
+    if !base_template.variables.is_empty() {
+        meta = meta.with_variables(base_template.variables.clone());
+    }
+
+    meta
 }
 
 /// Builds a template from the various input sources.

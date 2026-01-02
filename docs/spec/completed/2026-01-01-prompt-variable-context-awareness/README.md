@@ -2,11 +2,13 @@
 project_id: SPEC-2026-01-01-002
 project_name: "Prompt Variable Context-Aware Extraction"
 slug: prompt-variable-context-awareness
-status: in-progress
+status: completed
 created: 2026-01-01T00:00:00Z
 approved: null
 started: 2026-01-02T00:20:00Z
-completed: null
+completed: 2026-01-02T01:20:00Z
+final_effort: 8 hours
+outcome: success
 expires: 2026-04-01T00:00:00Z
 superseded_by: null
 tags: [bug-fix, prompt, variable-extraction, parsing, llm-enrichment]

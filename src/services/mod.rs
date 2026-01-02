@@ -25,6 +25,7 @@ mod context;
 pub mod deduplication;
 mod enrichment;
 mod prompt;
+mod prompt_enrichment;
 mod prompt_parser;
 mod query_parser;
 mod recall;
@@ -38,7 +39,11 @@ pub use deduplication::{
     DeduplicationConfig, DeduplicationService, Deduplicator, DuplicateCheckResult, DuplicateReason,
 };
 pub use enrichment::{EnrichmentResult, EnrichmentService, EnrichmentStats};
-pub use prompt::{PromptFilter, PromptService};
+pub use prompt::{PromptFilter, PromptService, SaveOptions, SaveResult};
+pub use prompt_enrichment::{
+    ENRICHMENT_TIMEOUT, EnrichmentRequest, EnrichmentStatus, PROMPT_ENRICHMENT_SYSTEM_PROMPT,
+    PartialMetadata, PromptEnrichmentResult, PromptEnrichmentService,
+};
 pub use prompt_parser::{PromptFormat, PromptParser};
 pub use query_parser::parse_filter_query;
 pub use recall::RecallService;

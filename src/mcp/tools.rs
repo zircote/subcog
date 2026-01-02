@@ -318,6 +318,11 @@ impl ToolRegistry {
                             },
                             "required": ["name"]
                         }
+                    },
+                    "skip_enrichment": {
+                        "type": "boolean",
+                        "description": "Skip LLM-powered metadata enrichment (default: false)",
+                        "default": false
                     }
                 },
                 "required": ["name"],
@@ -856,42 +861,52 @@ impl ToolRegistry {
 
     /// Executes the prompt.save tool.
     fn execute_prompt_save(&self, arguments: Value) -> Result<ToolResult> {
+        use crate::services::{EnrichmentStatus, PartialMetadata, SaveOptions};
+
         let args: PromptSaveArgs =
             serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
         // Parse domain scope
         let domain = parse_domain_scope(args.domain.as_deref());
 
-        // Build template either from content or file
-        let template = if let Some(content) = args.content {
-            let mut t = PromptTemplate::new(&args.name, &content);
-            if let Some(desc) = args.description {
-                t = t.with_description(&desc);
-            }
-            if let Some(tags) = args.tags {
-                t = t.with_tags(tags);
-            }
-            if let Some(vars) = args.variables {
-                use crate::models::PromptVariable;
-                let variables: Vec<PromptVariable> = vars
-                    .into_iter()
-                    .map(|v| PromptVariable {
-                        name: v.name,
-                        description: v.description,
-                        default: v.default,
-                        required: v.required.unwrap_or(true),
-                    })
-                    .collect();
-                t = t.with_variables(variables);
-            }
-            t
+        // Get content either directly or from file
+        let (content, mut base_template) = if let Some(content) = args.content {
+            (content.clone(), PromptTemplate::new(&args.name, &content))
         } else if let Some(file_path) = args.file_path {
-            PromptParser::from_file(&file_path)?
+            let template = PromptParser::from_file(&file_path)?;
+            (template.content.clone(), template)
         } else {
             return Err(Error::InvalidInput(
                 "Either 'content' or 'file_path' must be provided".to_string(),
             ));
         };
+
+        // Build partial metadata from user-provided values
+        let mut existing = PartialMetadata::new();
+        if let Some(desc) = args.description {
+            existing = existing.with_description(desc);
+        }
+        if let Some(tags) = args.tags {
+            existing = existing.with_tags(tags);
+        }
+        if let Some(vars) = args.variables {
+            use crate::models::PromptVariable;
+            let variables: Vec<PromptVariable> = vars
+                .into_iter()
+                .map(|v| PromptVariable {
+                    name: v.name,
+                    description: v.description,
+                    default: v.default,
+                    required: v.required.unwrap_or(true),
+                })
+                .collect();
+            existing = existing.with_variables(variables);
+        } else if !base_template.variables.is_empty() {
+            existing = existing.with_variables(std::mem::take(&mut base_template.variables));
+        }
+
+        // Configure save options
+        let options = SaveOptions::new().with_skip_enrichment(args.skip_enrichment);
 
         // Get repo path and create service
         let services = ServiceContainer::from_current_dir()?;
@@ -901,7 +916,27 @@ impl ToolRegistry {
             .clone();
 
         let mut prompt_service = create_prompt_service(&repo_path);
-        let memory_id = prompt_service.save(&template, domain)?;
+
+        // Use save_with_enrichment (no LLM provider for now - fallback mode)
+        let result = prompt_service.save_with_enrichment::<crate::llm::OllamaClient>(
+            &args.name,
+            &content,
+            domain,
+            &options,
+            None, // No LLM provider - uses fallback
+            if existing.is_empty() {
+                None
+            } else {
+                Some(existing)
+            },
+        )?;
+
+        // Format enrichment status
+        let enrichment_str = match result.enrichment_status {
+            EnrichmentStatus::Full => "LLM-enhanced",
+            EnrichmentStatus::Fallback => "Basic (LLM unavailable)",
+            EnrichmentStatus::Skipped => "Skipped",
+        };
 
         Ok(ToolResult {
             content: vec![ToolContent::Text {
@@ -910,14 +945,29 @@ impl ToolRegistry {
                      Name: {}\n\
                      ID: {}\n\
                      Domain: {}\n\
+                     Enrichment: {}\n\
+                     Description: {}\n\
+                     Tags: {}\n\
                      Variables: {}",
-                    template.name,
-                    memory_id,
+                    result.template.name,
+                    result.id,
                     domain_scope_to_display(domain),
-                    if template.variables.is_empty() {
-                        "none".to_string()
+                    enrichment_str,
+                    if result.template.description.is_empty() {
+                        "(none)".to_string()
                     } else {
-                        template
+                        result.template.description.clone()
+                    },
+                    if result.template.tags.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        result.template.tags.join(", ")
+                    },
+                    if result.template.variables.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        result
+                            .template
                             .variables
                             .iter()
                             .map(|v| v.name.clone())
