@@ -40,10 +40,10 @@ This plan implements two features in four phases:
 **Description**: Add `detect_code_blocks()` function with regex pattern
 
 **Acceptance Criteria**:
-- [ ] `CodeBlockRegion` struct defined with start, end, language
-- [ ] `CODE_BLOCK_PATTERN` regex using LazyLock
-- [ ] Function returns sorted list of regions
-- [ ] Handles language identifiers (```rust, ```markdown)
+- [x] `CodeBlockRegion` struct defined with start, end, language
+- [x] `CODE_BLOCK_PATTERN` regex using LazyLock
+- [x] Function returns sorted list of regions
+- [x] Handles language identifiers (```rust, ```markdown)
 
 **Estimated Effort**: 1 hour
 
@@ -54,11 +54,11 @@ This plan implements two features in four phases:
 **Description**: Modify `extract_variables()` to skip code block regions
 
 **Acceptance Criteria**:
-- [ ] New internal function `extract_variables_with_exclusions()`
-- [ ] Original `extract_variables()` calls detection then extraction
-- [ ] Variables inside code blocks are NOT extracted
-- [ ] Variables outside code blocks ARE extracted
-- [ ] Backward compatible (empty content, no code blocks)
+- [x] New internal function `extract_variables_with_exclusions()`
+- [x] Original `extract_variables()` calls detection then extraction
+- [x] Variables inside code blocks are NOT extracted
+- [x] Variables outside code blocks ARE extracted
+- [x] Backward compatible (empty content, no code blocks)
 
 **Estimated Effort**: 1 hour
 
@@ -69,8 +69,8 @@ This plan implements two features in four phases:
 **Description**: Helper to check if a byte position falls within exclusion regions
 
 **Acceptance Criteria**:
-- [ ] `fn is_in_exclusion(position: usize, regions: &[CodeBlockRegion]) -> bool`
-- [ ] Efficient (binary search if needed, but regions are typically few)
+- [x] `fn is_in_exclusion(position: usize, regions: &[CodeBlockRegion]) -> bool`
+- [x] Efficient (binary search if needed, but regions are typically few)
 
 **Estimated Effort**: 30 minutes
 
@@ -81,12 +81,12 @@ This plan implements two features in four phases:
 **Description**: Comprehensive tests for code block detection
 
 **Test Cases**:
-- [ ] Single code block
-- [ ] Multiple code blocks
-- [ ] Code block with language identifier
-- [ ] Empty code block
-- [ ] Unclosed code block (edge case)
-- [ ] No code blocks
+- [x] Single code block
+- [x] Multiple code blocks
+- [x] Code block with language identifier
+- [x] Empty code block
+- [x] Unclosed code block (edge case)
+- [x] No code blocks
 
 **Estimated Effort**: 1 hour
 
@@ -97,11 +97,11 @@ This plan implements two features in four phases:
 **Description**: Tests for variable extraction with exclusions
 
 **Test Cases**:
-- [ ] Variable only outside code block → extracted
-- [ ] Variable only inside code block → NOT extracted
-- [ ] Variables both inside and outside → only outside extracted
-- [ ] Multiple code blocks with variables
-- [ ] Variable at exact boundary of code block
+- [x] Variable only outside code block → extracted
+- [x] Variable only inside code block → NOT extracted
+- [x] Variables both inside and outside → only outside extracted
+- [x] Multiple code blocks with variables
+- [x] Variable at exact boundary of code block
 
 **Estimated Effort**: 1 hour
 

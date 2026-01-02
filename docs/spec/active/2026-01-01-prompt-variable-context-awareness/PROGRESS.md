@@ -26,11 +26,11 @@ This document tracks implementation progress against the spec plan.
 
 | ID | Description | Status | Started | Completed | Notes |
 |----|-------------|--------|---------|-----------|-------|
-| 1.1 | Add Code Block Detection Function | pending | | | |
-| 1.2 | Add Exclusion-Aware Variable Extraction | pending | | | |
-| 1.3 | Add Position-in-Region Helper | pending | | | |
-| 1.4 | Unit Tests for Code Block Detection | pending | | | |
-| 1.5 | Unit Tests for Context-Aware Extraction | pending | | | |
+| 1.1 | Add Code Block Detection Function | done | 2026-01-02 | 2026-01-02 | CodeBlockRegion struct, CODE_BLOCK_PATTERN regex, detect_code_blocks() |
+| 1.2 | Add Exclusion-Aware Variable Extraction | done | 2026-01-02 | 2026-01-02 | extract_variables_with_exclusions() internal function |
+| 1.3 | Add Position-in-Region Helper | done | 2026-01-02 | 2026-01-02 | is_in_exclusion() helper |
+| 1.4 | Unit Tests for Code Block Detection | done | 2026-01-02 | 2026-01-02 | 8 tests covering all cases |
+| 1.5 | Unit Tests for Context-Aware Extraction | done | 2026-01-02 | 2026-01-02 | 10 tests including backward compat |
 | 2.1 | Create Enrichment Types | pending | | | |
 | 2.2 | Create Enrichment System Prompt | pending | | | |
 | 2.3 | Implement PromptEnrichmentService | pending | | | |
@@ -53,8 +53,8 @@ This document tracks implementation progress against the spec plan.
 
 | Phase | Name | Progress | Status |
 |-------|------|----------|--------|
-| 1 | Code Block Detection | 0% | pending |
-| 2 | Enrichment Service | 0% | pending |
+| 1 | Code Block Detection | 100% | done |
+| 2 | Enrichment Service | 0% | in-progress |
 | 3 | Integration | 0% | pending |
 | 4 | Testing & Docs | 0% | pending |
 
