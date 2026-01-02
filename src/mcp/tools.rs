@@ -2,15 +2,20 @@
 //!
 //! Provides tool handlers for the Model Context Protocol.
 
+use super::tool_types::{
+    CaptureArgs, ConsolidateArgs, EnrichArgs, PromptDeleteArgs, PromptGetArgs, PromptListArgs,
+    PromptRunArgs, PromptSaveArgs, RecallArgs, ReindexArgs, SyncArgs, build_filter_description,
+    domain_scope_to_display, find_missing_required_variables, format_content_for_detail,
+    format_variable_info, parse_domain_scope, parse_namespace, parse_search_mode,
+};
 use crate::config::SubcogConfig;
 use crate::models::{
-    CaptureRequest, DetailLevel, Domain, MemoryStatus, Namespace, PromptTemplate, SearchFilter,
-    SearchMode, substitute_variables,
+    CaptureRequest, DetailLevel, Domain, PromptTemplate, SearchFilter, SearchMode,
+    substitute_variables,
 };
 use crate::services::{
     PromptFilter, PromptParser, PromptService, ServiceContainer, parse_filter_query,
 };
-use crate::storage::index::DomainScope;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1239,252 +1244,14 @@ pub enum ToolContent {
     },
 }
 
-/// Arguments for the capture tool.
-#[derive(Debug, Deserialize)]
-struct CaptureArgs {
-    content: String,
-    namespace: String,
-    tags: Option<Vec<String>>,
-    source: Option<String>,
-}
-
-/// Arguments for the recall tool.
-#[derive(Debug, Deserialize)]
-struct RecallArgs {
-    query: String,
-    filter: Option<String>,
-    namespace: Option<String>,
-    mode: Option<String>,
-    detail: Option<String>,
-    limit: Option<usize>,
-}
-
-/// Arguments for the consolidate tool.
-#[derive(Debug, Deserialize)]
-struct ConsolidateArgs {
-    namespace: String,
-    query: Option<String>,
-    strategy: Option<String>,
-    dry_run: Option<bool>,
-}
-
-/// Arguments for the enrich tool.
-#[derive(Debug, Deserialize)]
-struct EnrichArgs {
-    memory_id: String,
-    enrich_tags: Option<bool>,
-    enrich_structure: Option<bool>,
-    add_context: Option<bool>,
-}
-
-/// Arguments for the sync tool.
-#[derive(Debug, Deserialize)]
-struct SyncArgs {
-    direction: Option<String>,
-}
-
-/// Arguments for the reindex tool.
-#[derive(Debug, Deserialize)]
-struct ReindexArgs {
-    repo_path: Option<String>,
-}
-
-// ============================================================================
-// Prompt Tool Arguments
-// ============================================================================
-
-/// Arguments for the prompt.save tool.
-#[derive(Debug, Deserialize)]
-struct PromptSaveArgs {
-    name: String,
-    content: Option<String>,
-    file_path: Option<String>,
-    description: Option<String>,
-    tags: Option<Vec<String>>,
-    domain: Option<String>,
-    variables: Option<Vec<PromptVariableArg>>,
-}
-
-/// Variable definition argument for prompt.save.
-#[derive(Debug, Deserialize)]
-struct PromptVariableArg {
-    name: String,
-    description: Option<String>,
-    default: Option<String>,
-    required: Option<bool>,
-}
-
-/// Arguments for the prompt.list tool.
-#[derive(Debug, Deserialize)]
-struct PromptListArgs {
-    domain: Option<String>,
-    tags: Option<Vec<String>>,
-    name_pattern: Option<String>,
-    limit: Option<usize>,
-}
-
-/// Arguments for the prompt.get tool.
-#[derive(Debug, Deserialize)]
-struct PromptGetArgs {
-    name: String,
-    domain: Option<String>,
-}
-
-/// Arguments for the prompt.run tool.
-#[derive(Debug, Deserialize)]
-struct PromptRunArgs {
-    name: String,
-    variables: Option<HashMap<String, String>>,
-    domain: Option<String>,
-}
-
-/// Arguments for the prompt.delete tool.
-#[derive(Debug, Deserialize)]
-struct PromptDeleteArgs {
-    name: String,
-    domain: String,
-}
-
-/// Parses a namespace string to Namespace enum.
-fn parse_namespace(s: &str) -> Namespace {
-    match s.to_lowercase().as_str() {
-        "decisions" => Namespace::Decisions,
-        "patterns" => Namespace::Patterns,
-        "learnings" => Namespace::Learnings,
-        "context" => Namespace::Context,
-        "tech-debt" | "techdebt" => Namespace::TechDebt,
-        "apis" => Namespace::Apis,
-        "config" => Namespace::Config,
-        "security" => Namespace::Security,
-        "performance" => Namespace::Performance,
-        "testing" => Namespace::Testing,
-        _ => Namespace::Decisions,
-    }
-}
-
-/// Parses a search mode string to `SearchMode` enum.
-fn parse_search_mode(s: &str) -> SearchMode {
-    match s.to_lowercase().as_str() {
-        "vector" => SearchMode::Vector,
-        "text" => SearchMode::Text,
-        _ => SearchMode::Hybrid,
-    }
-}
-
-/// Parses a domain scope string to `DomainScope` enum.
-fn parse_domain_scope(s: Option<&str>) -> DomainScope {
-    match s.map(str::to_lowercase).as_deref() {
-        Some("user") => DomainScope::User,
-        Some("org") => DomainScope::Org,
-        _ => DomainScope::Project,
-    }
-}
-
-/// Converts a `DomainScope` to a display string.
-const fn domain_scope_to_display(scope: DomainScope) -> &'static str {
-    match scope {
-        DomainScope::Project => "project",
-        DomainScope::User => "user",
-        DomainScope::Org => "org",
-    }
-}
-
-/// Formats a `PromptVariable` for display.
-fn format_variable_info(v: &crate::models::PromptVariable) -> String {
-    let mut info = format!("- **{{{{{}}}}}**", v.name);
-    if let Some(ref desc) = v.description {
-        info.push_str(&format!(": {desc}"));
-    }
-    if let Some(ref default) = v.default {
-        info.push_str(&format!(" (default: `{default}`)"));
-    }
-    if !v.required {
-        info.push_str(" [optional]");
-    }
-    info
-}
-
-/// Finds missing required variables.
-fn find_missing_required_variables<'a>(
-    variables: &'a [crate::models::PromptVariable],
-    values: &HashMap<String, String>,
-) -> Vec<&'a str> {
-    variables
-        .iter()
-        .filter(|v| v.required && v.default.is_none() && !values.contains_key(&v.name))
-        .map(|v| v.name.as_str())
-        .collect()
-}
-
-/// Truncates a string to a maximum length.
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
-    }
-}
-
-/// Formats content based on detail level.
-fn format_content_for_detail(content: &str, detail: DetailLevel) -> String {
-    if content.is_empty() {
-        return String::new();
-    }
-    match detail {
-        DetailLevel::Light => String::new(),
-        DetailLevel::Medium => format!("\n   {}", truncate(content, 200)),
-        DetailLevel::Everything => format!("\n   {content}"),
-    }
-}
-
-/// Builds a human-readable description of the active filters.
-fn build_filter_description(filter: &SearchFilter) -> String {
-    let mut parts = Vec::new();
-
-    if !filter.namespaces.is_empty() {
-        let ns_list: Vec<_> = filter.namespaces.iter().map(Namespace::as_str).collect();
-        parts.push(format!("ns:{}", ns_list.join(",")));
-    }
-
-    if !filter.tags.is_empty() {
-        for tag in &filter.tags {
-            parts.push(format!("tag:{tag}"));
-        }
-    }
-
-    if !filter.tags_any.is_empty() {
-        parts.push(format!("tag:{}", filter.tags_any.join(",")));
-    }
-
-    if !filter.excluded_tags.is_empty() {
-        for tag in &filter.excluded_tags {
-            parts.push(format!("-tag:{tag}"));
-        }
-    }
-
-    if let Some(ref pattern) = filter.source_pattern {
-        parts.push(format!("source:{pattern}"));
-    }
-
-    if !filter.statuses.is_empty() {
-        let status_list: Vec<_> = filter.statuses.iter().map(MemoryStatus::as_str).collect();
-        parts.push(format!("status:{}", status_list.join(",")));
-    }
-
-    if filter.created_after.is_some() {
-        parts.push("since:active".to_string());
-    }
-
-    if parts.is_empty() {
-        String::new()
-    } else {
-        format!(", filter: {}", parts.join(" "))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::tool_types::{
+        domain_scope_to_display, parse_domain_scope, parse_namespace, parse_search_mode, truncate,
+    };
+    use crate::models::{Namespace, SearchMode};
+    use crate::storage::index::DomainScope;
 
     #[test]
     fn test_tool_registry_creation() {

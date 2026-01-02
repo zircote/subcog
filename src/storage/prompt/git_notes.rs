@@ -4,6 +4,7 @@
 //! Each prompt is stored as a note attached to a separate empty commit.
 
 use super::PromptStorage;
+use crate::current_timestamp;
 use crate::git::{NotesManager, YamlFrontMatterParser};
 use crate::models::PromptTemplate;
 use crate::{Error, Result};
@@ -11,7 +12,6 @@ use git2::{Repository, Signature};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Notes ref for storing prompts.
 ///
@@ -266,14 +266,6 @@ fn extract_prompt_name(content: &str) -> Option<String> {
         .get("prompt_name")
         .and_then(|v| v.as_str())
         .map(String::from)
-}
-
-/// Gets current Unix timestamp.
-fn current_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 /// Simple glob pattern matching.

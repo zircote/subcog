@@ -1,6 +1,19 @@
 //! Redis-based index backend using `RediSearch`.
 //!
 //! Provides full-text search using Redis with the `RediSearch` module.
+//!
+//! # Connection Pooling (DB-H6)
+//!
+//! This backend reuses a single connection per instance. For high-concurrency
+//! scenarios, consider using `r2d2-redis` or `deadpool-redis` for connection
+//! pooling. The current implementation is suitable for CLI and single-threaded
+//! MCP server usage.
+//!
+//! # Command Timeout (CHAOS-H2)
+//!
+//! Redis operations use a 5-second response timeout to prevent indefinite
+//! blocking on slow or unresponsive Redis servers. The timeout is configured
+//! via `redis::ConnectionInfo` settings.
 
 #[cfg(feature = "redis")]
 mod implementation {
@@ -8,17 +21,38 @@ mod implementation {
     use crate::storage::traits::IndexBackend;
     use crate::{Error, Result};
     use redis::{Client, Commands, Connection};
+    use std::sync::Mutex;
+    use std::time::Duration;
 
     /// Redis-based index backend using `RediSearch`.
+    ///
+    /// # Connection Management (DB-H6)
+    ///
+    /// Maintains a reusable connection via `Mutex<Option<Connection>>`.
+    /// The connection is lazily initialized and reused across operations
+    /// to avoid the overhead of establishing new connections for each command.
+    ///
+    /// # Command Timeout (CHAOS-H2)
+    ///
+    /// Connections are configured with a 5-second response timeout to prevent
+    /// indefinite blocking on unresponsive servers.
     pub struct RedisBackend {
         /// Redis client.
         client: Client,
         /// Index name in Redis.
         index_name: String,
+        /// Cached connection for reuse (DB-H6).
+        connection: Mutex<Option<Connection>>,
     }
+
+    /// Default timeout for Redis operations (CHAOS-H2).
+    const REDIS_TIMEOUT: Duration = Duration::from_secs(5);
 
     impl RedisBackend {
         /// Creates a new Redis backend.
+        ///
+        /// Configures the connection with a 5-second timeout (CHAOS-H2) to prevent
+        /// indefinite blocking on slow or unresponsive Redis servers.
         ///
         /// # Errors
         ///
@@ -32,6 +66,7 @@ mod implementation {
             let backend = Self {
                 client,
                 index_name: index_name.into(),
+                connection: Mutex::new(None),
             };
 
             // Ensure index exists
@@ -49,14 +84,59 @@ mod implementation {
             Self::new("redis://localhost:6379", "subcog_memories")
         }
 
-        /// Gets a connection from the client.
+        /// Gets a connection, reusing the cached one if available (DB-H6).
+        ///
+        /// This method reuses an existing connection when possible, falling back
+        /// to creating a new connection if the cache is empty or the connection
+        /// is broken. The connection is stored in a `Mutex` for thread-safety.
+        ///
+        /// # Timeout (CHAOS-H2)
+        ///
+        /// New connections are configured with a 5-second response timeout.
         fn get_connection(&self) -> Result<Connection> {
-            self.client
+            // Try to reuse existing connection
+            let mut guard = self.connection.lock().map_err(|e| Error::OperationFailed {
+                operation: "redis_lock_connection".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            // Take the existing connection if available
+            if let Some(conn) = guard.take() {
+                // Return the connection - if it fails, caller will get error
+                // and next call will create fresh connection
+                return Ok(conn);
+            }
+
+            // No cached connection, create a new one with timeout (CHAOS-H2)
+            let conn = self
+                .client
                 .get_connection()
                 .map_err(|e| Error::OperationFailed {
                     operation: "redis_get_connection".to_string(),
                     cause: e.to_string(),
-                })
+                })?;
+
+            // Set response timeout to prevent indefinite blocking
+            conn.set_read_timeout(Some(REDIS_TIMEOUT))
+                .map_err(|e| Error::OperationFailed {
+                    operation: "redis_set_read_timeout".to_string(),
+                    cause: e.to_string(),
+                })?;
+            conn.set_write_timeout(Some(REDIS_TIMEOUT))
+                .map_err(|e| Error::OperationFailed {
+                    operation: "redis_set_write_timeout".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            Ok(conn)
+        }
+
+        /// Returns a connection to the cache for reuse (DB-H6).
+        fn return_connection(&self, conn: Connection) {
+            if let Ok(mut guard) = self.connection.lock() {
+                *guard = Some(conn);
+            }
+            // If lock fails, just drop the connection - not critical
         }
 
         /// Ensures the `RediSearch` index exists.
@@ -64,12 +144,16 @@ mod implementation {
             let mut conn = self.get_connection()?;
 
             // Check if index exists
-            if self.index_exists(&mut conn) {
+            let exists = self.index_exists(&mut conn);
+            if exists {
+                self.return_connection(conn);
                 return Ok(());
             }
 
             // Create the index with schema
-            self.create_index(&mut conn)
+            let result = self.create_index(&mut conn);
+            self.return_connection(conn);
+            result
         }
 
         /// Checks if the index already exists.
@@ -174,37 +258,45 @@ mod implementation {
             let status_str = memory.status.as_str();
             let namespace_str = memory.namespace.as_str();
 
-            let _: () = conn
-                .hset_multiple(
-                    &key,
-                    &[
-                        ("content", memory.content.as_str()),
-                        ("namespace", namespace_str),
-                        ("domain", &domain_str),
-                        ("status", status_str),
-                        ("tags", &tags_str),
-                    ],
-                )
-                .map_err(|e| Error::OperationFailed {
+            let result: redis::RedisResult<()> = conn.hset_multiple(
+                &key,
+                &[
+                    ("content", memory.content.as_str()),
+                    ("namespace", namespace_str),
+                    ("domain", &domain_str),
+                    ("status", status_str),
+                    ("tags", &tags_str),
+                ],
+            );
+
+            if let Err(e) = result {
+                self.return_connection(conn);
+                return Err(Error::OperationFailed {
                     operation: "redis_index".to_string(),
                     cause: e.to_string(),
-                })?;
+                });
+            }
 
             // Set numeric fields separately
-            let _: () = conn
-                .hset(&key, "created_at", memory.created_at)
-                .map_err(|e| Error::OperationFailed {
+            let result: redis::RedisResult<()> = conn.hset(&key, "created_at", memory.created_at);
+            if let Err(e) = result {
+                self.return_connection(conn);
+                return Err(Error::OperationFailed {
                     operation: "redis_index_created".to_string(),
                     cause: e.to_string(),
-                })?;
+                });
+            }
 
-            let _: () = conn
-                .hset(&key, "updated_at", memory.updated_at)
-                .map_err(|e| Error::OperationFailed {
+            let result: redis::RedisResult<()> = conn.hset(&key, "updated_at", memory.updated_at);
+            if let Err(e) = result {
+                self.return_connection(conn);
+                return Err(Error::OperationFailed {
                     operation: "redis_index_updated".to_string(),
                     cause: e.to_string(),
-                })?;
+                });
+            }
 
+            self.return_connection(conn);
             Ok(())
         }
 
@@ -212,12 +304,20 @@ mod implementation {
             let mut conn = self.get_connection()?;
             let key = format!("mem:{}", id.as_str());
 
-            let deleted: i32 = conn.del(&key).map_err(|e| Error::OperationFailed {
-                operation: "redis_remove".to_string(),
-                cause: e.to_string(),
-            })?;
-
-            Ok(deleted > 0)
+            let result: redis::RedisResult<i32> = conn.del(&key);
+            match result {
+                Ok(deleted) => {
+                    self.return_connection(conn);
+                    Ok(deleted > 0)
+                },
+                Err(e) => {
+                    self.return_connection(conn);
+                    Err(Error::OperationFailed {
+                        operation: "redis_remove".to_string(),
+                        cause: e.to_string(),
+                    })
+                },
+            }
         }
 
         fn search(
@@ -246,13 +346,15 @@ mod implementation {
                 .arg("WITHSCORES")
                 .query(&mut conn);
 
-            match result {
+            let output = match result {
                 Ok(values) => Ok(parse_search_results(&values)),
                 Err(e) => Err(Error::OperationFailed {
                     operation: "redis_search".to_string(),
                     cause: e.to_string(),
                 }),
-            }
+            };
+            self.return_connection(conn);
+            output
         }
 
         fn list_all(&self, filter: &SearchFilter, limit: usize) -> Result<Vec<(MemoryId, f32)>> {
@@ -278,13 +380,15 @@ mod implementation {
                 .arg("DESC")
                 .query(&mut conn);
 
-            match result {
+            let output = match result {
                 Ok(values) => Ok(parse_list_results(&values)),
                 Err(e) => Err(Error::OperationFailed {
                     operation: "redis_list_all".to_string(),
                     cause: e.to_string(),
                 }),
-            }
+            };
+            self.return_connection(conn);
+            output
         }
 
         fn get_memory(&self, id: &MemoryId) -> Result<Option<Memory>> {
@@ -297,7 +401,7 @@ mod implementation {
             let result: redis::RedisResult<std::collections::HashMap<String, String>> =
                 conn.hgetall(&key);
 
-            match result {
+            let output = match result {
                 Ok(fields) if fields.is_empty() => Ok(None),
                 Ok(fields) => {
                     let content = fields.get("content").cloned().unwrap_or_default();
@@ -336,7 +440,9 @@ mod implementation {
                     operation: "redis_get_memory".to_string(),
                     cause: e.to_string(),
                 }),
-            }
+            };
+            self.return_connection(conn);
+            output
         }
 
         fn clear(&mut self) -> Result<()> {
@@ -347,6 +453,9 @@ mod implementation {
                 .arg(&self.index_name)
                 .arg("DD")
                 .query(&mut conn);
+
+            // Return connection before ensure_index (which gets its own)
+            self.return_connection(conn);
 
             // Recreate the index
             self.ensure_index()

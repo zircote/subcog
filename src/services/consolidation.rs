@@ -3,13 +3,14 @@
 //! Manages memory lifecycle, clustering, and archival.
 
 use crate::Result;
+use crate::current_timestamp;
 use crate::models::{
     EdgeType, Memory, MemoryEvent, MemoryStatus, MemoryTier, Namespace, RetentionScore,
 };
 use crate::security::record_event;
 use crate::storage::traits::PersistenceBackend;
 use std::collections::HashMap;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 use tracing::instrument;
 
 /// Service for consolidating and managing memory lifecycle.
@@ -285,14 +286,6 @@ impl ConsolidationStats {
             )
         }
     }
-}
-
-/// Gets the current Unix timestamp.
-fn current_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

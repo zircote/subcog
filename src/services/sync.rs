@@ -4,10 +4,11 @@
 
 use crate::Result;
 use crate::config::Config;
+use crate::current_timestamp;
 use crate::git::RemoteManager;
 use crate::models::MemoryEvent;
 use crate::security::record_event;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 use tracing::instrument;
 
 /// Service for synchronizing memories with remote storage.
@@ -226,13 +227,6 @@ impl SyncService {
 
         remote.get_remote_url(&remote_name)
     }
-}
-
-fn current_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 impl Default for SyncService {

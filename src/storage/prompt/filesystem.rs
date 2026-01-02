@@ -3,11 +3,11 @@
 //! Stores prompts as JSON files in a directory structure.
 
 use super::PromptStorage;
+use crate::current_timestamp;
 use crate::models::PromptTemplate;
 use crate::{Error, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Filesystem-based prompt storage.
 ///
@@ -85,14 +85,6 @@ impl FilesystemPromptStorage {
             cause: e.to_string(),
         })
     }
-}
-
-/// Gets current Unix timestamp.
-fn current_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 /// Simple glob pattern matching.

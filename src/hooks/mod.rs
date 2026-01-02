@@ -10,6 +10,7 @@ mod post_tool_use;
 mod pre_compact;
 mod search_context;
 mod search_intent;
+mod search_patterns;
 mod session_start;
 mod stop;
 mod user_prompt;

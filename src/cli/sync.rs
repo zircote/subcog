@@ -16,3 +16,19 @@ impl Default for SyncCommand {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sync_command_new() {
+        let _cmd = SyncCommand::new();
+    }
+
+    #[test]
+    #[allow(clippy::default_constructed_unit_structs)]
+    fn test_sync_command_default() {
+        let _cmd = SyncCommand::default();
+    }
+}

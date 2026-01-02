@@ -1,6 +1,12 @@
 //! MCP server setup and lifecycle.
 //!
 //! Implements a JSON-RPC based MCP server over stdio or HTTP transport.
+//!
+//! ## Transport Authentication
+//!
+//! - **Stdio**: No authentication required (trusted local process).
+//! - **HTTP**: JWT bearer token authentication required (SEC-H1).
+//!   Requires `http` feature and `SUBCOG_MCP_JWT_SECRET` environment variable.
 
 use crate::mcp::{PromptRegistry, ResourceHandler, ToolRegistry};
 use crate::observability::flush_metrics;
@@ -11,6 +17,9 @@ use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::time::{Duration, Instant};
 use tracing::info_span;
+
+#[cfg(feature = "http")]
+use crate::mcp::auth::{JwtAuthenticator, JwtConfig};
 
 /// Maximum requests per rate limit window.
 const RATE_LIMIT_MAX_REQUESTS: usize = 1000;
@@ -46,6 +55,9 @@ pub struct McpServer {
     transport: Transport,
     /// HTTP port (if using HTTP transport).
     port: u16,
+    /// JWT authenticator for HTTP transport (SEC-H1).
+    #[cfg(feature = "http")]
+    jwt_authenticator: Option<JwtAuthenticator>,
 }
 
 impl McpServer {
@@ -61,7 +73,36 @@ impl McpServer {
             prompts: PromptRegistry::new(),
             transport: Transport::Stdio,
             port: 3000,
+            #[cfg(feature = "http")]
+            jwt_authenticator: None,
         }
+    }
+
+    /// Sets the JWT authenticator for HTTP transport (SEC-H1).
+    ///
+    /// # Arguments
+    ///
+    /// * `authenticator` - The JWT authenticator to use for validating bearer tokens.
+    #[cfg(feature = "http")]
+    #[must_use]
+    pub fn with_jwt_authenticator(mut self, authenticator: JwtAuthenticator) -> Self {
+        self.jwt_authenticator = Some(authenticator);
+        self
+    }
+
+    /// Initializes JWT authentication from environment variables.
+    ///
+    /// Reads `SUBCOG_MCP_JWT_SECRET`, `SUBCOG_MCP_JWT_ISSUER`, and
+    /// `SUBCOG_MCP_JWT_AUDIENCE` from the environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `SUBCOG_MCP_JWT_SECRET` is not set or too short.
+    #[cfg(feature = "http")]
+    pub fn with_jwt_from_env(self) -> Result<Self> {
+        let config = JwtConfig::from_env()?;
+        let authenticator = JwtAuthenticator::new(&config);
+        Ok(self.with_jwt_authenticator(authenticator))
     }
 
     /// Tries to initialize `ResourceHandler` with services.
@@ -190,14 +231,68 @@ impl McpServer {
         Ok(())
     }
 
-    /// Runs the server over HTTP.
+    /// Runs the server over HTTP with JWT authentication (SEC-H1).
+    ///
+    /// Requires the `http` feature and `SUBCOG_MCP_JWT_SECRET` environment variable.
+    #[cfg(feature = "http")]
+    fn run_http(&mut self) -> Result<()> {
+        use axum::{Router, routing::post};
+        use std::sync::{Arc, Mutex};
+        use tower_http::trace::TraceLayer;
+
+        // Ensure JWT authenticator is configured
+        let authenticator = self.jwt_authenticator.clone().ok_or_else(|| {
+            Error::OperationFailed {
+                operation: "run_http".to_string(),
+                cause: "JWT authenticator not configured. Set SUBCOG_MCP_JWT_SECRET or call with_jwt_authenticator()".to_string(),
+            }
+        })?;
+
+        // Create shared state for the server
+        let server = Arc::new(Mutex::new(McpHttpState {
+            tools: std::mem::take(&mut self.tools),
+            resources: std::mem::take(&mut self.resources),
+            prompts: std::mem::take(&mut self.prompts),
+            authenticator,
+        }));
+
+        // Build the router
+        let app = Router::new()
+            .route("/mcp", post(handle_http_request))
+            .layer(TraceLayer::new_for_http())
+            .with_state(server);
+
+        // Create tokio runtime for the server
+        let rt = tokio::runtime::Runtime::new().map_err(|e| Error::OperationFailed {
+            operation: "create_runtime".to_string(),
+            cause: e.to_string(),
+        })?;
+
+        let addr = std::net::SocketAddr::from(([0, 0, 0, 0], self.port));
+        tracing::info!(port = self.port, "Starting MCP HTTP server with JWT auth");
+
+        rt.block_on(async {
+            let listener =
+                tokio::net::TcpListener::bind(addr)
+                    .await
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "bind".to_string(),
+                        cause: e.to_string(),
+                    })?;
+
+            axum::serve(listener, app)
+                .await
+                .map_err(|e| Error::OperationFailed {
+                    operation: "serve".to_string(),
+                    cause: e.to_string(),
+                })
+        })
+    }
+
+    /// Runs the server over HTTP (feature not enabled).
+    #[cfg(not(feature = "http"))]
     fn run_http(&self) -> Result<()> {
-        // HTTP transport would require an async runtime and HTTP server
-        // For now, return an error indicating it's not fully implemented
-        Err(Error::NotImplemented(format!(
-            "HTTP transport on port {} requires async runtime",
-            self.port
-        )))
+        Err(Error::FeatureNotEnabled("http".to_string()))
     }
 
     /// Handles a JSON-RPC request.
@@ -579,6 +674,302 @@ struct JsonRpcError {
     #[serde(skip_serializing_if = "Option::is_none")]
     data: Option<Value>,
 }
+
+// HTTP transport implementation (SEC-H1)
+#[cfg(feature = "http")]
+#[allow(
+    clippy::too_many_lines,
+    clippy::excessive_nesting,
+    clippy::significant_drop_tightening
+)]
+mod http_transport {
+    use super::{
+        DispatchResult, JsonRpcRequest, PromptRegistry, ResourceHandler, ToolRegistry, Value,
+    };
+    use crate::mcp::auth::JwtAuthenticator;
+    use axum::{
+        Json,
+        extract::State,
+        http::{HeaderMap, StatusCode},
+        response::IntoResponse,
+    };
+    use std::sync::{Arc, Mutex};
+
+    /// Shared state for HTTP transport.
+    pub struct McpHttpState {
+        pub tools: ToolRegistry,
+        pub resources: ResourceHandler,
+        pub prompts: PromptRegistry,
+        pub authenticator: JwtAuthenticator,
+    }
+
+    /// HTTP request handler with JWT authentication.
+    pub async fn handle_http_request(
+        State(state): State<Arc<Mutex<McpHttpState>>>,
+        headers: HeaderMap,
+        body: String,
+    ) -> impl IntoResponse {
+        // Extract and validate Authorization header
+        let auth_header = match headers.get("authorization") {
+            Some(h) => match h.to_str() {
+                Ok(s) => s,
+                Err(_) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "error": {
+                                "code": -32600,
+                                "message": "Invalid Authorization header encoding"
+                            }
+                        })),
+                    );
+                },
+            },
+            None => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "error": {
+                            "code": -32000,
+                            "message": "Missing Authorization header"
+                        }
+                    })),
+                );
+            },
+        };
+
+        // Validate JWT token
+        let Ok(state_guard) = state.lock() else {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32603,
+                        "message": "Internal server error"
+                    }
+                })),
+            );
+        };
+
+        if let Err(e) = state_guard.authenticator.validate_header(auth_header) {
+            tracing::warn!(error = %e, "JWT authentication failed");
+            metrics::counter!("mcp_auth_failures_total", "transport" => "http").increment(1);
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32000,
+                        "message": format!("Authentication failed: {e}")
+                    }
+                })),
+            );
+        }
+
+        metrics::counter!("mcp_auth_success_total", "transport" => "http").increment(1);
+
+        // Parse JSON-RPC request
+        let parsed: std::result::Result<JsonRpcRequest, _> = serde_json::from_str(&body);
+        drop(state_guard);
+
+        match parsed {
+            Ok(req) => {
+                let Ok(mut state_guard) = state.lock() else {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "error": {
+                                "code": -32603,
+                                "message": "Internal server error"
+                            }
+                        })),
+                    );
+                };
+
+                let result = dispatch_http_method(&mut state_guard, &req.method, req.params);
+
+                let response = match result {
+                    Ok(value) => serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": req.id,
+                        "result": value
+                    }),
+                    Err((code, message)) => serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": req.id,
+                        "error": {
+                            "code": code,
+                            "message": message
+                        }
+                    }),
+                };
+
+                (StatusCode::OK, Json(response))
+            },
+            Err(e) => (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32700,
+                        "message": format!("Parse error: {e}")
+                    }
+                })),
+            ),
+        }
+    }
+
+    /// Dispatches a method call for HTTP transport.
+    fn dispatch_http_method(
+        state: &mut McpHttpState,
+        method: &str,
+        params: Option<Value>,
+    ) -> DispatchResult {
+        match method {
+            "initialize" => Ok(serde_json::json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "tools": {},
+                    "resources": {},
+                    "prompts": {},
+                    "sampling": {}
+                },
+                "serverInfo": {
+                    "name": "subcog",
+                    "version": env!("CARGO_PKG_VERSION")
+                }
+            })),
+            "tools/list" => {
+                let tools: Vec<Value> = state
+                    .tools
+                    .list_tools()
+                    .iter()
+                    .map(|t| {
+                        serde_json::json!({
+                            "name": t.name,
+                            "description": t.description,
+                            "inputSchema": t.input_schema
+                        })
+                    })
+                    .collect();
+                Ok(serde_json::json!({ "tools": tools }))
+            },
+            "tools/call" => {
+                let params = params.ok_or((-32602, "Missing params".to_string()))?;
+                let name = params
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or((-32602, "Missing tool name".to_string()))?;
+                let arguments = params
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({}));
+
+                match state.tools.execute(name, arguments) {
+                    Ok(result) => Ok(serde_json::json!({
+                        "content": result.content,
+                        "isError": result.is_error
+                    })),
+                    Err(e) => Ok(serde_json::json!({
+                        "content": [{ "type": "text", "text": e.to_string() }],
+                        "isError": true
+                    })),
+                }
+            },
+            "resources/list" => {
+                let resources: Vec<Value> = state
+                    .resources
+                    .list_resources()
+                    .iter()
+                    .map(|r| {
+                        serde_json::json!({
+                            "uri": r.uri,
+                            "name": r.name,
+                            "description": r.description,
+                            "mimeType": r.mime_type
+                        })
+                    })
+                    .collect();
+                Ok(serde_json::json!({ "resources": resources }))
+            },
+            "resources/read" => {
+                let params = params.ok_or((-32602, "Missing params".to_string()))?;
+                let uri = params
+                    .get("uri")
+                    .and_then(|v| v.as_str())
+                    .ok_or((-32602, "Missing resource URI".to_string()))?;
+
+                match state.resources.get_resource(uri) {
+                    Ok(content) => Ok(serde_json::json!({
+                        "contents": [{
+                            "uri": content.uri,
+                            "mimeType": content.mime_type,
+                            "text": content.text
+                        }]
+                    })),
+                    Err(e) => Err((-32603, e.to_string())),
+                }
+            },
+            "prompts/list" => {
+                let prompts: Vec<Value> = state
+                    .prompts
+                    .list_prompts()
+                    .iter()
+                    .map(|p| {
+                        serde_json::json!({
+                            "name": p.name,
+                            "description": p.description,
+                            "arguments": p.arguments.iter().map(|a| {
+                                serde_json::json!({
+                                    "name": a.name,
+                                    "description": a.description,
+                                    "required": a.required
+                                })
+                            }).collect::<Vec<Value>>()
+                        })
+                    })
+                    .collect();
+                Ok(serde_json::json!({ "prompts": prompts }))
+            },
+            "prompts/get" => {
+                let params = params.ok_or((-32602, "Missing params".to_string()))?;
+                let name = params
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or((-32602, "Missing prompt name".to_string()))?;
+                let arguments = params
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({}));
+
+                match state.prompts.get_prompt_messages(name, &arguments) {
+                    Some(messages) => {
+                        let msgs: Vec<Value> = messages
+                            .iter()
+                            .map(|m| {
+                                serde_json::json!({
+                                    "role": m.role,
+                                    "content": m.content
+                                })
+                            })
+                            .collect();
+                        Ok(serde_json::json!({ "messages": msgs }))
+                    },
+                    None => Err((-32602, format!("Unknown prompt: {name}"))),
+                }
+            },
+            "ping" => Ok(serde_json::json!({})),
+            _ => Err((-32601, format!("Method not found: {method}"))),
+        }
+    }
+}
+
+#[cfg(feature = "http")]
+pub use http_transport::{McpHttpState, handle_http_request};
 
 #[cfg(test)]
 mod tests {

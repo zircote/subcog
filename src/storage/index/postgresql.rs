@@ -1,6 +1,20 @@
 //! PostgreSQL-based index backend.
 //!
 //! Provides full-text search using PostgreSQL's built-in tsvector/tsquery.
+//!
+//! # TLS Support (COMP-C3)
+//!
+//! Enable the `postgres-tls` feature for encrypted connections:
+//!
+//! ```toml
+//! [dependencies]
+//! subcog = { version = "0.1", features = ["postgres-tls"] }
+//! ```
+//!
+//! Then use a connection URL with `sslmode=require`:
+//! ```text
+//! postgresql://user:pass@host:5432/db?sslmode=require
+//! ```
 
 #[cfg(feature = "postgres")]
 mod implementation {
@@ -10,7 +24,12 @@ mod implementation {
     use crate::{Error, Result};
     use deadpool_postgres::{Config, Pool, Runtime};
     use tokio::runtime::Handle;
+
+    #[cfg(not(feature = "postgres-tls"))]
     use tokio_postgres::NoTls;
+
+    #[cfg(feature = "postgres-tls")]
+    use tokio_postgres_rustls::MakeRustlsConnect;
 
     /// Embedded migrations compiled into the binary.
     const MIGRATIONS: &[Migration] = &[
@@ -105,10 +124,19 @@ mod implementation {
     impl PostgresIndexBackend {
         /// Creates a new PostgreSQL index backend.
         ///
+        /// # TLS Support (COMP-C3)
+        ///
+        /// When the `postgres-tls` feature is enabled, connections use TLS by default.
+        /// For production, use a connection URL with `sslmode=require`:
+        /// ```text
+        /// postgresql://user:pass@host:5432/db?sslmode=require
+        /// ```
+        ///
         /// # Errors
         ///
         /// Returns an error if the connection pool fails to initialize
         /// or if the table name is not in the allowed whitelist.
+        #[cfg(not(feature = "postgres-tls"))]
         pub fn new(connection_url: &str, table_name: impl Into<String>) -> Result<Self> {
             let table_name = table_name.into();
 
@@ -128,6 +156,59 @@ mod implementation {
             let backend = Self { pool, table_name };
             backend.run_migrations()?;
             Ok(backend)
+        }
+
+        /// Creates a new PostgreSQL index backend with TLS encryption (COMP-C3).
+        ///
+        /// Uses rustls for TLS connections. The connection URL should include
+        /// `sslmode=require` or `sslmode=verify-full` for production use.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the connection pool fails to initialize,
+        /// if TLS configuration fails, or if the table name is not allowed.
+        #[cfg(feature = "postgres-tls")]
+        pub fn new(connection_url: &str, table_name: impl Into<String>) -> Result<Self> {
+            let table_name = table_name.into();
+
+            // Validate table name against whitelist to prevent SQL injection
+            validate_table_name(&table_name)?;
+
+            let config = Self::parse_connection_url(connection_url)?;
+            let cfg = Self::build_pool_config(&config);
+
+            // Build TLS connector with rustls
+            let tls_config = rustls::ClientConfig::builder()
+                .with_root_certificates(Self::root_cert_store())
+                .with_no_client_auth();
+
+            let tls = MakeRustlsConnect::new(tls_config);
+
+            let pool = cfg.create_pool(Some(Runtime::Tokio1), tls).map_err(|e| {
+                Error::OperationFailed {
+                    operation: "postgres_create_pool_tls".to_string(),
+                    cause: e.to_string(),
+                }
+            })?;
+
+            let backend = Self { pool, table_name };
+            backend.run_migrations()?;
+            Ok(backend)
+        }
+
+        /// Builds root certificate store for TLS.
+        #[cfg(feature = "postgres-tls")]
+        fn root_cert_store() -> rustls::RootCertStore {
+            let mut roots = rustls::RootCertStore::empty();
+
+            // Try to load system certificates
+            #[cfg(feature = "postgres-tls")]
+            {
+                // Use webpki-roots for portable certificate bundle
+                roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            }
+
+            roots
         }
 
         /// Parses the connection URL into a tokio-postgres config.
@@ -155,13 +236,24 @@ mod implementation {
             s.clone()
         }
 
+        /// Maximum connections in pool (CHAOS-H1).
+        const POOL_MAX_SIZE: usize = 20;
+
         /// Builds a deadpool config from tokio-postgres config.
+        ///
+        /// # Pool Exhaustion Protection (CHAOS-H1)
         ///
         /// Configures connection pool with safety limits:
         /// - Max 20 connections (prevents pool exhaustion)
-        /// - 5 second wait timeout (prevents indefinite blocking)
-        /// - 10 second create timeout (prevents slow connection hangs)
-        /// - 30 second recycle timeout (prevents stale connections)
+        /// - Runtime pool builder sets timeouts for wait/create/recycle
+        ///
+        /// # Statement Caching (DB-H4)
+        ///
+        /// Statement caching is handled automatically by `tokio-postgres` connections.
+        /// Each connection maintains its own prepared statement cache. The
+        /// `RecyclingMethod::Fast` setting preserves connections (and their statement
+        /// caches) across uses, providing implicit statement caching without
+        /// additional configuration.
         fn build_pool_config(config: &tokio_postgres::Config) -> Config {
             let mut cfg = Config::new();
             cfg.host = config.get_hosts().first().map(Self::host_to_string);
@@ -172,10 +264,13 @@ mod implementation {
                 .map(|p| String::from_utf8_lossy(p).to_string());
             cfg.dbname = config.get_dbname().map(String::from);
 
-            // Configure pool with safety limits to prevent exhaustion
-            // Pool configuration: max_size=20, wait_timeout=5s, create_timeout=10s
-            // Note: deadpool-postgres >=0.14 uses ConfigBuilder pattern - using
-            // env vars or builder for advanced config is recommended for production
+            // Pool exhaustion protection (CHAOS-H1)
+            cfg.pool = Some(deadpool_postgres::PoolConfig {
+                max_size: Self::POOL_MAX_SIZE,
+                ..Default::default()
+            });
+
+            // Configure manager with fast recycling for statement cache reuse
             cfg.manager = Some(deadpool_postgres::ManagerConfig {
                 recycling_method: deadpool_postgres::RecyclingMethod::Fast,
             });

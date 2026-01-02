@@ -16,3 +16,19 @@ impl Default for ServeCommand {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_serve_command_new() {
+        let _cmd = ServeCommand::new();
+    }
+
+    #[test]
+    #[allow(clippy::default_constructed_unit_structs)]
+    fn test_serve_command_default() {
+        let _cmd = ServeCommand::default();
+    }
+}

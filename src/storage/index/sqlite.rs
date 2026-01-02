@@ -452,46 +452,67 @@ impl IndexBackend for SqliteBackend {
             let tags_str = memory.tags.join(",");
             let domain_str = memory.domain.to_string();
 
-            // Insert or replace in main table
-            conn.execute(
-                "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags, source)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    memory.id.as_str(),
-                    memory.namespace.as_str(),
-                    domain_str,
-                    memory.status.as_str(),
-                    memory.created_at,
-                    tags_str,
-                    memory.source.as_deref()
-                ],
-            )
-            .map_err(|e| Error::OperationFailed {
-                operation: "insert_memory".to_string(),
-                cause: e.to_string(),
-            })?;
+            // Use transaction for atomicity (DB-H2)
+            conn.execute("BEGIN IMMEDIATE", [])
+                .map_err(|e| Error::OperationFailed {
+                    operation: "begin_transaction".to_string(),
+                    cause: e.to_string(),
+                })?;
 
-            // Delete from FTS if exists (FTS5 uses rowid internally for matching)
-            conn.execute(
-                "DELETE FROM memories_fts WHERE id = ?1",
-                params![memory.id.as_str()],
-            )
-            .map_err(|e| Error::OperationFailed {
-                operation: "delete_fts".to_string(),
-                cause: e.to_string(),
-            })?;
+            let result = (|| {
+                // Insert or replace in main table
+                conn.execute(
+                    "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags, source)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![
+                        memory.id.as_str(),
+                        memory.namespace.as_str(),
+                        domain_str,
+                        memory.status.as_str(),
+                        memory.created_at,
+                        tags_str,
+                        memory.source.as_deref()
+                    ],
+                )
+                .map_err(|e| Error::OperationFailed {
+                    operation: "insert_memory".to_string(),
+                    cause: e.to_string(),
+                })?;
 
-            // Insert into FTS table
-            conn.execute(
-                "INSERT INTO memories_fts (id, content, tags) VALUES (?1, ?2, ?3)",
-                params![memory.id.as_str(), memory.content, tags_str],
-            )
-            .map_err(|e| Error::OperationFailed {
-                operation: "insert_fts".to_string(),
-                cause: e.to_string(),
-            })?;
+                // Delete from FTS if exists (FTS5 uses rowid internally for matching)
+                conn.execute(
+                    "DELETE FROM memories_fts WHERE id = ?1",
+                    params![memory.id.as_str()],
+                )
+                .map_err(|e| Error::OperationFailed {
+                    operation: "delete_fts".to_string(),
+                    cause: e.to_string(),
+                })?;
 
-            Ok(())
+                // Insert into FTS table
+                conn.execute(
+                    "INSERT INTO memories_fts (id, content, tags) VALUES (?1, ?2, ?3)",
+                    params![memory.id.as_str(), memory.content, tags_str],
+                )
+                .map_err(|e| Error::OperationFailed {
+                    operation: "insert_fts".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+                Ok(())
+            })();
+
+            if result.is_ok() {
+                conn.execute("COMMIT", [])
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "commit_transaction".to_string(),
+                        cause: e.to_string(),
+                    })?;
+            } else {
+                let _ = conn.execute("ROLLBACK", []);
+            }
+
+            result
         })();
 
         let status = if result.is_ok() { "success" } else { "error" };
@@ -505,25 +526,46 @@ impl IndexBackend for SqliteBackend {
         let result = (|| {
             let conn = acquire_lock(&self.conn);
 
-            // Delete from FTS
-            conn.execute(
-                "DELETE FROM memories_fts WHERE id = ?1",
-                params![id.as_str()],
-            )
-            .map_err(|e| Error::OperationFailed {
-                operation: "delete_fts".to_string(),
-                cause: e.to_string(),
-            })?;
-
-            // Delete from main table
-            let deleted = conn
-                .execute("DELETE FROM memories WHERE id = ?1", params![id.as_str()])
+            // Use transaction for atomicity (DB-H2)
+            conn.execute("BEGIN IMMEDIATE", [])
                 .map_err(|e| Error::OperationFailed {
-                    operation: "delete_memory".to_string(),
+                    operation: "begin_transaction".to_string(),
                     cause: e.to_string(),
                 })?;
 
-            Ok(deleted > 0)
+            let result = (|| {
+                // Delete from FTS
+                conn.execute(
+                    "DELETE FROM memories_fts WHERE id = ?1",
+                    params![id.as_str()],
+                )
+                .map_err(|e| Error::OperationFailed {
+                    operation: "delete_fts".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+                // Delete from main table
+                let deleted = conn
+                    .execute("DELETE FROM memories WHERE id = ?1", params![id.as_str()])
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "delete_memory".to_string(),
+                        cause: e.to_string(),
+                    })?;
+
+                Ok(deleted > 0)
+            })();
+
+            if result.is_ok() {
+                conn.execute("COMMIT", [])
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "commit_transaction".to_string(),
+                        cause: e.to_string(),
+                    })?;
+            } else {
+                let _ = conn.execute("ROLLBACK", []);
+            }
+
+            result
         })();
 
         let status = if result.is_ok() { "success" } else { "error" };
@@ -605,10 +647,21 @@ impl IndexBackend for SqliteBackend {
                     cause: e.to_string(),
                 })?;
 
-                // Normalize BM25 score (BM25 returns negative values, lower is better)
-                // Convert to 0-1 range where higher is better
+                // Normalize BM25 score (DB-H3 fix)
+                // SQLite FTS5 bm25() returns negative values where MORE NEGATIVE = BETTER MATCH
+                // For example: -10.0 is a better match than -2.0
+                //
+                // We negate and apply sigmoid normalization to map to 0-1 range:
+                // - Negate: makes higher values = better matches
+                // - Sigmoid: 1.0 / (1.0 + e^(-k*x)) where k controls steepness
+                // - This gives values in (0, 1) with ~0.5 for score=0
                 #[allow(clippy::cast_possible_truncation)]
-                let normalized_score = (1.0 / (1.0 - score)).min(1.0) as f32;
+                let normalized_score = {
+                    // Negate so higher = better, apply sigmoid with k=0.5 for gentle curve
+                    let positive_score = -score;
+                    let sigmoid = 1.0 / (1.0 + (-0.5 * positive_score).exp());
+                    sigmoid.clamp(0.0, 1.0) as f32
+                };
 
                 results.push((MemoryId::new(id), normalized_score));
             }
@@ -632,19 +685,41 @@ impl IndexBackend for SqliteBackend {
         let result = (|| {
             let conn = acquire_lock(&self.conn);
 
-            conn.execute("DELETE FROM memories_fts", [])
+            // Use transaction for atomicity (DB-H2)
+            conn.execute("BEGIN IMMEDIATE", [])
                 .map_err(|e| Error::OperationFailed {
-                    operation: "clear_fts".to_string(),
+                    operation: "begin_transaction".to_string(),
                     cause: e.to_string(),
                 })?;
 
-            conn.execute("DELETE FROM memories", [])
-                .map_err(|e| Error::OperationFailed {
-                    operation: "clear_memories".to_string(),
-                    cause: e.to_string(),
+            let result = (|| {
+                conn.execute("DELETE FROM memories_fts", []).map_err(|e| {
+                    Error::OperationFailed {
+                        operation: "clear_fts".to_string(),
+                        cause: e.to_string(),
+                    }
                 })?;
 
-            Ok(())
+                conn.execute("DELETE FROM memories", [])
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "clear_memories".to_string(),
+                        cause: e.to_string(),
+                    })?;
+
+                Ok(())
+            })();
+
+            if result.is_ok() {
+                conn.execute("COMMIT", [])
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "commit_transaction".to_string(),
+                        cause: e.to_string(),
+                    })?;
+            } else {
+                let _ = conn.execute("ROLLBACK", []);
+            }
+
+            result
         })();
 
         let status = if result.is_ok() { "success" } else { "error" };
@@ -730,6 +805,166 @@ impl IndexBackend for SqliteBackend {
         self.record_operation_metrics("get_memory", start, status);
         result
     }
+
+    /// Retrieves multiple memories in a single batch query (PERF-C1 fix).
+    ///
+    /// Uses a single SQL query with IN clause instead of N individual queries.
+    #[instrument(skip(self, ids), fields(operation = "get_memories_batch", backend = "sqlite", count = ids.len()))]
+    fn get_memories_batch(&self, ids: &[MemoryId]) -> Result<Vec<Option<Memory>>> {
+        let start = Instant::now();
+
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let result = (|| {
+            let conn = acquire_lock(&self.conn);
+
+            // Build placeholders for IN clause
+            let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
+
+            let sql = format!(
+                "SELECT m.id, m.namespace, m.domain, m.status, m.created_at, m.tags, f.content
+                 FROM memories m
+                 JOIN memories_fts f ON m.id = f.id
+                 WHERE m.id IN ({})",
+                placeholders.join(", ")
+            );
+
+            let mut stmt = conn.prepare(&sql).map_err(|e| Error::OperationFailed {
+                operation: "prepare_get_memories_batch".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            // Collect results into a HashMap for O(1) lookup
+            let id_strs: Vec<&str> = ids.iter().map(MemoryId::as_str).collect();
+            let mut memory_map: std::collections::HashMap<String, Memory> =
+                std::collections::HashMap::with_capacity(ids.len());
+
+            let rows = stmt
+                .query_map(rusqlite::params_from_iter(id_strs.iter()), |row| {
+                    Ok(MemoryRow {
+                        id: row.get(0)?,
+                        namespace: row.get(1)?,
+                        domain: row.get(2)?,
+                        status: row.get(3)?,
+                        created_at: row.get(4)?,
+                        tags: row.get(5)?,
+                        content: row.get(6)?,
+                    })
+                })
+                .map_err(|e| Error::OperationFailed {
+                    operation: "execute_get_memories_batch".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            for row in rows {
+                let memory_row = row.map_err(|e| Error::OperationFailed {
+                    operation: "read_batch_row".to_string(),
+                    cause: e.to_string(),
+                })?;
+                let id = memory_row.id.clone();
+                memory_map.insert(id, build_memory_from_row(memory_row));
+            }
+
+            // Return memories in the same order as input IDs
+            Ok(ids
+                .iter()
+                .map(|id| memory_map.remove(id.as_str()))
+                .collect())
+        })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        self.record_operation_metrics("get_memories_batch", start, status);
+        result
+    }
+
+    /// Re-indexes all memories in a single transaction (DB-H2).
+    ///
+    /// This is more efficient than the default implementation which creates
+    /// a transaction per memory.
+    #[instrument(skip(self, memories), fields(operation = "reindex", backend = "sqlite", count = memories.len()))]
+    fn reindex(&mut self, memories: &[Memory]) -> Result<()> {
+        let start = Instant::now();
+
+        if memories.is_empty() {
+            return Ok(());
+        }
+
+        let result = (|| {
+            let conn = acquire_lock(&self.conn);
+
+            // Use a single transaction for all operations
+            conn.execute("BEGIN IMMEDIATE", [])
+                .map_err(|e| Error::OperationFailed {
+                    operation: "begin_transaction".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            let result = (|| {
+                for memory in memories {
+                    let tags_str = memory.tags.join(",");
+                    let domain_str = memory.domain.to_string();
+
+                    // Insert or replace in main table
+                    conn.execute(
+                        "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags, source)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        params![
+                            memory.id.as_str(),
+                            memory.namespace.as_str(),
+                            domain_str,
+                            memory.status.as_str(),
+                            memory.created_at,
+                            tags_str,
+                            memory.source.as_deref()
+                        ],
+                    )
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "insert_memory".to_string(),
+                        cause: e.to_string(),
+                    })?;
+
+                    // Delete from FTS if exists
+                    conn.execute(
+                        "DELETE FROM memories_fts WHERE id = ?1",
+                        params![memory.id.as_str()],
+                    )
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "delete_fts".to_string(),
+                        cause: e.to_string(),
+                    })?;
+
+                    // Insert into FTS table
+                    conn.execute(
+                        "INSERT INTO memories_fts (id, content, tags) VALUES (?1, ?2, ?3)",
+                        params![memory.id.as_str(), memory.content, tags_str],
+                    )
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "insert_fts".to_string(),
+                        cause: e.to_string(),
+                    })?;
+                }
+                Ok(())
+            })();
+
+            if result.is_ok() {
+                conn.execute("COMMIT", [])
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "commit_transaction".to_string(),
+                        cause: e.to_string(),
+                    })?;
+            } else {
+                let _ = conn.execute("ROLLBACK", []);
+            }
+
+            result
+        })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        self.record_operation_metrics("reindex", start, status);
+        result
+    }
 }
 
 // Implement PersistenceBackend for SqliteBackend so it can be used with ConsolidationService
@@ -755,12 +990,12 @@ impl crate::storage::traits::PersistenceBackend for SqliteBackend {
                 cause: e.to_string(),
             })?;
 
-            let mut stmt = conn
-                .prepare("SELECT id FROM memories")
-                .map_err(|e| Error::OperationFailed {
-                    operation: "prepare_list_ids".to_string(),
-                    cause: e.to_string(),
-                })?;
+            let mut stmt =
+                conn.prepare("SELECT id FROM memories")
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "prepare_list_ids".to_string(),
+                        cause: e.to_string(),
+                    })?;
 
             let ids: Vec<MemoryId> = stmt
                 .query_map([], |row| {
@@ -919,5 +1154,64 @@ mod tests {
             .search("different", &SearchFilter::new(), 10)
             .unwrap();
         assert_eq!(new_results.len(), 1);
+    }
+
+    #[test]
+    fn test_get_memories_batch() {
+        let mut backend = SqliteBackend::in_memory().unwrap();
+
+        let memory1 = create_test_memory("batch1", "First memory", Namespace::Decisions);
+        let memory2 = create_test_memory("batch2", "Second memory", Namespace::Learnings);
+        let memory3 = create_test_memory("batch3", "Third memory", Namespace::Patterns);
+
+        backend.index(&memory1).unwrap();
+        backend.index(&memory2).unwrap();
+        backend.index(&memory3).unwrap();
+
+        // Fetch all three in a batch
+        let ids = vec![
+            MemoryId::new("batch1"),
+            MemoryId::new("batch2"),
+            MemoryId::new("batch3"),
+        ];
+        let results = backend.get_memories_batch(&ids).unwrap();
+
+        assert_eq!(results.len(), 3);
+        assert!(results[0].is_some());
+        assert!(results[1].is_some());
+        assert!(results[2].is_some());
+
+        // Verify order is preserved
+        assert_eq!(results[0].as_ref().unwrap().id.as_str(), "batch1");
+        assert_eq!(results[1].as_ref().unwrap().id.as_str(), "batch2");
+        assert_eq!(results[2].as_ref().unwrap().id.as_str(), "batch3");
+    }
+
+    #[test]
+    fn test_get_memories_batch_with_missing() {
+        let mut backend = SqliteBackend::in_memory().unwrap();
+
+        let memory1 = create_test_memory("exists1", "Memory one", Namespace::Decisions);
+        backend.index(&memory1).unwrap();
+
+        // Request both existing and non-existing
+        let ids = vec![
+            MemoryId::new("exists1"),
+            MemoryId::new("does_not_exist"),
+            MemoryId::new("also_missing"),
+        ];
+        let results = backend.get_memories_batch(&ids).unwrap();
+
+        assert_eq!(results.len(), 3);
+        assert!(results[0].is_some());
+        assert!(results[1].is_none());
+        assert!(results[2].is_none());
+    }
+
+    #[test]
+    fn test_get_memories_batch_empty() {
+        let backend = SqliteBackend::in_memory().unwrap();
+        let results = backend.get_memories_batch(&[]).unwrap();
+        assert!(results.is_empty());
     }
 }

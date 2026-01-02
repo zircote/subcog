@@ -1,6 +1,83 @@
-//! LLM client abstraction.
+//! LLM client abstraction (DOC-H3).
 //!
-//! Provides a unified interface for different LLM providers.
+//! Provides a unified interface for different LLM providers including
+//! Anthropic Claude, `OpenAI` GPT, Ollama (local), and LM Studio (local).
+//!
+//! # Supported Providers
+//!
+//! | Provider | Client | Environment Variables |
+//! |----------|--------|----------------------|
+//! | Anthropic | [`AnthropicClient`] | `ANTHROPIC_API_KEY` |
+//! | `OpenAI` | [`OpenAiClient`] | `OPENAI_API_KEY` |
+//! | Ollama | [`OllamaClient`] | `OLLAMA_HOST`, `OLLAMA_MODEL` |
+//! | LM Studio | [`LmStudioClient`] | `LMSTUDIO_ENDPOINT`, `LMSTUDIO_MODEL` |
+//!
+//! # Usage Examples
+//!
+//! ## Basic Completion
+//!
+//! ```rust,ignore
+//! use subcog::llm::{LlmProvider, AnthropicClient};
+//!
+//! let client = AnthropicClient::new();
+//! let response = client.complete("Explain Rust ownership in one sentence")?;
+//! println!("{response}");
+//! ```
+//!
+//! ## With System Prompt
+//!
+//! ```rust,ignore
+//! use subcog::llm::{LlmProvider, OpenAiClient};
+//!
+//! let client = OpenAiClient::new();
+//! let response = client.complete_with_system(
+//!     "You are a helpful coding assistant.",
+//!     "How do I parse JSON in Rust?"
+//! )?;
+//! ```
+//!
+//! ## Capture Analysis
+//!
+//! ```rust,ignore
+//! use subcog::llm::{LlmProvider, OllamaClient};
+//!
+//! let client = OllamaClient::new();
+//! let analysis = client.analyze_for_capture(
+//!     "Decision: Use PostgreSQL for the primary database due to JSONB support"
+//! )?;
+//!
+//! if analysis.should_capture && analysis.confidence > 0.8 {
+//!     println!("Suggested namespace: {:?}", analysis.suggested_namespace);
+//!     println!("Suggested tags: {:?}", analysis.suggested_tags);
+//! }
+//! ```
+//!
+//! ## Resilient Provider with Circuit Breaker
+//!
+//! ```rust,ignore
+//! use subcog::llm::{LlmProvider, AnthropicClient, ResilientLlmProvider, LlmResilienceConfig};
+//!
+//! let base_client = AnthropicClient::new();
+//! let resilient = ResilientLlmProvider::new(
+//!     Box::new(base_client),
+//!     LlmResilienceConfig::default()
+//! );
+//!
+//! // Automatically retries with exponential backoff and circuit breaker
+//! let response = resilient.complete("Hello world")?;
+//! ```
+//!
+//! # Configuration
+//!
+//! Providers can be configured via environment variables or the config file:
+//!
+//! ```toml
+//! [llm]
+//! provider = "anthropic"  # or "openai", "ollama", "lmstudio"
+//! model = "claude-sonnet-4-20250514"
+//! timeout_ms = 30000
+//! max_retries = 3
+//! ```
 
 mod anthropic;
 mod lmstudio;
@@ -231,8 +308,27 @@ fn parse_consolidation_analysis(response: &str) -> Result<ConsolidationAnalysis>
     })
 }
 
-/// Extracts JSON from LLM response, handling markdown code blocks.
-fn extract_json_from_response(response: &str) -> &str {
+/// Extracts JSON from LLM response, handling markdown code blocks (CQ-H2).
+///
+/// This is a centralized utility for extracting JSON from LLM responses that may
+/// include markdown formatting, prose, or other surrounding text.
+///
+/// # Handling
+///
+/// 1. Markdown code blocks with `json` language marker
+/// 2. Markdown code blocks without language marker
+/// 3. Raw JSON objects (first `{` to last `}`)
+/// 4. JSON arrays (first `[` to last `]`)
+///
+/// # Arguments
+///
+/// * `response` - The raw LLM response text
+///
+/// # Returns
+///
+/// The extracted JSON string, or the trimmed input if no JSON found
+#[must_use]
+pub fn extract_json_from_response(response: &str) -> &str {
     let trimmed = response.trim();
 
     // Handle ```json ... ``` blocks
