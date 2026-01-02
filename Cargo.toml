@@ -112,7 +112,7 @@ tempfile = "3.14"
 tokio-test = "0.4"
 
 # Benchmarking
-criterion = { version = "0.6", features = ["html_reports"] }
+criterion = { version = "0.7", features = ["html_reports"] }
 
 [[bench]]
 name = "search_intent"
