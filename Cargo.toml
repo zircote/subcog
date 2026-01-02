@@ -71,7 +71,7 @@ sha2 = "0.10"
 hex = "0.4"
 
 # LRU cache for recent capture tracking
-lru = "0.12"
+lru = "0.16"
 
 # usearch HNSW vector search (optional - pure Rust fallback if not available)
 usearch = { version = "2.21", optional = true }
