@@ -175,6 +175,24 @@ enum Commands {
         #[command(subcommand)]
         action: PromptAction,
     },
+
+    /// List available memory namespaces.
+    Namespaces {
+        /// Output format: table, json, or yaml.
+        #[arg(short, long, default_value = "table")]
+        format: String,
+
+        /// Show signal words for each namespace.
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// Generate shell completion scripts.
+    Completions {
+        /// Shell type: bash, zsh, fish, powershell, or elvish.
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 /// Hook events.
@@ -281,7 +299,7 @@ enum PromptAction {
         name: String,
 
         /// Variable values as KEY=VALUE.
-        #[arg(short, long = "var")]
+        #[arg(short = 'V', long = "var")]
         variables: Vec<String>,
 
         /// Domain scope to search.
@@ -323,6 +341,46 @@ enum PromptAction {
         /// Domain scope to search.
         #[arg(long)]
         domain: Option<String>,
+    },
+
+    /// Import a prompt from a file or URL.
+    Import {
+        /// Source file path or URL.
+        source: String,
+
+        /// Target domain scope: project, user, or org.
+        #[arg(short, long, default_value = "project")]
+        domain: String,
+
+        /// Override the prompt name.
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// Skip validation.
+        #[arg(long)]
+        no_validate: bool,
+    },
+
+    /// Share a prompt (export with full metadata).
+    Share {
+        /// Prompt name.
+        name: String,
+
+        /// Output file path.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Export format: yaml (default), json, or markdown.
+        #[arg(short, long, default_value = "yaml")]
+        format: String,
+
+        /// Domain scope to search.
+        #[arg(long)]
+        domain: Option<String>,
+
+        /// Include usage statistics.
+        #[arg(long)]
+        include_stats: bool,
     },
 }
 
@@ -413,6 +471,22 @@ fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::error:
         Commands::Hook { event } => cmd_hook(event, &config),
 
         Commands::Prompt { action } => cmd_prompt(action),
+
+        Commands::Namespaces { format, verbose } => {
+            use std::str::FromStr;
+            use subcog::cli::{NamespacesOutputFormat, cmd_namespaces};
+            let format = NamespacesOutputFormat::from_str(&format).unwrap_or_default();
+            cmd_namespaces(format, verbose)
+        },
+
+        Commands::Completions { shell } => {
+            use clap::CommandFactory;
+            use clap_complete::generate;
+            use std::io;
+            let mut cmd = Cli::command();
+            generate(shell, &mut cmd, "subcog", &mut io::stdout());
+            Ok(())
+        },
     }
 }
 
@@ -1349,8 +1423,8 @@ fn read_hook_input() -> Result<String, Box<dyn std::error::Error>> {
 /// Prompt command.
 fn cmd_prompt(action: PromptAction) -> Result<(), Box<dyn std::error::Error>> {
     use subcog::cli::{
-        cmd_prompt_delete, cmd_prompt_export, cmd_prompt_get, cmd_prompt_list, cmd_prompt_run,
-        cmd_prompt_save,
+        cmd_prompt_delete, cmd_prompt_export, cmd_prompt_get, cmd_prompt_import, cmd_prompt_list,
+        cmd_prompt_run, cmd_prompt_save, cmd_prompt_share,
     };
 
     match action {
@@ -1405,5 +1479,20 @@ fn cmd_prompt(action: PromptAction) -> Result<(), Box<dyn std::error::Error>> {
             format,
             domain,
         } => cmd_prompt_export(name, output, format, domain),
+
+        PromptAction::Import {
+            source,
+            domain,
+            name,
+            no_validate,
+        } => cmd_prompt_import(source, domain, name, no_validate),
+
+        PromptAction::Share {
+            name,
+            output,
+            format,
+            domain,
+            include_stats,
+        } => cmd_prompt_share(name, output, format, domain, include_stats),
     }
 }

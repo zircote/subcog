@@ -28,6 +28,7 @@ anyhow = "1.0"
 
 # CLI
 clap = { version = "4.5", features = ["derive", "env"] }
+clap_complete = "4.5"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -71,6 +72,9 @@ hex = "0.4"
 
 # LRU cache for recent capture tracking
 lru = "0.12"
+
+# usearch HNSW vector search (optional - pure Rust fallback if not available)
+usearch = { version = "2.21", optional = true }
 
 # HTTP client for LLM APIs (using rustls instead of native-tls to avoid openssl)
 reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
@@ -168,7 +172,9 @@ default = []
 postgres = ["dep:tokio-postgres", "dep:deadpool-postgres"]
 postgres-tls = ["postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:webpki-roots"]
 redis = ["dep:redis"]
+# usearch HNSW vector search (native implementation)
+usearch-hnsw = ["dep:usearch"]
 # HTTP transport with JWT authentication
 http = ["dep:axum", "dep:tower-http"]
 # All features enabled
-full = ["postgres", "postgres-tls", "redis", "http"]
+full = ["postgres", "postgres-tls", "redis", "usearch-hnsw", "http"]

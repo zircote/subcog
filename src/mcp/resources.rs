@@ -16,6 +16,7 @@
 //! - `subcog://search/{query}` - Search memories with a query
 //! - `subcog://topics` - List all indexed topics
 //! - `subcog://topics/{topic}` - Get memories for a specific topic
+//! - `subcog://namespaces` - List all namespaces with descriptions and signal words
 //!
 //! ## Domain-Scoped Resources (future)
 //! - `subcog://project/_` - Project-scoped memories only
@@ -246,6 +247,26 @@ impl ResourceHandler {
             mime_type: Some("application/json".to_string()),
         });
 
+        // Namespaces resource
+        resources.push(ResourceDefinition {
+            uri: "subcog://namespaces".to_string(),
+            name: "All Namespaces".to_string(),
+            description: Some(
+                "List all memory namespaces with descriptions and signal words".to_string(),
+            ),
+            mime_type: Some("application/json".to_string()),
+        });
+
+        // Aggregate prompts resource (all domains)
+        resources.push(ResourceDefinition {
+            uri: "subcog://_prompts".to_string(),
+            name: "All Prompts".to_string(),
+            description: Some(
+                "Aggregate prompts from all domains (project, user, org)".to_string(),
+            ),
+            mime_type: Some("application/json".to_string()),
+        });
+
         // Prompt resources
         resources.push(ResourceDefinition {
             uri: "subcog://project/_prompts".to_string(),
@@ -319,8 +340,10 @@ impl ResourceHandler {
             "memory" => self.get_memory_resource(uri, &parts),
             "search" => self.get_search_resource(uri, &parts),
             "topics" => self.get_topics_resource(uri, &parts),
+            "namespaces" => self.get_namespaces_resource(uri),
+            "_prompts" => self.get_aggregate_prompts_resource(uri),
             _ => Err(Error::InvalidInput(format!(
-                "Unknown resource type: {}. Valid: _, help, memory, project, user, org, search, topics",
+                "Unknown resource type: {}. Valid: _, help, memory, project, user, org, search, topics, namespaces, _prompts",
                 parts[0]
             ))),
         }
@@ -639,6 +662,107 @@ impl ResourceHandler {
                 text: Some(serde_json::to_string_pretty(&response).unwrap_or_default()),
                 blob: None,
             })
+        }
+    }
+
+    /// Gets namespaces resource listing all available namespaces.
+    ///
+    /// URI: `subcog://namespaces`
+    ///
+    /// Returns namespace definitions with descriptions and signal words.
+    fn get_namespaces_resource(&self, uri: &str) -> Result<ResourceContent> {
+        use crate::cli::get_all_namespaces;
+
+        let namespaces = get_all_namespaces();
+
+        let namespaces_json: Vec<serde_json::Value> = namespaces
+            .iter()
+            .map(|ns| {
+                serde_json::json!({
+                    "namespace": ns.namespace,
+                    "description": ns.description,
+                    "signal_words": ns.signal_words,
+                })
+            })
+            .collect();
+
+        let response = serde_json::json!({
+            "count": namespaces_json.len(),
+            "namespaces": namespaces_json,
+        });
+
+        Ok(ResourceContent {
+            uri: uri.to_string(),
+            mime_type: Some("application/json".to_string()),
+            text: Some(serde_json::to_string_pretty(&response).unwrap_or_default()),
+            blob: None,
+        })
+    }
+
+    /// Gets aggregate prompts resource listing prompts from all domains.
+    ///
+    /// URI: `subcog://_prompts`
+    ///
+    /// Returns prompts aggregated from project, user, and org domains.
+    /// Prompts are deduplicated by name, with project scope taking priority.
+    fn get_aggregate_prompts_resource(&mut self, uri: &str) -> Result<ResourceContent> {
+        use crate::services::PromptFilter;
+        use std::collections::HashSet;
+
+        let prompt_service = self.prompt_service.as_mut().ok_or_else(|| {
+            Error::InvalidInput("Prompt browsing requires PromptService".to_string())
+        })?;
+
+        // Collect prompts from all domains, deduplicating by name
+        // Priority: project > user > org (first seen wins)
+        let mut seen_names: HashSet<String> = HashSet::new();
+        let mut prompts_json: Vec<serde_json::Value> = Vec::new();
+
+        let domains = [
+            (DomainScope::Project, "project"),
+            (DomainScope::User, "user"),
+            (DomainScope::Org, "org"),
+        ];
+
+        for (domain, domain_name) in domains {
+            let filter = PromptFilter::new().with_domain(domain);
+            let prompts = prompt_service.list(&filter).unwrap_or_default();
+            Self::collect_unique_prompts(&mut seen_names, &mut prompts_json, prompts, domain_name);
+        }
+
+        let response = serde_json::json!({
+            "count": prompts_json.len(),
+            "prompts": prompts_json,
+        });
+
+        Ok(ResourceContent {
+            uri: uri.to_string(),
+            mime_type: Some("application/json".to_string()),
+            text: Some(serde_json::to_string_pretty(&response).unwrap_or_default()),
+            blob: None,
+        })
+    }
+
+    /// Collects unique prompts, skipping those already seen.
+    fn collect_unique_prompts(
+        seen: &mut std::collections::HashSet<String>,
+        output: &mut Vec<serde_json::Value>,
+        prompts: Vec<crate::models::PromptTemplate>,
+        domain_name: &str,
+    ) {
+        for p in prompts {
+            if seen.contains(&p.name) {
+                continue;
+            }
+            seen.insert(p.name.clone());
+            output.push(serde_json::json!({
+                "name": p.name,
+                "description": p.description,
+                "domain": domain_name,
+                "tags": p.tags,
+                "usage_count": p.usage_count,
+                "variables": p.variables.iter().map(|v| v.name.clone()).collect::<Vec<_>>(),
+            }));
         }
     }
 
@@ -1119,5 +1243,55 @@ mod tests {
         let mut handler = build_handler_with_memories();
         let result = handler.get_resource("subcog://project/decisions/patterns-1");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_namespaces_resource() {
+        let mut handler = ResourceHandler::new();
+        let result = handler.get_resource("subcog://namespaces").unwrap();
+
+        assert!(result.text.is_some());
+        let text = result.text.unwrap();
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+
+        assert_eq!(value["count"].as_u64(), Some(11));
+        assert!(value["namespaces"].is_array());
+
+        let namespaces = value["namespaces"].as_array().unwrap();
+        assert!(namespaces.iter().any(|ns| ns["namespace"] == "decisions"));
+        assert!(namespaces.iter().any(|ns| ns["namespace"] == "patterns"));
+        assert!(namespaces.iter().any(|ns| ns["namespace"] == "learnings"));
+
+        // Verify signal words are included
+        let decisions = namespaces
+            .iter()
+            .find(|ns| ns["namespace"] == "decisions")
+            .unwrap();
+        assert!(decisions["signal_words"].is_array());
+        assert!(!decisions["signal_words"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_list_resources_includes_namespaces() {
+        let handler = ResourceHandler::new();
+        let resources = handler.list_resources();
+
+        assert!(resources.iter().any(|r| r.uri == "subcog://namespaces"));
+    }
+
+    #[test]
+    fn test_list_resources_includes_aggregate_prompts() {
+        let handler = ResourceHandler::new();
+        let resources = handler.list_resources();
+
+        assert!(resources.iter().any(|r| r.uri == "subcog://_prompts"));
+    }
+
+    #[test]
+    fn test_aggregate_prompts_requires_prompt_service() {
+        let mut handler = ResourceHandler::new();
+        let result = handler.get_resource("subcog://_prompts");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("PromptService"));
     }
 }

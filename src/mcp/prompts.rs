@@ -30,6 +30,7 @@ impl PromptRegistry {
     fn all_prompts() -> Vec<PromptDefinition> {
         vec![
             Self::tutorial_prompt(),
+            Self::generate_tutorial_definition(),
             Self::capture_assistant_prompt(),
             Self::review_prompt(),
             Self::document_decision_prompt(),
@@ -57,6 +58,34 @@ impl PromptRegistry {
                 PromptArgument {
                     name: "focus".to_string(),
                     description: Some("Topic to focus on".to_string()),
+                    required: false,
+                },
+            ],
+        }
+    }
+
+    fn generate_tutorial_definition() -> PromptDefinition {
+        PromptDefinition {
+            name: "subcog_generate_tutorial".to_string(),
+            description: Some(
+                "Generate a tutorial on any topic using memories as source material".to_string(),
+            ),
+            arguments: vec![
+                PromptArgument {
+                    name: "topic".to_string(),
+                    description: Some("Topic to create tutorial for".to_string()),
+                    required: true,
+                },
+                PromptArgument {
+                    name: "level".to_string(),
+                    description: Some(
+                        "Tutorial level: beginner, intermediate, advanced".to_string(),
+                    ),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "format".to_string(),
+                    description: Some("Output format: markdown, outline, steps".to_string()),
                     required: false,
                 },
             ],
@@ -350,6 +379,7 @@ impl PromptRegistry {
     pub fn get_prompt_messages(&self, name: &str, arguments: &Value) -> Option<Vec<PromptMessage>> {
         match name {
             "subcog_tutorial" => Some(self.generate_tutorial_prompt(arguments)),
+            "subcog_generate_tutorial" => Some(self.generate_generate_tutorial_messages(arguments)),
             "subcog_capture_assistant" => Some(self.generate_capture_assistant_prompt(arguments)),
             "subcog_review" => Some(self.generate_review_prompt(arguments)),
             "subcog_document_decision" => Some(self.generate_decision_prompt(arguments)),
@@ -409,6 +439,65 @@ impl PromptRegistry {
                 role: "assistant".to_string(),
                 content: PromptContent::Text {
                     text: format!("{intro}\n\n{focus_content}"),
+                },
+            },
+        ]
+    }
+
+    /// Generates the `generate_tutorial` prompt messages.
+    ///
+    /// Creates a tutorial on any topic using memories as source material.
+    fn generate_generate_tutorial_messages(&self, arguments: &Value) -> Vec<PromptMessage> {
+        let topic = arguments
+            .get("topic")
+            .and_then(|v| v.as_str())
+            .unwrap_or("general");
+
+        let level = arguments
+            .get("level")
+            .and_then(|v| v.as_str())
+            .unwrap_or("beginner");
+
+        let format = arguments
+            .get("format")
+            .and_then(|v| v.as_str())
+            .unwrap_or("markdown");
+
+        let level_description = match level {
+            "advanced" => "for an experienced developer who knows the fundamentals",
+            "intermediate" => "for a developer with some experience",
+            _ => "for someone new to this topic",
+        };
+
+        let format_instruction = match format {
+            "outline" => {
+                "Present the tutorial as a structured outline with main sections and sub-points."
+            },
+            "steps" => "Present the tutorial as numbered step-by-step instructions.",
+            _ => "Present the tutorial in full markdown with headings, examples, and explanations.",
+        };
+
+        let prompt = format!(
+            "Generate a comprehensive tutorial about **{topic}** {level_description}.\n\n\
+            **Instructions**:\n\
+            1. First, search for relevant memories using `mcp__plugin_subcog_subcog__subcog_recall` with query: \"{topic}\"\n\
+            2. Incorporate insights, decisions, and patterns from the memories found\n\
+            3. Structure the tutorial with clear sections\n\
+            4. Include practical examples where applicable\n\
+            5. Reference specific memories that inform the content\n\n\
+            **Format**: {format_instruction}\n\n\
+            {GENERATE_TUTORIAL_STRUCTURE}"
+        );
+
+        vec![
+            PromptMessage {
+                role: "user".to_string(),
+                content: PromptContent::Text { text: prompt },
+            },
+            PromptMessage {
+                role: "assistant".to_string(),
+                content: PromptContent::Text {
+                    text: GENERATE_TUTORIAL_RESPONSE.to_string(),
                 },
             },
         ]
@@ -1043,6 +1132,32 @@ const TUTORIAL_BEST_PRACTICES: &str = r"
 3. **Sync regularly** - keep memories backed up
 ";
 
+const GENERATE_TUTORIAL_STRUCTURE: &str = r"
+## Tutorial Structure Guide
+
+Organize your tutorial with these sections:
+
+1. **Overview** - What this topic is about and why it matters
+2. **Prerequisites** - What the reader should know beforehand
+3. **Core Concepts** - Main ideas explained clearly
+4. **Practical Examples** - Working code or scenarios
+5. **Common Pitfalls** - Mistakes to avoid (informed by learnings memories)
+6. **Best Practices** - Patterns and conventions (informed by patterns memories)
+7. **Summary** - Key takeaways
+8. **References** - Links to relevant memories and resources
+";
+
+const GENERATE_TUTORIAL_RESPONSE: &str = r"
+I'll generate a comprehensive tutorial on this topic by:
+
+1. Searching the memory collection for relevant decisions, patterns, learnings, and context
+2. Organizing the content according to the specified format
+3. Incorporating real insights from the project's history
+4. Adding practical examples and code snippets where applicable
+
+Let me start by searching for memories related to this topic...
+";
+
 const CAPTURE_ASSISTANT_SYSTEM: &str = r"
 I'll analyze the context and suggest memories to capture. For each suggestion, I'll provide:
 
@@ -1547,5 +1662,126 @@ mod tests {
         assert!(registry.get_prompt("subcog_query_suggest").is_some());
         assert!(registry.get_prompt("subcog_context_capture").is_some());
         assert!(registry.get_prompt("subcog_discover").is_some());
+    }
+
+    #[test]
+    fn test_generate_tutorial_prompt_definition() {
+        let registry = PromptRegistry::new();
+
+        let prompt = registry.get_prompt("subcog_generate_tutorial").unwrap();
+        assert_eq!(prompt.name, "subcog_generate_tutorial");
+        assert!(prompt.description.is_some());
+        assert!(
+            prompt
+                .description
+                .as_ref()
+                .unwrap()
+                .contains("Generate a tutorial")
+        );
+
+        // Verify arguments
+        assert_eq!(prompt.arguments.len(), 3);
+
+        let topic_arg = prompt.arguments.iter().find(|a| a.name == "topic").unwrap();
+        assert!(topic_arg.required);
+
+        let level_arg = prompt.arguments.iter().find(|a| a.name == "level").unwrap();
+        assert!(!level_arg.required);
+
+        let format_arg = prompt
+            .arguments
+            .iter()
+            .find(|a| a.name == "format")
+            .unwrap();
+        assert!(!format_arg.required);
+    }
+
+    #[test]
+    fn test_generate_tutorial_prompt_messages() {
+        let registry = PromptRegistry::new();
+
+        let args = serde_json::json!({
+            "topic": "error handling",
+            "level": "intermediate",
+            "format": "markdown"
+        });
+
+        let messages = registry
+            .get_prompt_messages("subcog_generate_tutorial", &args)
+            .unwrap();
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[1].role, "assistant");
+
+        if let PromptContent::Text { text } = &messages[0].content {
+            assert!(text.contains("error handling"));
+            assert!(text.contains("developer with some experience"));
+            assert!(text.contains("subcog_recall"));
+        }
+    }
+
+    #[test]
+    fn test_generate_tutorial_prompt_levels() {
+        let registry = PromptRegistry::new();
+
+        // Test beginner level
+        let beginner_args = serde_json::json!({ "topic": "testing", "level": "beginner" });
+        let beginner_messages = registry
+            .get_prompt_messages("subcog_generate_tutorial", &beginner_args)
+            .unwrap();
+        if let PromptContent::Text { text } = &beginner_messages[0].content {
+            assert!(text.contains("new to this topic"));
+        }
+
+        // Test advanced level
+        let advanced_args = serde_json::json!({ "topic": "testing", "level": "advanced" });
+        let advanced_messages = registry
+            .get_prompt_messages("subcog_generate_tutorial", &advanced_args)
+            .unwrap();
+        if let PromptContent::Text { text } = &advanced_messages[0].content {
+            assert!(text.contains("experienced developer"));
+        }
+    }
+
+    #[test]
+    fn test_generate_tutorial_prompt_formats() {
+        let registry = PromptRegistry::new();
+
+        // Test outline format
+        let outline_args = serde_json::json!({ "topic": "api design", "format": "outline" });
+        let outline_messages = registry
+            .get_prompt_messages("subcog_generate_tutorial", &outline_args)
+            .unwrap();
+        if let PromptContent::Text { text } = &outline_messages[0].content {
+            assert!(text.contains("structured outline"));
+        }
+
+        // Test steps format
+        let steps_args = serde_json::json!({ "topic": "api design", "format": "steps" });
+        let steps_messages = registry
+            .get_prompt_messages("subcog_generate_tutorial", &steps_args)
+            .unwrap();
+        if let PromptContent::Text { text } = &steps_messages[0].content {
+            assert!(text.contains("step-by-step"));
+        }
+    }
+
+    #[test]
+    fn test_generate_tutorial_prompt_defaults() {
+        let registry = PromptRegistry::new();
+
+        // Only required topic, others use defaults
+        let args = serde_json::json!({ "topic": "rust patterns" });
+        let messages = registry
+            .get_prompt_messages("subcog_generate_tutorial", &args)
+            .unwrap();
+
+        if let PromptContent::Text { text } = &messages[0].content {
+            // Default level is beginner
+            assert!(text.contains("new to this topic"));
+            // Default format is markdown
+            assert!(text.contains("full markdown"));
+        }
     }
 }

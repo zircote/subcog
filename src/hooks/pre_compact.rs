@@ -5,6 +5,7 @@
 
 use crate::Result;
 use crate::hooks::HookHandler;
+use crate::llm::LlmProvider;
 use crate::models::{CaptureRequest, Domain, MemoryId, Namespace};
 use crate::services::CaptureService;
 use crate::services::deduplication::{Deduplicator, DuplicateReason};
@@ -12,6 +13,14 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::instrument;
+
+// Content analysis thresholds
+/// Minimum section length to consider for capture.
+const MIN_SECTION_LENGTH: usize = 20;
+/// Length of content fingerprint for deduplication.
+const FINGERPRINT_LENGTH: usize = 50;
+/// Minimum common characters to consider a duplicate.
+const MIN_COMMON_CHARS_FOR_DUPLICATE: usize = 30;
 
 /// Handler for the `PreCompact` hook event.
 ///
@@ -26,11 +35,24 @@ use tracing::instrument;
 /// 3. **Recent capture**: LRU cache with TTL
 ///
 /// Duplicates are skipped and reported in the hook output.
+///
+/// # LLM Analysis Mode
+///
+/// When an LLM provider is configured and `use_llm_analysis` is enabled, content
+/// that doesn't match keyword-based detection patterns will be analyzed by the
+/// LLM for classification. This provides more accurate namespace assignment at
+/// the cost of increased latency.
+///
+/// Configure via environment variable: `SUBCOG_AUTO_CAPTURE_USE_LLM=true`
 pub struct PreCompactHandler {
     /// Capture service instance.
     capture: Option<CaptureService>,
     /// Deduplication service instance (trait object for flexibility).
     dedup: Option<Arc<dyn Deduplicator>>,
+    /// Optional LLM provider for content classification.
+    llm: Option<Arc<dyn LlmProvider>>,
+    /// Whether to use LLM for classifying ambiguous content.
+    use_llm_analysis: bool,
 }
 
 /// Input for the `PreCompact` hook.
@@ -92,11 +114,20 @@ struct CaptureCandidate {
 
 impl PreCompactHandler {
     /// Creates a new `PreCompact` handler.
+    ///
+    /// The `use_llm_analysis` setting is loaded from the environment variable
+    /// `SUBCOG_AUTO_CAPTURE_USE_LLM` (default: false).
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
+        let use_llm_analysis = std::env::var("SUBCOG_AUTO_CAPTURE_USE_LLM")
+            .map(|v| v.to_lowercase() == "true" || v == "1")
+            .unwrap_or(false);
+
         Self {
             capture: None,
             dedup: None,
+            llm: None,
+            use_llm_analysis,
         }
     }
 
@@ -117,19 +148,38 @@ impl PreCompactHandler {
         self
     }
 
+    /// Sets the LLM provider for content classification.
+    ///
+    /// When set (and `SUBCOG_AUTO_CAPTURE_USE_LLM=true`), content that doesn't
+    /// match keyword-based detection will be analyzed by the LLM.
+    #[must_use]
+    pub fn with_llm(mut self, llm: Arc<dyn LlmProvider>) -> Self {
+        self.llm = Some(llm);
+        self
+    }
+
+    /// Enables or disables LLM analysis mode.
+    ///
+    /// This overrides the `SUBCOG_AUTO_CAPTURE_USE_LLM` environment variable.
+    #[must_use]
+    pub const fn with_llm_analysis(mut self, enabled: bool) -> Self {
+        self.use_llm_analysis = enabled;
+        self
+    }
+
     /// Analyzes content and extracts capture candidates.
     fn analyze_content(&self, input: &PreCompactInput) -> Vec<CaptureCandidate> {
         let mut candidates = Vec::new();
 
         // Analyze the full context
         if !input.context.is_empty() {
-            candidates.extend(Self::extract_from_text(&input.context));
+            candidates.extend(self.extract_from_text(&input.context));
         }
 
         // Analyze individual sections
         for section in &input.sections {
             if section.role == "assistant" {
-                candidates.extend(Self::extract_from_text(&section.content));
+                candidates.extend(self.extract_from_text(&section.content));
             }
         }
 
@@ -137,8 +187,70 @@ impl PreCompactHandler {
         Self::deduplicate_candidates(candidates)
     }
 
+    /// Uses LLM to classify content that didn't match keyword detection.
+    ///
+    /// Returns `Some(CaptureCandidate)` if the LLM suggests capturing,
+    /// `None` if LLM is unavailable or suggests not capturing.
+    fn classify_with_llm(&self, section: &str) -> Option<CaptureCandidate> {
+        let llm = self.llm.as_ref()?;
+
+        match llm.analyze_for_capture(section) {
+            Ok(analysis) if analysis.should_capture && analysis.confidence > 0.6 => {
+                let namespace = analysis
+                    .suggested_namespace
+                    .as_ref()
+                    .and_then(|ns| Namespace::parse(ns))
+                    .unwrap_or(Namespace::Context);
+
+                tracing::debug!(
+                    namespace = %namespace.as_str(),
+                    confidence = analysis.confidence,
+                    reasoning = %analysis.reasoning,
+                    "LLM classified content for capture"
+                );
+
+                metrics::counter!(
+                    "hook_llm_classifications_total",
+                    "hook_type" => "PreCompact",
+                    "namespace" => namespace.as_str().to_string(),
+                    "result" => "capture"
+                )
+                .increment(1);
+
+                Some(CaptureCandidate {
+                    content: section.to_string(),
+                    namespace,
+                    confidence: analysis.confidence,
+                })
+            },
+            Ok(analysis) => {
+                tracing::debug!(
+                    confidence = analysis.confidence,
+                    should_capture = analysis.should_capture,
+                    "LLM analysis did not suggest capture"
+                );
+
+                metrics::counter!(
+                    "hook_llm_classifications_total",
+                    "hook_type" => "PreCompact",
+                    "result" => "skip"
+                )
+                .increment(1);
+
+                None
+            },
+            Err(e) => {
+                tracing::warn!(error = %e, "LLM classification failed, skipping content");
+                None
+            },
+        }
+    }
+
     /// Extracts potential memories from text.
-    fn extract_from_text(text: &str) -> Vec<CaptureCandidate> {
+    ///
+    /// Uses keyword-based detection first, then optionally falls back to LLM
+    /// classification if `use_llm_analysis` is enabled.
+    fn extract_from_text(&self, text: &str) -> Vec<CaptureCandidate> {
         let mut candidates = Vec::new();
 
         // Split into paragraphs or logical sections
@@ -149,7 +261,7 @@ impl PreCompactHandler {
 
         for section in sections {
             let section = section.trim();
-            if section.len() < 20 {
+            if section.len() < MIN_SECTION_LENGTH {
                 continue;
             }
 
@@ -185,6 +297,18 @@ impl PreCompactHandler {
                     confidence: calculate_section_confidence(section),
                 });
             }
+            // Check for context-related language (explains "why" behind decisions)
+            else if contains_context_language(section) {
+                candidates.push(CaptureCandidate {
+                    content: section.to_string(),
+                    namespace: Namespace::Context,
+                    confidence: calculate_section_confidence(section),
+                });
+            }
+            // No keyword match - try LLM classification if enabled
+            else if self.use_llm_analysis {
+                candidates.extend(self.classify_with_llm(section));
+            }
         }
 
         candidates
@@ -203,8 +327,8 @@ impl PreCompactHandler {
         let mut seen_prefixes: Vec<String> = Vec::new();
 
         for candidate in candidates {
-            // Take first 50 chars as a "fingerprint"
-            let prefix: String = candidate.content.chars().take(50).collect();
+            // Take first N chars as a "fingerprint"
+            let prefix: String = candidate.content.chars().take(FINGERPRINT_LENGTH).collect();
 
             // Check if we've seen a similar prefix
             let is_duplicate = seen_prefixes.iter().any(|p| {
@@ -213,7 +337,7 @@ impl PreCompactHandler {
                     .zip(prefix.chars())
                     .take_while(|(a, b)| a == b)
                     .count();
-                common > 30
+                common > MIN_COMMON_CHARS_FOR_DUPLICATE
             });
 
             if !is_duplicate {
@@ -498,6 +622,24 @@ fn contains_pattern_language(text: &str) -> bool {
         || lower.contains("must ")
 }
 
+/// Checks if text contains context-related language.
+///
+/// Context captures explain the "why" behind decisions - constraints,
+/// requirements, and important background information.
+fn contains_context_language(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("because")
+        || lower.contains("constraint")
+        || lower.contains("requirement")
+        || lower.contains("context:")
+        || lower.contains("important:")
+        || lower.contains("note:")
+        || lower.contains("background:")
+        || lower.contains("rationale")
+        || lower.contains("reason why")
+        || lower.contains("due to")
+}
+
 /// Calculates confidence for a section.
 fn calculate_section_confidence(section: &str) -> f32 {
     let mut confidence: f32 = 0.5;
@@ -621,6 +763,28 @@ mod tests {
         // Use text that truly has no pattern-related words
         assert!(!contains_pattern_language(
             "Hello world, this is regular code"
+        ));
+    }
+
+    #[test]
+    fn test_contains_context_language() {
+        assert!(contains_context_language(
+            "We did this because of performance requirements"
+        ));
+        assert!(contains_context_language("Context: the system needs X"));
+        assert!(contains_context_language(
+            "The constraint here is memory usage"
+        ));
+        assert!(contains_context_language(
+            "Important: this must complete fast"
+        ));
+        assert!(contains_context_language("Note: this is a workaround"));
+        assert!(contains_context_language(
+            "Due to backwards compatibility, we chose this"
+        ));
+        // Text with no context language
+        assert!(!contains_context_language(
+            "Just some regular implementation code"
         ));
     }
 

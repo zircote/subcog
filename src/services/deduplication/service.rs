@@ -484,12 +484,26 @@ mod tests {
         let index = SqliteBackend::in_memory().unwrap();
         let recall = Arc::new(RecallService::with_index(index));
         let embedder = Arc::new(FastEmbedEmbedder::new());
-        let vector = Arc::new(RwLockVectorWrapper::new(UsearchBackend::in_memory(
+        let vector = Arc::new(RwLockVectorWrapper::new(create_usearch_backend(
             FastEmbedEmbedder::DEFAULT_DIMENSIONS,
         )));
         let config = DeduplicationConfig::default();
 
         DeduplicationService::new(recall, embedder, vector, config)
+    }
+
+    /// Creates a usearch backend for tests.
+    /// Handles the Result return type when usearch-hnsw feature is enabled.
+    #[cfg(not(feature = "usearch-hnsw"))]
+    fn create_usearch_backend(dimensions: usize) -> UsearchBackend {
+        UsearchBackend::in_memory(dimensions)
+    }
+
+    /// Creates a usearch backend for tests.
+    /// Handles the Result return type when usearch-hnsw feature is enabled.
+    #[cfg(feature = "usearch-hnsw")]
+    fn create_usearch_backend(dimensions: usize) -> UsearchBackend {
+        UsearchBackend::in_memory(dimensions).expect("Failed to create usearch backend")
     }
 
     fn create_test_memory(
@@ -533,7 +547,7 @@ mod tests {
         let index = SqliteBackend::in_memory().unwrap();
         let recall = Arc::new(RecallService::with_index(index));
         let embedder = Arc::new(FastEmbedEmbedder::new());
-        let vector = Arc::new(RwLockVectorWrapper::new(UsearchBackend::in_memory(
+        let vector = Arc::new(RwLockVectorWrapper::new(create_usearch_backend(
             FastEmbedEmbedder::DEFAULT_DIMENSIONS,
         )));
         let config = DeduplicationConfig::default().with_enabled(false);
@@ -592,7 +606,7 @@ mod tests {
 
         let recall = Arc::new(RecallService::with_index(index));
         let embedder = Arc::new(FastEmbedEmbedder::new());
-        let vector = Arc::new(RwLockVectorWrapper::new(UsearchBackend::in_memory(
+        let vector = Arc::new(RwLockVectorWrapper::new(create_usearch_backend(
             FastEmbedEmbedder::DEFAULT_DIMENSIONS,
         )));
         let config = DeduplicationConfig::default();
@@ -618,7 +632,7 @@ mod tests {
         let index = SqliteBackend::in_memory().unwrap();
         let recall = Arc::new(RecallService::with_index(index));
         let embedder = Arc::new(FastEmbedEmbedder::new());
-        let vector = Arc::new(RwLockVectorWrapper::new(UsearchBackend::in_memory(
+        let vector = Arc::new(RwLockVectorWrapper::new(create_usearch_backend(
             FastEmbedEmbedder::DEFAULT_DIMENSIONS,
         )));
 
@@ -673,7 +687,7 @@ mod tests {
         let index = SqliteBackend::in_memory().unwrap();
         let recall = Arc::new(RecallService::with_index(index));
         let embedder = Arc::new(FastEmbedEmbedder::new());
-        let vector = Arc::new(RwLockVectorWrapper::new(UsearchBackend::in_memory(
+        let vector = Arc::new(RwLockVectorWrapper::new(create_usearch_backend(
             FastEmbedEmbedder::DEFAULT_DIMENSIONS,
         )));
         let config = DeduplicationConfig::default().with_enabled(false);

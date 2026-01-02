@@ -13,6 +13,16 @@ use std::collections::HashMap;
 use std::time::Instant;
 use tracing::instrument;
 
+// Retention score calculation constants
+/// Seconds per day for age calculation.
+const SECONDS_PER_DAY: f32 = 86400.0;
+/// Half-life in days for recency decay.
+const RECENCY_DECAY_DAYS: f32 = 30.0;
+/// Default importance score when LLM analysis unavailable.
+const DEFAULT_IMPORTANCE: f32 = 0.5;
+/// Minimum memories in namespace before flagging contradictions.
+const CONTRADICTION_THRESHOLD: usize = 10;
+
 /// Service for consolidating and managing memory lifecycle.
 pub struct ConsolidationService<P: PersistenceBackend> {
     /// Persistence backend for memory storage.
@@ -124,13 +134,13 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             .max(1);
         let access_frequency = (access_count as f32) / (max_accesses as f32);
 
-        // Recency: decay over time (30 days = 0.5 score)
+        // Recency: decay over time (RECENCY_DECAY_DAYS days = 0.5 score)
         let last_access = self.last_access.get(memory_id).copied().unwrap_or(0);
-        let age_days = (now.saturating_sub(last_access)) as f32 / 86400.0;
-        let recency = (-age_days / 30.0).exp().clamp(0.0, 1.0);
+        let age_days = (now.saturating_sub(last_access)) as f32 / SECONDS_PER_DAY;
+        let recency = (-age_days / RECENCY_DECAY_DAYS).exp().clamp(0.0, 1.0);
 
-        // Importance: default to 0.5 (would need LLM for real analysis)
-        let importance = 0.5;
+        // Importance: default (would need LLM for real analysis)
+        let importance = DEFAULT_IMPORTANCE;
 
         RetentionScore::new(access_frequency, recency, importance)
     }
@@ -154,9 +164,9 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         // Check for potential contradictions within each namespace
         // This is a simple heuristic - real implementation would use LLM
         for ids in namespace_memories.values() {
-            if ids.len() > 10 {
+            if ids.len() > CONTRADICTION_THRESHOLD {
                 // Flag potential contradictions when many memories in same namespace
-                contradiction_count += ids.len() / 10;
+                contradiction_count += ids.len() / CONTRADICTION_THRESHOLD;
             }
         }
 

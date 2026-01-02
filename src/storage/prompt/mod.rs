@@ -4,7 +4,7 @@
 //!
 //! - **Project scope**: Git notes (`refs/notes/_prompts`)
 //! - **User scope**: `SQLite`, PostgreSQL, Redis, or Filesystem
-//! - **Org scope**: Deferred (not yet implemented)
+//! - **Org scope**: `SQLite` or Filesystem (org-isolated)
 //!
 //! # URN Scheme
 //!
@@ -13,6 +13,7 @@
 //! Examples:
 //! - `subcog://project/_prompts/code-review`
 //! - `subcog://user/_prompts/api-design`
+//! - `subcog://org/_prompts/team-review`
 //!
 //! # Domain Routing
 //!
@@ -21,11 +22,19 @@
 //! | Domain | Backend | Location |
 //! |--------|---------|----------|
 //! | Project | Git Notes | `.git/refs/notes/_prompts` |
-//! | User | SQLite | `~/.config/subcog/memories.db` |
+//! | User | `SQLite` | `~/.config/subcog/memories.db` |
 //! | User | PostgreSQL | Configured connection |
 //! | User | Redis | Configured connection |
 //! | User | Filesystem | `~/.config/subcog/prompts/` |
-//! | Org | Deferred | Not yet implemented |
+//! | Org | `SQLite` | `~/.config/subcog/orgs/{org}/memories.db` |
+//! | Org | Filesystem | `~/.config/subcog/orgs/{org}/prompts/` |
+//!
+//! # Org Identifier Resolution
+//!
+//! The org identifier is resolved from:
+//! 1. `SUBCOG_ORG` environment variable (highest priority)
+//! 2. Git remote URL (extracts org from `github.com/org/repo`)
+//! 3. Returns error if no identifier can be resolved
 
 mod filesystem;
 mod git_notes;
@@ -73,7 +82,7 @@ impl PromptStorageFactory {
     ///
     /// - **Project**: Git notes in the repository
     /// - **User**: `SQLite` at `~/.config/subcog/memories.db` (default)
-    /// - **Org**: Returns an error (deferred)
+    /// - **Org**: `SQLite` at `~/.config/subcog/orgs/{org}/memories.db`
     ///
     /// # Arguments
     ///
@@ -83,17 +92,13 @@ impl PromptStorageFactory {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - Org scope is requested (not implemented)
+    /// - Org scope is requested but no org identifier can be resolved
     /// - Storage backend cannot be initialized
     pub fn create_for_scope(scope: DomainScope, config: &Config) -> Result<Arc<dyn PromptStorage>> {
         match scope {
             DomainScope::Project => Self::create_project_storage(config),
             DomainScope::User => Self::create_user_storage(config),
-            DomainScope::Org => Err(Error::NotImplemented(
-                "Organization-scope prompt storage is not yet implemented. \
-                 Use project or user scope for now."
-                    .to_string(),
-            )),
+            DomainScope::Org => Self::create_org_storage(config),
         }
     }
 
@@ -176,6 +181,121 @@ impl PromptStorageFactory {
             })?;
 
         Ok(Arc::new(FilesystemPromptStorage::new(fs_path)?))
+    }
+
+    /// Creates org-scoped storage based on configuration.
+    ///
+    /// Resolves org identifier from:
+    /// 1. `SUBCOG_ORG` environment variable
+    /// 2. Git remote URL (extracts org from `github.com/org/repo`)
+    /// 3. Falls back with error if no org can be resolved
+    ///
+    /// Priority order:
+    /// 1. `SQLite` (default)
+    /// 2. Filesystem (fallback if `SQLite` fails)
+    fn create_org_storage(config: &Config) -> Result<Arc<dyn PromptStorage>> {
+        let org = Self::resolve_org_identifier(config)?;
+
+        // Try SQLite (default)
+        if let Some(db_path) = SqlitePromptStorage::default_org_path(&org) {
+            match SqlitePromptStorage::new(&db_path) {
+                Ok(storage) => return Ok(Arc::new(storage)),
+                Err(e) => {
+                    tracing::warn!("Failed to create SQLite org prompt storage: {e}");
+                    // Fall through to filesystem
+                },
+            }
+        }
+
+        // Fallback to filesystem
+        let fs_path = FilesystemPromptStorage::default_org_path(&org).ok_or_else(|| {
+            Error::OperationFailed {
+                operation: "create_org_storage".to_string(),
+                cause: "Could not determine org config directory".to_string(),
+            }
+        })?;
+
+        Ok(Arc::new(FilesystemPromptStorage::new(fs_path)?))
+    }
+
+    /// Resolves the organization identifier.
+    ///
+    /// Priority:
+    /// 1. `SUBCOG_ORG` environment variable
+    /// 2. Git remote URL (extracts org from `github.com/org/repo`)
+    fn resolve_org_identifier(config: &Config) -> Result<String> {
+        // 1. Check SUBCOG_ORG environment variable
+        if let Ok(org) = std::env::var("SUBCOG_ORG") {
+            if !org.is_empty() {
+                return Ok(org);
+            }
+        }
+
+        // 2. Try to extract from git remote in config repo path
+        if let Some(ref repo_path) = config.repo_path {
+            if let Some(org) = Self::extract_org_from_repo_path(repo_path) {
+                return Ok(org);
+            }
+        }
+
+        // 3. Try current directory as fallback
+        if let Ok(cwd) = std::env::current_dir() {
+            if let Some(org) = Self::extract_org_from_repo_path(&cwd) {
+                return Ok(org);
+            }
+        }
+
+        Err(Error::InvalidInput(
+            "Could not resolve organization identifier. \
+             Set SUBCOG_ORG environment variable or ensure git remote is configured."
+                .to_string(),
+        ))
+    }
+
+    /// Extracts organization from a git repository's origin remote.
+    fn extract_org_from_repo_path(path: &std::path::Path) -> Option<String> {
+        let repo = git2::Repository::open(path).ok()?;
+        let remote = repo.find_remote("origin").ok()?;
+        let url = remote.url()?;
+        Self::extract_org_from_git_url(url)
+    }
+
+    /// Extracts organization name from a git URL.
+    ///
+    /// Supports:
+    /// - `https://github.com/org/repo.git`
+    /// - `git@github.com:org/repo.git`
+    /// - `ssh://git@github.com/org/repo.git`
+    fn extract_org_from_git_url(url: &str) -> Option<String> {
+        // Handle SSH format: git@github.com:org/repo.git
+        if let Some(rest) = url.strip_prefix("git@") {
+            if let Some(path_start) = rest.find(':') {
+                let path = &rest[path_start + 1..];
+                return path.split('/').next().map(ToString::to_string);
+            }
+        }
+
+        // Handle HTTPS/SSH URL format
+        // Examples:
+        // - https://github.com/org/repo.git
+        // - ssh://git@github.com/org/repo.git
+        let path = url
+            .strip_prefix("https://")
+            .or_else(|| url.strip_prefix("http://"))
+            .or_else(|| url.strip_prefix("ssh://"))
+            .or_else(|| url.strip_prefix("git://"));
+
+        if let Some(rest) = path {
+            // Skip host (github.com, gitlab.com, etc.)
+            let parts: Vec<&str> = rest.split('/').collect();
+            if parts.len() >= 2 {
+                // parts[0] = host (github.com) or user@host
+                // parts[1] = org
+                return Some(parts[1].to_string());
+            }
+        }
+
+        None
     }
 
     /// Creates storage with an explicit backend type.
@@ -312,16 +432,79 @@ mod tests {
     }
 
     #[test]
-    fn test_create_org_scope_returns_error() {
+    fn test_create_org_scope_with_git_remote() {
+        // This test verifies that org scope works when in a git repo with origin remote.
+        // If SUBCOG_ORG is set or we're in a repo with origin, this should succeed.
         let config = Config::default();
         let result = PromptStorageFactory::create_for_scope(DomainScope::Org, &config);
 
-        assert!(result.is_err(), "Expected Err, got Ok");
-        // Use if let to check the error without requiring Debug on Ok type
-        let Err(err) = result else { return };
-        assert!(
-            matches!(err, Error::NotImplemented(ref msg) if msg.contains("Organization-scope")),
-            "Expected NotImplemented error with Organization-scope message"
+        // In most test environments (including CI), we're in a git repo with origin.
+        // The result depends on whether an org identifier can be resolved.
+        // If SUBCOG_ORG is set OR we have a git origin, it should succeed.
+        // If neither, it fails with InvalidInput.
+        if result.is_ok() {
+            // Org was resolved from env or git remote - success path
+            assert!(result.is_ok());
+        } else {
+            // No org could be resolved - error path
+            let Err(err) = result else { return };
+            assert!(
+                matches!(err, Error::InvalidInput(ref msg) if msg.contains("organization identifier")),
+                "Expected InvalidInput error about org identifier"
+            );
+        }
+    }
+
+    #[test]
+    fn test_resolve_org_from_git_url_in_config() {
+        // Test org resolution with a repo path pointing to this repo
+        let cwd = std::env::current_dir().ok();
+        let config = Config {
+            repo_path: cwd,
+            ..Config::default()
+        };
+
+        // If we're in a git repo with origin, this should succeed
+        let result = PromptStorageFactory::resolve_org_identifier(&config);
+
+        // Result depends on environment - in most cases we're in a git repo
+        if let Ok(org) = result {
+            assert!(!org.is_empty(), "Org should not be empty");
+        }
+    }
+
+    #[test]
+    fn test_extract_org_from_git_url() {
+        // HTTPS format
+        assert_eq!(
+            PromptStorageFactory::extract_org_from_git_url("https://github.com/zircote/subcog.git"),
+            Some("zircote".to_string())
+        );
+
+        // SSH format
+        assert_eq!(
+            PromptStorageFactory::extract_org_from_git_url("git@github.com:zircote/subcog.git"),
+            Some("zircote".to_string())
+        );
+
+        // SSH URL format
+        assert_eq!(
+            PromptStorageFactory::extract_org_from_git_url(
+                "ssh://git@github.com/zircote/subcog.git"
+            ),
+            Some("zircote".to_string())
+        );
+
+        // GitLab
+        assert_eq!(
+            PromptStorageFactory::extract_org_from_git_url("https://gitlab.com/myorg/myrepo.git"),
+            Some("myorg".to_string())
+        );
+
+        // Invalid URL
+        assert_eq!(
+            PromptStorageFactory::extract_org_from_git_url("not-a-url"),
+            None
         );
     }
 

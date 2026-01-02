@@ -27,32 +27,32 @@
 
 #### Tasks
 
-- [ ] **1.1.1** Research Redis Stack vector similarity search API
-  - [ ] Review Redis VSS documentation
-  - [ ] Identify required Redis modules (RediSearch 2.4+)
-  - [ ] Document connection requirements
+- [x] **1.1.1** Research Redis Stack vector similarity search API ✓
+  - [x] Review Redis VSS documentation
+  - [x] Identify required Redis modules (RediSearch 2.4+)
+  - [x] Document connection requirements
 
-- [ ] **1.1.2** Implement `VectorBackend` trait methods
-  - [ ] `dimensions()` - Return configured dimension count
-  - [ ] `upsert()` - Store vector with `FT.CREATE` / `HSET`
-  - [ ] `search()` - KNN search with `FT.SEARCH ... KNN`
-  - [ ] `remove()` - Delete vector with `DEL` / `FT.DEL`
-  - [ ] `count()` - Count vectors with `FT.INFO`
-  - [ ] `clear()` - Truncate index
+- [x] **1.1.2** Implement `VectorBackend` trait methods ✓
+  - [x] `dimensions()` - Return configured dimension count
+  - [x] `upsert()` - Store vector with `FT.CREATE` / `HSET`
+  - [x] `search()` - KNN search with `FT.SEARCH ... KNN`
+  - [x] `remove()` - Delete vector with `DEL` / `FT.DEL`
+  - [x] `count()` - Count vectors with `FT.INFO`
+  - [x] `clear()` - Truncate index
 
-- [ ] **1.1.3** Add configuration support
-  - [ ] Redis connection string in config
-  - [ ] Index name configuration
-  - [ ] Vector dimension validation
+- [x] **1.1.3** Add configuration support ✓
+  - [x] Redis connection string in config
+  - [x] Index name configuration
+  - [x] Vector dimension validation
 
-- [ ] **1.1.4** Write tests
-  - [ ] Unit tests with mock Redis
-  - [ ] Integration tests (requires Redis Stack)
-  - [ ] Add to CI with Redis container
+- [x] **1.1.4** Write tests ✓
+  - [x] Unit tests with mock Redis
+  - [x] Integration tests (requires Redis Stack)
+  - [x] Add to CI with Redis container
 
-- [ ] **1.1.5** Update documentation
-  - [ ] docs/storage/vector.md - Redis configuration
-  - [ ] example.config.toml - Redis vector example
+- [x] **1.1.5** Update documentation ✓
+  - [x] docs/storage/vector.md - Redis configuration
+  - [x] example.config.toml - Redis vector example
 
 ---
 
@@ -64,35 +64,35 @@
 
 #### Tasks
 
-- [ ] **1.2.1** Design HTTP transport layer
-  - [ ] Choose HTTP framework (axum recommended)
-  - [ ] Define endpoint structure (`/v1/mcp`)
-  - [ ] Plan SSE for server-initiated messages
+- [x] **1.2.1** Design HTTP transport layer ✓
+  - [x] Choose HTTP framework (axum recommended)
+  - [x] Define endpoint structure (`/v1/mcp`)
+  - [x] Plan SSE for server-initiated messages
 
-- [ ] **1.2.2** Implement HTTP server
-  - [ ] Create `HttpTransport` struct
-  - [ ] Implement JSON-RPC over HTTP POST
-  - [ ] Add CORS configuration
-  - [ ] Implement SSE for subscriptions
+- [x] **1.2.2** Implement HTTP server ✓
+  - [x] Create `HttpTransport` struct
+  - [x] Implement JSON-RPC over HTTP POST
+  - [x] Add CORS configuration
+  - [x] Implement SSE for subscriptions
 
-- [ ] **1.2.3** Add CLI options
-  - [ ] `--transport http` flag in `serve` command
-  - [ ] `--port` flag (default: 8080)
-  - [ ] `--host` flag (default: 127.0.0.1)
+- [x] **1.2.3** Add CLI options ✓
+  - [x] `--transport http` flag in `serve` command
+  - [x] `--port` flag (default: 8080)
+  - [x] `--host` flag (default: 127.0.0.1)
 
-- [ ] **1.2.4** Security considerations
-  - [ ] Optional API key authentication
-  - [ ] Rate limiting
-  - [ ] Request size limits
+- [x] **1.2.4** Security considerations ✓
+  - [x] Optional API key authentication
+  - [x] Rate limiting
+  - [x] Request size limits
 
-- [ ] **1.2.5** Write tests
-  - [ ] Unit tests for HTTP handler
-  - [ ] Integration tests for full request cycle
-  - [ ] SSE subscription tests
+- [x] **1.2.5** Write tests ✓
+  - [x] Unit tests for HTTP handler
+  - [x] Integration tests for full request cycle
+  - [x] SSE subscription tests
 
-- [ ] **1.2.6** Update documentation
-  - [ ] docs/mcp/protocol.md - HTTP transport details
-  - [ ] docs/cli/serve.md - HTTP options
+- [x] **1.2.6** Update documentation ✓
+  - [x] docs/mcp/protocol.md - HTTP transport details
+  - [x] docs/cli/serve.md - HTTP options
 
 ---
 
@@ -106,28 +106,28 @@
 
 #### Tasks
 
-- [ ] **2.1.1** Add usearch crate dependency
-  - [ ] Add `usearch` to Cargo.toml
-  - [ ] Verify SIMD/platform compatibility
-  - [ ] Configure feature flags
+- [x] **2.1.1** Add usearch crate dependency
+  - [x] Add `usearch` to Cargo.toml
+  - [x] Verify SIMD/platform compatibility
+  - [x] Configure feature flags
 
-- [ ] **2.1.2** Refactor to use usearch Index
-  - [ ] Replace `HashMap<String, Vec<f32>>` with `usearch::Index`
-  - [ ] Configure HNSW parameters (ef_construction, M)
-  - [ ] Implement proper ANN search
+- [x] **2.1.2** Refactor to use usearch Index
+  - [x] Replace `HashMap<String, Vec<f32>>` with `usearch::Index`
+  - [x] Configure HNSW parameters (ef_construction, M)
+  - [x] Implement proper ANN search
 
-- [ ] **2.1.3** Maintain file persistence
-  - [ ] Use usearch's native save/load
-  - [ ] Fallback to JSON for compatibility
+- [x] **2.1.3** Maintain file persistence
+  - [x] Use usearch's native save/load
+  - [x] Fallback to JSON for compatibility
 
-- [ ] **2.1.4** Benchmark improvements
-  - [ ] Add benchmarks in `benches/`
-  - [ ] Compare brute-force vs HNSW at various scales
-  - [ ] Document performance characteristics
+- [x] **2.1.4** Benchmark improvements
+  - [x] Add benchmarks in `benches/`
+  - [x] Compare brute-force vs HNSW at various scales
+  - [x] Document performance characteristics
 
-- [ ] **2.1.5** Update tests
-  - [ ] Verify search accuracy within tolerance
-  - [ ] Test with 10k+ vectors
+- [x] **2.1.5** Update tests
+  - [x] Verify search accuracy within tolerance
+  - [x] Test with 10k+ vectors
 
 ---
 
@@ -138,31 +138,31 @@
 
 #### Tasks
 
-- [ ] **2.2.1** Implement semantic similarity deduplication
-  - [ ] Add embedding generation for candidates
-  - [ ] Compute cosine similarity against existing memories
-  - [ ] Skip if >90% similar memory exists
-  - [ ] Add `EmbeddingService` dependency injection
+- [x] **2.2.1** Implement semantic similarity deduplication
+  - [x] Add embedding generation for candidates
+  - [x] Compute cosine similarity against existing memories
+  - [x] Skip if >90% similar memory exists
+  - [x] Add `EmbeddingService` dependency injection
 
-- [ ] **2.2.2** Implement recent capture check
-  - [ ] Query index for memories captured in last 5 minutes
-  - [ ] Skip candidates matching recent content
-  - [ ] Add configurable window (`SUBCOG_AUTO_CAPTURE_WINDOW_SECS`)
+- [x] **2.2.2** Implement recent capture check
+  - [x] Query index for memories captured in last 5 minutes
+  - [x] Skip candidates matching recent content
+  - [x] Add configurable window (`SUBCOG_AUTO_CAPTURE_WINDOW_SECS`)
 
-- [ ] **2.2.3** Add context language detection
-  - [ ] Add `contains_context_language()` function
-  - [ ] Detect: "because", "constraint", "requirement", "context:", "important:", "note:"
-  - [ ] Map to `Namespace::Context`
+- [x] **2.2.3** Add context language detection
+  - [x] Add `contains_context_language()` function
+  - [x] Detect: "because", "constraint", "requirement", "context:", "important:", "note:"
+  - [x] Map to `Namespace::Context`
 
-- [ ] **2.2.4** Optional LLM analysis mode
-  - [ ] Add `--llm-analyze` flag
-  - [ ] Use LLM to classify ambiguous content
-  - [ ] Add configuration `SUBCOG_AUTO_CAPTURE_USE_LLM`
+- [x] **2.2.4** Optional LLM analysis mode
+  - [x] Add `--llm-analyze` flag
+  - [x] Use LLM to classify ambiguous content
+  - [x] Add configuration `SUBCOG_AUTO_CAPTURE_USE_LLM`
 
-- [ ] **2.2.5** Update tests
-  - [ ] Test semantic deduplication logic
-  - [ ] Test time-based deduplication
-  - [ ] Test context language detection
+- [x] **2.2.5** Update tests
+  - [x] Test semantic deduplication logic
+  - [x] Test time-based deduplication
+  - [x] Test context language detection
 
 ---
 
@@ -173,36 +173,36 @@
 
 #### Tasks
 
-- [ ] **2.3.1** Extend `SessionSummary` struct
-  - [ ] Add `namespace_counts: HashMap<String, NamespaceStats>`
-  - [ ] Add `tags_used: Vec<(String, usize)>`
-  - [ ] Add `query_patterns: Vec<String>`
-  - [ ] Add `resources_read: Vec<String>`
+- [x] **2.3.1** Extend `SessionSummary` struct
+  - [x] Add `namespace_counts: HashMap<String, NamespaceStats>`
+  - [x] Add `tags_used: Vec<(String, usize)>`
+  - [x] Add `query_patterns: Vec<String>`
+  - [x] Add `resources_read: Vec<String>`
 
-- [ ] **2.3.2** Implement namespace breakdown
-  - [ ] Track captures per namespace during session
-  - [ ] Track recalls per namespace
-  - [ ] Format as table in output
+- [x] **2.3.2** Implement namespace breakdown
+  - [x] Track captures per namespace during session
+  - [x] Track recalls per namespace
+  - [x] Format as table in output
 
-- [ ] **2.3.3** Implement tags analysis
-  - [ ] Collect tags from captures
-  - [ ] Rank by frequency
-  - [ ] Include top 10 in summary
+- [x] **2.3.3** Implement tags analysis
+  - [x] Collect tags from captures
+  - [x] Rank by frequency
+  - [x] Include top 10 in summary
 
-- [ ] **2.3.4** Implement query pattern tracking
-  - [ ] Log search queries during session
-  - [ ] Identify common patterns
-  - [ ] Suggest related memories
+- [x] **2.3.4** Implement query pattern tracking
+  - [x] Log search queries during session
+  - [x] Identify common patterns
+  - [x] Suggest related memories
 
-- [ ] **2.3.5** Implement resources tracking
-  - [ ] Track MCP resources read
-  - [ ] Count unique resources
-  - [ ] Include in summary
+- [x] **2.3.5** Implement resources tracking
+  - [x] Track MCP resources read
+  - [x] Count unique resources
+  - [x] Include in summary
 
-- [ ] **2.3.6** Update tests
-  - [ ] Verify namespace breakdown in output
-  - [ ] Verify tags analysis
-  - [ ] Verify query patterns
+- [x] **2.3.6** Update tests
+  - [x] Verify namespace breakdown in output
+  - [x] Verify tags analysis
+  - [x] Verify query patterns
 
 ---
 
@@ -213,29 +213,29 @@
 
 #### Tasks
 
-- [ ] **2.4.1** Design org-scope storage
-  - [ ] Define org identifier resolution
-  - [ ] Plan storage path (`~/.config/subcog/orgs/{org}/prompts/`)
-  - [ ] Handle org membership
+- [x] **2.4.1** Design org-scope storage
+  - [x] Define org identifier resolution
+  - [x] Plan storage path (`~/.config/subcog/orgs/{org}/prompts/`)
+  - [x] Handle org membership
 
-- [ ] **2.4.2** Implement org-scope in `PromptStorageBackend`
-  - [ ] Add `DomainScope::Org` handling in each backend
-  - [ ] Filesystem: org directory structure
-  - [ ] SQLite: org column in prompts table
-  - [ ] Git Notes: org namespace in refs
+- [x] **2.4.2** Implement org-scope in `PromptStorageBackend`
+  - [x] Add `DomainScope::Org` handling in each backend
+  - [x] Filesystem: org directory structure
+  - [x] SQLite: org column in prompts table
+  - [x] Git Notes: org namespace in refs
 
-- [ ] **2.4.3** Add org configuration
-  - [ ] `SUBCOG_ORG` environment variable
-  - [ ] Config file `org` field
-  - [ ] Auto-detect from git remote
+- [x] **2.4.3** Add org configuration
+  - [x] `SUBCOG_ORG` environment variable
+  - [x] Config file `org` field
+  - [x] Auto-detect from git remote
 
-- [ ] **2.4.4** Update MCP resources
-  - [ ] Enable `subcog://org/_prompts`
-  - [ ] Enable `subcog://org/_prompts/{name}`
+- [x] **2.4.4** Update MCP resources
+  - [x] Enable `subcog://org/_prompts`
+  - [x] Enable `subcog://org/_prompts/{name}`
 
-- [ ] **2.4.5** Write tests
-  - [ ] Test org-scope CRUD operations
-  - [ ] Test domain cascade (project → user → org)
+- [x] **2.4.5** Write tests
+  - [x] Test org-scope CRUD operations
+  - [x] Test domain cascade (project → user → org)
 
 ---
 
@@ -248,23 +248,23 @@
 
 #### Tasks
 
-- [ ] **3.1.1** Create `src/cli/namespaces.rs`
-  - [ ] Define `NamespacesArgs` struct
-  - [ ] Implement `run()` function
-  - [ ] List all namespaces with descriptions
+- [x] **3.1.1** Create `src/cli/namespaces.rs`
+  - [x] Define `NamespacesArgs` struct
+  - [x] Implement `run()` function
+  - [x] List all namespaces with descriptions
 
-- [ ] **3.1.2** Add to CLI module
-  - [ ] Register in `src/cli/mod.rs`
-  - [ ] Add `Namespaces` variant to `Commands` enum
+- [x] **3.1.2** Add to CLI module
+  - [x] Register in `src/cli/mod.rs`
+  - [x] Add `Namespaces` variant to `Commands` enum
 
-- [ ] **3.1.3** Implement output formats
-  - [ ] Table format (default)
-  - [ ] JSON format (`--json`)
-  - [ ] Include signal words and descriptions
+- [x] **3.1.3** Implement output formats
+  - [x] Table format (default)
+  - [x] JSON format (`--json`)
+  - [x] Include signal words and descriptions
 
-- [ ] **3.1.4** Write tests
-  - [ ] Test table output
-  - [ ] Test JSON output
+- [x] **3.1.4** Write tests
+  - [x] Test table output
+  - [x] Test JSON output
 
 ---
 
@@ -275,21 +275,21 @@
 
 #### Tasks
 
-- [ ] **3.2.1** Add to `list_resources()`
-  - [ ] Add `subcog://namespaces` ResourceDefinition
-  - [ ] Add `subcog://namespaces/{ns}` template
+- [x] **3.2.1** Add to `list_resources()`
+  - [x] Add `subcog://namespaces` ResourceDefinition
+  - [x] Add `subcog://namespaces/{ns}` template
 
-- [ ] **3.2.2** Implement `get_namespaces_resource()`
-  - [ ] Handle `subcog://namespaces` - list all
-  - [ ] Handle `subcog://namespaces/{ns}` - get memories in namespace
+- [x] **3.2.2** Implement `get_namespaces_resource()`
+  - [x] Handle `subcog://namespaces` - list all
+  - [x] Handle `subcog://namespaces/{ns}` - get memories in namespace
 
-- [ ] **3.2.3** Add routing in `get_resource()`
-  - [ ] Add `"namespaces"` case in match statement
-  - [ ] Route to `get_namespaces_resource()`
+- [x] **3.2.3** Add routing in `get_resource()`
+  - [x] Add `"namespaces"` case in match statement
+  - [x] Route to `get_namespaces_resource()`
 
-- [ ] **3.2.4** Write tests
-  - [ ] Test list namespaces
-  - [ ] Test get namespace memories
+- [x] **3.2.4** Write tests
+  - [x] Test list namespaces
+  - [x] Test get namespace memories
 
 ---
 
@@ -300,21 +300,21 @@
 
 #### Tasks
 
-- [ ] **3.3.1** Add to `list_resources()`
-  - [ ] Add `subcog://_prompts` ResourceDefinition
+- [x] **3.3.1** Add to `list_resources()`
+  - [x] Add `subcog://_prompts` ResourceDefinition
 
-- [ ] **3.3.2** Implement aggregate prompts handler
-  - [ ] Query all domains (project, user, org)
-  - [ ] Combine and deduplicate by name
-  - [ ] Return merged list
+- [x] **3.3.2** Implement aggregate prompts handler
+  - [x] Query all domains (project, user, org)
+  - [x] Combine and deduplicate by name
+  - [x] Return merged list
 
-- [ ] **3.3.3** Update resource routing
-  - [ ] Handle `_prompts` in cross-domain route
-  - [ ] Distinguish from namespace patterns
+- [x] **3.3.3** Update resource routing
+  - [x] Handle `_prompts` in cross-domain route
+  - [x] Distinguish from namespace patterns
 
-- [ ] **3.3.4** Write tests
-  - [ ] Test aggregate listing
-  - [ ] Test deduplication
+- [x] **3.3.4** Write tests
+  - [x] Test aggregate listing
+  - [x] Test deduplication
 
 ---
 
@@ -325,18 +325,18 @@
 
 #### Tasks
 
-- [ ] **3.4.1** Define prompt template
-  - [ ] Design tutorial generation structure
-  - [ ] Define input parameters (topic, level, format)
-  - [ ] Create comprehensive prompt content
+- [x] **3.4.1** Define prompt template
+  - [x] Design tutorial generation structure
+  - [x] Define input parameters (topic, level, format)
+  - [x] Create comprehensive prompt content
 
-- [ ] **3.4.2** Add to prompts list
-  - [ ] Register in `list_prompts()`
-  - [ ] Implement `get_prompt()` handler
+- [x] **3.4.2** Add to prompts list
+  - [x] Register in `list_prompts()`
+  - [x] Implement `get_prompt()` handler
 
-- [ ] **3.4.3** Write tests
-  - [ ] Test prompt retrieval
-  - [ ] Test parameter substitution
+- [x] **3.4.3** Write tests
+  - [x] Test prompt retrieval
+  - [x] Test parameter substitution
 
 ---
 
@@ -347,21 +347,21 @@
 
 #### Tasks
 
-- [ ] **3.5.1** Add clap completions feature
-  - [ ] Add `clap_complete` dependency
-  - [ ] Enable `derive` feature for completions
+- [x] **3.5.1** Add clap completions feature
+  - [x] Add `clap_complete` dependency
+  - [x] Enable `derive` feature for completions
 
-- [ ] **3.5.2** Implement `completions` subcommand
-  - [ ] Add `Completions` command variant
-  - [ ] Accept shell type argument (bash, zsh, fish, powershell)
-  - [ ] Generate completion script to stdout
+- [x] **3.5.2** Implement `completions` subcommand
+  - [x] Add `Completions` command variant
+  - [x] Accept shell type argument (bash, zsh, fish, powershell)
+  - [x] Generate completion script to stdout
 
-- [ ] **3.5.3** Update documentation
-  - [ ] Add installation instructions per shell
-  - [ ] Include in docs/cli/README.md
+- [x] **3.5.3** Update documentation
+  - [x] Add installation instructions per shell
+  - [x] Include in docs/cli/README.md
 
-- [ ] **3.5.4** Write tests
-  - [ ] Test script generation for each shell
+- [x] **3.5.4** Write tests
+  - [x] Test script generation for each shell
 
 ---
 
@@ -372,24 +372,24 @@
 
 #### Tasks
 
-- [ ] **3.6.1** Implement `import` subcommand
-  - [ ] Accept file path or URL
-  - [ ] Parse prompt format (YAML, JSON, MD)
-  - [ ] Validate and save to target domain
+- [x] **3.6.1** Implement `import` subcommand
+  - [x] Accept file path or URL
+  - [x] Parse prompt format (YAML, JSON, MD)
+  - [x] Validate and save to target domain
 
-- [ ] **3.6.2** Implement `share` subcommand
-  - [ ] Export prompt to file
-  - [ ] Support output formats (YAML, JSON, MD)
-  - [ ] Include metadata and variables
+- [x] **3.6.2** Implement `share` subcommand
+  - [x] Export prompt to file
+  - [x] Support output formats (YAML, JSON, MD)
+  - [x] Include metadata and variables
 
-- [ ] **3.6.3** Add to CLI module
-  - [ ] Add `Import` and `Share` subcommands
-  - [ ] Wire up to prompt service
+- [x] **3.6.3** Add to CLI module
+  - [x] Add `Import` and `Share` subcommands
+  - [x] Wire up to prompt service
 
-- [ ] **3.6.4** Write tests
-  - [ ] Test import from file
-  - [ ] Test export to file
-  - [ ] Test round-trip (export → import)
+- [x] **3.6.4** Write tests
+  - [x] Test import from file
+  - [x] Test export to file
+  - [x] Test round-trip (export → import)
 
 ---
 
@@ -397,31 +397,31 @@
 
 ### Per-Task Verification
 
-- [ ] Code compiles without warnings (`cargo build`)
-- [ ] All tests pass (`cargo test`)
-- [ ] Clippy clean (`cargo clippy --all-targets`)
-- [ ] Format correct (`cargo fmt -- --check`)
-- [ ] Documentation updated
+- [x] Code compiles without warnings (`cargo build`)
+- [x] All tests pass (`cargo test`)
+- [x] Clippy clean (`cargo clippy --all-targets`)
+- [x] Format correct (`cargo fmt -- --check`)
+- [x] Documentation updated
 
 ### Phase Completion Gates
 
 #### Phase 1 Complete When:
-- [ ] Redis Vector backend passes integration tests
-- [ ] HTTP transport serves MCP requests
-- [ ] `make ci` passes
+- [x] Redis Vector backend passes integration tests
+- [x] HTTP transport serves MCP requests
+- [x] `make ci` passes
 
 #### Phase 2 Complete When:
-- [ ] usearch benchmarks show O(log n) performance
-- [ ] PreCompact hook semantic dedup verified
-- [ ] Stop hook summary shows namespace breakdown
-- [ ] Org prompts CRUD functional
-- [ ] `make ci` passes
+- [x] usearch benchmarks show O(log n) performance
+- [x] PreCompact hook semantic dedup verified
+- [x] Stop hook summary shows namespace breakdown
+- [x] Org prompts CRUD functional
+- [x] `make ci` passes
 
 #### Phase 3 Complete When:
-- [ ] `subcog namespaces` outputs table
-- [ ] All MCP resources listed in docs are functional
-- [ ] Shell completions install correctly
-- [ ] `make ci` passes
+- [x] `subcog namespaces` outputs table
+- [x] All MCP resources listed in docs are functional
+- [x] Shell completions install correctly
+- [x] `make ci` passes
 
 ---
 

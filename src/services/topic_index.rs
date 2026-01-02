@@ -11,6 +11,16 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
+// Topic index configuration constants
+/// Default refresh interval in seconds.
+const DEFAULT_REFRESH_INTERVAL_SECS: u64 = 300;
+/// Maximum memories to retrieve for index building.
+const MAX_INDEX_MEMORIES: usize = 10000;
+/// Minimum word length to consider for topic extraction.
+const MIN_TOPIC_WORD_LENGTH: usize = 3;
+/// Maximum word length to consider for topic extraction.
+const MAX_TOPIC_WORD_LENGTH: usize = 30;
+
 /// Information about a topic in the index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TopicInfo {
@@ -42,7 +52,7 @@ impl TopicIndexService {
             topics: Arc::new(RwLock::new(HashMap::new())),
             topic_namespaces: Arc::new(RwLock::new(HashMap::new())),
             last_refresh: Arc::new(RwLock::new(None)),
-            refresh_interval: Duration::from_secs(300), // 5 minutes
+            refresh_interval: Duration::from_secs(DEFAULT_REFRESH_INTERVAL_SECS),
         }
     }
 
@@ -75,7 +85,7 @@ impl TopicIndexService {
     /// Returns an error if memory retrieval fails.
     pub fn build_index(&self, recall: &RecallService) -> Result<()> {
         let filter = SearchFilter::new();
-        let result = recall.list_all(&filter, 10000)?;
+        let result = recall.list_all(&filter, MAX_INDEX_MEMORIES)?;
 
         let mut topics_map: HashMap<String, Vec<MemoryId>> = HashMap::new();
         let mut namespace_map: HashMap<String, Vec<Namespace>> = HashMap::new();
@@ -402,7 +412,7 @@ fn extract_content_keywords(content: &str) -> Vec<String> {
 
     let words: Vec<String> = content
         .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| w.len() >= 3 && w.len() <= 30)
+        .filter(|w| w.len() >= MIN_TOPIC_WORD_LENGTH && w.len() <= MAX_TOPIC_WORD_LENGTH)
         .map(str::to_lowercase)
         .filter(|w| !STOP_WORDS.contains(&w.as_str()))
         .filter(|w| !w.chars().all(char::is_numeric))
