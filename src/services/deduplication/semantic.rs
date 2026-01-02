@@ -296,10 +296,6 @@ mod tests {
                 inner: RwLock::new(backend),
             }
         }
-
-        fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
-            self.inner.write().unwrap().upsert(id, embedding)
-        }
     }
 
     impl VectorBackend for RwLockWrapper {
@@ -307,11 +303,11 @@ mod tests {
             self.inner.read().unwrap().dimensions()
         }
 
-        fn upsert(&mut self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
+        fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
             self.inner.write().unwrap().upsert(id, embedding)
         }
 
-        fn remove(&mut self, id: &MemoryId) -> Result<bool> {
+        fn remove(&self, id: &MemoryId) -> Result<bool> {
             self.inner.write().unwrap().remove(id)
         }
 
@@ -331,7 +327,7 @@ mod tests {
             self.inner.read().unwrap().count()
         }
 
-        fn clear(&mut self) -> Result<()> {
+        fn clear(&self) -> Result<()> {
             self.inner.write().unwrap().clear()
         }
     }

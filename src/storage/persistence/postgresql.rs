@@ -330,7 +330,7 @@ mod implementation {
     }
 
     impl PersistenceBackend for PostgresBackend {
-        fn store(&mut self, memory: &Memory) -> Result<()> {
+        fn store(&self, memory: &Memory) -> Result<()> {
             self.block_on(self.store_async(memory))
         }
 
@@ -338,7 +338,7 @@ mod implementation {
             self.block_on(self.get_async(id))
         }
 
-        fn delete(&mut self, id: &MemoryId) -> Result<bool> {
+        fn delete(&self, id: &MemoryId) -> Result<bool> {
             self.block_on(self.delete_async(id))
         }
 
@@ -381,7 +381,7 @@ mod stub {
     }
 
     impl PersistenceBackend for PostgresBackend {
-        fn store(&mut self, _memory: &Memory) -> Result<()> {
+        fn store(&self, _memory: &Memory) -> Result<()> {
             Err(Error::NotImplemented(format!(
                 "PostgresBackend::store to {} on {}",
                 self.table_name, self.connection_url
@@ -395,7 +395,7 @@ mod stub {
             )))
         }
 
-        fn delete(&mut self, _id: &MemoryId) -> Result<bool> {
+        fn delete(&self, _id: &MemoryId) -> Result<bool> {
             Err(Error::NotImplemented(format!(
                 "PostgresBackend::delete from {} on {}",
                 self.table_name, self.connection_url
@@ -464,7 +464,7 @@ mod tests {
         };
 
         let table = unique_table_name();
-        let mut backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+        let backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
 
         let memory = create_test_memory("test-store-retrieve");
         backend.store(&memory).expect("Failed to store memory");
@@ -506,7 +506,7 @@ mod tests {
         };
 
         let table = unique_table_name();
-        let mut backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+        let backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
 
         let mut memory = create_test_memory("test-update");
         backend.store(&memory).expect("Failed to store initial");
@@ -535,7 +535,7 @@ mod tests {
         };
 
         let table = unique_table_name();
-        let mut backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+        let backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
 
         let memory = create_test_memory("test-delete");
         backend.store(&memory).expect("Failed to store");
@@ -559,7 +559,7 @@ mod tests {
         };
 
         let table = unique_table_name();
-        let mut backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+        let backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
 
         let deleted = backend
             .delete(&MemoryId::new("never-existed"))
@@ -575,7 +575,7 @@ mod tests {
         };
 
         let table = unique_table_name();
-        let mut backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+        let backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
 
         // Initially empty
         let ids = backend.list_ids().expect("Failed to list");
@@ -599,7 +599,7 @@ mod tests {
         };
 
         let table = unique_table_name();
-        let mut backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+        let backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
 
         let mut memory = create_test_memory("test-embedding");
         memory.embedding = Some(vec![0.1, 0.2, 0.3, 0.4, 0.5]);
@@ -625,7 +625,7 @@ mod tests {
         };
 
         let table = unique_table_name();
-        let mut backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+        let backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
 
         let namespaces = [
             Namespace::Decisions,
@@ -678,7 +678,7 @@ mod stub_tests {
 
     #[test]
     fn test_stub_store_returns_not_implemented() {
-        let mut backend = PostgresBackend::with_defaults();
+        let backend = PostgresBackend::with_defaults();
         let memory = create_test_memory();
         let result = backend.store(&memory);
         assert!(result.is_err());
@@ -701,7 +701,7 @@ mod stub_tests {
 
     #[test]
     fn test_stub_delete_returns_not_implemented() {
-        let mut backend = PostgresBackend::with_defaults();
+        let backend = PostgresBackend::with_defaults();
         let result = backend.delete(&MemoryId::new("test"));
         assert!(result.is_err());
         assert!(matches!(

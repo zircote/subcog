@@ -24,6 +24,26 @@ impl SyncService {
         Self { config }
     }
 
+    /// Creates a no-op sync service for user-scoped storage.
+    ///
+    /// This service does nothing when sync operations are called,
+    /// returning empty stats. Used for user-scope where there's no
+    /// git remote to sync with.
+    #[must_use]
+    pub fn no_op() -> Self {
+        Self {
+            config: Config::default(),
+        }
+    }
+
+    /// Returns whether this service can perform sync operations.
+    ///
+    /// Returns `false` if no repository path is configured (user-scope).
+    #[must_use]
+    pub const fn is_enabled(&self) -> bool {
+        self.config.repo_path.is_some()
+    }
+
     /// Fetches memories from remote.
     ///
     /// # Errors

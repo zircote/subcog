@@ -1084,7 +1084,7 @@ mod tests {
     use crate::storage::traits::IndexBackend;
 
     fn build_handler_with_memories() -> ResourceHandler {
-        let mut index = SqliteBackend::in_memory().expect("in-memory index");
+        let index = SqliteBackend::in_memory().expect("in-memory index");
         let now = 1_700_000_000;
         let memory = Memory {
             id: MemoryId::new("decisions-1"),

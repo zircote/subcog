@@ -29,7 +29,7 @@ use subcog::mcp::{McpServer, Transport};
 use subcog::observability::{self, InitOptions};
 use subcog::security::AuditConfig;
 
-use commands::{HookEvent, PromptAction};
+use commands::{HookEvent, MigrateAction, PromptAction};
 
 /// Subcog - A persistent memory system for AI coding assistants.
 #[derive(Parser)]
@@ -85,6 +85,10 @@ enum Commands {
         /// Maximum number of results.
         #[arg(short, long, default_value = "10")]
         limit: usize,
+
+        /// Display raw (un-normalized) scores instead of normalized scores.
+        #[arg(long)]
+        raw: bool,
     },
 
     /// Show status.
@@ -177,6 +181,13 @@ enum Commands {
         verbose: bool,
     },
 
+    /// Migrate memories to new features.
+    Migrate {
+        /// Migration subcommand.
+        #[command(subcommand)]
+        action: MigrateAction,
+    },
+
     /// Generate shell completion scripts.
     Completions {
         /// Shell type: bash, zsh, fish, powershell, or elvish.
@@ -248,7 +259,8 @@ fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::error:
             mode,
             namespace,
             limit,
-        } => commands::cmd_recall(query, mode, namespace, limit),
+            raw,
+        } => commands::cmd_recall(query, mode, namespace, limit, raw),
 
         Commands::Status => commands::cmd_status(&config),
 
@@ -278,6 +290,14 @@ fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::error:
             use subcog::cli::{NamespacesOutputFormat, cmd_namespaces};
             let format = NamespacesOutputFormat::from_str(&format).unwrap_or_default();
             cmd_namespaces(format, verbose)
+        },
+
+        Commands::Migrate { action } => match action {
+            MigrateAction::Embeddings {
+                repo,
+                dry_run,
+                force,
+            } => commands::cmd_migrate_embeddings(repo, dry_run, force),
         },
 
         Commands::Completions { shell } => {

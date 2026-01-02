@@ -325,11 +325,11 @@ mod implementation {
             self.dimensions
         }
 
-        fn upsert(&mut self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
+        fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
             self.block_on(self.upsert_async(id, embedding))
         }
 
-        fn remove(&mut self, id: &MemoryId) -> Result<bool> {
+        fn remove(&self, id: &MemoryId) -> Result<bool> {
             self.block_on(self.remove_async(id))
         }
 
@@ -346,7 +346,7 @@ mod implementation {
             self.block_on(self.count_async())
         }
 
-        fn clear(&mut self) -> Result<()> {
+        fn clear(&self) -> Result<()> {
             self.block_on(self.clear_async())
         }
     }
@@ -405,14 +405,14 @@ mod stub {
             self.dimensions
         }
 
-        fn upsert(&mut self, _id: &MemoryId, _embedding: &[f32]) -> Result<()> {
+        fn upsert(&self, _id: &MemoryId, _embedding: &[f32]) -> Result<()> {
             Err(Error::NotImplemented(format!(
                 "PgvectorBackend::upsert for {} on {}",
                 self.table_name, self.connection_url
             )))
         }
 
-        fn remove(&mut self, _id: &MemoryId) -> Result<bool> {
+        fn remove(&self, _id: &MemoryId) -> Result<bool> {
             Err(Error::NotImplemented(format!(
                 "PgvectorBackend::remove for {} on {}",
                 self.table_name, self.connection_url
@@ -438,7 +438,7 @@ mod stub {
             )))
         }
 
-        fn clear(&mut self) -> Result<()> {
+        fn clear(&self) -> Result<()> {
             Err(Error::NotImplemented(format!(
                 "PgvectorBackend::clear for {} on {}",
                 self.table_name, self.connection_url

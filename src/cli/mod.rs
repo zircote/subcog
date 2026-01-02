@@ -45,6 +45,7 @@ mod config;
 mod consolidate;
 mod hook;
 mod llm_factory;
+mod migrate;
 mod namespaces;
 mod prompt;
 mod recall;
@@ -60,6 +61,7 @@ pub use llm_factory::{
     build_anthropic_client, build_hook_llm_provider, build_http_config, build_lmstudio_client,
     build_ollama_client, build_openai_client, build_resilience_config,
 };
+pub use migrate::MigrateCommand;
 pub use namespaces::{NamespaceInfo, NamespacesOutputFormat, cmd_namespaces, get_all_namespaces};
 pub use prompt::{
     OutputFormat, PromptCommand, SavePromptArgs, cmd_prompt_delete, cmd_prompt_export,

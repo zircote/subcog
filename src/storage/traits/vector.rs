@@ -54,6 +54,11 @@ use crate::models::{MemoryId, SearchFilter};
 /// Vector backends provide similarity search using embedding vectors.
 /// Implementations should be thread-safe (`Send + Sync`).
 ///
+/// # Implementor Notes
+///
+/// - Methods use `&self` to enable sharing via `Arc<dyn VectorBackend>`
+/// - Use interior mutability (e.g., `Mutex<HashMap<K,V>>`) for mutable state
+///
 /// # Dimensionality
 ///
 /// All embeddings must match the backend's [`dimensions()`](VectorBackend::dimensions).
@@ -64,17 +69,21 @@ pub trait VectorBackend: Send + Sync {
 
     /// Inserts or updates an embedding for a memory.
     ///
+    /// Uses interior mutability for thread-safe concurrent access.
+    ///
     /// # Errors
     ///
     /// Returns an error if the upsert operation fails.
-    fn upsert(&mut self, id: &MemoryId, embedding: &[f32]) -> Result<()>;
+    fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()>;
 
     /// Removes an embedding by memory ID.
+    ///
+    /// Uses interior mutability for thread-safe concurrent access.
     ///
     /// # Errors
     ///
     /// Returns an error if the removal operation fails.
-    fn remove(&mut self, id: &MemoryId) -> Result<bool>;
+    fn remove(&self, id: &MemoryId) -> Result<bool>;
 
     /// Searches for similar embeddings.
     ///
@@ -100,8 +109,10 @@ pub trait VectorBackend: Send + Sync {
 
     /// Clears all embeddings.
     ///
+    /// Uses interior mutability for thread-safe concurrent access.
+    ///
     /// # Errors
     ///
     /// Returns an error if the clear operation fails.
-    fn clear(&mut self) -> Result<()>;
+    fn clear(&self) -> Result<()>;
 }

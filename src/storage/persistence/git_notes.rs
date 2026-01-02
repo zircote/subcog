@@ -9,6 +9,7 @@ use crate::storage::traits::PersistenceBackend;
 use crate::{Error, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::RwLock;
 
 /// Git notes-based persistence backend.
 pub struct GitNotesBackend {
@@ -19,7 +20,8 @@ pub struct GitNotesBackend {
     /// Notes manager instance.
     notes_manager: NotesManager,
     /// In-memory index of memory ID to commit ID mappings.
-    id_mapping: HashMap<String, String>,
+    /// Uses `RwLock` for interior mutability to satisfy `&self` trait requirements.
+    id_mapping: RwLock<HashMap<String, String>>,
 }
 
 impl GitNotesBackend {
@@ -32,7 +34,7 @@ impl GitNotesBackend {
             repo_path: path,
             notes_ref: NotesManager::DEFAULT_NOTES_REF.to_string(),
             notes_manager,
-            id_mapping: HashMap::new(),
+            id_mapping: RwLock::new(HashMap::new()),
         }
     }
 
@@ -61,15 +63,23 @@ impl GitNotesBackend {
     ///
     /// # Errors
     ///
-    /// Returns an error if notes cannot be read.
-    pub fn build_index(&mut self) -> Result<()> {
-        self.id_mapping.clear();
+    /// Returns an error if notes cannot be read or the lock is poisoned.
+    pub fn build_index(&self) -> Result<()> {
+        let mut mapping = self
+            .id_mapping
+            .write()
+            .map_err(|e| Error::OperationFailed {
+                operation: "build_index".to_string(),
+                cause: format!("Lock poisoned: {e}"),
+            })?;
+
+        mapping.clear();
 
         let notes = self.notes_manager.list()?;
 
         for (commit_id, content) in notes {
             if let Some(id) = extract_memory_id_from_content(&content) {
-                self.id_mapping.insert(id, commit_id);
+                mapping.insert(id, commit_id);
             }
         }
 
@@ -227,7 +237,7 @@ fn parse_domain(s: &str) -> Domain {
 }
 
 impl PersistenceBackend for GitNotesBackend {
-    fn store(&mut self, memory: &Memory) -> Result<()> {
+    fn store(&self, memory: &Memory) -> Result<()> {
         let content = Self::serialize_memory(memory)?;
 
         // Add note to HEAD
@@ -236,18 +246,33 @@ impl PersistenceBackend for GitNotesBackend {
         // Update our in-memory mapping
         // For simplicity, we use the memory ID as the key and store a placeholder
         // In production, we would track which commit each memory is attached to
-        self.id_mapping
-            .insert(memory.id.as_str().to_string(), "HEAD".to_string());
+        let mut mapping = self
+            .id_mapping
+            .write()
+            .map_err(|e| Error::OperationFailed {
+                operation: "store".to_string(),
+                cause: format!("Lock poisoned: {e}"),
+            })?;
+
+        mapping.insert(memory.id.as_str().to_string(), "HEAD".to_string());
 
         Ok(())
     }
 
     fn get(&self, id: &MemoryId) -> Result<Option<Memory>> {
         // First check our mapping
-        if !self.id_mapping.contains_key(id.as_str()) {
+        let mapping = self.id_mapping.read().map_err(|e| Error::OperationFailed {
+            operation: "get".to_string(),
+            cause: format!("Lock poisoned: {e}"),
+        })?;
+
+        if !mapping.contains_key(id.as_str()) {
+            // Drop the read lock before scanning
+            drop(mapping);
             // Try to find by scanning all notes
             return self.find_memory_by_scanning(id);
         }
+        drop(mapping);
 
         // Get from HEAD (simplified - in production we'd use the actual commit ID)
         let content = self.notes_manager.get_from_head()?;
@@ -265,10 +290,18 @@ impl PersistenceBackend for GitNotesBackend {
         }
     }
 
-    fn delete(&mut self, id: &MemoryId) -> Result<bool> {
+    fn delete(&self, id: &MemoryId) -> Result<bool> {
         // For git notes, we don't actually delete - we mark as deleted
         // A proper implementation would need to track the commit ID
-        if self.id_mapping.remove(id.as_str()).is_some() {
+        let mut mapping = self
+            .id_mapping
+            .write()
+            .map_err(|e| Error::OperationFailed {
+                operation: "delete".to_string(),
+                cause: format!("Lock poisoned: {e}"),
+            })?;
+
+        if mapping.remove(id.as_str()).is_some() {
             Ok(true)
         } else {
             Ok(false)
@@ -400,7 +433,7 @@ This is the memory content.";
     #[test]
     fn test_store_and_list() {
         let (dir, _repo) = create_test_repo();
-        let mut backend = GitNotesBackend::new(dir.path());
+        let backend = GitNotesBackend::new(dir.path());
 
         let memory = create_test_memory();
         backend.store(&memory).unwrap();

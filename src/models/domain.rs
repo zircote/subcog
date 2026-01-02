@@ -168,6 +168,40 @@ impl Domain {
         }
     }
 
+    /// Creates a domain based on the current working directory context.
+    ///
+    /// - If in a git repository: returns a project-scoped domain
+    /// - If NOT in a git repository: returns a user-scoped domain
+    ///
+    /// This ensures memories are routed to the appropriate storage backend:
+    /// - Project domains use git notes storage
+    /// - User domains use sqlite storage
+    #[must_use]
+    pub fn default_for_context() -> Self {
+        use crate::storage::index::is_in_git_repo;
+
+        if is_in_git_repo() {
+            // In a git repo - use project scope (empty domain = project-local)
+            Self::new()
+        } else {
+            // Not in a git repo - use user scope
+            Self::for_user()
+        }
+    }
+
+    /// Creates a user-scoped domain.
+    ///
+    /// User-scoped memories are stored in the user's personal sqlite database
+    /// and are accessible across all projects.
+    #[must_use]
+    pub fn for_user() -> Self {
+        Self {
+            organization: None,
+            project: Some("user".to_string()),
+            repository: None,
+        }
+    }
+
     /// Creates a domain for a specific repository.
     #[must_use]
     pub fn for_repository(org: impl Into<String>, repo: impl Into<String>) -> Self {
@@ -178,10 +212,16 @@ impl Domain {
         }
     }
 
-    /// Returns true if this is a global domain (no restrictions).
+    /// Returns true if this is a global/project domain (no restrictions).
     #[must_use]
     pub const fn is_global(&self) -> bool {
         self.organization.is_none() && self.project.is_none() && self.repository.is_none()
+    }
+
+    /// Returns true if this is a user-scoped domain.
+    #[must_use]
+    pub fn is_user(&self) -> bool {
+        self.project.as_deref() == Some("user") && self.organization.is_none()
     }
 
     /// Returns the scope string for URN construction.
@@ -207,8 +247,11 @@ impl fmt::Display for Domain {
             (Some(org), None, Some(repo)) => write!(f, "{org}/{repo}"),
             (Some(org), Some(proj), None) => write!(f, "{org}/{proj}"),
             (Some(org), None, None) => write!(f, "{org}"),
+            // User-scoped domain shows as "user"
+            (None, Some(proj), _) if proj == "user" => write!(f, "user"),
             (None, Some(proj), _) => write!(f, "{proj}"),
             (None, None, Some(repo)) => write!(f, "{repo}"),
+            // Global/project domain shows as "global" (legacy) or "project"
             (None, None, None) => write!(f, "global"),
         }
     }

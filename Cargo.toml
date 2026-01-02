@@ -1,6 +1,6 @@
 [package]
 name = "subcog"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 description = "A persistent memory system for AI coding assistants"
@@ -73,6 +73,9 @@ hex = "0.4"
 # LRU cache for recent capture tracking
 lru = "0.16"
 
+# FastEmbed for semantic embeddings (optional - fallback to pseudo-embeddings if not available)
+fastembed = { version = "4", optional = true }
+
 # usearch HNSW vector search (optional - pure Rust fallback if not available)
 usearch = { version = "2.21", optional = true }
 
@@ -116,6 +119,14 @@ criterion = { version = "0.7", features = ["html_reports"] }
 
 [[bench]]
 name = "search_intent"
+harness = false
+
+[[bench]]
+name = "embedding"
+harness = false
+
+[[bench]]
+name = "search"
 harness = false
 
 [profile.dev]
@@ -174,7 +185,9 @@ postgres-tls = ["postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:webp
 redis = ["dep:redis"]
 # usearch HNSW vector search (native implementation)
 usearch-hnsw = ["dep:usearch"]
+# FastEmbed semantic embeddings (ONNX-based)
+fastembed-embeddings = ["dep:fastembed"]
 # HTTP transport with JWT authentication
 http = ["dep:axum", "dep:tower-http"]
 # All features enabled
-full = ["postgres", "postgres-tls", "redis", "usearch-hnsw", "http"]
+full = ["postgres", "postgres-tls", "redis", "usearch-hnsw", "fastembed-embeddings", "http"]

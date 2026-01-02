@@ -192,7 +192,7 @@ impl FilesystemBackend {
 }
 
 impl PersistenceBackend for FilesystemBackend {
-    fn store(&mut self, memory: &Memory) -> Result<()> {
+    fn store(&self, memory: &Memory) -> Result<()> {
         // Ensure directory exists before storing
         let _ = fs::create_dir_all(&self.base_path);
 
@@ -249,7 +249,7 @@ impl PersistenceBackend for FilesystemBackend {
         Ok(Some(stored.to_memory()))
     }
 
-    fn delete(&mut self, id: &MemoryId) -> Result<bool> {
+    fn delete(&self, id: &MemoryId) -> Result<bool> {
         let path = match self.memory_path(id) {
             Ok(p) => p,
             Err(_) => return Ok(false), // Invalid ID means nothing to delete
@@ -333,7 +333,7 @@ mod tests {
     #[test]
     fn test_store_and_get() {
         let dir = TempDir::new().unwrap();
-        let mut backend = FilesystemBackend::new(dir.path());
+        let backend = FilesystemBackend::new(dir.path());
 
         let memory = create_test_memory("test_id");
         backend.store(&memory).unwrap();
@@ -359,7 +359,7 @@ mod tests {
     #[test]
     fn test_delete() {
         let dir = TempDir::new().unwrap();
-        let mut backend = FilesystemBackend::new(dir.path());
+        let backend = FilesystemBackend::new(dir.path());
 
         let memory = create_test_memory("to_delete");
         backend.store(&memory).unwrap();
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn test_delete_nonexistent() {
         let dir = TempDir::new().unwrap();
-        let mut backend = FilesystemBackend::new(dir.path());
+        let backend = FilesystemBackend::new(dir.path());
 
         let deleted = backend.delete(&MemoryId::new("nonexistent")).unwrap();
         assert!(!deleted);
@@ -383,7 +383,7 @@ mod tests {
     #[test]
     fn test_list_ids() {
         let dir = TempDir::new().unwrap();
-        let mut backend = FilesystemBackend::new(dir.path());
+        let backend = FilesystemBackend::new(dir.path());
 
         backend.store(&create_test_memory("id1")).unwrap();
         backend.store(&create_test_memory("id2")).unwrap();
@@ -396,7 +396,7 @@ mod tests {
     #[test]
     fn test_count() {
         let dir = TempDir::new().unwrap();
-        let mut backend = FilesystemBackend::new(dir.path());
+        let backend = FilesystemBackend::new(dir.path());
 
         assert_eq!(backend.count().unwrap(), 0);
 
@@ -409,7 +409,7 @@ mod tests {
     #[test]
     fn test_exists() {
         let dir = TempDir::new().unwrap();
-        let mut backend = FilesystemBackend::new(dir.path());
+        let backend = FilesystemBackend::new(dir.path());
 
         backend.store(&create_test_memory("exists")).unwrap();
 
@@ -420,7 +420,7 @@ mod tests {
     #[test]
     fn test_update_memory() {
         let dir = TempDir::new().unwrap();
-        let mut backend = FilesystemBackend::new(dir.path());
+        let backend = FilesystemBackend::new(dir.path());
 
         let mut memory = create_test_memory("update_test");
         backend.store(&memory).unwrap();
@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn test_memory_roundtrip_all_namespaces() {
         let dir = TempDir::new().unwrap();
-        let mut backend = FilesystemBackend::new(dir.path());
+        let backend = FilesystemBackend::new(dir.path());
 
         let namespaces = [
             Namespace::Decisions,

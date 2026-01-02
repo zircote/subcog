@@ -442,10 +442,6 @@ mod tests {
                 inner: RwLock::new(backend),
             }
         }
-
-        fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
-            self.inner.write().unwrap().upsert(id, embedding)
-        }
     }
 
     impl VectorBackend for RwLockVectorWrapper {
@@ -453,11 +449,11 @@ mod tests {
             self.inner.read().unwrap().dimensions()
         }
 
-        fn upsert(&mut self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
+        fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
             self.inner.write().unwrap().upsert(id, embedding)
         }
 
-        fn remove(&mut self, id: &MemoryId) -> Result<bool> {
+        fn remove(&self, id: &MemoryId) -> Result<bool> {
             self.inner.write().unwrap().remove(id)
         }
 
@@ -477,7 +473,7 @@ mod tests {
             self.inner.read().unwrap().count()
         }
 
-        fn clear(&mut self) -> Result<()> {
+        fn clear(&self) -> Result<()> {
             self.inner.write().unwrap().clear()
         }
     }
@@ -592,7 +588,7 @@ mod tests {
 
     #[test]
     fn test_check_exact_match() {
-        let mut index = SqliteBackend::in_memory().unwrap();
+        let index = SqliteBackend::in_memory().unwrap();
 
         // Create memory with hash tag
         let content = "Use PostgreSQL for the primary database storage.";

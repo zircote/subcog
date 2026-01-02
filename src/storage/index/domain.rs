@@ -32,6 +32,36 @@ impl DomainScope {
             Self::Org => "org",
         }
     }
+
+    /// Returns the appropriate default domain scope based on current context.
+    ///
+    /// - If in a git repository (`.git` folder exists): returns `Project`
+    /// - If NOT in a git repository: returns `User`
+    ///
+    /// This ensures memories are stored in the appropriate scope:
+    /// - Project-scoped memories are stored in git notes (requires git repo)
+    /// - User-scoped memories are stored in sqlite (works anywhere)
+    #[must_use]
+    pub fn default_for_context() -> Self {
+        if is_in_git_repo() {
+            Self::Project
+        } else {
+            Self::User
+        }
+    }
+
+    /// Returns the appropriate default domain scope for a specific path.
+    ///
+    /// - If path is in a git repository: returns `Project`
+    /// - If path is NOT in a git repository: returns `User`
+    #[must_use]
+    pub fn default_for_path(path: &Path) -> Self {
+        if is_path_in_git_repo(path) {
+            Self::Project
+        } else {
+            Self::User
+        }
+    }
 }
 
 /// Configuration for domain-scoped indices.
@@ -126,7 +156,7 @@ impl DomainIndexManager {
     pub fn get_index_path(&self, scope: DomainScope) -> Result<PathBuf> {
         match scope {
             DomainScope::Project => self.get_project_index_path(),
-            DomainScope::User => self.get_user_index_path(),
+            DomainScope::User => Ok(self.get_user_index_path()),
             DomainScope::Org => self.get_org_index_path(),
         }
     }
@@ -140,14 +170,18 @@ impl DomainIndexManager {
         Ok(repo_path.join(".subcog").join("index.db"))
     }
 
-    /// Gets the user-scoped index path: `<user_data>/repos/<hash>/index.db`
-    fn get_user_index_path(&self) -> Result<PathBuf> {
-        let repo_path = self.config.repo_path.as_ref().ok_or_else(|| {
-            Error::InvalidInput("Repository path not configured for user scope".to_string())
-        })?;
-
-        let hash = hash_path(repo_path);
-        Ok(self.user_data_dir.join("repos").join(hash).join("index.db"))
+    /// Gets the user-scoped index path.
+    ///
+    /// If a repo path is configured: `<user_data>/repos/<hash>/index.db`
+    /// If no repo path (pure user scope): `<user_data>/index.db`
+    fn get_user_index_path(&self) -> PathBuf {
+        self.config.repo_path.as_ref().map_or_else(
+            || self.user_data_dir.join("index.db"),
+            |repo_path| {
+                let hash = hash_path(repo_path);
+                self.user_data_dir.join("repos").join(hash).join("index.db")
+            },
+        )
     }
 
     /// Gets the org-scoped index path from configuration.
@@ -180,7 +214,16 @@ impl DomainIndexManager {
 }
 
 /// Gets the user data directory for subcog.
-fn get_user_data_dir() -> Result<PathBuf> {
+///
+/// Returns the platform-specific user data directory:
+/// - macOS: `~/Library/Application Support/subcog/`
+/// - Linux: `~/.local/share/subcog/`
+/// - Windows: `C:\Users\<User>\AppData\Local\subcog\`
+///
+/// # Errors
+///
+/// Returns an error if the user data directory cannot be determined.
+pub fn get_user_data_dir() -> Result<PathBuf> {
     directories::BaseDirs::new()
         .map(|b| b.data_local_dir().join("subcog"))
         .ok_or_else(|| Error::OperationFailed {
@@ -204,6 +247,25 @@ fn hash_path(path: &Path) -> String {
 
     // Use first 16 hex chars (64 bits) - collision-resistant enough
     format!("{hash:016x}")
+}
+
+/// Checks if the current working directory is inside a git repository.
+///
+/// Returns `true` if a `.git` directory exists in the current directory
+/// or any parent directory.
+#[must_use]
+pub fn is_in_git_repo() -> bool {
+    std::env::current_dir()
+        .map(|cwd| is_path_in_git_repo(&cwd))
+        .unwrap_or(false)
+}
+
+/// Checks if a given path is inside a git repository.
+///
+/// Returns `true` if a `.git` directory exists at or above the given path.
+#[must_use]
+pub fn is_path_in_git_repo(path: &Path) -> bool {
+    find_repo_root(path).is_ok()
 }
 
 /// Resolves the repository root from a given path.
@@ -328,5 +390,51 @@ mod tests {
 
         let path = manager.get_index_path(DomainScope::Org).unwrap();
         assert_eq!(path, PathBuf::from("/shared/org/index.db"));
+    }
+
+    #[test]
+    fn test_is_path_in_git_repo_with_git() {
+        let dir = TempDir::new().unwrap();
+        let repo_root = dir.path();
+
+        // Create .git directory
+        std::fs::create_dir(repo_root.join(".git")).unwrap();
+
+        // Path with .git should return true
+        assert!(is_path_in_git_repo(repo_root));
+
+        // Nested path should also return true
+        let nested = repo_root.join("src");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert!(is_path_in_git_repo(&nested));
+    }
+
+    #[test]
+    fn test_is_path_in_git_repo_without_git() {
+        let dir = TempDir::new().unwrap();
+        // No .git directory - should return false
+        assert!(!is_path_in_git_repo(dir.path()));
+    }
+
+    #[test]
+    fn test_default_for_path_in_git_repo() {
+        let dir = TempDir::new().unwrap();
+        let repo_root = dir.path();
+
+        // Create .git directory
+        std::fs::create_dir(repo_root.join(".git")).unwrap();
+
+        // Should default to Project when in git repo
+        assert_eq!(
+            DomainScope::default_for_path(repo_root),
+            DomainScope::Project
+        );
+    }
+
+    #[test]
+    fn test_default_for_path_not_in_git_repo() {
+        let dir = TempDir::new().unwrap();
+        // No .git directory - should default to User
+        assert_eq!(DomainScope::default_for_path(dir.path()), DomainScope::User);
     }
 }

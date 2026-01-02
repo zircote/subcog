@@ -3,35 +3,106 @@
 //! Searches for memories using hybrid (vector + BM25) search with RRF fusion.
 
 use crate::current_timestamp;
+use crate::embedding::Embedder;
 use crate::models::{
     Memory, MemoryEvent, MemoryId, MemoryStatus, SearchFilter, SearchHit, SearchMode, SearchResult,
 };
 use crate::security::record_event;
 use crate::storage::index::SqliteBackend;
-use crate::storage::traits::IndexBackend;
+use crate::storage::traits::{IndexBackend, VectorBackend};
 use crate::{Error, Result};
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 use tracing::instrument;
 
 /// Service for searching and retrieving memories.
+///
+/// Supports three search modes:
+/// - **Text**: BM25 full-text search via `SQLite` FTS5
+/// - **Vector**: Semantic similarity search via embedding + vector backend
+/// - **Hybrid**: Combines both using Reciprocal Rank Fusion (RRF)
+///
+/// # Graceful Degradation
+///
+/// If embedder or vector backend is unavailable:
+/// - `SearchMode::Vector` falls back to empty results with a warning
+/// - `SearchMode::Hybrid` falls back to text-only search
+/// - No errors are raised; partial results are returned
 pub struct RecallService {
-    /// `SQLite` index backend.
+    /// `SQLite` index backend for BM25 text search.
     index: Option<SqliteBackend>,
+    /// Embedder for generating query embeddings (optional).
+    embedder: Option<Arc<dyn Embedder>>,
+    /// Vector backend for similarity search (optional).
+    vector: Option<Arc<dyn VectorBackend + Send + Sync>>,
 }
 
 impl RecallService {
-    /// Creates a new recall service.
+    /// Creates a new recall service without any backends.
+    ///
+    /// This is primarily for testing. Use [`with_index`](Self::with_index) or
+    /// [`with_backends`](Self::with_backends) for production use.
     #[must_use]
     pub const fn new() -> Self {
-        Self { index: None }
+        Self {
+            index: None,
+            embedder: None,
+            vector: None,
+        }
     }
 
-    /// Creates a recall service with an index backend.
+    /// Creates a recall service with an index backend (text search only).
+    ///
+    /// Vector search will be disabled; hybrid search falls back to text-only.
     #[must_use]
     pub const fn with_index(index: SqliteBackend) -> Self {
-        Self { index: Some(index) }
+        Self {
+            index: Some(index),
+            embedder: None,
+            vector: None,
+        }
+    }
+
+    /// Creates a recall service with full hybrid search support.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - `SQLite` index backend for BM25 text search
+    /// * `embedder` - Embedder for generating query embeddings
+    /// * `vector` - Vector backend for similarity search
+    #[must_use]
+    pub fn with_backends(
+        index: SqliteBackend,
+        embedder: Arc<dyn Embedder>,
+        vector: Arc<dyn VectorBackend + Send + Sync>,
+    ) -> Self {
+        Self {
+            index: Some(index),
+            embedder: Some(embedder),
+            vector: Some(vector),
+        }
+    }
+
+    /// Adds an embedder to an existing recall service.
+    #[must_use]
+    pub fn with_embedder(mut self, embedder: Arc<dyn Embedder>) -> Self {
+        self.embedder = Some(embedder);
+        self
+    }
+
+    /// Adds a vector backend to an existing recall service.
+    #[must_use]
+    pub fn with_vector(mut self, vector: Arc<dyn VectorBackend + Send + Sync>) -> Self {
+        self.vector = Some(vector);
+        self
+    }
+
+    /// Returns whether vector search is available.
+    #[must_use]
+    pub fn has_vector_search(&self) -> bool {
+        self.embedder.is_some() && self.vector.is_some()
     }
 
     /// Searches for memories matching a query.
@@ -68,11 +139,17 @@ impl RecallService {
                 return Err(Error::InvalidInput("Query cannot be empty".to_string()));
             }
 
-            let memories = match mode {
+            let mut memories = match mode {
                 SearchMode::Text => self.text_search(query, filter, limit)?,
                 SearchMode::Vector => self.vector_search(query, filter, limit)?,
                 SearchMode::Hybrid => self.hybrid_search(query, filter, limit)?,
             };
+
+            // Normalize scores to 0.0-1.0 range for Text and Vector modes
+            // (Hybrid mode already normalizes after RRF fusion)
+            if mode != SearchMode::Hybrid {
+                normalize_scores(&mut memories);
+            }
 
             // Safe cast: u128 milliseconds will practically never exceed u64::MAX
             let execution_time_ms = start.elapsed().as_millis() as u64;
@@ -156,6 +233,7 @@ impl RecallService {
                         SearchHit {
                             memory,
                             score,
+                            raw_score: score,
                             vector_score: None,
                             bm25_score: None,
                         }
@@ -202,6 +280,10 @@ impl RecallService {
     }
 
     /// Performs BM25 text search.
+    ///
+    /// Note: Scores are NOT normalized here. Normalization is applied:
+    /// - In `hybrid_search` after RRF fusion
+    /// - The caller is responsible for normalization in text-only mode
     fn text_search(
         &self,
         query: &str,
@@ -228,6 +310,7 @@ impl RecallService {
                 SearchHit {
                     memory,
                     score,
+                    raw_score: score,
                     vector_score: None,
                     bm25_score: Some(score),
                 }
@@ -238,15 +321,108 @@ impl RecallService {
     }
 
     /// Performs vector similarity search.
-    const fn vector_search(
+    ///
+    /// # Graceful Degradation
+    ///
+    /// Returns empty results (not an error) if:
+    /// - Embedder is not configured
+    /// - Vector backend is not configured
+    /// - Embedding generation fails
+    /// - Vector search fails
+    ///
+    /// This allows hybrid search to fall back to text-only.
+    fn vector_search(
         &self,
-        _query: &str,
-        _filter: &SearchFilter,
-        _limit: usize,
+        query: &str,
+        filter: &SearchFilter,
+        limit: usize,
     ) -> Result<Vec<SearchHit>> {
-        // Vector search requires embeddings - for now return empty
-        // This would need the embedding service and vector backend
-        Ok(Vec::new())
+        // Check if we have the required components
+        let (embedder, vector) = match (&self.embedder, &self.vector) {
+            (Some(e), Some(v)) => (e, v),
+            (None, _) => {
+                tracing::debug!("Vector search unavailable: no embedder configured");
+                return Ok(Vec::new());
+            },
+            (_, None) => {
+                tracing::debug!("Vector search unavailable: no vector backend configured");
+                return Ok(Vec::new());
+            },
+        };
+
+        // Generate query embedding
+        let query_embedding = match embedder.embed(query) {
+            Ok(emb) => emb,
+            Err(e) => {
+                tracing::warn!("Failed to embed query for vector search: {e}");
+                return Ok(Vec::new());
+            },
+        };
+
+        // Search vector backend
+        let results = match vector.search(&query_embedding, filter, limit) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("Vector search failed: {e}");
+                return Ok(Vec::new());
+            },
+        };
+
+        // Get index backend to retrieve full memories
+        let index = match &self.index {
+            Some(idx) => idx,
+            None => {
+                // Return results with placeholder memories if no index
+                return Ok(results
+                    .into_iter()
+                    .map(|(id, score)| SearchHit {
+                        memory: create_placeholder_memory(id),
+                        score,
+                        raw_score: score,
+                        vector_score: Some(score),
+                        bm25_score: None,
+                    })
+                    .collect());
+            },
+        };
+
+        // PERF: Batch fetch memories for vector results
+        let ids: Vec<_> = results.iter().map(|(id, _)| id.clone()).collect();
+        let batch_memories = match index.get_memories_batch(&ids) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!("Failed to fetch memories for vector results: {e}");
+                // Return with placeholder memories
+                return Ok(results
+                    .into_iter()
+                    .map(|(id, score)| SearchHit {
+                        memory: create_placeholder_memory(id),
+                        score,
+                        raw_score: score,
+                        vector_score: Some(score),
+                        bm25_score: None,
+                    })
+                    .collect());
+            },
+        };
+
+        // Convert to SearchHits
+        let hits: Vec<SearchHit> = results
+            .into_iter()
+            .zip(batch_memories)
+            .map(|((id, score), memory_opt)| {
+                let memory = memory_opt.unwrap_or_else(|| create_placeholder_memory(id));
+                SearchHit {
+                    memory,
+                    score,
+                    raw_score: score,
+                    vector_score: Some(score),
+                    bm25_score: None,
+                }
+            })
+            .collect();
+
+        Ok(hits)
     }
 
     /// Performs hybrid search with RRF fusion.
@@ -261,7 +437,10 @@ impl RecallService {
         let vector_results = self.vector_search(query, filter, limit * 2)?;
 
         // Apply Reciprocal Rank Fusion
-        let fused = self.rrf_fusion(&text_results, &vector_results, limit);
+        let mut fused = self.rrf_fusion(&text_results, &vector_results, limit);
+
+        // Normalize scores to 0.0-1.0 range
+        normalize_scores(&mut fused);
 
         Ok(fused)
     }
@@ -407,6 +586,55 @@ const fn merge_vector_score(existing: &mut Option<SearchHit>, vector_score: Opti
     }
 }
 
+/// Normalizes search result scores to the 0.0-1.0 range.
+///
+/// # Algorithm
+///
+/// The maximum score in the result set becomes 1.0, and all other scores
+/// are scaled proportionally. This ensures:
+///
+/// - Scores are always in [0.0, 1.0] range
+/// - The top result always has score 1.0 (if results exist)
+/// - Relative score proportions are preserved
+///
+/// # Arguments
+///
+/// * `results` - Mutable slice of search hits to normalize
+///
+/// # Notes
+///
+/// - Empty results are handled safely (no division by zero)
+/// - Sets `raw_score` to preserve the original score before normalization
+/// - If all scores are 0, they remain 0 after normalization
+///
+/// # Example
+///
+/// ```text
+/// Before: [0.033, 0.020, 0.016]  (RRF scores)
+/// After:  [1.0,   0.606, 0.485]  (normalized)
+/// ```
+fn normalize_scores(results: &mut [SearchHit]) {
+    if results.is_empty() {
+        return;
+    }
+
+    // Find the maximum score
+    let max_score = results.iter().map(|h| h.score).fold(0.0_f32, f32::max);
+
+    // Avoid division by zero
+    if max_score <= f32::EPSILON {
+        return;
+    }
+
+    // Normalize all scores
+    for hit in results {
+        // Store raw score before normalization
+        hit.raw_score = hit.score;
+        // Normalize to 0.0-1.0 range
+        hit.score /= max_score;
+    }
+}
+
 impl Default for RecallService {
     fn default() -> Self {
         Self::new()
@@ -469,7 +697,7 @@ mod tests {
 
     #[test]
     fn test_search_with_backend() {
-        let mut index = SqliteBackend::in_memory().unwrap();
+        let index = SqliteBackend::in_memory().unwrap();
 
         // Add some test data
         index
@@ -496,12 +724,14 @@ mod tests {
             SearchHit {
                 memory: create_test_memory("id1", ""),
                 score: 0.9,
+                raw_score: 0.9,
                 vector_score: None,
                 bm25_score: Some(0.9),
             },
             SearchHit {
                 memory: create_test_memory("id2", ""),
                 score: 0.8,
+                raw_score: 0.8,
                 vector_score: None,
                 bm25_score: Some(0.8),
             },
@@ -511,12 +741,14 @@ mod tests {
             SearchHit {
                 memory: create_test_memory("id2", ""),
                 score: 0.95,
+                raw_score: 0.95,
                 vector_score: Some(0.95),
                 bm25_score: None,
             },
             SearchHit {
                 memory: create_test_memory("id3", ""),
                 score: 0.85,
+                raw_score: 0.85,
                 vector_score: Some(0.85),
                 bm25_score: None,
             },
@@ -546,5 +778,529 @@ mod tests {
             RecallService::default().search("test", SearchMode::Hybrid, &SearchFilter::new(), 10);
         // Will fail without backend, but tests the path
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_vector_search_no_embedder() {
+        let service = RecallService::default();
+        let result = service.vector_search("test query", &SearchFilter::new(), 10);
+
+        // Should return empty, not error (graceful degradation)
+        assert!(result.is_ok());
+        assert!(result.expect("vector_search failed").is_empty());
+    }
+
+    #[test]
+    fn test_vector_search_no_vector_backend() {
+        use crate::embedding::FastEmbedEmbedder;
+
+        let embedder: Arc<dyn Embedder> = Arc::new(FastEmbedEmbedder::new());
+        let service = RecallService::new().with_embedder(embedder);
+
+        let result = service.vector_search("test query", &SearchFilter::new(), 10);
+
+        // Should return empty, not error (graceful degradation)
+        assert!(result.is_ok());
+        assert!(result.expect("vector_search failed").is_empty());
+    }
+
+    #[test]
+    fn test_has_vector_search() {
+        use crate::embedding::FastEmbedEmbedder;
+
+        let service = RecallService::default();
+        assert!(!service.has_vector_search());
+
+        let embedder: Arc<dyn Embedder> = Arc::new(FastEmbedEmbedder::new());
+        let service_with_embedder = RecallService::new().with_embedder(embedder);
+        assert!(!service_with_embedder.has_vector_search());
+    }
+
+    #[test]
+    fn test_with_backends_builder() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+        let service = RecallService::with_index(index);
+
+        // Test that index is configured but not embedder/vector
+        assert!(!service.has_vector_search());
+    }
+
+    #[test]
+    fn test_hybrid_search_fallback_text_only() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+
+        // Add test data
+        index
+            .index(&create_test_memory("id1", "Rust programming language"))
+            .expect("index failed");
+
+        // Service with index but no embedder/vector
+        let service = RecallService::with_index(index);
+
+        // Hybrid search should fall back to text-only
+        let result = service.search("Rust", SearchMode::Hybrid, &SearchFilter::new(), 10);
+        assert!(result.is_ok());
+
+        let search_result = result.expect("search failed");
+        // Should get text results even though vector is unavailable
+        assert!(!search_result.memories.is_empty());
+    }
+
+    #[test]
+    fn test_vector_search_mode_graceful() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+        let service = RecallService::with_index(index);
+
+        // Vector search mode without embedder should return empty (graceful)
+        let result = service.search("test", SearchMode::Vector, &SearchFilter::new(), 10);
+        assert!(result.is_ok());
+
+        let search_result = result.expect("search failed");
+        assert!(search_result.memories.is_empty());
+    }
+
+    #[test]
+    fn test_rrf_with_empty_vector_results() {
+        let service = RecallService::default();
+
+        let text_hits = vec![SearchHit {
+            memory: create_test_memory("id1", "content"),
+            score: 0.9,
+            raw_score: 0.9,
+            vector_score: None,
+            bm25_score: Some(0.9),
+        }];
+        let vector_hits: Vec<SearchHit> = vec![]; // Empty vector results
+
+        let fused = service.rrf_fusion(&text_hits, &vector_hits, 10);
+
+        // Should still return text results
+        assert_eq!(fused.len(), 1);
+        assert_eq!(fused[0].memory.id.as_str(), "id1");
+    }
+
+    #[test]
+    fn test_rrf_with_empty_text_results() {
+        let service = RecallService::default();
+
+        let text_hits: Vec<SearchHit> = vec![]; // Empty text results
+        let vector_hits = vec![SearchHit {
+            memory: create_test_memory("id1", "content"),
+            score: 0.9,
+            raw_score: 0.9,
+            vector_score: Some(0.9),
+            bm25_score: None,
+        }];
+
+        let fused = service.rrf_fusion(&text_hits, &vector_hits, 10);
+
+        // Should still return vector results
+        assert_eq!(fused.len(), 1);
+        assert_eq!(fused[0].memory.id.as_str(), "id1");
+    }
+
+    #[test]
+    fn test_domain_label() {
+        let filter = SearchFilter::new();
+        assert_eq!(domain_label(&filter), "all");
+    }
+
+    // ========================================================================
+    // Score Normalization Tests (Phase 4.6)
+    // ========================================================================
+
+    #[test]
+    fn test_normalize_scores_max_becomes_one() {
+        let mut hits = vec![
+            SearchHit {
+                memory: create_test_memory("id1", "high score"),
+                score: 0.033,
+                raw_score: 0.0,
+                vector_score: None,
+                bm25_score: None,
+            },
+            SearchHit {
+                memory: create_test_memory("id2", "low score"),
+                score: 0.020,
+                raw_score: 0.0,
+                vector_score: None,
+                bm25_score: None,
+            },
+        ];
+
+        normalize_scores(&mut hits);
+
+        // Max score should be 1.0
+        assert!(
+            (hits[0].score - 1.0).abs() < f32::EPSILON,
+            "Max score should be 1.0"
+        );
+        // raw_score should be preserved
+        assert!(
+            (hits[0].raw_score - 0.033).abs() < f32::EPSILON,
+            "raw_score should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_normalize_scores_all_in_range() {
+        let mut hits = vec![
+            SearchHit {
+                memory: create_test_memory("id1", ""),
+                score: 0.033,
+                raw_score: 0.0,
+                vector_score: None,
+                bm25_score: None,
+            },
+            SearchHit {
+                memory: create_test_memory("id2", ""),
+                score: 0.020,
+                raw_score: 0.0,
+                vector_score: None,
+                bm25_score: None,
+            },
+            SearchHit {
+                memory: create_test_memory("id3", ""),
+                score: 0.016,
+                raw_score: 0.0,
+                vector_score: None,
+                bm25_score: None,
+            },
+        ];
+
+        normalize_scores(&mut hits);
+
+        for hit in &hits {
+            assert!(
+                hit.score >= 0.0,
+                "Score should be >= 0.0, got {}",
+                hit.score
+            );
+            assert!(
+                hit.score <= 1.0,
+                "Score should be <= 1.0, got {}",
+                hit.score
+            );
+        }
+    }
+
+    #[test]
+    fn test_normalize_scores_empty_results() {
+        let mut hits: Vec<SearchHit> = vec![];
+        normalize_scores(&mut hits);
+        // Should not panic
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn test_normalize_scores_single_result() {
+        let mut hits = vec![SearchHit {
+            memory: create_test_memory("id1", ""),
+            score: 0.5,
+            raw_score: 0.0,
+            vector_score: None,
+            bm25_score: None,
+        }];
+
+        normalize_scores(&mut hits);
+
+        // Single result should have score 1.0
+        assert!(
+            (hits[0].score - 1.0).abs() < f32::EPSILON,
+            "Single result should have score 1.0"
+        );
+    }
+
+    #[test]
+    fn test_normalize_scores_proportions_preserved() {
+        let mut hits = vec![
+            SearchHit {
+                memory: create_test_memory("id1", ""),
+                score: 0.040,
+                raw_score: 0.0,
+                vector_score: None,
+                bm25_score: None,
+            },
+            SearchHit {
+                memory: create_test_memory("id2", ""),
+                score: 0.020,
+                raw_score: 0.0,
+                vector_score: None,
+                bm25_score: None,
+            },
+        ];
+
+        // Before: id1 is 2x id2
+        let ratio_before = hits[0].score / hits[1].score;
+
+        normalize_scores(&mut hits);
+
+        // After: ratio should be preserved
+        let ratio_after = hits[0].score / hits[1].score;
+        assert!(
+            (ratio_before - ratio_after).abs() < 0.001,
+            "Proportions should be preserved: before={ratio_before}, after={ratio_after}"
+        );
+    }
+
+    #[test]
+    fn test_normalize_scores_ordering_preserved() {
+        let mut hits = vec![
+            SearchHit {
+                memory: create_test_memory("id1", ""),
+                score: 0.033,
+                raw_score: 0.0,
+                vector_score: None,
+                bm25_score: None,
+            },
+            SearchHit {
+                memory: create_test_memory("id2", ""),
+                score: 0.020,
+                raw_score: 0.0,
+                vector_score: None,
+                bm25_score: None,
+            },
+            SearchHit {
+                memory: create_test_memory("id3", ""),
+                score: 0.016,
+                raw_score: 0.0,
+                vector_score: None,
+                bm25_score: None,
+            },
+        ];
+
+        normalize_scores(&mut hits);
+
+        // Ordering should be preserved
+        assert!(hits[0].score > hits[1].score, "id1 > id2");
+        assert!(hits[1].score > hits[2].score, "id2 > id3");
+    }
+
+    #[test]
+    fn test_normalize_scores_zero_scores() {
+        let mut hits = vec![
+            SearchHit {
+                memory: create_test_memory("id1", ""),
+                score: 0.0,
+                raw_score: 0.0,
+                vector_score: None,
+                bm25_score: None,
+            },
+            SearchHit {
+                memory: create_test_memory("id2", ""),
+                score: 0.0,
+                raw_score: 0.0,
+                vector_score: None,
+                bm25_score: None,
+            },
+        ];
+
+        normalize_scores(&mut hits);
+
+        // All zero scores should remain zero (no division by zero)
+        assert!(
+            hits[0].score.abs() < f32::EPSILON,
+            "Zero score should remain zero"
+        );
+        assert!(
+            hits[1].score.abs() < f32::EPSILON,
+            "Zero score should remain zero"
+        );
+    }
+
+    #[test]
+    fn test_normalize_scores_raw_score_preserved() {
+        let mut hits = vec![
+            SearchHit {
+                memory: create_test_memory("id1", ""),
+                score: 0.033,
+                raw_score: 0.0,
+                vector_score: None,
+                bm25_score: None,
+            },
+            SearchHit {
+                memory: create_test_memory("id2", ""),
+                score: 0.020,
+                raw_score: 0.0,
+                vector_score: None,
+                bm25_score: None,
+            },
+        ];
+
+        normalize_scores(&mut hits);
+
+        // raw_score should contain the original score
+        assert!(
+            (hits[0].raw_score - 0.033).abs() < f32::EPSILON,
+            "raw_score should be 0.033"
+        );
+        assert!(
+            (hits[1].raw_score - 0.020).abs() < f32::EPSILON,
+            "raw_score should be 0.020"
+        );
+    }
+}
+
+// ============================================================================
+// Property-Based Tests (Phase 4.7)
+// ============================================================================
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use crate::models::{Domain, Namespace};
+    use proptest::prelude::*;
+
+    fn create_test_memory_prop(id: &str) -> Memory {
+        Memory {
+            id: MemoryId::new(id),
+            content: String::new(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            status: MemoryStatus::Active,
+            created_at: 0,
+            updated_at: 0,
+            embedding: None,
+            tags: Vec::new(),
+            source: None,
+        }
+    }
+
+    // Strategy for generating valid positive scores
+    fn score_strategy() -> impl Strategy<Value = f32> {
+        // Use positive scores > EPSILON to avoid edge case of all zeros
+        (1u32..=1_000_000u32).prop_map(|n| n as f32 / 1_000_000.0)
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// Property: All normalized scores are always in [0.0, 1.0] range.
+        #[test]
+        fn prop_normalized_scores_in_range(
+            scores in prop::collection::vec(score_strategy(), 1..20)
+        ) {
+            let mut hits: Vec<SearchHit> = scores
+                .into_iter()
+                .enumerate()
+                .map(|(i, score)| SearchHit {
+                    memory: create_test_memory_prop(&format!("id{i}")),
+                    score,
+                    raw_score: 0.0,
+                    vector_score: None,
+                    bm25_score: None,
+                })
+                .collect();
+
+            normalize_scores(&mut hits);
+
+            for hit in &hits {
+                prop_assert!(
+                    hit.score >= 0.0,
+                    "Score {} should be >= 0.0",
+                    hit.score
+                );
+                prop_assert!(
+                    hit.score <= 1.0,
+                    "Score {} should be <= 1.0",
+                    hit.score
+                );
+            }
+        }
+
+        /// Property: Score ordering is preserved after normalization.
+        #[test]
+        fn prop_ordering_preserved(
+            scores in prop::collection::vec(score_strategy(), 2..20)
+        ) {
+            let mut hits: Vec<SearchHit> = scores
+                .iter()
+                .enumerate()
+                .map(|(i, &score)| SearchHit {
+                    memory: create_test_memory_prop(&format!("id{i}")),
+                    score,
+                    raw_score: 0.0,
+                    vector_score: None,
+                    bm25_score: None,
+                })
+                .collect();
+
+            // Sort by original score descending
+            let mut original_order: Vec<_> = scores.iter().enumerate().collect();
+            original_order.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+            let original_ids: Vec<_> = original_order.iter().map(|(i, _)| *i).collect();
+
+            normalize_scores(&mut hits);
+
+            // Sort by normalized score descending
+            hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+            let normalized_ids: Vec<_> = hits
+                .iter()
+                .map(|h| h.memory.id.as_str().strip_prefix("id").unwrap().parse::<usize>().unwrap())
+                .collect();
+
+            prop_assert_eq!(
+                original_ids,
+                normalized_ids,
+                "Score ordering should be preserved"
+            );
+        }
+
+        /// Property: Maximum score becomes 1.0 after normalization.
+        #[test]
+        fn prop_max_score_is_one(
+            scores in prop::collection::vec(score_strategy(), 1..20)
+        ) {
+            let mut hits: Vec<SearchHit> = scores
+                .into_iter()
+                .enumerate()
+                .map(|(i, score)| SearchHit {
+                    memory: create_test_memory_prop(&format!("id{i}")),
+                    score,
+                    raw_score: 0.0,
+                    vector_score: None,
+                    bm25_score: None,
+                })
+                .collect();
+
+            normalize_scores(&mut hits);
+
+            let max_score = hits.iter().map(|h| h.score).fold(0.0_f32, f32::max);
+            prop_assert!(
+                (max_score - 1.0).abs() < f32::EPSILON,
+                "Max score should be 1.0, got {}",
+                max_score
+            );
+        }
+
+        /// Property: raw_score is preserved and equals original score.
+        #[test]
+        fn prop_raw_score_preserved(
+            scores in prop::collection::vec(score_strategy(), 1..20)
+        ) {
+            let original_scores = scores.clone();
+
+            let mut hits: Vec<SearchHit> = scores
+                .into_iter()
+                .enumerate()
+                .map(|(i, score)| SearchHit {
+                    memory: create_test_memory_prop(&format!("id{i}")),
+                    score,
+                    raw_score: 0.0,
+                    vector_score: None,
+                    bm25_score: None,
+                })
+                .collect();
+
+            normalize_scores(&mut hits);
+
+            for (hit, original) in hits.iter().zip(original_scores.iter()) {
+                prop_assert!(
+                    (hit.raw_score - original).abs() < f32::EPSILON,
+                    "raw_score {} should equal original {}",
+                    hit.raw_score,
+                    original
+                );
+            }
+        }
     }
 }

@@ -98,8 +98,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-test-
 
+      - name: Cache Hugging Face models
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/fastembed
+          key: ${{ runner.os }}-huggingface-all-minilm-l6-v2-v1
+          restore-keys: |
+            ${{ runner.os }}-huggingface-
+
       - name: Run tests
         run: cargo test --all-features --verbose
+        timeout-minutes: 30
 
   doc:
     name: Documentation
@@ -202,11 +213,25 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-bench-
 
+      - name: Cache Hugging Face models
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/fastembed
+          key: ${{ runner.os }}-huggingface-all-minilm-l6-v2-v1
+          restore-keys: |
+            ${{ runner.os }}-huggingface-
+
       - name: Compile benchmarks
         run: cargo build --benches --all-features
 
       - name: Run benchmarks (quick validation)
         run: cargo bench --bench search_intent -- --test
+
+      - name: Run embedding benchmarks (quick validation)
+        run: cargo bench --bench embedding --features fastembed-embeddings -- --test
+        timeout-minutes: 10
 
   coverage:
     name: Coverage

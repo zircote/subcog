@@ -41,7 +41,7 @@ pub fn capture_tool() -> ToolDefinition {
 pub fn recall_tool() -> ToolDefinition {
     ToolDefinition {
         name: "subcog_recall".to_string(),
-        description: "Search for relevant memories using semantic and text search".to_string(),
+        description: "Search for relevant memories using semantic and text search. Returns normalized scores (0.0-1.0 where 1.0 is the best match) with raw RRF scores shown in parentheses for debugging.".to_string(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {

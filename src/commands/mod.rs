@@ -5,12 +5,14 @@
 //! - `config.rs`: Configuration display command
 //! - `enrich.rs`: LLM-powered tag enrichment command
 //! - `hook.rs`: Claude Code hook event handlers
+//! - `migrate.rs`: Migration commands (embeddings)
 //! - `prompt.rs`: Prompt template management
 
 mod config;
 mod core;
 mod enrich;
 mod hook;
+mod migrate;
 mod prompt;
 
 use std::path::PathBuf;
@@ -22,7 +24,27 @@ pub use config::cmd_config;
 pub use core::{cmd_capture, cmd_consolidate, cmd_recall, cmd_reindex, cmd_status, cmd_sync};
 pub use enrich::cmd_enrich;
 pub use hook::cmd_hook;
+pub use migrate::cmd_migrate_embeddings;
 pub use prompt::cmd_prompt;
+
+/// Migrate subcommands.
+#[derive(Subcommand)]
+pub enum MigrateAction {
+    /// Generate embeddings for memories that don't have them.
+    Embeddings {
+        /// Path to the git repository (default: current directory).
+        #[arg(short, long)]
+        repo: Option<PathBuf>,
+
+        /// Show what would be migrated without making changes.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Re-generate embeddings for all memories, even those that already have them.
+        #[arg(long)]
+        force: bool,
+    },
+}
 
 /// Hook events.
 #[derive(Subcommand)]

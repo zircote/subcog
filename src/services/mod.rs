@@ -37,6 +37,7 @@ mod consolidation;
 mod context;
 pub mod deduplication;
 mod enrichment;
+pub mod migration;
 mod prompt;
 mod prompt_enrichment;
 mod prompt_parser;
@@ -64,16 +65,18 @@ pub use sync::SyncService;
 pub use topic_index::{TopicIndexService, TopicInfo};
 
 use crate::config::SubcogConfig;
+use crate::embedding::{Embedder, FastEmbedEmbedder};
 use crate::git::{NotesManager, YamlFrontMatterParser};
 use crate::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace};
 use crate::storage::index::{
     DomainIndexConfig, DomainIndexManager, DomainScope, OrgIndexConfig, SqliteBackend,
-    find_repo_root,
+    find_repo_root, get_user_data_dir,
 };
-use crate::storage::traits::IndexBackend;
+use crate::storage::traits::{IndexBackend, VectorBackend};
+use crate::storage::vector::UsearchBackend;
 use crate::{Error, Result};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 // ============================================================================
 // Service Factory Functions
@@ -193,6 +196,10 @@ pub struct ServiceContainer {
     index_manager: Mutex<DomainIndexManager>,
     /// Repository path (if known).
     repo_path: Option<PathBuf>,
+    /// Shared embedder for both capture and recall.
+    embedder: Option<Arc<dyn Embedder>>,
+    /// Shared vector backend for both capture and recall.
+    vector: Option<Arc<dyn VectorBackend + Send + Sync>>,
 }
 
 impl ServiceContainer {
@@ -225,11 +232,81 @@ impl ServiceContainer {
         // Create CaptureService with repo_path so it stores to git notes
         let capture_config = crate::config::Config::new().with_repo_path(&repo_root);
 
+        // Create storage backends for CaptureService
+        let subcog_dir = repo_root.join(".subcog");
+        let index_path = subcog_dir.join("index.db");
+        let vector_path = subcog_dir.join("vectors.idx");
+
+        // Ensure .subcog directory exists
+        if let Err(e) = std::fs::create_dir_all(&subcog_dir) {
+            tracing::warn!("Failed to create .subcog directory: {e}");
+        }
+
+        // Create embedder (singleton, always available)
+        let embedder: Arc<dyn Embedder> = Arc::new(FastEmbedEmbedder::new());
+
+        // Create index backend (SQLite FTS5)
+        let index: Arc<dyn IndexBackend + Send + Sync> = match SqliteBackend::new(&index_path) {
+            Ok(backend) => Arc::new(backend),
+            Err(e) => {
+                tracing::warn!("Failed to create index backend: {e}");
+                // Continue without index backend - CaptureService handles gracefully
+                return Ok(Self {
+                    capture: CaptureService::new(capture_config)
+                        .with_embedder(Arc::clone(&embedder)),
+                    sync: SyncService::default(),
+                    index_manager: Mutex::new(index_manager),
+                    repo_path: Some(repo_root),
+                    embedder: Some(embedder),
+                    vector: None,
+                });
+            },
+        };
+
+        // Create vector backend (usearch HNSW)
+        // Note: Fallback UsearchBackend::new() returns Self, native returns Result<Self>
+        #[cfg(feature = "usearch-hnsw")]
+        let vector_result =
+            UsearchBackend::new(&vector_path, FastEmbedEmbedder::DEFAULT_DIMENSIONS);
+        #[cfg(not(feature = "usearch-hnsw"))]
+        let vector_result: Result<UsearchBackend> = Ok(UsearchBackend::new(
+            &vector_path,
+            FastEmbedEmbedder::DEFAULT_DIMENSIONS,
+        ));
+
+        let vector: Arc<dyn VectorBackend + Send + Sync> = match vector_result {
+            Ok(backend) => Arc::new(backend),
+            Err(e) => {
+                tracing::warn!("Failed to create vector backend: {e}");
+                // Continue without vector backend - CaptureService handles gracefully
+                return Ok(Self {
+                    capture: CaptureService::new(capture_config)
+                        .with_embedder(Arc::clone(&embedder))
+                        .with_index(Arc::clone(&index)),
+                    sync: SyncService::default(),
+                    index_manager: Mutex::new(index_manager),
+                    repo_path: Some(repo_root),
+                    embedder: Some(embedder),
+                    vector: None,
+                });
+            },
+        };
+
+        // Create CaptureService with all backends
+        let capture = CaptureService::with_backends(
+            capture_config,
+            Arc::clone(&embedder),
+            Arc::clone(&index),
+            Arc::clone(&vector),
+        );
+
         Ok(Self {
-            capture: CaptureService::new(capture_config),
+            capture,
             sync: SyncService::default(),
             index_manager: Mutex::new(index_manager),
             repo_path: Some(repo_root),
+            embedder: Some(embedder),
+            vector: Some(vector),
         })
     }
 
@@ -247,7 +324,170 @@ impl ServiceContainer {
         Self::for_repo(cwd, None)
     }
 
+    /// Creates a service container for user-scoped storage.
+    ///
+    /// Used when operating outside a git repository. Stores memories in the
+    /// user's local data directory using `SQLite` persistence (no git notes).
+    ///
+    /// # Storage Paths
+    ///
+    /// | Platform | Path |
+    /// |----------|------|
+    /// | macOS | `~/Library/Application Support/subcog/` |
+    /// | Linux | `~/.local/share/subcog/` |
+    /// | Windows | `C:\Users\<User>\AppData\Local\subcog\` |
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the user data directory cannot be created or
+    /// storage backends fail to initialize.
+    pub fn for_user() -> Result<Self> {
+        let user_data_dir = get_user_data_dir()?;
+
+        // Ensure user data directory exists
+        std::fs::create_dir_all(&user_data_dir).map_err(|e| Error::OperationFailed {
+            operation: "create_user_data_dir".to_string(),
+            cause: format!(
+                "Cannot create {}: {}. Please create manually with: mkdir -p {}",
+                user_data_dir.display(),
+                e,
+                user_data_dir.display()
+            ),
+        })?;
+
+        // Create storage paths
+        let index_path = user_data_dir.join("index.db");
+        let vector_path = user_data_dir.join("vectors.idx");
+
+        // Create domain index config for user-only mode (no repo)
+        let config = DomainIndexConfig {
+            repo_path: None,
+            org_config: None,
+        };
+        let index_manager = DomainIndexManager::new(config)?;
+
+        // Create CaptureService WITHOUT repo_path (no git notes)
+        let capture_config = crate::config::Config::new();
+
+        // Create embedder
+        let embedder: Arc<dyn Embedder> = Arc::new(FastEmbedEmbedder::new());
+
+        // Create index backend (SQLite FTS5)
+        let index: Arc<dyn IndexBackend + Send + Sync> = match SqliteBackend::new(&index_path) {
+            Ok(backend) => Arc::new(backend),
+            Err(e) => {
+                tracing::warn!("Failed to create index backend for user scope: {e}");
+                return Ok(Self {
+                    capture: CaptureService::new(capture_config)
+                        .with_embedder(Arc::clone(&embedder)),
+                    sync: SyncService::no_op(),
+                    index_manager: Mutex::new(index_manager),
+                    repo_path: None,
+                    embedder: Some(embedder),
+                    vector: None,
+                });
+            },
+        };
+
+        // Create vector backend (usearch HNSW)
+        #[cfg(feature = "usearch-hnsw")]
+        let vector_result =
+            UsearchBackend::new(&vector_path, FastEmbedEmbedder::DEFAULT_DIMENSIONS);
+        #[cfg(not(feature = "usearch-hnsw"))]
+        let vector_result: Result<UsearchBackend> = Ok(UsearchBackend::new(
+            &vector_path,
+            FastEmbedEmbedder::DEFAULT_DIMENSIONS,
+        ));
+
+        let vector: Arc<dyn VectorBackend + Send + Sync> = match vector_result {
+            Ok(backend) => Arc::new(backend),
+            Err(e) => {
+                tracing::warn!("Failed to create vector backend for user scope: {e}");
+                return Ok(Self {
+                    capture: CaptureService::new(capture_config)
+                        .with_embedder(Arc::clone(&embedder))
+                        .with_index(Arc::clone(&index)),
+                    sync: SyncService::no_op(),
+                    index_manager: Mutex::new(index_manager),
+                    repo_path: None,
+                    embedder: Some(embedder),
+                    vector: None,
+                });
+            },
+        };
+
+        // Create CaptureService with all backends (but no repo_path = no git notes)
+        let capture = CaptureService::with_backends(
+            capture_config,
+            Arc::clone(&embedder),
+            Arc::clone(&index),
+            Arc::clone(&vector),
+        );
+
+        tracing::info!(
+            user_data_dir = %user_data_dir.display(),
+            "Created user-scoped service container"
+        );
+
+        Ok(Self {
+            capture,
+            sync: SyncService::no_op(),
+            index_manager: Mutex::new(index_manager),
+            repo_path: None,
+            embedder: Some(embedder),
+            vector: Some(vector),
+        })
+    }
+
+    /// Creates a service container from the current directory, falling back to user scope.
+    ///
+    /// This is the recommended factory method for CLI and MCP entry points:
+    /// - If in a git repository → uses project scope (git notes + local index)
+    /// - If NOT in a git repository → uses user scope (SQLite-only)
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// // Works in any directory
+    /// let container = ServiceContainer::from_current_dir_or_user()?;
+    ///
+    /// // In git repo: subcog://global/{namespace}/{id}
+    /// // Outside git: subcog://user/{namespace}/{id}
+    /// let result = container.capture().capture(request)?;
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only if both project and user scope fail to initialize.
+    pub fn from_current_dir_or_user() -> Result<Self> {
+        // Try project scope first
+        match Self::from_current_dir() {
+            Ok(container) => {
+                tracing::debug!("Using project-scoped service container");
+                Ok(container)
+            },
+            Err(e) => {
+                tracing::debug!(
+                    error = %e,
+                    "Not in git repository, falling back to user scope"
+                );
+                Self::for_user()
+            },
+        }
+    }
+
+    /// Returns whether this container is using user scope (no git repository).
+    #[must_use]
+    pub const fn is_user_scope(&self) -> bool {
+        self.repo_path.is_none()
+    }
+
     /// Creates a recall service for a specific domain scope.
+    ///
+    /// The recall service is configured with:
+    /// - Index backend (`SQLite` FTS5) for text search
+    /// - Embedder for generating query embeddings (if available)
+    /// - Vector backend for similarity search (if available)
     ///
     /// # Errors
     ///
@@ -274,16 +514,35 @@ impl ServiceContainer {
         }
 
         let index = SqliteBackend::new(&index_path)?;
-        Ok(RecallService::with_index(index))
+
+        // Start with index-only service
+        let mut service = RecallService::with_index(index);
+
+        // Add embedder and vector backends if available
+        if let Some(ref embedder) = self.embedder {
+            service = service.with_embedder(Arc::clone(embedder));
+        }
+        if let Some(ref vector) = self.vector {
+            service = service.with_vector(Arc::clone(vector));
+        }
+
+        Ok(service)
     }
 
-    /// Creates a recall service for the project scope.
+    /// Creates a recall service for the appropriate scope.
+    ///
+    /// Uses user scope for user-scoped containers, project scope otherwise.
     ///
     /// # Errors
     ///
     /// Returns an error if the index cannot be initialized.
     pub fn recall(&self) -> Result<RecallService> {
-        self.recall_for_scope(DomainScope::Project)
+        let scope = if self.is_user_scope() {
+            DomainScope::User
+        } else {
+            DomainScope::Project
+        };
+        self.recall_for_scope(scope)
     }
 
     /// Returns the capture service.
@@ -302,6 +561,37 @@ impl ServiceContainer {
     #[must_use]
     pub const fn repo_path(&self) -> Option<&PathBuf> {
         self.repo_path.as_ref()
+    }
+
+    /// Returns a reference to the embedder if available.
+    #[must_use]
+    pub fn embedder(&self) -> Option<Arc<dyn Embedder>> {
+        self.embedder.clone()
+    }
+
+    /// Returns a reference to the vector backend if available.
+    #[must_use]
+    pub fn vector(&self) -> Option<Arc<dyn VectorBackend + Send + Sync>> {
+        self.vector.clone()
+    }
+
+    /// Creates an index backend for the project scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the index cannot be initialized.
+    pub fn index(&self) -> Result<SqliteBackend> {
+        let index_path = self.get_index_path(DomainScope::Project)?;
+
+        // Ensure parent directory exists
+        if let Some(parent) = index_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| Error::OperationFailed {
+                operation: "create_index_dir".to_string(),
+                cause: e.to_string(),
+            })?;
+        }
+
+        SqliteBackend::new(&index_path)
     }
 
     /// Creates a deduplication service without embedding support.
@@ -425,7 +715,7 @@ impl ServiceContainer {
             })?;
         }
 
-        let mut index = SqliteBackend::new(&index_path)?;
+        let index = SqliteBackend::new(&index_path)?;
 
         // Clear and reindex
         index.clear()?;

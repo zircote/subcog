@@ -248,7 +248,7 @@ mod implementation {
     }
 
     impl IndexBackend for RedisBackend {
-        fn index(&mut self, memory: &Memory) -> Result<()> {
+        fn index(&self, memory: &Memory) -> Result<()> {
             let mut conn = self.get_connection()?;
             let key = format!("mem:{}", memory.id.as_str());
 
@@ -300,7 +300,7 @@ mod implementation {
             Ok(())
         }
 
-        fn remove(&mut self, id: &MemoryId) -> Result<bool> {
+        fn remove(&self, id: &MemoryId) -> Result<bool> {
             let mut conn = self.get_connection()?;
             let key = format!("mem:{}", id.as_str());
 
@@ -445,7 +445,7 @@ mod implementation {
             output
         }
 
-        fn clear(&mut self) -> Result<()> {
+        fn clear(&self) -> Result<()> {
             let mut conn = self.get_connection()?;
 
             // Drop and recreate the index
@@ -581,11 +581,11 @@ mod stub {
     }
 
     impl IndexBackend for RedisBackend {
-        fn index(&mut self, _memory: &Memory) -> Result<()> {
+        fn index(&self, _memory: &Memory) -> Result<()> {
             Err(Error::FeatureNotEnabled("redis".to_string()))
         }
 
-        fn remove(&mut self, _id: &MemoryId) -> Result<bool> {
+        fn remove(&self, _id: &MemoryId) -> Result<bool> {
             Err(Error::FeatureNotEnabled("redis".to_string()))
         }
 
@@ -606,7 +606,7 @@ mod stub {
             Err(Error::FeatureNotEnabled("redis".to_string()))
         }
 
-        fn clear(&mut self) -> Result<()> {
+        fn clear(&self) -> Result<()> {
             Err(Error::FeatureNotEnabled("redis".to_string()))
         }
     }

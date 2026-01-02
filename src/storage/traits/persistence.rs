@@ -48,16 +48,20 @@ use crate::models::{Memory, MemoryId};
 ///
 /// # Implementor Notes
 ///
+/// - Methods use `&self` to enable sharing via `Arc<dyn PersistenceBackend>`
+/// - Use interior mutability (e.g., `Mutex`) for mutable state
 /// - All methods must be thread-safe (`Send + Sync` bound)
 /// - Prefer returning `Error::NotFound` over `None` for missing IDs
 /// - Use structured error variants from [`crate::Error`]
 pub trait PersistenceBackend: Send + Sync {
     /// Stores a memory.
     ///
+    /// Uses interior mutability for thread-safe concurrent access.
+    ///
     /// # Errors
     ///
     /// Returns an error if the storage operation fails.
-    fn store(&mut self, memory: &Memory) -> Result<()>;
+    fn store(&self, memory: &Memory) -> Result<()>;
 
     /// Retrieves a memory by ID.
     ///
@@ -68,10 +72,12 @@ pub trait PersistenceBackend: Send + Sync {
 
     /// Deletes a memory by ID.
     ///
+    /// Uses interior mutability for thread-safe concurrent access.
+    ///
     /// # Errors
     ///
     /// Returns an error if the deletion operation fails.
-    fn delete(&mut self, id: &MemoryId) -> Result<bool>;
+    fn delete(&self, id: &MemoryId) -> Result<bool>;
 
     /// Lists all memory IDs.
     ///

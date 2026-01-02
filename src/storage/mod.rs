@@ -26,6 +26,7 @@ pub mod prompt;
 pub mod traits;
 pub mod vector;
 
+pub use index::get_user_data_dir;
 pub use prompt::{
     FilesystemPromptStorage, GitNotesPromptStorage, PostgresPromptStorage, PromptBackendType,
     PromptStorage, PromptStorageFactory, RedisPromptStorage, SqlitePromptStorage,

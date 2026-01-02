@@ -12,6 +12,7 @@ use crate::{Error, Result};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 /// Default embedding dimensions for all-MiniLM-L6-v2.
 pub const DEFAULT_USEARCH_DIMENSIONS: usize = 384;
@@ -39,19 +40,13 @@ const HNSW_EXPANSION_SEARCH: usize = 64;
 mod native {
     use super::{
         DEFAULT_USEARCH_DIMENSIONS, Error, HNSW_CONNECTIVITY, HNSW_EXPANSION_ADD,
-        HNSW_EXPANSION_SEARCH, HashMap, MemoryId, PathBuf, Result, SearchFilter, VectorBackend, fs,
+        HNSW_EXPANSION_SEARCH, HashMap, MemoryId, Mutex, PathBuf, Result, SearchFilter,
+        VectorBackend, fs,
     };
     use usearch::{Index, IndexOptions, MetricKind, ScalarKind};
 
-    /// Native usearch-based vector backend using HNSW.
-    ///
-    /// Uses the usearch library for high-performance approximate nearest
-    /// neighbor search with O(log n) query complexity.
-    pub struct UsearchBackend {
-        /// Path to the index file.
-        index_path: PathBuf,
-        /// Embedding dimensions.
-        dimensions: usize,
+    /// Inner mutable state protected by a Mutex.
+    struct InnerState {
         /// The usearch index.
         index: Index,
         /// Mapping from `MemoryId` string to usearch key (u64).
@@ -62,6 +57,19 @@ mod native {
         next_key: u64,
         /// Whether the index has been modified since last save.
         dirty: bool,
+    }
+
+    /// Native usearch-based vector backend using HNSW.
+    ///
+    /// Uses the usearch library for high-performance approximate nearest
+    /// neighbor search with O(log n) query complexity.
+    pub struct UsearchBackend {
+        /// Path to the index file.
+        index_path: PathBuf,
+        /// Embedding dimensions.
+        dimensions: usize,
+        /// Interior mutable state.
+        state: Mutex<InnerState>,
     }
 
     impl UsearchBackend {
@@ -95,14 +103,18 @@ mod native {
                 cause: e.to_string(),
             })?;
 
-            Ok(Self {
-                index_path: index_path.into(),
-                dimensions,
+            let state = InnerState {
                 index,
                 id_to_key: HashMap::new(),
                 key_to_id: HashMap::new(),
                 next_key: 1,
                 dirty: false,
+            };
+
+            Ok(Self {
+                index_path: index_path.into(),
+                dimensions,
+                state: Mutex::new(state),
             })
         }
 
@@ -135,7 +147,7 @@ mod native {
         /// # Errors
         ///
         /// Returns an error if the file cannot be read or parsed.
-        pub fn load(&mut self) -> Result<()> {
+        pub fn load(&self) -> Result<()> {
             if self.index_path.as_os_str().is_empty() {
                 return Ok(());
             }
@@ -147,8 +159,14 @@ mod native {
                 return Ok(());
             }
 
+            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_state".to_string(),
+                cause: e.to_string(),
+            })?;
+
             // Load the usearch index
-            self.index
+            state
+                .index
                 .load(index_file.to_string_lossy().as_ref())
                 .map_err(|e| Error::OperationFailed {
                     operation: "load_usearch_index".to_string(),
@@ -175,10 +193,10 @@ mod native {
                 )));
             }
 
-            self.id_to_key = meta.id_to_key;
-            self.key_to_id = meta.key_to_id;
-            self.next_key = meta.next_key;
-            self.dirty = false;
+            state.id_to_key = meta.id_to_key;
+            state.key_to_id = meta.key_to_id;
+            state.next_key = meta.next_key;
+            state.dirty = false;
 
             Ok(())
         }
@@ -188,12 +206,17 @@ mod native {
         /// # Errors
         ///
         /// Returns an error if the file cannot be written.
-        pub fn save(&mut self) -> Result<()> {
+        pub fn save(&self) -> Result<()> {
             if self.index_path.as_os_str().is_empty() {
                 return Ok(());
             }
 
-            if !self.dirty {
+            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_state".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            if !state.dirty {
                 return Ok(());
             }
 
@@ -209,7 +232,8 @@ mod native {
             let meta_file = self.index_path.with_extension("meta.json");
 
             // Save the usearch index
-            self.index
+            state
+                .index
                 .save(index_file.to_string_lossy().as_ref())
                 .map_err(|e| Error::OperationFailed {
                     operation: "save_usearch_index".to_string(),
@@ -219,9 +243,9 @@ mod native {
             // Save the metadata
             let meta = IndexMetadata {
                 dimensions: self.dimensions,
-                id_to_key: self.id_to_key.clone(),
-                key_to_id: self.key_to_id.clone(),
-                next_key: self.next_key,
+                id_to_key: state.id_to_key.clone(),
+                key_to_id: state.key_to_id.clone(),
+                next_key: state.next_key,
             };
 
             let meta_content =
@@ -235,7 +259,7 @@ mod native {
                 cause: e.to_string(),
             })?;
 
-            self.dirty = false;
+            state.dirty = false;
             Ok(())
         }
 
@@ -252,15 +276,15 @@ mod native {
         }
 
         /// Gets or creates a key for a memory ID.
-        fn get_or_create_key(&mut self, id: &str) -> u64 {
-            if let Some(&key) = self.id_to_key.get(id) {
+        fn get_or_create_key(state: &mut InnerState, id: &str) -> u64 {
+            if let Some(&key) = state.id_to_key.get(id) {
                 return key;
             }
 
-            let key = self.next_key;
-            self.next_key += 1;
-            self.id_to_key.insert(id.to_string(), key);
-            self.key_to_id.insert(key, id.to_string());
+            let key = state.next_key;
+            state.next_key += 1;
+            state.id_to_key.insert(id.to_string(), key);
+            state.key_to_id.insert(key, id.to_string());
             key
         }
     }
@@ -279,41 +303,55 @@ mod native {
             self.dimensions
         }
 
-        fn upsert(&mut self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
+        fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
             self.validate_embedding(embedding)?;
 
-            let key = self.get_or_create_key(id.as_str());
+            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_state".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            let key = Self::get_or_create_key(&mut state, id.as_str());
 
             // usearch doesn't allow duplicate keys, so remove first if exists
-            if self.index.contains(key) {
-                let _ = self.index.remove(key); // Ignore result - may not exist
+            if state.index.contains(key) {
+                let _ = state.index.remove(key); // Ignore result - may not exist
             }
 
-            self.index
+            state
+                .index
                 .add(key, embedding)
                 .map_err(|e| Error::OperationFailed {
                     operation: "usearch_add".to_string(),
                     cause: e.to_string(),
                 })?;
 
-            self.dirty = true;
+            state.dirty = true;
             Ok(())
         }
 
-        fn remove(&mut self, id: &MemoryId) -> Result<bool> {
-            let Some(&key) = self.id_to_key.get(id.as_str()) else {
-                return Ok(false);
-            };
-
-            let removed = self.index.remove(key).map_err(|e| Error::OperationFailed {
-                operation: "usearch_remove".to_string(),
+        fn remove(&self, id: &MemoryId) -> Result<bool> {
+            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_state".to_string(),
                 cause: e.to_string(),
             })?;
 
+            let Some(&key) = state.id_to_key.get(id.as_str()) else {
+                return Ok(false);
+            };
+
+            let removed = state
+                .index
+                .remove(key)
+                .map_err(|e| Error::OperationFailed {
+                    operation: "usearch_remove".to_string(),
+                    cause: e.to_string(),
+                })?;
+
             if removed > 0 {
-                self.id_to_key.remove(id.as_str());
-                self.key_to_id.remove(&key);
-                self.dirty = true;
+                state.id_to_key.remove(id.as_str());
+                state.key_to_id.remove(&key);
+                state.dirty = true;
                 Ok(true)
             } else {
                 Ok(false)
@@ -328,12 +366,18 @@ mod native {
         ) -> Result<Vec<(MemoryId, f32)>> {
             self.validate_embedding(query_embedding)?;
 
-            if self.index.size() == 0 {
+            let state = self.state.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_state".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            if state.index.size() == 0 {
                 return Ok(Vec::new());
             }
 
             let matches =
-                self.index
+                state
+                    .index
                     .search(query_embedding, limit)
                     .map_err(|e| Error::OperationFailed {
                         operation: "usearch_search".to_string(),
@@ -345,7 +389,7 @@ mod native {
                 .iter()
                 .zip(matches.distances.iter())
                 .filter_map(|(&key, &distance)| {
-                    let id = self.key_to_id.get(&key)?;
+                    let id = state.key_to_id.get(&key)?;
                     // usearch returns distance, convert to similarity
                     // For cosine: distance = 1 - similarity
                     let similarity = 1.0 - distance;
@@ -357,25 +401,35 @@ mod native {
         }
 
         fn count(&self) -> Result<usize> {
-            Ok(self.index.size())
+            let state = self.state.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_state".to_string(),
+                cause: e.to_string(),
+            })?;
+            Ok(state.index.size())
         }
 
-        fn clear(&mut self) -> Result<()> {
-            self.index.reset().map_err(|e| Error::OperationFailed {
+        fn clear(&self) -> Result<()> {
+            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_state".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            state.index.reset().map_err(|e| Error::OperationFailed {
                 operation: "usearch_reset".to_string(),
                 cause: e.to_string(),
             })?;
             // Re-reserve capacity after reset
-            self.index
+            state
+                .index
                 .reserve(1024)
                 .map_err(|e| Error::OperationFailed {
                     operation: "reserve_usearch_capacity".to_string(),
                     cause: e.to_string(),
                 })?;
-            self.id_to_key.clear();
-            self.key_to_id.clear();
-            self.next_key = 1;
-            self.dirty = true;
+            state.id_to_key.clear();
+            state.key_to_id.clear();
+            state.next_key = 1;
+            state.dirty = true;
             Ok(())
         }
     }
@@ -396,6 +450,14 @@ mod native {
 mod fallback {
     use super::*;
 
+    /// Inner mutable state protected by a Mutex.
+    struct InnerState {
+        /// In-memory vector storage: `memory_id` -> embedding.
+        vectors: HashMap<String, Vec<f32>>,
+        /// Whether the index has been modified since last save.
+        dirty: bool,
+    }
+
     /// Pure-Rust fallback vector backend.
     ///
     /// This is a brute-force O(n) implementation used when the `usearch-hnsw`
@@ -406,10 +468,8 @@ mod fallback {
         index_path: PathBuf,
         /// Embedding dimensions.
         dimensions: usize,
-        /// In-memory vector storage: `memory_id` -> embedding.
-        vectors: HashMap<String, Vec<f32>>,
-        /// Whether the index has been modified since last save.
-        dirty: bool,
+        /// Interior mutable state.
+        state: Mutex<InnerState>,
     }
 
     impl UsearchBackend {
@@ -419,11 +479,14 @@ mod fallback {
         /// Creates a new fallback backend.
         #[must_use]
         pub fn new(index_path: impl Into<PathBuf>, dimensions: usize) -> Self {
+            let state = InnerState {
+                vectors: HashMap::new(),
+                dirty: false,
+            };
             Self {
                 index_path: index_path.into(),
                 dimensions,
-                vectors: HashMap::new(),
-                dirty: false,
+                state: Mutex::new(state),
             }
         }
 
@@ -439,8 +502,10 @@ mod fallback {
             Self {
                 index_path: PathBuf::new(),
                 dimensions,
-                vectors: HashMap::new(),
-                dirty: false,
+                state: Mutex::new(InnerState {
+                    vectors: HashMap::new(),
+                    dirty: false,
+                }),
             }
         }
 
@@ -455,7 +520,7 @@ mod fallback {
         /// # Errors
         ///
         /// Returns an error if the file cannot be read or parsed.
-        pub fn load(&mut self) -> Result<()> {
+        pub fn load(&self) -> Result<()> {
             if self.index_path.as_os_str().is_empty() {
                 return Ok(());
             }
@@ -483,8 +548,13 @@ mod fallback {
                 )));
             }
 
-            self.vectors = data.vectors;
-            self.dirty = false;
+            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_state".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            state.vectors = data.vectors;
+            state.dirty = false;
 
             Ok(())
         }
@@ -494,18 +564,23 @@ mod fallback {
         /// # Errors
         ///
         /// Returns an error if the file cannot be written.
-        pub fn save(&mut self) -> Result<()> {
+        pub fn save(&self) -> Result<()> {
             if self.index_path.as_os_str().is_empty() {
                 return Ok(());
             }
 
-            if !self.dirty {
+            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_state".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            if !state.dirty {
                 return Ok(());
             }
 
             let data = IndexData {
                 dimensions: self.dimensions,
-                vectors: self.vectors.clone(),
+                vectors: state.vectors.clone(),
             };
 
             let content = serde_json::to_string(&data).map_err(|e| Error::OperationFailed {
@@ -526,7 +601,7 @@ mod fallback {
                 cause: e.to_string(),
             })?;
 
-            self.dirty = false;
+            state.dirty = false;
             Ok(())
         }
 
@@ -573,20 +648,31 @@ mod fallback {
             self.dimensions
         }
 
-        fn upsert(&mut self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
+        fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
             self.validate_embedding(embedding)?;
 
-            self.vectors
+            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_state".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            state
+                .vectors
                 .insert(id.as_str().to_string(), embedding.to_vec());
-            self.dirty = true;
+            state.dirty = true;
 
             Ok(())
         }
 
-        fn remove(&mut self, id: &MemoryId) -> Result<bool> {
-            let removed = self.vectors.remove(id.as_str()).is_some();
+        fn remove(&self, id: &MemoryId) -> Result<bool> {
+            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_state".to_string(),
+                cause: e.to_string(),
+            })?;
+
+            let removed = state.vectors.remove(id.as_str()).is_some();
             if removed {
-                self.dirty = true;
+                state.dirty = true;
             }
             Ok(removed)
         }
@@ -599,8 +685,13 @@ mod fallback {
         ) -> Result<Vec<(MemoryId, f32)>> {
             self.validate_embedding(query_embedding)?;
 
+            let state = self.state.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_state".to_string(),
+                cause: e.to_string(),
+            })?;
+
             // Compute similarity for all vectors (brute-force O(n))
-            let mut scores: Vec<(String, f32)> = self
+            let mut scores: Vec<(String, f32)> = state
                 .vectors
                 .iter()
                 .map(|(id, vec)| {
@@ -623,12 +714,20 @@ mod fallback {
         }
 
         fn count(&self) -> Result<usize> {
-            Ok(self.vectors.len())
+            let state = self.state.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_state".to_string(),
+                cause: e.to_string(),
+            })?;
+            Ok(state.vectors.len())
         }
 
-        fn clear(&mut self) -> Result<()> {
-            self.vectors.clear();
-            self.dirty = true;
+        fn clear(&self) -> Result<()> {
+            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_state".to_string(),
+                cause: e.to_string(),
+            })?;
+            state.vectors.clear();
+            state.dirty = true;
             Ok(())
         }
     }
@@ -728,7 +827,7 @@ mod tests {
 
     #[test]
     fn test_upsert_and_count() {
-        let mut backend = create_in_memory(384);
+        let backend = create_in_memory(384);
 
         let id1 = MemoryId::new("id1");
         let embedding1 = create_random_embedding(384);
@@ -745,7 +844,7 @@ mod tests {
 
     #[test]
     fn test_upsert_dimension_mismatch() {
-        let mut backend = create_in_memory(384);
+        let backend = create_in_memory(384);
 
         let id = MemoryId::new("test");
         let wrong_dim = create_random_embedding(256);
@@ -756,7 +855,7 @@ mod tests {
 
     #[test]
     fn test_remove() {
-        let mut backend = create_in_memory(384);
+        let backend = create_in_memory(384);
 
         let id = MemoryId::new("test");
         let embedding = create_random_embedding(384);
@@ -775,7 +874,7 @@ mod tests {
 
     #[test]
     fn test_search() {
-        let mut backend = create_in_memory(384);
+        let backend = create_in_memory(384);
 
         // Insert some vectors
         for i in 0..5 {
@@ -811,7 +910,7 @@ mod tests {
 
     #[test]
     fn test_clear() {
-        let mut backend = create_in_memory(384);
+        let backend = create_in_memory(384);
 
         // Add some vectors
         for i in 0..3 {
@@ -833,7 +932,7 @@ mod tests {
 
         // Create and populate backend
         {
-            let mut backend = create_backend(&index_path, 384);
+            let backend = create_backend(&index_path, 384);
 
             let id = MemoryId::new("persistent");
             let embedding = create_random_embedding(384);
@@ -843,7 +942,7 @@ mod tests {
 
         // Load in new backend
         {
-            let mut backend = create_backend(&index_path, 384);
+            let backend = create_backend(&index_path, 384);
             backend.load().expect("load failed");
 
             assert_eq!(backend.count().expect("count failed"), 1);
@@ -857,7 +956,7 @@ mod tests {
 
         // Create with 384 dimensions
         {
-            let mut backend = create_backend(&index_path, 384);
+            let backend = create_backend(&index_path, 384);
             let id = MemoryId::new("test");
             let embedding = create_random_embedding(384);
             backend.upsert(&id, &embedding).expect("upsert failed");
@@ -866,7 +965,7 @@ mod tests {
 
         // Try to load with different dimensions
         {
-            let mut backend = create_backend(&index_path, 512);
+            let backend = create_backend(&index_path, 512);
             let result = backend.load();
             assert!(result.is_err());
         }
@@ -874,7 +973,7 @@ mod tests {
 
     #[test]
     fn test_load_nonexistent() {
-        let mut backend = create_backend("/nonexistent/path/index.idx", 384);
+        let backend = create_backend("/nonexistent/path/index.idx", 384);
         let result = backend.load();
         assert!(result.is_ok()); // Should succeed with empty index
         assert_eq!(backend.count().expect("count failed"), 0);
@@ -882,7 +981,7 @@ mod tests {
 
     #[test]
     fn test_update_existing() {
-        let mut backend = create_in_memory(384);
+        let backend = create_in_memory(384);
 
         let id = MemoryId::new("test");
         let embedding1 = create_normalized_embedding(384, 1.0);

@@ -11,7 +11,7 @@ mod fallback;
 mod fastembed;
 
 pub use fallback::FallbackEmbedder;
-pub use fastembed::FastEmbedEmbedder;
+pub use fastembed::{FastEmbedEmbedder, cosine_similarity};
 
 use crate::Result;
 

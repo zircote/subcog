@@ -28,6 +28,24 @@ fn create_prompt_service(repo_path: &Path) -> PromptService {
     prompt_service_for_repo(repo_path)
 }
 
+/// Formats a field value for display, returning "(none)" if empty.
+fn format_field_or_none(value: &str) -> String {
+    if value.is_empty() {
+        "(none)".to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+/// Formats a list of items for display, returning "(none)" if empty.
+fn format_list_or_none(items: &[String]) -> String {
+    if items.is_empty() {
+        "(none)".to_string()
+    } else {
+        items.join(", ")
+    }
+}
+
 /// Executes the prompt.save tool.
 pub fn execute_prompt_save(arguments: Value) -> Result<ToolResult> {
     use crate::services::{EnrichmentStatus, PartialMetadata, SaveOptions};
@@ -77,14 +95,15 @@ pub fn execute_prompt_save(arguments: Value) -> Result<ToolResult> {
     // Configure save options
     let options = SaveOptions::new().with_skip_enrichment(args.skip_enrichment);
 
-    // Get repo path and create service
-    let services = ServiceContainer::from_current_dir()?;
-    let repo_path = services
-        .repo_path()
-        .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
-        .clone();
-
-    let mut prompt_service = create_prompt_service(&repo_path);
+    // Get repo path and create service (works in both project and user scope)
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let mut prompt_service = if let Some(repo_path) = services.repo_path() {
+        create_prompt_service(repo_path)
+    } else {
+        // User-scope: create prompt service with user data directory
+        let user_dir = crate::storage::get_user_data_dir()?;
+        create_prompt_service(&user_dir)
+    };
 
     // Use save_with_enrichment (no LLM provider for now - fallback mode)
     let result = prompt_service.save_with_enrichment::<crate::llm::OllamaClient>(
@@ -107,6 +126,12 @@ pub fn execute_prompt_save(arguments: Value) -> Result<ToolResult> {
         EnrichmentStatus::Skipped => "Skipped",
     };
 
+    let var_names: Vec<String> = result
+        .template
+        .variables
+        .iter()
+        .map(|v| v.name.clone())
+        .collect();
     Ok(ToolResult {
         content: vec![ToolContent::Text {
             text: format!(
@@ -122,27 +147,9 @@ pub fn execute_prompt_save(arguments: Value) -> Result<ToolResult> {
                 result.id,
                 domain_scope_to_display(domain),
                 enrichment_str,
-                if result.template.description.is_empty() {
-                    "(none)".to_string()
-                } else {
-                    result.template.description.clone()
-                },
-                if result.template.tags.is_empty() {
-                    "(none)".to_string()
-                } else {
-                    result.template.tags.join(", ")
-                },
-                if result.template.variables.is_empty() {
-                    "(none)".to_string()
-                } else {
-                    result
-                        .template
-                        .variables
-                        .iter()
-                        .map(|v| v.name.clone())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                }
+                format_field_or_none(&result.template.description),
+                format_list_or_none(&result.template.tags),
+                format_list_or_none(&var_names),
             ),
         }],
         is_error: false,
@@ -171,14 +178,14 @@ pub fn execute_prompt_list(arguments: Value) -> Result<ToolResult> {
         filter = filter.with_limit(20);
     }
 
-    // Get prompts
-    let services = ServiceContainer::from_current_dir()?;
-    let repo_path = services
-        .repo_path()
-        .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
-        .clone();
-
-    let mut prompt_service = create_prompt_service(&repo_path);
+    // Get prompts (works in both project and user scope)
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let mut prompt_service = if let Some(repo_path) = services.repo_path() {
+        create_prompt_service(repo_path)
+    } else {
+        let user_dir = crate::storage::get_user_data_dir()?;
+        create_prompt_service(&user_dir)
+    };
     let prompts = prompt_service.list(&filter)?;
 
     if prompts.is_empty() {
@@ -246,13 +253,14 @@ pub fn execute_prompt_get(arguments: Value) -> Result<ToolResult> {
 
     let domain = args.domain.map(|d| parse_domain_scope(Some(&d)));
 
-    let services = ServiceContainer::from_current_dir()?;
-    let repo_path = services
-        .repo_path()
-        .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
-        .clone();
-
-    let mut prompt_service = create_prompt_service(&repo_path);
+    // Works in both project and user scope
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let mut prompt_service = if let Some(repo_path) = services.repo_path() {
+        create_prompt_service(repo_path)
+    } else {
+        let user_dir = crate::storage::get_user_data_dir()?;
+        create_prompt_service(&user_dir)
+    };
     let prompt = prompt_service.get(&args.name, domain)?;
 
     match prompt {
@@ -307,13 +315,14 @@ pub fn execute_prompt_run(arguments: Value) -> Result<ToolResult> {
 
     let domain = args.domain.map(|d| parse_domain_scope(Some(&d)));
 
-    let services = ServiceContainer::from_current_dir()?;
-    let repo_path = services
-        .repo_path()
-        .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
-        .clone();
-
-    let mut prompt_service = create_prompt_service(&repo_path);
+    // Works in both project and user scope
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let mut prompt_service = if let Some(repo_path) = services.repo_path() {
+        create_prompt_service(repo_path)
+    } else {
+        let user_dir = crate::storage::get_user_data_dir()?;
+        create_prompt_service(&user_dir)
+    };
     let prompt = prompt_service.get(&args.name, domain)?;
 
     match prompt {
@@ -383,13 +392,14 @@ pub fn execute_prompt_delete(arguments: Value) -> Result<ToolResult> {
 
     let domain = parse_domain_scope(Some(&args.domain));
 
-    let services = ServiceContainer::from_current_dir()?;
-    let repo_path = services
-        .repo_path()
-        .ok_or_else(|| Error::InvalidInput("Repository path not available".to_string()))?
-        .clone();
-
-    let mut prompt_service = create_prompt_service(&repo_path);
+    // Works in both project and user scope
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let mut prompt_service = if let Some(repo_path) = services.repo_path() {
+        create_prompt_service(repo_path)
+    } else {
+        let user_dir = crate::storage::get_user_data_dir()?;
+        create_prompt_service(&user_dir)
+    };
     let deleted = prompt_service.delete(&args.name, domain)?;
 
     if deleted {

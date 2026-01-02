@@ -114,17 +114,23 @@ impl McpServer {
 
         let mut handler = ResourceHandler::new();
 
-        // Try to add RecallService
-        if let Ok(services) = ServiceContainer::from_current_dir() {
+        // Try to add RecallService (works in both project and user scope)
+        if let Ok(services) = ServiceContainer::from_current_dir_or_user() {
             if let Ok(recall) = services.recall() {
                 handler = handler.with_recall_service(recall);
             }
 
             // Try to add PromptService with full config (respects storage settings)
+            // For user-scope, repo_path is None - PromptService still works with user storage
             if let Some(repo_path) = services.repo_path() {
                 let config = SubcogConfig::load_default().with_repo_path(repo_path);
                 let prompt_service =
                     PromptService::with_subcog_config(config).with_repo_path(repo_path);
+                handler = handler.with_prompt_service(prompt_service);
+            } else {
+                // User-scope: create prompt service without repo path
+                let config = SubcogConfig::load_default();
+                let prompt_service = PromptService::with_subcog_config(config);
                 handler = handler.with_prompt_service(prompt_service);
             }
         }

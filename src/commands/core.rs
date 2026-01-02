@@ -57,10 +57,11 @@ pub fn cmd_capture(
         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
         .unwrap_or_default();
 
+    // Use context-aware domain: project if in git repo, user if not
     let request = CaptureRequest {
         content,
         namespace: parse_namespace(&namespace),
-        domain: Domain::default(),
+        domain: Domain::default_for_context(),
         tags: tag_list,
         source,
         skip_security_check: false,
@@ -79,16 +80,25 @@ pub fn cmd_capture(
 }
 
 /// Recall command.
+///
+/// # Arguments
+///
+/// * `query` - The search query
+/// * `mode` - Search mode: text, vector, or hybrid
+/// * `namespace` - Optional namespace filter
+/// * `limit` - Maximum number of results
+/// * `raw` - If true, display raw (un-normalized) scores instead of normalized scores
 pub fn cmd_recall(
     query: String,
     mode: String,
     namespace: Option<String>,
     limit: usize,
+    raw: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use subcog::services::ServiceContainer;
 
-    // Use domain-scoped index (project-local .subcog/index.db)
-    let services = ServiceContainer::from_current_dir()?;
+    // Use domain-scoped index (project-local or user-scoped)
+    let services = ServiceContainer::from_current_dir_or_user()?;
     let service = services.recall()?;
 
     let mut filter = SearchFilter::new();
@@ -104,9 +114,11 @@ pub fn cmd_recall(
             println!();
 
             for hit in &search_result.memories {
+                // Use raw_score if --raw flag is set, otherwise use normalized score
+                let display_score = if raw { hit.raw_score } else { hit.score };
                 println!(
-                    "  [{:.2}] {} ({})",
-                    hit.score,
+                    "  [{:.4}] {} ({})",
+                    display_score,
                     hit.memory.id.as_str(),
                     hit.memory.namespace
                 );
@@ -120,7 +132,11 @@ pub fn cmd_recall(
                 println!();
             }
 
-            println!("Search completed in {}ms", search_result.execution_time_ms);
+            let score_type = if raw { " (raw)" } else { "" };
+            println!(
+                "Search completed in {}ms{}",
+                search_result.execution_time_ms, score_type
+            );
         },
         Err(e) => {
             eprintln!("Search failed: {e}");

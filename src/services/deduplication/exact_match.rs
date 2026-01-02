@@ -228,7 +228,7 @@ mod tests {
     #[test]
     fn test_check_with_match() {
         // Create in-memory backend
-        let mut index = SqliteBackend::in_memory().unwrap();
+        let index = SqliteBackend::in_memory().unwrap();
 
         // Create a memory with the hash tag
         let content = "Use PostgreSQL for storage";
@@ -259,7 +259,7 @@ mod tests {
     #[test]
     fn test_check_different_namespace() {
         // Create in-memory backend
-        let mut index = SqliteBackend::in_memory().unwrap();
+        let index = SqliteBackend::in_memory().unwrap();
 
         // Create a memory in Decisions namespace
         let content = "Use PostgreSQL for storage";
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn test_check_normalized_content_matches() {
         // Create in-memory backend
-        let mut index = SqliteBackend::in_memory().unwrap();
+        let index = SqliteBackend::in_memory().unwrap();
 
         // Create a memory with normalized content hash
         let original_content = "Use PostgreSQL";

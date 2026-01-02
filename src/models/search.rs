@@ -234,8 +234,14 @@ pub struct SearchResult {
 pub struct SearchHit {
     /// The matched memory.
     pub memory: Memory,
-    /// Combined score (0.0 to 1.0).
+    /// Normalized combined score (0.0 to 1.0).
+    /// This is the primary score for display to users.
+    /// The max score in a result set is always 1.0.
     pub score: f32,
+    /// Raw combined score before normalization.
+    /// Useful for debugging RRF fusion behavior.
+    /// This is the sum of RRF contributions from text and vector search.
+    pub raw_score: f32,
     /// Vector similarity score if applicable.
     pub vector_score: Option<f32>,
     /// BM25 text score if applicable.

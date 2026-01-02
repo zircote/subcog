@@ -412,7 +412,7 @@ mod tests {
             || std::path::PathBuf::from("/tmp/test_consolidate_with"),
             |d| d.path().to_path_buf(),
         );
-        let mut backend = FilesystemBackend::new(&path);
+        let backend = FilesystemBackend::new(&path);
 
         // Add some test memories
         let memory1 = create_test_memory("mem_1", "First memory");

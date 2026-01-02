@@ -21,16 +21,17 @@ pub fn execute_capture(arguments: Value) -> Result<ToolResult> {
 
     let namespace = parse_namespace(&args.namespace);
 
+    // Use context-aware domain: project if in git repo, user if not
     let request = CaptureRequest {
         content: args.content,
         namespace,
-        domain: Domain::default(),
+        domain: Domain::default_for_context(),
         tags: args.tags.unwrap_or_default(),
         source: args.source,
         skip_security_check: false,
     };
 
-    let services = ServiceContainer::from_current_dir()?;
+    let services = ServiceContainer::from_current_dir_or_user()?;
     let result = services.capture().capture(request)?;
 
     Ok(ToolResult {
@@ -74,7 +75,7 @@ pub fn execute_recall(arguments: Value) -> Result<ToolResult> {
 
     let limit = args.limit.unwrap_or(10).min(50);
 
-    let services = ServiceContainer::from_current_dir()?;
+    let services = ServiceContainer::from_current_dir_or_user()?;
     let recall = services.recall()?;
 
     // Use list_all for wildcard queries or filter-only queries
@@ -115,11 +116,19 @@ pub fn execute_recall(arguments: Value) -> Result<ToolResult> {
             domain_part, hit.memory.namespace, hit.memory.id
         );
 
+        // Display both normalized score and raw score for transparency
+        // Format: "1.00 (raw: 0.0325)" or just "1.00" if they're the same
+        let score_display = if (hit.score - hit.raw_score).abs() < f32::EPSILON {
+            format!("{:.2}", hit.score)
+        } else {
+            format!("{:.2} (raw: {:.4})", hit.score, hit.raw_score)
+        };
+
         output.push_str(&format!(
-            "{}. {} | {:.2}{}{}\n\n",
+            "{}. {} | {}{}{}\n\n",
             i + 1,
             urn,
-            hit.score,
+            score_display,
             tags_display,
             content_display,
         ));
@@ -195,7 +204,7 @@ pub fn execute_consolidate(arguments: Value) -> Result<ToolResult> {
     let dry_run = args.dry_run.unwrap_or(false);
 
     // Fetch memories for consolidation
-    let services = ServiceContainer::from_current_dir()?;
+    let services = ServiceContainer::from_current_dir_or_user()?;
     let filter = SearchFilter::new().with_namespace(namespace);
     let query = args.query.as_deref().unwrap_or("*");
     let recall = services.recall()?;
@@ -334,7 +343,7 @@ pub fn execute_sync(arguments: Value) -> Result<ToolResult> {
 
     let direction = args.direction.as_deref().unwrap_or("full");
 
-    let services = ServiceContainer::from_current_dir()?;
+    let services = ServiceContainer::from_current_dir_or_user()?;
     let result = match direction {
         "push" => services.sync().push(),
         "fetch" => services.sync().fetch(),

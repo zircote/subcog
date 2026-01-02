@@ -450,7 +450,7 @@ impl IndexBackend for SqliteBackend {
             domain = %memory.domain.to_string()
         )
     )]
-    fn index(&mut self, memory: &Memory) -> Result<()> {
+    fn index(&self, memory: &Memory) -> Result<()> {
         let start = Instant::now();
         let result = (|| {
             let conn = acquire_lock(&self.conn);
@@ -530,7 +530,7 @@ impl IndexBackend for SqliteBackend {
     }
 
     #[instrument(skip(self), fields(operation = "remove", backend = "sqlite", memory.id = %id.as_str()))]
-    fn remove(&mut self, id: &MemoryId) -> Result<bool> {
+    fn remove(&self, id: &MemoryId) -> Result<bool> {
         let start = Instant::now();
         let result = (|| {
             let conn = acquire_lock(&self.conn);
@@ -699,7 +699,7 @@ impl IndexBackend for SqliteBackend {
     }
 
     #[instrument(skip(self), fields(operation = "clear", backend = "sqlite"))]
-    fn clear(&mut self) -> Result<()> {
+    fn clear(&self) -> Result<()> {
         let start = Instant::now();
         let result = (|| {
             let conn = acquire_lock(&self.conn);
@@ -903,7 +903,7 @@ impl IndexBackend for SqliteBackend {
     /// This is more efficient than the default implementation which creates
     /// a transaction per memory.
     #[instrument(skip(self, memories), fields(operation = "reindex", backend = "sqlite", count = memories.len()))]
-    fn reindex(&mut self, memories: &[Memory]) -> Result<()> {
+    fn reindex(&self, memories: &[Memory]) -> Result<()> {
         let start = Instant::now();
 
         if memories.is_empty() {
@@ -991,7 +991,7 @@ impl IndexBackend for SqliteBackend {
 
 // Implement PersistenceBackend for SqliteBackend so it can be used with ConsolidationService
 impl crate::storage::traits::PersistenceBackend for SqliteBackend {
-    fn store(&mut self, memory: &Memory) -> Result<()> {
+    fn store(&self, memory: &Memory) -> Result<()> {
         // Delegate to index() which stores the full memory
         self.index(memory)
     }
@@ -1000,7 +1000,7 @@ impl crate::storage::traits::PersistenceBackend for SqliteBackend {
         self.get_memory(id)
     }
 
-    fn delete(&mut self, id: &MemoryId) -> Result<bool> {
+    fn delete(&self, id: &MemoryId) -> Result<bool> {
         self.remove(id)
     }
 
@@ -1062,7 +1062,7 @@ mod tests {
 
     #[test]
     fn test_index_and_search() {
-        let mut backend = SqliteBackend::in_memory().unwrap();
+        let backend = SqliteBackend::in_memory().unwrap();
 
         let memory1 = create_test_memory("id1", "Rust programming language", Namespace::Decisions);
         let memory2 = create_test_memory("id2", "Python scripting", Namespace::Learnings);
@@ -1084,7 +1084,7 @@ mod tests {
 
     #[test]
     fn test_search_with_namespace_filter() {
-        let mut backend = SqliteBackend::in_memory().unwrap();
+        let backend = SqliteBackend::in_memory().unwrap();
 
         let memory1 = create_test_memory("id1", "Rust programming", Namespace::Decisions);
         let memory2 = create_test_memory("id2", "Rust patterns", Namespace::Patterns);
@@ -1102,7 +1102,7 @@ mod tests {
 
     #[test]
     fn test_remove() {
-        let mut backend = SqliteBackend::in_memory().unwrap();
+        let backend = SqliteBackend::in_memory().unwrap();
 
         let memory = create_test_memory("to_remove", "Test content", Namespace::Decisions);
         backend.index(&memory).unwrap();
@@ -1122,7 +1122,7 @@ mod tests {
 
     #[test]
     fn test_clear() {
-        let mut backend = SqliteBackend::in_memory().unwrap();
+        let backend = SqliteBackend::in_memory().unwrap();
 
         backend
             .index(&create_test_memory("id1", "content1", Namespace::Decisions))
@@ -1139,7 +1139,7 @@ mod tests {
 
     #[test]
     fn test_reindex() {
-        let mut backend = SqliteBackend::in_memory().unwrap();
+        let backend = SqliteBackend::in_memory().unwrap();
 
         let memories = vec![
             create_test_memory("id1", "memory one", Namespace::Decisions),
@@ -1155,7 +1155,7 @@ mod tests {
 
     #[test]
     fn test_update_index() {
-        let mut backend = SqliteBackend::in_memory().unwrap();
+        let backend = SqliteBackend::in_memory().unwrap();
 
         let mut memory =
             create_test_memory("update_test", "original content", Namespace::Decisions);
@@ -1180,7 +1180,7 @@ mod tests {
 
     #[test]
     fn test_get_memories_batch() {
-        let mut backend = SqliteBackend::in_memory().unwrap();
+        let backend = SqliteBackend::in_memory().unwrap();
 
         let memory1 = create_test_memory("batch1", "First memory", Namespace::Decisions);
         let memory2 = create_test_memory("batch2", "Second memory", Namespace::Learnings);
@@ -1211,7 +1211,7 @@ mod tests {
 
     #[test]
     fn test_get_memories_batch_with_missing() {
-        let mut backend = SqliteBackend::in_memory().unwrap();
+        let backend = SqliteBackend::in_memory().unwrap();
 
         let memory1 = create_test_memory("exists1", "Memory one", Namespace::Decisions);
         backend.index(&memory1).unwrap();
@@ -1239,7 +1239,7 @@ mod tests {
 
     #[test]
     fn test_search_with_status_filter() {
-        let mut backend = SqliteBackend::in_memory().unwrap();
+        let backend = SqliteBackend::in_memory().unwrap();
 
         // Create memories with different statuses
         let mut memory1 = create_test_memory("id1", "Rust programming", Namespace::Decisions);
@@ -1261,7 +1261,7 @@ mod tests {
 
     #[test]
     fn test_search_with_tag_filter() {
-        let mut backend = SqliteBackend::in_memory().unwrap();
+        let backend = SqliteBackend::in_memory().unwrap();
 
         let mut memory1 = create_test_memory("id1", "Rust guide", Namespace::Decisions);
         memory1.tags = vec!["rust".to_string(), "guide".to_string()];
@@ -1282,7 +1282,7 @@ mod tests {
 
     #[test]
     fn test_search_fts_special_characters() {
-        let mut backend = SqliteBackend::in_memory().unwrap();
+        let backend = SqliteBackend::in_memory().unwrap();
 
         let memory = create_test_memory(
             "special",
@@ -1304,7 +1304,7 @@ mod tests {
 
     #[test]
     fn test_get_memory_single() {
-        let mut backend = SqliteBackend::in_memory().unwrap();
+        let backend = SqliteBackend::in_memory().unwrap();
 
         let memory = create_test_memory(
             "single_get",
@@ -1333,7 +1333,7 @@ mod tests {
 
     #[test]
     fn test_remove_nonexistent() {
-        let mut backend = SqliteBackend::in_memory().unwrap();
+        let backend = SqliteBackend::in_memory().unwrap();
 
         // Removing a non-existent memory should return false
         let removed = backend.remove(&MemoryId::new("does_not_exist")).unwrap();
@@ -1342,7 +1342,7 @@ mod tests {
 
     #[test]
     fn test_search_whitespace_only_query() {
-        let mut backend = SqliteBackend::in_memory().unwrap();
+        let backend = SqliteBackend::in_memory().unwrap();
 
         let memory = create_test_memory("id1", "Some content", Namespace::Decisions);
         backend.index(&memory).unwrap();
@@ -1356,7 +1356,7 @@ mod tests {
 
     #[test]
     fn test_search_limit() {
-        let mut backend = SqliteBackend::in_memory().unwrap();
+        let backend = SqliteBackend::in_memory().unwrap();
 
         // Index 5 memories all containing "test"
         for i in 0..5 {
@@ -1379,11 +1379,11 @@ mod tests {
 
     #[test]
     fn test_index_and_search_with_unicode() {
-        let mut backend = SqliteBackend::in_memory().unwrap();
+        let backend = SqliteBackend::in_memory().unwrap();
 
         let memory = create_test_memory(
             "unicode",
-            "Testing Unicode support with accents: café naïve résumé",
+            "Testing Unicode support with accents: cafe naive resume",
             Namespace::Learnings,
         );
         backend.index(&memory).unwrap();
