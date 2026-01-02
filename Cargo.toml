@@ -54,7 +54,7 @@ metrics-exporter-prometheus = "0.18"
 git2 = { version = "0.20", features = ["vendored-openssl", "vendored-libgit2"] }
 
 # SQLite for FTS5 index
-rusqlite = { version = "0.32", features = ["bundled", "modern-full"] }
+rusqlite = { version = "0.38", features = ["bundled", "modern-full"] }
 
 # UUID generation
 uuid = { version = "1.11", features = ["v4", "v7"] }
