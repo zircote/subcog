@@ -433,4 +433,86 @@ mod tests {
         assert_eq!(retrieved.content, "Updated content");
         assert_eq!(retrieved.updated_at, 9_999_999_999);
     }
+
+    #[test]
+    fn test_path_traversal_protection() {
+        let dir = TempDir::new().unwrap();
+        let backend = FilesystemBackend::new(dir.path());
+
+        // Attempt path traversal with ".."
+        let result = backend.memory_path(&MemoryId::new("../../../etc/passwd"));
+        assert!(result.is_err());
+
+        // Attempt with forward slash
+        let result = backend.memory_path(&MemoryId::new("dir/subdir/file"));
+        assert!(result.is_err());
+
+        // Attempt with backslash
+        let result = backend.memory_path(&MemoryId::new("dir\\subdir\\file"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_safe_filename_validation() {
+        // Valid filenames
+        assert!(FilesystemBackend::is_safe_filename("valid_id"));
+        assert!(FilesystemBackend::is_safe_filename("valid-id-123"));
+        assert!(FilesystemBackend::is_safe_filename("abc123"));
+        assert!(FilesystemBackend::is_safe_filename("UPPERCASE"));
+
+        // Invalid filenames
+        assert!(!FilesystemBackend::is_safe_filename(""));
+        assert!(!FilesystemBackend::is_safe_filename("../path"));
+        assert!(!FilesystemBackend::is_safe_filename("path/to/file"));
+        assert!(!FilesystemBackend::is_safe_filename("path\\to\\file"));
+        assert!(!FilesystemBackend::is_safe_filename("file.json"));
+        assert!(!FilesystemBackend::is_safe_filename("file with space"));
+    }
+
+    #[test]
+    fn test_with_create_success() {
+        let dir = TempDir::new().unwrap();
+        let subdir = dir.path().join("subdir");
+
+        let backend = FilesystemBackend::with_create(&subdir);
+        assert!(backend.is_ok());
+        assert!(subdir.exists());
+    }
+
+    #[test]
+    fn test_base_path_accessor() {
+        let dir = TempDir::new().unwrap();
+        let backend = FilesystemBackend::new(dir.path());
+
+        assert_eq!(backend.base_path(), dir.path());
+    }
+
+    #[test]
+    fn test_memory_roundtrip_all_namespaces() {
+        let dir = TempDir::new().unwrap();
+        let mut backend = FilesystemBackend::new(dir.path());
+
+        let namespaces = [
+            Namespace::Decisions,
+            Namespace::Patterns,
+            Namespace::Learnings,
+            Namespace::Context,
+            Namespace::TechDebt,
+            Namespace::Apis,
+            Namespace::Config,
+            Namespace::Security,
+            Namespace::Performance,
+            Namespace::Testing,
+        ];
+
+        for (i, ns) in namespaces.iter().enumerate() {
+            let id = format!("ns_test_{i}");
+            let mut memory = create_test_memory(&id);
+            memory.namespace = *ns;
+
+            backend.store(&memory).unwrap();
+            let retrieved = backend.get(&MemoryId::new(&id)).unwrap().unwrap();
+            assert_eq!(retrieved.namespace, *ns);
+        }
+    }
 }

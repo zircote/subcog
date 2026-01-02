@@ -53,7 +53,7 @@ use super::types::{Deduplicator, DuplicateCheckResult};
 ///     println!("Duplicate found: {:?} - {}", result.reason, result.matched_urn.unwrap());
 /// }
 /// ```
-pub struct DeduplicationService<E: Embedder, V: VectorBackend> {
+pub struct DeduplicationService<E: Embedder + Send + Sync, V: VectorBackend + Send + Sync> {
     /// Configuration.
     config: DeduplicationConfig,
     /// Exact match checker.
@@ -66,7 +66,7 @@ pub struct DeduplicationService<E: Embedder, V: VectorBackend> {
     domain: Domain,
 }
 
-impl<E: Embedder, V: VectorBackend> DeduplicationService<E, V> {
+impl<E: Embedder + Send + Sync, V: VectorBackend + Send + Sync> DeduplicationService<E, V> {
     /// Creates a new deduplication service with all checkers.
     ///
     /// # Arguments
@@ -407,7 +407,9 @@ impl<E: Embedder, V: VectorBackend> DeduplicationService<E, V> {
 }
 
 /// Implementation of the Deduplicator trait.
-impl<E: Embedder, V: VectorBackend> Deduplicator for DeduplicationService<E, V> {
+impl<E: Embedder + Send + Sync, V: VectorBackend + Send + Sync> Deduplicator
+    for DeduplicationService<E, V>
+{
     fn check_duplicate(&self, content: &str, namespace: Namespace) -> Result<DuplicateCheckResult> {
         self.check(content, namespace)
     }

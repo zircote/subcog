@@ -80,11 +80,11 @@ usearch = { version = "2.21", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
 
 # JWT authentication for MCP HTTP transport
-jsonwebtoken = "10.2"
+jsonwebtoken = { version = "10.2", features = ["rust_crypto"] }
 
 # HTTP server for MCP HTTP transport (optional)
 axum = { version = "0.8", optional = true }
-tower-http = { version = "0.6", features = ["cors", "trace"], optional = true }
+tower-http = { version = "0.6", features = ["cors", "trace", "set-header"], optional = true }
 
 # Directories for config/data paths
 directories = "6.0"

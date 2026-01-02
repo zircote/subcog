@@ -10,6 +10,7 @@ use crate::security::record_event;
 use crate::storage::index::SqliteBackend;
 use crate::storage::traits::IndexBackend;
 use crate::{Error, Result};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::time::Instant;
 use tracing::instrument;
@@ -77,6 +78,11 @@ impl RecallService {
             let execution_time_ms = start.elapsed().as_millis() as u64;
             let total_count = memories.len();
             let timestamp = current_timestamp();
+            // Performance note: query_value.clone() creates a new String for each event.
+            // Changing to Arc<str> would require modifying MemoryEvent::Retrieved
+            // which is a breaking change. The current overhead is acceptable for
+            // typical search result sizes (<100 hits). Future optimization would
+            // batch events or use Arc<str> in MemoryEvent.
             let query_value = query.to_string();
             for hit in &memories {
                 record_event(MemoryEvent::Retrieved {
@@ -260,9 +266,47 @@ impl RecallService {
         Ok(fused)
     }
 
-    /// Applies Reciprocal Rank Fusion to combine search results.
+    /// Applies Reciprocal Rank Fusion (RRF) to combine search results.
     ///
-    /// RRF score = sum(1 / (k + `rank_i`)) for each ranking
+    /// # Algorithm
+    ///
+    /// RRF is a rank aggregation technique that combines ranked lists from multiple
+    /// retrieval systems. For each document `d` appearing in ranking `r`:
+    ///
+    /// ```text
+    /// RRF_score(d) = Σ 1 / (k + rank_r(d))
+    /// ```
+    ///
+    /// Where:
+    /// - `k` = 60 (standard constant, prevents division by zero and dampens high ranks)
+    /// - `rank_r(d)` = position of document `d` in ranking `r` (1-indexed)
+    ///
+    /// # Why RRF?
+    ///
+    /// - **Score normalization**: Raw scores from different retrievers (BM25 vs cosine)
+    ///   are not comparable. RRF uses ranks, which are always comparable.
+    /// - **Robust fusion**: Documents ranked highly in multiple systems get boosted.
+    /// - **Simple and effective**: No hyperparameter tuning needed (k=60 works well).
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// BM25 results:  [doc_A@1, doc_B@2, doc_C@3]
+    /// Vector results: [doc_B@1, doc_C@2, doc_D@3]
+    ///
+    /// RRF scores:
+    /// - doc_A: 1/(60+1) = 0.0164  (only in BM25)
+    /// - doc_B: 1/(60+2) + 1/(60+1) = 0.0161 + 0.0164 = 0.0325  (in both!)
+    /// - doc_C: 1/(60+3) + 1/(60+2) = 0.0159 + 0.0161 = 0.0320  (in both)
+    /// - doc_D: 1/(60+3) = 0.0159  (only in vector)
+    ///
+    /// Final ranking: [doc_B, doc_C, doc_A, doc_D]
+    /// ```
+    ///
+    /// # References
+    ///
+    /// - Cormack, G. V., Clarke, C. L., & Buettcher, S. (2009). "Reciprocal Rank Fusion
+    ///   outperforms Condorcet and individual Rank Learning Methods"
     fn rrf_fusion(
         &self,
         text_results: &[SearchHit],
@@ -275,7 +319,7 @@ impl RecallService {
 
         // Add text results
         for (rank, hit) in text_results.iter().enumerate() {
-            let id = hit.memory.id.as_str().to_string();
+            let id = hit.memory.id.to_string();
             let rrf_score = 1.0 / (K + rank as f32 + 1.0);
 
             scores
@@ -286,7 +330,7 @@ impl RecallService {
 
         // Add vector results
         for (rank, hit) in vector_results.iter().enumerate() {
-            let id = hit.memory.id.as_str().to_string();
+            let id = hit.memory.id.to_string();
             let rrf_score = 1.0 / (K + rank as f32 + 1.0);
 
             scores
@@ -347,11 +391,12 @@ impl RecallService {
     }
 }
 
-fn domain_label(filter: &SearchFilter) -> String {
+/// Returns a domain label for metrics, avoiding allocations for common cases.
+fn domain_label(filter: &SearchFilter) -> Cow<'static, str> {
     match filter.domains.len() {
-        0 => "all".to_string(),
-        1 => filter.domains[0].to_string(),
-        _ => "multi".to_string(),
+        0 => Cow::Borrowed("all"),
+        1 => Cow::Owned(filter.domains[0].to_string()),
+        _ => Cow::Borrowed("multi"),
     }
 }
 

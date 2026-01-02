@@ -5,6 +5,7 @@ mod features;
 pub use features::FeatureFlags;
 
 use serde::Deserialize;
+use std::borrow::Cow;
 use std::path::PathBuf;
 
 /// Expands environment variable references in a string.
@@ -12,15 +13,25 @@ use std::path::PathBuf;
 /// Supports `${VAR_NAME}` syntax. If the variable is not set, the original
 /// reference is preserved (e.g., `${MISSING_VAR}` stays as-is).
 ///
+/// # Performance
+///
+/// Uses `Cow<str>` to avoid allocation when no expansion is needed.
+/// Only allocates when at least one environment variable is found and expanded.
+///
 /// # Examples
 ///
 /// ```ignore
 /// // If OPENAI_API_KEY=sk-xxx in environment
 /// expand_env_vars("${OPENAI_API_KEY}") // Returns "sk-xxx"
 /// expand_env_vars("prefix-${VAR}-suffix") // Expands VAR in the middle
-/// expand_env_vars("no vars here") // Returns unchanged
+/// expand_env_vars("no vars here") // Returns unchanged (no allocation)
 /// ```
-fn expand_env_vars(input: &str) -> String {
+fn expand_env_vars(input: &str) -> Cow<'_, str> {
+    // Fast path: no ${} pattern at all
+    if !input.contains("${") {
+        return Cow::Borrowed(input);
+    }
+
     let mut result = input.to_string();
     let mut start = 0;
 
@@ -43,7 +54,10 @@ fn expand_env_vars(input: &str) -> String {
         }
     }
 
-    result
+    // We always return owned in the slow path since we've allocated.
+    // This is acceptable since we only enter this path if the input
+    // contained "${" pattern.
+    Cow::Owned(result)
 }
 
 /// Main configuration for subcog.
@@ -1008,7 +1022,7 @@ impl SubcogConfig {
             }
             if let Some(api_key) = llm.api_key.filter(|value| !value.trim().is_empty()) {
                 // Expand environment variable references like ${OPENAI_API_KEY}
-                self.llm.api_key = Some(expand_env_vars(&api_key));
+                self.llm.api_key = Some(expand_env_vars(&api_key).into_owned());
             }
             if let Some(base_url) = llm.base_url.filter(|value| !value.trim().is_empty()) {
                 self.llm.base_url = Some(base_url);

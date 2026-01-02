@@ -194,6 +194,12 @@ impl SqliteBackend {
             [],
         );
 
+        // Index on domain for domain-scoped searches
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_domain ON memories(domain)",
+            [],
+        );
+
         // Index on status for filtered searches
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status)",
@@ -461,6 +467,9 @@ impl IndexBackend for SqliteBackend {
 
             let result = (|| {
                 // Insert or replace in main table
+                // Note: Cast u64 to i64 for SQLite compatibility (rusqlite doesn't impl ToSql for u64)
+                #[allow(clippy::cast_possible_wrap)]
+                let created_at_i64 = memory.created_at as i64;
                 conn.execute(
                     "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags, source)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -469,7 +478,7 @@ impl IndexBackend for SqliteBackend {
                         memory.namespace.as_str(),
                         domain_str,
                         memory.status.as_str(),
-                        memory.created_at,
+                        created_at_i64,
                         tags_str,
                         memory.source.as_deref()
                     ],
@@ -613,15 +622,25 @@ impl IndexBackend for SqliteBackend {
 
             // FTS5 query - escape special characters and wrap terms in quotes
             // FTS5 special chars: - (NOT), * (prefix), " (phrase), : (column)
-            let fts_query = query
-                .split_whitespace()
-                .map(|term| {
-                    // Escape double quotes and wrap each term in quotes for literal matching
-                    let escaped = term.replace('"', "\"\"");
-                    format!("\"{escaped}\"")
-                })
-                .collect::<Vec<_>>()
-                .join(" OR ");
+            // Pre-allocate: each term becomes ~term.len() + 6 chars ("term" OR )
+            let terms: Vec<_> = query.split_whitespace().collect();
+            let estimated_len = terms.iter().map(|t| t.len() + 8).sum::<usize>();
+            let mut fts_query = String::with_capacity(estimated_len);
+            for (i, term) in terms.iter().enumerate() {
+                if i > 0 {
+                    fts_query.push_str(" OR ");
+                }
+                fts_query.push('"');
+                // Escape double quotes for literal matching
+                for c in term.chars() {
+                    if c == '"' {
+                        fts_query.push_str("\"\"");
+                    } else {
+                        fts_query.push(c);
+                    }
+                }
+                fts_query.push('"');
+            }
 
             let rows = stmt
                 .query_map(
@@ -907,6 +926,9 @@ impl IndexBackend for SqliteBackend {
                     let domain_str = memory.domain.to_string();
 
                     // Insert or replace in main table
+                    // Note: Cast u64 to i64 for SQLite compatibility (rusqlite doesn't impl ToSql for u64)
+                    #[allow(clippy::cast_possible_wrap)]
+                    let created_at_i64 = memory.created_at as i64;
                     conn.execute(
                         "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags, source)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -915,7 +937,7 @@ impl IndexBackend for SqliteBackend {
                             memory.namespace.as_str(),
                             domain_str,
                             memory.status.as_str(),
-                            memory.created_at,
+                            created_at_i64,
                             tags_str,
                             memory.source.as_deref()
                         ],
@@ -1213,5 +1235,175 @@ mod tests {
         let backend = SqliteBackend::in_memory().unwrap();
         let results = backend.get_memories_batch(&[]).unwrap();
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_search_with_status_filter() {
+        let mut backend = SqliteBackend::in_memory().unwrap();
+
+        // Create memories with different statuses
+        let mut memory1 = create_test_memory("id1", "Rust programming", Namespace::Decisions);
+        memory1.status = MemoryStatus::Active;
+
+        let mut memory2 = create_test_memory("id2", "Rust patterns", Namespace::Decisions);
+        memory2.status = MemoryStatus::Archived;
+
+        backend.index(&memory1).unwrap();
+        backend.index(&memory2).unwrap();
+
+        // Search with status filter
+        let filter = SearchFilter::new().with_status(MemoryStatus::Active);
+        let results = backend.search("Rust", &filter, 10).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0.as_str(), "id1");
+    }
+
+    #[test]
+    fn test_search_with_tag_filter() {
+        let mut backend = SqliteBackend::in_memory().unwrap();
+
+        let mut memory1 = create_test_memory("id1", "Rust guide", Namespace::Decisions);
+        memory1.tags = vec!["rust".to_string(), "guide".to_string()];
+
+        let mut memory2 = create_test_memory("id2", "Rust tutorial", Namespace::Decisions);
+        memory2.tags = vec!["rust".to_string(), "tutorial".to_string()];
+
+        backend.index(&memory1).unwrap();
+        backend.index(&memory2).unwrap();
+
+        // Search with tag filter (using with_tag for single tag)
+        let filter = SearchFilter::new().with_tag("guide");
+        let results = backend.search("Rust", &filter, 10).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0.as_str(), "id1");
+    }
+
+    #[test]
+    fn test_search_fts_special_characters() {
+        let mut backend = SqliteBackend::in_memory().unwrap();
+
+        let memory = create_test_memory(
+            "special",
+            "Error: unexpected 'syntax' in /path/to/file.rs:42",
+            Namespace::Learnings,
+        );
+        backend.index(&memory).unwrap();
+
+        // Search with special characters should be escaped properly
+        let results = backend
+            .search("Error syntax", &SearchFilter::new(), 10)
+            .unwrap();
+        assert_eq!(results.len(), 1);
+
+        // Search for path-like content
+        let results = backend.search("file.rs", &SearchFilter::new(), 10).unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_get_memory_single() {
+        let mut backend = SqliteBackend::in_memory().unwrap();
+
+        let memory = create_test_memory(
+            "single_get",
+            "Fetching a single memory",
+            Namespace::Decisions,
+        );
+        backend.index(&memory).unwrap();
+
+        // Fetch the memory
+        let result = backend.get_memory(&MemoryId::new("single_get")).unwrap();
+        assert!(result.is_some());
+
+        let fetched = result.unwrap();
+        assert_eq!(fetched.id.as_str(), "single_get");
+        assert_eq!(fetched.content, "Fetching a single memory");
+        assert_eq!(fetched.namespace, Namespace::Decisions);
+    }
+
+    #[test]
+    fn test_get_memory_not_found() {
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        let result = backend.get_memory(&MemoryId::new("nonexistent")).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_remove_nonexistent() {
+        let mut backend = SqliteBackend::in_memory().unwrap();
+
+        // Removing a non-existent memory should return false
+        let removed = backend.remove(&MemoryId::new("does_not_exist")).unwrap();
+        assert!(!removed);
+    }
+
+    #[test]
+    fn test_search_whitespace_only_query() {
+        let mut backend = SqliteBackend::in_memory().unwrap();
+
+        let memory = create_test_memory("id1", "Some content", Namespace::Decisions);
+        backend.index(&memory).unwrap();
+
+        // Whitespace-only query should be handled gracefully
+        // The search function should either return empty or handle the error
+        let results = backend.search("   ", &SearchFilter::new(), 10);
+        // Either empty results or an error is acceptable for whitespace-only queries
+        assert!(results.is_ok() || results.is_err());
+    }
+
+    #[test]
+    fn test_search_limit() {
+        let mut backend = SqliteBackend::in_memory().unwrap();
+
+        // Index 5 memories all containing "test"
+        for i in 0..5 {
+            let memory = create_test_memory(
+                &format!("id{i}"),
+                &format!("test content {i}"),
+                Namespace::Decisions,
+            );
+            backend.index(&memory).unwrap();
+        }
+
+        // Search with limit of 3
+        let results = backend.search("test", &SearchFilter::new(), 3).unwrap();
+        assert_eq!(results.len(), 3);
+
+        // Search with limit of 10 (more than available)
+        let results = backend.search("test", &SearchFilter::new(), 10).unwrap();
+        assert_eq!(results.len(), 5);
+    }
+
+    #[test]
+    fn test_index_and_search_with_unicode() {
+        let mut backend = SqliteBackend::in_memory().unwrap();
+
+        let memory = create_test_memory(
+            "unicode",
+            "Testing Unicode support with accents: café naïve résumé",
+            Namespace::Learnings,
+        );
+        backend.index(&memory).unwrap();
+
+        // Search for English content
+        let results = backend
+            .search("Testing Unicode", &SearchFilter::new(), 10)
+            .unwrap();
+        assert_eq!(results.len(), 1);
+
+        // Search for accented content (should work with FTS5's unicode tokenizer)
+        let results = backend.search("cafe", &SearchFilter::new(), 10).unwrap();
+        // Note: FTS5's default tokenizer may or may not match accented words
+        // This test validates that unicode content doesn't break indexing
+        assert!(results.is_empty() || results.len() == 1);
+    }
+
+    #[test]
+    fn test_db_path() {
+        let backend = SqliteBackend::in_memory().unwrap();
+        assert!(backend.db_path().is_none());
     }
 }

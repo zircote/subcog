@@ -566,3 +566,344 @@ fn is_timeout_error(err: &Error) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // Circuit Breaker Tests
+    // =========================================================================
+
+    #[test]
+    fn test_circuit_breaker_starts_closed() {
+        let config = LlmResilienceConfig::default();
+        let breaker = CircuitBreaker::new(&config);
+        assert_eq!(breaker.state_value(), 0); // Closed = 0
+    }
+
+    #[test]
+    fn test_circuit_breaker_allows_calls_when_closed() {
+        let config = LlmResilienceConfig::default();
+        let mut breaker = CircuitBreaker::new(&config);
+        assert!(breaker.allow());
+        assert!(breaker.allow());
+        assert!(breaker.allow());
+    }
+
+    #[test]
+    fn test_circuit_breaker_opens_after_threshold_failures() {
+        let config = LlmResilienceConfig {
+            breaker_failure_threshold: 3,
+            ..Default::default()
+        };
+        let mut breaker = CircuitBreaker::new(&config);
+
+        // First two failures don't trip the breaker
+        breaker.on_failure();
+        assert_eq!(breaker.state_value(), 0); // Still closed
+        breaker.on_failure();
+        assert_eq!(breaker.state_value(), 0); // Still closed
+
+        // Third failure trips the breaker
+        let tripped = breaker.on_failure();
+        assert!(tripped);
+        assert_eq!(breaker.state_value(), 1); // Open = 1
+    }
+
+    #[test]
+    fn test_circuit_breaker_rejects_when_open() {
+        let config = LlmResilienceConfig {
+            breaker_failure_threshold: 1,
+            breaker_reset_timeout_ms: 10_000, // Long timeout
+            ..Default::default()
+        };
+        let mut breaker = CircuitBreaker::new(&config);
+
+        // Trip the breaker
+        breaker.on_failure();
+        assert_eq!(breaker.state_value(), 1); // Open
+
+        // Should reject calls
+        assert!(!breaker.allow());
+        assert!(!breaker.allow());
+    }
+
+    #[test]
+    fn test_circuit_breaker_transitions_to_half_open_after_timeout() {
+        let config = LlmResilienceConfig {
+            breaker_failure_threshold: 1,
+            breaker_reset_timeout_ms: 0, // Immediate reset
+            breaker_half_open_max_calls: 1,
+            ..Default::default()
+        };
+        let mut breaker = CircuitBreaker::new(&config);
+
+        // Trip the breaker
+        breaker.on_failure();
+        assert_eq!(breaker.state_value(), 1); // Open
+
+        // Should allow call after timeout (immediate since reset_timeout_ms=0)
+        std::thread::sleep(Duration::from_millis(1));
+        assert!(breaker.allow());
+        assert_eq!(breaker.state_value(), 2); // Half-open = 2
+    }
+
+    #[test]
+    fn test_circuit_breaker_half_open_limits_calls() {
+        let config = LlmResilienceConfig {
+            breaker_failure_threshold: 1,
+            breaker_reset_timeout_ms: 0,
+            breaker_half_open_max_calls: 2, // Allow 2 more calls in half-open state
+            ..Default::default()
+        };
+        let mut breaker = CircuitBreaker::new(&config);
+
+        // Trip and transition to half-open
+        breaker.on_failure();
+        std::thread::sleep(Duration::from_millis(1));
+
+        // First call transitions to half-open and is allowed (free transition call)
+        assert!(breaker.allow());
+        assert_eq!(breaker.state_value(), 2); // Half-open
+
+        // Two more calls allowed (attempts = 1, 2)
+        assert!(breaker.allow()); // attempts = 1
+        assert!(breaker.allow()); // attempts = 2
+
+        // Next call rejected (attempts >= max_calls)
+        assert!(!breaker.allow());
+    }
+
+    #[test]
+    fn test_circuit_breaker_closes_on_success() {
+        let config = LlmResilienceConfig {
+            breaker_failure_threshold: 1,
+            breaker_reset_timeout_ms: 0,
+            ..Default::default()
+        };
+        let mut breaker = CircuitBreaker::new(&config);
+
+        // Trip and transition to half-open
+        breaker.on_failure();
+        std::thread::sleep(Duration::from_millis(1));
+        breaker.allow();
+
+        // Success closes the breaker
+        breaker.on_success();
+        assert_eq!(breaker.state_value(), 0); // Closed
+    }
+
+    #[test]
+    fn test_circuit_breaker_reopens_on_failure_when_half_open() {
+        let config = LlmResilienceConfig {
+            breaker_failure_threshold: 1,
+            breaker_reset_timeout_ms: 0,
+            ..Default::default()
+        };
+        let mut breaker = CircuitBreaker::new(&config);
+
+        // Trip and transition to half-open
+        breaker.on_failure();
+        std::thread::sleep(Duration::from_millis(1));
+        breaker.allow();
+        assert_eq!(breaker.state_value(), 2); // Half-open
+
+        // Failure reopens the breaker
+        let tripped = breaker.on_failure();
+        assert!(tripped);
+        assert_eq!(breaker.state_value(), 1); // Open
+    }
+
+    // =========================================================================
+    // Budget Tracker Tests
+    // =========================================================================
+
+    #[test]
+    fn test_budget_tracker_starts_empty() {
+        let tracker = BudgetTracker::new(Duration::from_secs(60));
+        assert!(tracker.requests.is_empty());
+        assert!(tracker.errors.is_empty());
+    }
+
+    #[test]
+    fn test_budget_tracker_records_successful_requests() {
+        let mut tracker = BudgetTracker::new(Duration::from_secs(60));
+        let now = Instant::now();
+
+        let ratio = tracker.record(now, false);
+        assert!(ratio.abs() < f64::EPSILON); // No errors
+
+        let ratio = tracker.record(now, false);
+        assert!(ratio.abs() < f64::EPSILON); // Still no errors
+    }
+
+    #[test]
+    fn test_budget_tracker_records_error_requests() {
+        let mut tracker = BudgetTracker::new(Duration::from_secs(60));
+        let now = Instant::now();
+
+        tracker.record(now, false);
+        tracker.record(now, false);
+        let ratio = tracker.record(now, true);
+
+        // 1 error out of 3 requests = 0.333...
+        assert!((ratio - 0.333).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_budget_tracker_calculates_error_ratio() {
+        let mut tracker = BudgetTracker::new(Duration::from_secs(60));
+        let now = Instant::now();
+
+        // 50% error rate
+        let ratio = tracker.record(now, true);
+        assert!((ratio - 1.0).abs() < f64::EPSILON); // 1/1
+
+        let ratio = tracker.record(now, false);
+        assert!((ratio - 0.5).abs() < f64::EPSILON); // 1/2
+
+        let ratio = tracker.record(now, true);
+        // 2 errors / 3 total = 0.666...
+        assert!((ratio - 0.666).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_budget_tracker_evicts_expired_entries() {
+        // Very short window for testing
+        let mut tracker = BudgetTracker::new(Duration::from_millis(10));
+        let now = Instant::now();
+
+        tracker.record(now, true);
+        assert_eq!(tracker.requests.len(), 1);
+        assert_eq!(tracker.errors.len(), 1);
+
+        // Wait for entries to expire
+        std::thread::sleep(Duration::from_millis(15));
+
+        // Recording a new request should evict old entries
+        let new_now = Instant::now();
+        tracker.record(new_now, false);
+
+        // Old entries should be evicted
+        assert_eq!(tracker.requests.len(), 1);
+        assert_eq!(tracker.errors.len(), 0);
+    }
+
+    // =========================================================================
+    // Configuration Tests
+    // =========================================================================
+
+    #[test]
+    fn test_config_default_values() {
+        let config = LlmResilienceConfig::default();
+        assert_eq!(config.max_retries, 0);
+        assert_eq!(config.retry_backoff_ms, 100);
+        assert_eq!(config.breaker_failure_threshold, 3);
+        assert_eq!(config.breaker_reset_timeout_ms, 30_000);
+        assert_eq!(config.breaker_half_open_max_calls, 1);
+        assert_eq!(config.latency_slo_ms, 2_000);
+        assert!((config.error_budget_ratio - 0.05).abs() < 0.001);
+        assert_eq!(config.error_budget_window_secs, 300);
+    }
+
+    #[test]
+    fn test_config_from_config_file() {
+        let llm_config = crate::config::LlmConfig {
+            max_retries: Some(5),
+            retry_backoff_ms: Some(200),
+            breaker_failure_threshold: Some(10),
+            breaker_reset_ms: Some(60_000),
+            breaker_half_open_max_calls: Some(3),
+            latency_slo_ms: Some(5_000),
+            error_budget_ratio: Some(0.10),
+            error_budget_window_secs: Some(600),
+            ..Default::default()
+        };
+
+        let config = LlmResilienceConfig::from_config(&llm_config);
+        assert_eq!(config.max_retries, 5);
+        assert_eq!(config.retry_backoff_ms, 200);
+        assert_eq!(config.breaker_failure_threshold, 10);
+        assert_eq!(config.breaker_reset_timeout_ms, 60_000);
+        assert_eq!(config.breaker_half_open_max_calls, 3);
+        assert_eq!(config.latency_slo_ms, 5_000);
+        assert!((config.error_budget_ratio - 0.10).abs() < 0.001);
+        assert_eq!(config.error_budget_window_secs, 600);
+    }
+
+    #[test]
+    fn test_config_clamps_values() {
+        let llm_config = crate::config::LlmConfig {
+            breaker_failure_threshold: Some(0),   // Should be clamped to 1
+            breaker_half_open_max_calls: Some(0), // Should be clamped to 1
+            error_budget_ratio: Some(2.0),        // Should be clamped to 1.0
+            error_budget_window_secs: Some(0),    // Should be clamped to 1
+            ..Default::default()
+        };
+
+        let config = LlmResilienceConfig::from_config(&llm_config);
+        assert_eq!(config.breaker_failure_threshold, 1);
+        assert_eq!(config.breaker_half_open_max_calls, 1);
+        assert!((config.error_budget_ratio - 1.0).abs() < 0.001);
+        assert_eq!(config.error_budget_window_secs, 1);
+    }
+
+    // =========================================================================
+    // Error Detection Tests
+    // =========================================================================
+
+    #[test]
+    fn test_is_timeout_error_detects_timeout() {
+        let err = Error::OperationFailed {
+            operation: "test".to_string(),
+            cause: "Connection timeout".to_string(),
+        };
+        assert!(is_timeout_error(&err));
+    }
+
+    #[test]
+    fn test_is_timeout_error_detects_timed_out() {
+        let err = Error::OperationFailed {
+            operation: "test".to_string(),
+            cause: "Request timed out".to_string(),
+        };
+        assert!(is_timeout_error(&err));
+    }
+
+    #[test]
+    fn test_is_timeout_error_detects_deadline() {
+        let err = Error::OperationFailed {
+            operation: "test".to_string(),
+            cause: "Deadline exceeded".to_string(),
+        };
+        assert!(is_timeout_error(&err));
+    }
+
+    #[test]
+    fn test_is_timeout_error_detects_elapsed() {
+        let err = Error::OperationFailed {
+            operation: "test".to_string(),
+            cause: "Time elapsed".to_string(),
+        };
+        assert!(is_timeout_error(&err));
+    }
+
+    #[test]
+    fn test_is_timeout_error_returns_false_for_other_errors() {
+        let err = Error::OperationFailed {
+            operation: "test".to_string(),
+            cause: "Connection refused".to_string(),
+        };
+        assert!(!is_timeout_error(&err));
+    }
+
+    #[test]
+    fn test_is_timeout_error_is_case_insensitive() {
+        let err = Error::OperationFailed {
+            operation: "test".to_string(),
+            cause: "TIMEOUT ERROR".to_string(),
+        };
+        assert!(is_timeout_error(&err));
+    }
+}

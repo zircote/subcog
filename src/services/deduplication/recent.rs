@@ -277,6 +277,7 @@ impl RecentCaptureChecker {
     }
 
     /// Clears all entries from the cache.
+    #[cfg(test)]
     pub fn clear(&self) {
         if let Ok(mut cache) = self.cache.write() {
             cache.clear();
@@ -291,18 +292,21 @@ impl RecentCaptureChecker {
     ///
     /// Note: This includes potentially expired entries that haven't
     /// been cleaned up yet.
+    #[cfg(test)]
     #[must_use]
     pub fn len(&self) -> usize {
         self.cache.read().map(|c| c.len()).unwrap_or(0)
     }
 
     /// Returns true if the cache is empty.
+    #[cfg(test)]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Returns the configured TTL.
+    #[cfg(test)]
     #[must_use]
     pub const fn ttl(&self) -> Duration {
         self.ttl

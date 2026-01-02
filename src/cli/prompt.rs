@@ -9,11 +9,10 @@
 // The if-let-else pattern is clearer for nested conditionals
 #![allow(clippy::option_if_let_else)]
 
-use crate::config::SubcogConfig;
 use crate::models::{PromptTemplate, PromptVariable, substitute_variables};
 use crate::services::{
     EnrichmentStatus, PartialMetadata, PromptFilter, PromptFormat, PromptParser, PromptService,
-    SaveOptions,
+    SaveOptions, prompt_service_for_cwd,
 };
 use crate::storage::index::DomainScope;
 use std::collections::HashMap;
@@ -67,6 +66,98 @@ impl OutputFormat {
     }
 }
 
+/// Arguments for the `prompt save` command.
+///
+/// Encapsulates all parameters to avoid function with too many arguments.
+#[derive(Debug, Clone, Default)]
+pub struct SavePromptArgs {
+    /// Prompt name (kebab-case).
+    pub name: String,
+    /// Optional inline content.
+    pub content: Option<String>,
+    /// Optional description.
+    pub description: Option<String>,
+    /// Optional comma-separated tags.
+    pub tags: Option<String>,
+    /// Optional domain scope.
+    pub domain: Option<String>,
+    /// Optional file path to load from.
+    pub from_file: Option<PathBuf>,
+    /// Whether to read from stdin.
+    pub from_stdin: bool,
+    /// Skip LLM-powered enrichment.
+    pub no_enrich: bool,
+    /// Show enriched template without saving.
+    pub dry_run: bool,
+}
+
+impl SavePromptArgs {
+    /// Creates new save arguments with a name.
+    #[must_use]
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            ..Default::default()
+        }
+    }
+
+    /// Sets the content.
+    #[must_use]
+    pub fn with_content(mut self, content: impl Into<String>) -> Self {
+        self.content = Some(content.into());
+        self
+    }
+
+    /// Sets the description.
+    #[must_use]
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    /// Sets the tags.
+    #[must_use]
+    pub fn with_tags(mut self, tags: impl Into<String>) -> Self {
+        self.tags = Some(tags.into());
+        self
+    }
+
+    /// Sets the domain scope.
+    #[must_use]
+    pub fn with_domain(mut self, domain: impl Into<String>) -> Self {
+        self.domain = Some(domain.into());
+        self
+    }
+
+    /// Sets the file path to load from.
+    #[must_use]
+    pub fn with_file(mut self, path: PathBuf) -> Self {
+        self.from_file = Some(path);
+        self
+    }
+
+    /// Sets whether to read from stdin.
+    #[must_use]
+    pub const fn with_stdin(mut self, from_stdin: bool) -> Self {
+        self.from_stdin = from_stdin;
+        self
+    }
+
+    /// Sets whether to skip enrichment.
+    #[must_use]
+    pub const fn with_no_enrich(mut self, no_enrich: bool) -> Self {
+        self.no_enrich = no_enrich;
+        self
+    }
+
+    /// Sets whether this is a dry run.
+    #[must_use]
+    pub const fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
+}
+
 /// Parses domain scope from string.
 fn parse_domain_scope(s: Option<&str>) -> DomainScope {
     match s.map(str::to_lowercase).as_deref() {
@@ -87,14 +178,97 @@ const fn domain_scope_to_display(scope: DomainScope) -> &'static str {
 
 /// Creates a [`PromptService`] with full config loaded.
 ///
-/// Uses `SubcogConfig` to respect storage settings from config file.
+/// Delegates to the canonical factory function in the services module to avoid
+/// layer violations (CLI layer should not directly construct services).
 fn create_prompt_service() -> Result<PromptService, Box<dyn std::error::Error>> {
-    let cwd = std::env::current_dir()?;
-    let config = SubcogConfig::load_default().with_repo_path(&cwd);
-    Ok(PromptService::with_subcog_config(config).with_repo_path(cwd))
+    prompt_service_for_cwd().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
 }
 
 /// Executes the `prompt save` subcommand.
+///
+/// # Arguments
+///
+/// * `args` - Save command arguments.
+///
+/// # Errors
+///
+/// Returns an error if saving fails.
+pub fn cmd_prompt_save_with_args(args: SavePromptArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let mut service = create_prompt_service()?;
+    let scope = parse_domain_scope(args.domain.as_deref());
+
+    // Build template from input source to get content
+    let base_template = build_template_from_input(
+        args.name.clone(),
+        args.content,
+        args.from_file,
+        args.from_stdin,
+    )?;
+
+    // Build partial metadata from user-provided values
+    let existing = build_partial_metadata(args.description, args.tags, &base_template);
+
+    // Configure save options
+    let options = SaveOptions::new()
+        .with_skip_enrichment(args.no_enrich)
+        .with_dry_run(args.dry_run);
+
+    // Use save_with_enrichment (no LLM provider for now - fallback mode)
+    // Future: Add LLM provider integration when API keys are available
+    let result = service.save_with_enrichment::<crate::llm::OllamaClient>(
+        &args.name,
+        &base_template.content,
+        scope,
+        &options,
+        None, // No LLM provider - uses fallback
+        if existing.is_empty() {
+            None
+        } else {
+            Some(existing)
+        },
+    )?;
+
+    // Display output
+    if args.dry_run {
+        println!("Dry run - template would be saved as:");
+    } else {
+        println!("Prompt saved:");
+    }
+    println!("  Name: {}", result.template.name);
+    if !args.dry_run {
+        println!("  ID: {}", result.id);
+    }
+    println!("  Domain: {}", domain_scope_to_display(scope));
+
+    // Show enrichment status
+    match result.enrichment_status {
+        EnrichmentStatus::Full => println!("  Enrichment: LLM-enhanced"),
+        EnrichmentStatus::Fallback => println!("  Enrichment: fallback (LLM unavailable)"),
+        EnrichmentStatus::Skipped => println!("  Enrichment: skipped"),
+    }
+
+    if !result.template.description.is_empty() {
+        println!("  Description: {}", result.template.description);
+    }
+    if !result.template.tags.is_empty() {
+        println!("  Tags: {}", result.template.tags.join(", "));
+    }
+    if !result.template.variables.is_empty() {
+        println!("  Variables:");
+        for var in &result.template.variables {
+            let required = if var.required { "*" } else { "" };
+            let default = var
+                .default
+                .as_ref()
+                .map_or(String::new(), |d| format!(" = \"{d}\""));
+            println!("    - {}{required}{default}", var.name);
+        }
+    }
+
+    Ok(())
+}
+
+/// Executes the `prompt save` subcommand (legacy interface).
 ///
 /// # Arguments
 ///
@@ -123,68 +297,18 @@ pub fn cmd_prompt_save(
     no_enrich: bool,
     dry_run: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut service = create_prompt_service()?;
-    let scope = parse_domain_scope(domain.as_deref());
-
-    // Build template from input source to get content
-    let base_template = build_template_from_input(name.clone(), content, from_file, from_stdin)?;
-
-    // Build partial metadata from user-provided values
-    let existing = build_partial_metadata(description, tags, &base_template);
-
-    // Configure save options
-    let options = SaveOptions::new()
-        .with_skip_enrichment(no_enrich)
-        .with_dry_run(dry_run);
-
-    // Use save_with_enrichment (no LLM provider for now - fallback mode)
-    // Future: Add LLM provider integration when API keys are available
-    let result = service.save_with_enrichment::<crate::llm::OllamaClient>(
-        &name,
-        &base_template.content,
-        scope,
-        &options,
-        None, // No LLM provider - uses fallback
-        if existing.is_empty() {
-            None
-        } else {
-            Some(existing)
-        },
-    )?;
-
-    // Display output
-    if dry_run {
-        println!("Dry run - template would be saved as:");
-    } else {
-        println!("Prompt saved:");
-    }
-    println!("  Name: {}", result.template.name);
-    if !dry_run {
-        println!("  ID: {}", result.id);
-    }
-    println!("  Domain: {}", domain_scope_to_display(scope));
-
-    // Show enrichment status
-    match result.enrichment_status {
-        EnrichmentStatus::Full => println!("  Enrichment: LLM-enhanced"),
-        EnrichmentStatus::Fallback => println!("  Enrichment: Basic (LLM unavailable)"),
-        EnrichmentStatus::Skipped => println!("  Enrichment: Skipped"),
-    }
-
-    if !result.template.description.is_empty() {
-        println!("  Description: {}", result.template.description);
-    }
-    if !result.template.variables.is_empty() {
-        println!(
-            "  Variables: {}",
-            format_variables_summary(&result.template.variables)
-        );
-    }
-    if !result.template.tags.is_empty() {
-        println!("  Tags: {}", result.template.tags.join(", "));
-    }
-
-    Ok(())
+    let args = SavePromptArgs {
+        name,
+        content,
+        description,
+        tags,
+        domain,
+        from_file,
+        from_stdin,
+        no_enrich,
+        dry_run,
+    };
+    cmd_prompt_save_with_args(args)
 }
 
 /// Builds partial metadata from user-provided values.

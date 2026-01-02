@@ -1,27 +1,65 @@
 //! MCP resource handlers.
 //!
 //! Provides resource access for the Model Context Protocol.
-//! Resources are accessed via URN scheme:
+//! Resources are accessed via URN scheme.
+//!
+//! # URN Format Specification
+//!
+//! ```text
+//! subcog://{domain}/{resource-type}[/{resource-id}]
+//! ```
+//!
+//! ## Components
+//!
+//! | Component | Format | Description |
+//! |-----------|--------|-------------|
+//! | `domain` | `_` \| `global` \| `project` \| `user` \| `org/{name}` | Scope for resolution |
+//! | `resource-type` | `help` \| `memory` \| `search` \| `topics` \| `namespaces` | Type of resource |
+//! | `resource-id` | alphanumeric with `-`, `_` | Optional identifier |
+//!
+//! ## Domain Scopes
+//!
+//! | Domain | Description |
+//! |--------|-------------|
+//! | `_` | Wildcard - all domains combined |
+//! | `global` | Shared across all projects |
+//! | `project` | Current project/repository |
+//! | `user` | User-specific (e.g., `~/.subcog/`) |
+//! | `org/{name}` | Organization namespace |
+//!
+//! # Resource Types
 //!
 //! ## Help Resources
-//! - `subcog://help` - Help index
-//! - `subcog://help/{topic}` - Topic-specific help
+//! - `subcog://help` - Help index with all available topics
+//! - `subcog://help/{topic}` - Topic-specific help (setup, concepts, capture, recall, etc.)
 //!
 //! ## Memory Resources
 //! - `subcog://_` - All memories across all domains
 //! - `subcog://_/{namespace}` - All memories in a namespace (e.g., `subcog://_/learnings`)
-//! - `subcog://memory/{id}` - Get a specific memory by ID
+//! - `subcog://memory/{id}` - Get a specific memory by its unique ID
+//! - `subcog://global/decisions/{id}` - Fully-qualified memory URN
 //!
 //! ## Search & Topic Resources
-//! - `subcog://search/{query}` - Search memories with a query
-//! - `subcog://topics` - List all indexed topics
+//! - `subcog://search/{query}` - Search memories with a query (URL-encoded)
+//! - `subcog://topics` - List all indexed topics with memory counts
 //! - `subcog://topics/{topic}` - Get memories for a specific topic
 //! - `subcog://namespaces` - List all namespaces with descriptions and signal words
 //!
-//! ## Domain-Scoped Resources (future)
+//! ## Domain-Scoped Resources
 //! - `subcog://project/_` - Project-scoped memories only
 //! - `subcog://org/{org}/_` - Organization-scoped memories
 //! - `subcog://global/_` - Global memories
+//!
+//! # Examples
+//!
+//! ```text
+//! subcog://help/capture          # Get capture help
+//! subcog://_/decisions           # All decisions across domains
+//! subcog://global/learnings      # Global learnings only
+//! subcog://memory/abc123         # Specific memory by ID
+//! subcog://search/postgres       # Search for "postgres"
+//! subcog://topics/authentication # Memories about authentication
+//! ```
 //!
 //! For advanced filtering and discovery, use the `subcog_browse` prompt
 //! which supports filtering by namespace, tags, time, source, and status.

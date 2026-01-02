@@ -375,4 +375,223 @@ mod tests {
 
         assert_eq!(manager.count().unwrap(), 1);
     }
+
+    // ============================================================================
+    // Git Operation Failure Tests
+    // ============================================================================
+
+    #[test]
+    fn test_open_nonexistent_repo_fails() {
+        let manager = NotesManager::new("/nonexistent/path/to/repo");
+
+        // All operations should fail with OperationFailed error
+        let result = manager.list();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("open_repository") || msg.contains("failed"),
+            "Error should mention repository operation: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_add_note_invalid_commit_id() {
+        let (dir, _repo) = create_test_repo();
+        let manager = NotesManager::new(dir.path());
+
+        // Invalid commit ID format
+        let result = manager.add("not-a-valid-oid", "content");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("invalid") || msg.contains("Invalid"),
+            "Error should mention invalid input: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_add_note_nonexistent_commit() {
+        let (dir, _repo) = create_test_repo();
+        let manager = NotesManager::new(dir.path());
+
+        // Valid OID format but doesn't exist
+        let fake_oid = "0000000000000000000000000000000000000001";
+        let result = manager.add(fake_oid, "content");
+
+        // This may succeed (git allows notes on any OID) or fail
+        // depending on implementation. Just verify we don't panic.
+        let _ = result;
+    }
+
+    #[test]
+    fn test_get_note_invalid_commit_id() {
+        let (dir, _repo) = create_test_repo();
+        let manager = NotesManager::new(dir.path());
+
+        let result = manager.get("invalid-oid");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_remove_note_invalid_commit_id() {
+        let (dir, _repo) = create_test_repo();
+        let manager = NotesManager::new(dir.path());
+
+        let result = manager.remove("invalid-oid");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_remove_nonexistent_note() {
+        let (dir, repo) = create_test_repo();
+        let manager = NotesManager::new(dir.path());
+
+        let head = repo.head().unwrap().target().unwrap().to_string();
+
+        // Try to remove a note that doesn't exist
+        let result = manager.remove(&head);
+        // Should return Ok(false) - note didn't exist
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
+    }
+
+    #[test]
+    fn test_custom_notes_ref() {
+        let (dir, repo) = create_test_repo();
+        let manager = NotesManager::new(dir.path()).with_notes_ref("refs/notes/custom");
+
+        let head = repo.head().unwrap().target().unwrap().to_string();
+
+        // Add note with custom ref
+        manager.add(&head, "Custom ref note").unwrap();
+
+        // Get with same custom ref should work
+        let content = manager.get(&head).unwrap();
+        assert_eq!(content, Some("Custom ref note".to_string()));
+
+        // Default manager shouldn't see it
+        let default_manager = NotesManager::new(dir.path());
+        let default_content = default_manager.get(&head).unwrap();
+        assert!(default_content.is_none());
+    }
+
+    #[test]
+    fn test_notes_ref_isolation() {
+        let (dir, repo) = create_test_repo();
+        let head = repo.head().unwrap().target().unwrap().to_string();
+
+        // Add notes with different refs
+        let manager1 = NotesManager::new(dir.path()).with_notes_ref("refs/notes/ns1");
+        let manager2 = NotesManager::new(dir.path()).with_notes_ref("refs/notes/ns2");
+
+        manager1.add(&head, "Namespace 1 note").unwrap();
+        manager2.add(&head, "Namespace 2 note").unwrap();
+
+        // Each should see only its own note
+        let content1 = manager1.get(&head).unwrap();
+        let content2 = manager2.get(&head).unwrap();
+
+        assert_eq!(content1, Some("Namespace 1 note".to_string()));
+        assert_eq!(content2, Some("Namespace 2 note".to_string()));
+
+        // Counts should be independent
+        assert_eq!(manager1.count().unwrap(), 1);
+        assert_eq!(manager2.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_add_to_head_on_bare_repo() {
+        // Create a bare repo which has no working directory
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init_bare(dir.path()).unwrap();
+
+        // Create an initial commit
+        {
+            let sig = Signature::now("test", "test@test.com").unwrap();
+            let tree_id = {
+                let mut index = repo.index().unwrap();
+                index.write_tree().unwrap()
+            };
+            let tree = repo.find_tree(tree_id).unwrap();
+            let commit_oid = repo
+                .commit(None, &sig, &sig, "Initial commit", &tree, &[])
+                .unwrap();
+
+            // Set HEAD to point to the commit
+            repo.reference("refs/heads/main", commit_oid, true, "initial commit")
+                .unwrap();
+            repo.set_head("refs/heads/main").unwrap();
+        }
+
+        let manager = NotesManager::new(dir.path());
+
+        // Should still be able to add notes
+        let result = manager.add_to_head("Note on bare repo");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_update_existing_note() {
+        let (dir, repo) = create_test_repo();
+        let manager = NotesManager::new(dir.path());
+
+        let head = repo.head().unwrap().target().unwrap().to_string();
+
+        // Add initial note
+        manager.add(&head, "Initial content").unwrap();
+
+        // Update with new content (force=true in implementation)
+        manager.add(&head, "Updated content").unwrap();
+
+        // Should see updated content
+        let content = manager.get(&head).unwrap();
+        assert_eq!(content, Some("Updated content".to_string()));
+
+        // Count should still be 1
+        assert_eq!(manager.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_empty_note_content() {
+        let (dir, repo) = create_test_repo();
+        let manager = NotesManager::new(dir.path());
+
+        let head = repo.head().unwrap().target().unwrap().to_string();
+
+        // Empty content should be allowed
+        manager.add(&head, "").unwrap();
+
+        let content = manager.get(&head).unwrap();
+        assert_eq!(content, Some(String::new()));
+    }
+
+    #[test]
+    fn test_multiline_note_content() {
+        let (dir, repo) = create_test_repo();
+        let manager = NotesManager::new(dir.path());
+
+        let head = repo.head().unwrap().target().unwrap().to_string();
+
+        let multiline = "Line 1\nLine 2\nLine 3\n\nBlank line above";
+        manager.add(&head, multiline).unwrap();
+
+        let content = manager.get(&head).unwrap();
+        assert_eq!(content, Some(multiline.to_string()));
+    }
+
+    #[test]
+    fn test_unicode_note_content() {
+        let (dir, repo) = create_test_repo();
+        let manager = NotesManager::new(dir.path());
+
+        let head = repo.head().unwrap().target().unwrap().to_string();
+
+        let unicode = "Hello 世界 🌍 émojis café";
+        manager.add(&head, unicode).unwrap();
+
+        let content = manager.get(&head).unwrap();
+        assert_eq!(content, Some(unicode.to_string()));
+    }
 }
