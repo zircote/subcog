@@ -2,6 +2,48 @@
 
 All notable changes to this specification will be documented in this file.
 
+## [1.1.0] - 2026-01-03
+
+### Completed
+- **All 32 tasks complete** across 5 phases
+- **921 tests passing** with full CI verification
+
+### Phase 1: Foundation
+- Created `src/context/` module with `GitContext` struct for project/branch detection
+- Extended `Memory` struct with `project_id`, `branch`, `file_path`, `tombstoned_at` fields
+- Added `Tombstoned` variant to `MemoryStatus` enum
+- Extended `SearchFilter` with facet fields and `include_tombstoned` flag
+- Created SQLite and PostgreSQL schema migrations for facet columns
+
+### Phase 2: Capture Path
+- Updated `CaptureRequest` with optional facet fields
+- Integrated context detection in `CaptureService` (auto-detects project/branch from git)
+- Removed git-notes code from `CaptureService` - SQLite is now single source of truth
+- Updated MCP capture handler and CLI with facet parameters
+
+### Phase 3: Recall Path
+- Updated `RecallService` with facet filtering
+- Added convenience methods: `search_in_project()`, `search_on_branch()`, etc.
+- Updated MCP recall handler and CLI with facet filter flags
+- Added `Memory::urn()` for faceted URN generation
+- Added `TombstoneHint` for sparse result warnings
+
+### Phase 4: Garbage Collection
+- Created `src/gc/` module with `BranchGarbageCollector`
+- Added `get_distinct_branches()` and `update_status()` to `IndexBackend` trait
+- Integrated lazy GC in `RecallService` (checks branch existence during search)
+- Created `subcog gc` CLI command with `--dry-run`, `--purge`, `--older-than` flags
+- Created `subcog_gc` MCP tool
+
+### Phase 5: Cleanup & Polish
+- Removed git-notes module (`src/git/notes.rs`, `src/storage/persistence/git_notes.rs`, etc.)
+- Evaluated git2 dependency - still required for context detection, branch GC, remote sync
+- Updated README.md with SQLite architecture, faceted storage, branch GC documentation
+- Verified org-scope already implemented with feature gate
+
+### Status
+- Moved to **Complete** - all tasks implemented and verified
+
 ## [1.0.0] - 2026-01-03
 
 ### Added

@@ -848,9 +848,7 @@ pub struct StorageBackendConfig {
 /// Storage backend types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StorageBackendType {
-    /// Git notes (default for project).
-    GitNotes,
-    /// `SQLite` database (default for user).
+    /// `SQLite` database (default).
     #[default]
     Sqlite,
     /// Filesystem.
@@ -868,11 +866,10 @@ impl StorageBackendType {
     #[must_use]
     pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
-            "git_notes" | "gitnotes" | "git-notes" => Self::GitNotes,
             "filesystem" | "fs" | "file" => Self::Filesystem,
             "postgresql" | "postgres" | "pg" => Self::PostgreSQL,
             "redis" => Self::Redis,
-            // sqlite is the default for any unrecognized value
+            // sqlite is the default for any unrecognized value (including legacy "git_notes")
             _ => Self::Sqlite,
         }
     }

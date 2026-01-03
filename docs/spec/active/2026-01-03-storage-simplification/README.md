@@ -2,11 +2,11 @@
 project_id: SPEC-2026-01-03-001
 project_name: "Storage Architecture Simplification"
 slug: storage-simplification
-status: in-review
+status: complete
 created: 2026-01-03T00:56:00Z
-approved: null
-started: null
-completed: null
+approved: 2026-01-03T02:00:00Z
+started: 2026-01-03T02:00:00Z
+completed: 2026-01-03T09:50:00Z
 expires: 2026-04-03T00:56:00Z
 superseded_by: null
 tags: [storage, architecture, git-notes, refactoring, simplification]
@@ -24,7 +24,7 @@ worktree:
 | Field | Value |
 |-------|-------|
 | Spec ID | SPEC-2026-01-03-001 |
-| Status | In Review |
+| Status | Complete |
 | Priority | P0 (Critical - fixes data loss bug) |
 | GitHub Issue | [#43](https://github.com/zircote/subcog/issues/43) |
 | Author | Claude (Architect) |

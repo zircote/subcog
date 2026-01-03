@@ -163,7 +163,7 @@ pub fn execute_status(_arguments: Value) -> Result<ToolResult> {
         "version": env!("CARGO_PKG_VERSION"),
         "status": "operational",
         "backends": {
-            "persistence": "git-notes",
+            "persistence": "sqlite",
             "index": "sqlite-fts5",
             "vector": "usearch"
         },

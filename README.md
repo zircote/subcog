@@ -15,10 +15,12 @@ A persistent memory system for AI coding assistants. Subcog captures decisions, 
 Subcog is a Rust rewrite of the [git-notes-memory](https://github.com/zircote/git-notes-memory) Python system, delivering:
 
 - **Single-binary distribution** (<100MB, <10ms cold start)
-- **Pluggable storage backends** (Git Notes, SQLite+usearch, PostgreSQL+pgvector)
+- **Pluggable storage backends** (SQLite+usearch, PostgreSQL+pgvector, Filesystem)
 - **MCP server integration** for AI agent interoperability
 - **Claude Code hooks** for seamless IDE integration
 - **Semantic search** with hybrid vector + BM25 ranking
+- **Faceted storage** with project, branch, and file path filtering
+- **Branch garbage collection** for stale branch cleanup
 
 ## Benchmark Results
 
@@ -38,9 +40,11 @@ Subcog achieves **97% accuracy on factual recall** (LongMemEval) and **57% on pe
 - **Real semantic search** using all-MiniLM-L6-v2 via fastembed-rs
 - **Hybrid search** combining BM25 text search + vector similarity (RRF fusion)
 - **Normalized scores** (0.0-1.0 range) for intuitive relevance understanding
-- Git notes persistence with YAML front matter
+- **SQLite persistence** as single source of truth (ACID-compliant)
+- **Faceted storage** with project_id, branch, and file_path fields
 - Multi-domain memories (project, user, organization)
 - 10 memory namespaces (decisions, learnings, patterns, blockers, etc.)
+- **Branch garbage collection** for tombstoning stale branch memories
 - **Migration tools** for upgrading existing memories to use embeddings
 
 ### Enhanced (Opt-in)
@@ -195,13 +199,16 @@ The migration command:
 │  ┌────────────────┐  ┌─────────────────┐  ┌──────────────┐  │
 │  │ CaptureService │  │  RecallService  │  │ SyncService  │  │
 │  └────────────────┘  └─────────────────┘  └──────────────┘  │
+│  ┌────────────────┐  ┌─────────────────┐                    │
+│  │   GC Service   │  │  ContextDetect  │                    │
+│  └────────────────┘  └─────────────────┘                    │
 └─────────────────────────────┬───────────────────────────────┘
                               │
 ┌─────────────────────────────┴───────────────────────────────┐
 │                    Storage Layer                             │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
 │  │ Persistence  │  │    Index     │  │     Vector       │   │
-│  │  (Git Notes) │  │   (SQLite)   │  │    (usearch)     │   │
+│  │   (SQLite)   │  │ (SQLite FTS) │  │    (usearch)     │   │
 │  └──────────────┘  └──────────────┘  └──────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -266,7 +273,7 @@ Configuration file at `~/.config/subcog/config.toml`:
 
 ```toml
 [storage]
-backend = "sqlite"  # "git-notes", "sqlite", "postgres"
+backend = "sqlite"  # "sqlite", "postgres", "filesystem"
 data_dir = "~/.local/share/subcog"
 
 [embedding]
@@ -280,6 +287,42 @@ user_prompt_timeout_ms = 50
 
 [llm]
 provider = "anthropic"  # Optional: for Tier 3 features
+```
+
+### Faceted Capture
+
+Memories can be tagged with project, branch, and file path:
+
+```bash
+# Capture with facets (auto-detected from git context)
+subcog capture --namespace decisions "Use PostgreSQL"
+
+# Capture with explicit facets
+subcog capture --namespace decisions --project my-project --branch feature/auth "Added JWT support"
+
+# Search within a project
+subcog recall "authentication" --project my-project
+
+# Search within a branch
+subcog recall "bug fix" --branch feature/auth
+
+# Include tombstoned memories
+subcog recall "old decision" --include-tombstoned
+```
+
+### Branch Garbage Collection
+
+Clean up memories from deleted branches:
+
+```bash
+# GC current project (dry-run)
+subcog gc --dry-run
+
+# GC specific branch
+subcog gc --branch feature/old-branch
+
+# Purge tombstoned memories older than 30 days
+subcog gc --purge --older-than 30d
 ```
 
 ## Performance Targets
@@ -298,12 +341,12 @@ All performance targets are exceeded by 10-100x. Benchmarks run via `cargo bench
 
 ## Specification
 
-Full specification documents are in [`docs/spec/active/2025-12-28-subcog-rust-rewrite/`](docs/spec/active/2025-12-28-subcog-rust-rewrite/):
+Full specification documents are in [`docs/spec/active/2026-01-03-storage-simplification/`](docs/spec/active/2026-01-03-storage-simplification/):
 
-- [REQUIREMENTS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/REQUIREMENTS.md) - Product requirements
-- [ARCHITECTURE.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/ARCHITECTURE.md) - Technical architecture
-- [IMPLEMENTATION_PLAN.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/IMPLEMENTATION_PLAN.md) - Phased implementation
-- [DECISIONS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/DECISIONS.md) - Architecture decision records
+- [REQUIREMENTS.md](docs/spec/active/2026-01-03-storage-simplification/REQUIREMENTS.md) - Product requirements
+- [ARCHITECTURE.md](docs/spec/active/2026-01-03-storage-simplification/ARCHITECTURE.md) - Technical architecture
+- [IMPLEMENTATION_PLAN.md](docs/spec/active/2026-01-03-storage-simplification/IMPLEMENTATION_PLAN.md) - Phased implementation
+- [DECISIONS.md](docs/spec/active/2026-01-03-storage-simplification/DECISIONS.md) - Architecture decision records
 
 ## License
 

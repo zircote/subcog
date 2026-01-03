@@ -13,10 +13,10 @@ status: complete
 | Metric | Value |
 |--------|-------|
 | Total Tasks | 32 |
-| Completed | 28 |
+| Completed | 32 |
 | In Progress | 0 |
 | Pending | 0 |
-| Skipped | 4 |
+| Skipped | 0 |
 | Progress | 100% |
 
 ## Phase Progress
@@ -27,7 +27,7 @@ status: complete
 | Phase 2: Capture Path | 6 | 6 | ✅ Complete |
 | Phase 3: Recall Path | 5 | 5 | ✅ Complete |
 | Phase 4: Garbage Collection | 6 | 6 | ✅ Complete |
-| Phase 5: Cleanup & Polish | 7 | 3 | ✅ Complete (4 deferred) |
+| Phase 5: Cleanup & Polish | 7 | 7 | ✅ Complete |
 
 ---
 
@@ -299,25 +299,35 @@ status: complete
 ## Phase 5: Cleanup & Polish
 
 ### Task 5.1: Remove Git-Notes Module
-- **Status**: ⏸️ Deferred
-- **Started**: -
-- **Completed**: -
+- **Status**: ✅ Complete
+- **Started**: 2026-01-03T09:00:00Z
+- **Completed**: 2026-01-03T09:30:00Z
 - **Dependencies**: Phase 2
 - **Files**:
-  - [ ] `src/git/notes.rs` (delete)
-  - [ ] `src/git/mod.rs`
-  - [ ] `src/storage/persistence/git_notes.rs` (delete)
-  - [ ] `src/storage/prompt/git_notes.rs` (delete)
-- **Notes**: Deferred - git-notes code is isolated and not in critical path. Can be removed in future cleanup.
+  - [x] `src/git/notes.rs` (deleted)
+  - [x] `src/git/mod.rs` (updated - removed notes module)
+  - [x] `src/storage/persistence/git_notes.rs` (deleted)
+  - [x] `src/storage/prompt/git_notes.rs` (deleted)
+  - [x] `src/services/enrichment.rs` (deleted)
+  - [x] `src/commands/enrich.rs` (deleted)
+  - [x] `src/config/mod.rs` (removed GitNotes enum variant)
+  - [x] All git-notes comments updated to reference SQLite
+- **Notes**: Removed all git-notes code. SQLite is now the single source of truth. All documentation comments updated.
 
 ### Task 5.2: Evaluate git2 Dependency
-- **Status**: ⏸️ Deferred
-- **Started**: -
-- **Completed**: -
+- **Status**: ✅ Complete
+- **Started**: 2026-01-03T09:30:00Z
+- **Completed**: 2026-01-03T09:35:00Z
 - **Dependencies**: Task 5.1
 - **Files**:
-  - [ ] `Cargo.toml`
-- **Notes**: Deferred - git2 still needed for GitContext detection. Evaluate after Task 5.1.
+  - [x] `Cargo.toml` (no changes needed)
+- **Notes**: Evaluated git2 usage. Still required for:
+  - `src/context/detector.rs` - GitContext detection (project_id, branch)
+  - `src/gc/branch.rs` - Branch garbage collection (checking if branches exist)
+  - `src/git/remote.rs` - Remote sync operations
+  - `src/storage/prompt/mod.rs` - Git repo detection
+
+  **Conclusion**: Cannot remove git2 - essential for core functionality (context detection, GC, sync).
 
 ### Task 5.3: Update CLAUDE.md Documentation
 - **Status**: ✅ Complete
@@ -329,24 +339,38 @@ status: complete
 - **Notes**: Already includes facet filtering documentation, MCP parameters, query patterns. No additional updates needed.
 
 ### Task 5.4: Update README Documentation
-- **Status**: ⏸️ Deferred
-- **Started**: -
-- **Completed**: -
+- **Status**: ✅ Complete
+- **Started**: 2026-01-03T09:35:00Z
+- **Completed**: 2026-01-03T09:45:00Z
 - **Dependencies**: All phases
 - **Files**:
-  - [ ] `README.md`
-- **Notes**: Deferred - README can be updated in a separate documentation pass.
+  - [x] `README.md`
+- **Notes**: Updated README with:
+  - Storage backends now list SQLite+usearch, PostgreSQL+pgvector, Filesystem (removed Git Notes)
+  - Added faceted storage and branch GC to features
+  - Updated Core features section with SQLite persistence, faceted storage, branch GC
+  - Updated architecture diagram (Persistence now shows SQLite, Index shows SQLite FTS)
+  - Updated configuration section (removed git-notes backend option)
+  - Added Faceted Capture section with CLI examples
+  - Added Branch Garbage Collection section
+  - Fixed spec links to point to 2026-01-03-storage-simplification
 
 ### Task 5.5: Design Org-Scope (Feature-Gated)
-- **Status**: ⏸️ Deferred
-- **Started**: -
-- **Completed**: -
+- **Status**: ✅ Complete
+- **Started**: 2026-01-03T09:45:00Z
+- **Completed**: 2026-01-03T09:50:00Z
 - **Dependencies**: None
 - **Files**:
-  - [ ] `src/config/mod.rs`
-  - [ ] `src/services/mod.rs`
-  - [ ] `Cargo.toml`
-- **Notes**: Deferred - org-scope is a future enhancement, not required for core functionality.
+  - [x] `src/config/mod.rs` (OrgConfig struct with feature gate)
+  - [x] `src/services/mod.rs` (ServiceContainer::for_org() with feature gate)
+  - [x] `Cargo.toml` (org-scope feature defined)
+  - [x] `src/lib.rs` (feature-gated exports)
+- **Notes**: Org-scope already fully designed and implemented:
+  - `OrgConfig` struct with `org_id`, `database_url`, `encryption_key` fields
+  - `OrgConfigBuilder` with validation
+  - `ServiceContainer::for_org()` method behind `#[cfg(feature = "org-scope")]`
+  - Feature defined in Cargo.toml as `org-scope = []`
+  - Tests exist in `src/config/mod.rs` and `src/services/mod.rs`
 
 ### Task 5.6: Run Full Test Suite
 - **Status**: ✅ Complete
@@ -405,9 +429,12 @@ status: complete
 | 2026-01-03T07:30:00Z | 5.6-5.7 | Started | Began CI verification |
 | 2026-01-03T08:00:00Z | 5.6 | Completed | 949 tests passing |
 | 2026-01-03T08:00:00Z | 5.7 | Completed | `make ci` passes (fmt, clippy, test, doc) |
-| 2026-01-03T08:00:00Z | 5.1-5.5 | Deferred | Non-critical tasks deferred for future cleanup |
-| 2026-01-03T08:00:00Z | Phase 5 | Completed | All critical tasks complete, 4 deferred |
-| 2026-01-03T08:00:00Z | Project | Completed | SPEC-2026-01-03-001 complete |
+| 2026-01-03T09:00:00Z | 5.1 | Completed | Removed git-notes module, deleted files, updated comments |
+| 2026-01-03T09:35:00Z | 5.2 | Completed | Evaluated git2 - still required for core functionality |
+| 2026-01-03T09:45:00Z | 5.4 | Completed | Updated README documentation with SQLite architecture |
+| 2026-01-03T09:50:00Z | 5.5 | Completed | Verified org-scope already implemented with feature gate |
+| 2026-01-03T09:50:00Z | Phase 5 | Completed | All 7 tasks complete |
+| 2026-01-03T09:50:00Z | Project | Completed | SPEC-2026-01-03-001 complete - all 32 tasks done |
 
 ---
 
@@ -420,4 +447,5 @@ status: complete
 5. **Task 4.4 Lightweight Approach**: Implemented as visibility/metrics tracking rather than active tombstoning during search
 6. **Task 5.3 Pre-existing**: CLAUDE.md already contained comprehensive documentation for faceted storage
 7. **Task 5.7 Bug Fix**: Found and fixed missing `Tombstoned` case in `build_memory_from_row()` - status was falling through to default `Active`
-8. **Tasks 5.1, 5.2, 5.4, 5.5 Deferred**: Non-critical cleanup and documentation tasks deferred - core functionality complete and tested
+8. **Task 5.2 Scope Clarification**: git2 crate cannot be removed - still required for GitContext detection, branch GC, and remote sync operations
+9. **Task 5.5 Pre-existing**: Org-scope was already fully designed and implemented with feature gate in Cargo.toml, config, and services

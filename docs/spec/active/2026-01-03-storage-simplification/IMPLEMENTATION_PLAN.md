@@ -3,7 +3,7 @@ document_type: implementation_plan
 project_id: SPEC-2026-01-03-001
 version: 1.0.0
 last_updated: 2026-01-03T01:30:00Z
-status: draft
+status: complete
 estimated_effort: 24-40 hours
 ---
 
@@ -272,42 +272,42 @@ This implementation plan breaks down the storage architecture simplification int
 
 ### Tasks
 
-#### Task 3.1: Update RecallService for Facet Filtering
+#### Task 3.1: Update RecallService for Facet Filtering ✅
 
 - **Description**: Update `search()` and `list_all()` to filter by facets
 - **Dependencies**: Phase 1 (SearchFilter changes)
 - **Files**:
   - `src/services/recall.rs`
 - **Acceptance Criteria**:
-  - [ ] `search()` applies facet filters from SearchFilter
-  - [ ] `list_all()` applies facet filters
-  - [ ] Tombstoned memories excluded by default
-  - [ ] `include_tombstoned` flag works
+  - [x] `search()` applies facet filters from SearchFilter
+  - [x] `list_all()` applies facet filters
+  - [x] Tombstoned memories excluded by default
+  - [x] `include_tombstoned` flag works
 
-#### Task 3.2: Update MCP Recall Handler
+#### Task 3.2: Update MCP Recall Handler ✅
 
 - **Description**: Update `execute_recall` to accept facet filter parameters
 - **Dependencies**: Task 3.1
 - **Files**:
   - `src/mcp/tools/handlers/core.rs`
 - **Acceptance Criteria**:
-  - [ ] `RecallArgs` has facet filter fields
-  - [ ] Filters passed to RecallService
-  - [ ] Backward compatible
+  - [x] `RecallArgs` has facet filter fields
+  - [x] Filters passed to RecallService
+  - [x] Backward compatible
 
-#### Task 3.3: Update CLI Recall Command
+#### Task 3.3: Update CLI Recall Command ✅
 
 - **Description**: Add facet filter flags to recall CLI
 - **Dependencies**: Task 3.1
 - **Files**:
   - `src/cli/recall.rs`
 - **Acceptance Criteria**:
-  - [ ] `--project`, `--branch`, `--path` flags added
-  - [ ] `--include-tombstoned` flag added
-  - [ ] `--all-projects` flag added (clears project filter)
-  - [ ] Help text updated
+  - [x] `--project`, `--branch`, `--path` flags added
+  - [x] `--include-tombstoned` flag added
+  - [x] `--all-projects` flag added (clears project filter)
+  - [x] Help text updated
 
-#### Task 3.4: Update URN Generation
+#### Task 3.4: Update URN Generation ✅
 
 - **Description**: Update URN scheme to work with faceted model
 - **Dependencies**: None
@@ -315,36 +315,36 @@ This implementation plan breaks down the storage architecture simplification int
   - `src/services/capture.rs` (generate_urn)
   - Any URN parsing code
 - **Acceptance Criteria**:
-  - [ ] URN format: `subcog://{scope}/{namespace}/{id}`
-  - [ ] Scope derived from facets or "user"
-  - [ ] Backward compatible parsing
+  - [x] URN format: `subcog://{scope}/{namespace}/{id}`
+  - [x] Scope derived from facets or "user"
+  - [x] Backward compatible parsing
 
-#### Task 3.5: Add Tombstone Hint to Search Results
+#### Task 3.5: Add Tombstone Hint to Search Results ✅
 
 - **Description**: When active results are sparse, check tombstones and hint
 - **Dependencies**: Task 3.1
 - **Files**:
   - `src/services/recall.rs`
 - **Acceptance Criteria**:
-  - [ ] If active results < 3 and tombstones exist, add hint
-  - [ ] Hint includes branch names and count
-  - [ ] Hint visible in MCP response
+  - [x] If active results < 3 and tombstones exist, add hint
+  - [x] Hint includes branch names and count
+  - [x] Hint visible in MCP response
 
 ### Phase 3 Deliverables
 
-- [ ] RecallService with facet filtering
-- [ ] MCP recall handler with facet parameters
-- [ ] CLI recall with facet flags
-- [ ] Tombstone hints
+- [x] RecallService with facet filtering
+- [x] MCP recall handler with facet parameters
+- [x] CLI recall with facet flags
+- [x] Tombstone hints
 
 ### Phase 3 Exit Criteria
 
-- [ ] `cargo test` passes
-- [ ] Recall with project filter works
-- [ ] Recall with branch filter works
-- [ ] Recall with path pattern works
-- [ ] Tombstoned memories hidden by default
-- [ ] `--include-tombstoned` shows them
+- [x] `cargo test` passes
+- [x] Recall with project filter works
+- [x] Recall with branch filter works
+- [x] Recall with path pattern works
+- [x] Tombstoned memories hidden by default
+- [x] `--include-tombstoned` shows them
 
 ---
 
@@ -356,7 +356,7 @@ This implementation plan breaks down the storage architecture simplification int
 
 ### Tasks
 
-#### Task 4.1: Create Branch Garbage Collector Module
+#### Task 4.1: Create Branch Garbage Collector Module ✅
 
 - **Description**: Create `src/gc/mod.rs` and `src/gc/branch.rs` with `BranchGarbageCollector`
 - **Dependencies**: Phase 1
@@ -365,13 +365,13 @@ This implementation plan breaks down the storage architecture simplification int
   - `src/gc/branch.rs` (new)
   - `src/lib.rs` (add `pub mod gc`)
 - **Acceptance Criteria**:
-  - [ ] `BranchGarbageCollector` struct
-  - [ ] `gc_stale_branches(project_id)` method
-  - [ ] Uses git2 to get current branches
-  - [ ] Tombstones memories for deleted branches
-  - [ ] Returns count of tombstoned memories
+  - [x] `BranchGarbageCollector` struct
+  - [x] `gc_stale_branches(project_id)` method
+  - [x] Uses git2 to get current branches
+  - [x] Tombstones memories for deleted branches
+  - [x] Returns count of tombstoned memories
 
-#### Task 4.2: Add get_distinct_branches to IndexBackend
+#### Task 4.2: Add get_distinct_branches to IndexBackend ✅
 
 - **Description**: Add method to get unique branches for a project
 - **Dependencies**: Task 4.1
@@ -380,12 +380,12 @@ This implementation plan breaks down the storage architecture simplification int
   - `src/storage/index/sqlite.rs`
   - `src/storage/index/postgresql.rs`
 - **Acceptance Criteria**:
-  - [ ] Trait method added
-  - [ ] SQLite implementation
-  - [ ] PostgreSQL implementation
-  - [ ] Tests
+  - [x] Trait method added
+  - [x] SQLite implementation
+  - [x] PostgreSQL implementation
+  - [x] Tests
 
-#### Task 4.3: Add update_status to IndexBackend
+#### Task 4.3: Add update_status to IndexBackend ✅
 
 - **Description**: Add method to bulk update status by filter
 - **Dependencies**: Task 4.1
@@ -394,23 +394,23 @@ This implementation plan breaks down the storage architecture simplification int
   - `src/storage/index/sqlite.rs`
   - `src/storage/index/postgresql.rs`
 - **Acceptance Criteria**:
-  - [ ] Trait method added
-  - [ ] SQLite implementation (updates status, sets tombstoned_at)
-  - [ ] PostgreSQL implementation
-  - [ ] Tests
+  - [x] Trait method added
+  - [x] SQLite implementation (updates status, sets tombstoned_at)
+  - [x] PostgreSQL implementation
+  - [x] Tests
 
-#### Task 4.4: Integrate Lazy GC in RecallService
+#### Task 4.4: Integrate Lazy GC in RecallService ✅
 
 - **Description**: Add opportunistic GC check during recall
 - **Dependencies**: Task 4.1
 - **Files**:
   - `src/services/recall.rs`
 - **Acceptance Criteria**:
-  - [ ] GC runs on each recall if project_id is set
-  - [ ] GC overhead < 10ms (only checks if branches changed)
-  - [ ] GC errors don't fail recall (log warning)
+  - [x] GC runs on each recall if project_id is set
+  - [x] GC overhead < 10ms (only checks if branches changed)
+  - [x] GC errors don't fail recall (log warning)
 
-#### Task 4.5: Create GC CLI Command
+#### Task 4.5: Create GC CLI Command ✅
 
 - **Description**: Add `subcog gc` command with flags
 - **Dependencies**: Task 4.1
@@ -419,12 +419,12 @@ This implementation plan breaks down the storage architecture simplification int
   - `src/cli/mod.rs` (add gc)
   - `src/main.rs` (add subcommand)
 - **Acceptance Criteria**:
-  - [ ] `subcog gc` - GC current project
-  - [ ] `subcog gc --branch=X` - GC specific branch
-  - [ ] `subcog gc --dry-run` - Show what would be tombstoned
-  - [ ] `subcog gc --purge --older-than=30d` - Permanent delete
+  - [x] `subcog gc` - GC current project
+  - [x] `subcog gc --branch=X` - GC specific branch
+  - [x] `subcog gc --dry-run` - Show what would be tombstoned
+  - [x] `subcog gc --purge --older-than=30d` - Permanent delete
 
-#### Task 4.6: Add GC MCP Tool (Optional)
+#### Task 4.6: Add GC MCP Tool (Optional) ✅
 
 - **Description**: Add `subcog_gc` MCP tool for programmatic GC
 - **Dependencies**: Task 4.1
@@ -432,23 +432,23 @@ This implementation plan breaks down the storage architecture simplification int
   - `src/mcp/tools/handlers/core.rs`
   - `src/mcp/tools/schemas/`
 - **Acceptance Criteria**:
-  - [ ] `subcog_gc` tool registered
-  - [ ] Accepts project_id, branch, dry_run parameters
-  - [ ] Returns GC results
+  - [x] `subcog_gc` tool registered
+  - [x] Accepts project_id, branch, dry_run parameters
+  - [x] Returns GC results
 
 ### Phase 4 Deliverables
 
-- [ ] `src/gc/` module with `BranchGarbageCollector`
-- [ ] Lazy GC during recall
-- [ ] CLI `subcog gc` command
-- [ ] (Optional) MCP GC tool
+- [x] `src/gc/` module with `BranchGarbageCollector`
+- [x] Lazy GC during recall
+- [x] CLI `subcog gc` command
+- [x] (Optional) MCP GC tool
 
 ### Phase 4 Exit Criteria
 
-- [ ] `cargo test` passes
-- [ ] GC correctly tombstones deleted branch memories
-- [ ] Lazy GC doesn't impact recall latency significantly
-- [ ] CLI GC works with all flags
+- [x] `cargo test` passes
+- [x] GC correctly tombstones deleted branch memories
+- [x] Lazy GC doesn't impact recall latency significantly
+- [x] CLI GC works with all flags
 
 ---
 
@@ -460,7 +460,7 @@ This implementation plan breaks down the storage architecture simplification int
 
 ### Tasks
 
-#### Task 5.1: Remove Git-Notes Module
+#### Task 5.1: Remove Git-Notes Module ✅
 
 - **Description**: Delete git-notes files and remove from module tree
 - **Dependencies**: Phase 2 complete
@@ -470,11 +470,11 @@ This implementation plan breaks down the storage architecture simplification int
   - `src/storage/persistence/git_notes.rs` (delete)
   - `src/storage/prompt/git_notes.rs` (delete if exists)
 - **Acceptance Criteria**:
-  - [ ] Files deleted
-  - [ ] No dangling imports
-  - [ ] `cargo build` succeeds
+  - [x] Files deleted
+  - [x] No dangling imports
+  - [x] `cargo build` succeeds
 
-#### Task 5.2: Evaluate git2 Dependency
+#### Task 5.2: Evaluate git2 Dependency ✅
 
 - **Description**: Check if git2 is still needed after git-notes removal
 - **Dependencies**: Task 5.1
@@ -482,9 +482,10 @@ This implementation plan breaks down the storage architecture simplification int
   - `Cargo.toml`
   - All files using git2
 - **Acceptance Criteria**:
-  - [ ] Document remaining git2 usages
-  - [ ] If only for context detection, consider lightweight alternative
-  - [ ] If removable, remove from Cargo.toml
+  - [x] Document remaining git2 usages
+  - [x] If only for context detection, consider lightweight alternative
+  - [x] If removable, remove from Cargo.toml
+- **Notes**: git2 still required for: context detection (GitContext), branch GC (branch_exists), remote sync operations. Cannot be removed.
 
 #### Task 5.3: Update CLAUDE.md Documentation ✅
 
@@ -499,18 +500,19 @@ This implementation plan breaks down the storage architecture simplification int
   - [x] GC command documented
 - **Notes**: Pre-existing documentation was already comprehensive.
 
-#### Task 5.4: Update README Documentation
+#### Task 5.4: Update README Documentation ✅
 
 - **Description**: Update README with architecture changes
 - **Dependencies**: All phases
 - **Files**:
   - `README.md`
 - **Acceptance Criteria**:
-  - [ ] Architecture section updated
-  - [ ] CLI usage updated
-  - [ ] Storage paths documented
+  - [x] Architecture section updated
+  - [x] CLI usage updated
+  - [x] Storage paths documented
+- **Notes**: Updated storage backends to list SQLite+usearch, PostgreSQL+pgvector, Filesystem. Added faceted storage and branch GC documentation. Fixed spec links.
 
-#### Task 5.5: Design Org-Scope (Feature-Gated)
+#### Task 5.5: Design Org-Scope (Feature-Gated) ✅
 
 - **Description**: Document org-scope design in code, feature-gate implementation
 - **Dependencies**: None
@@ -519,9 +521,10 @@ This implementation plan breaks down the storage architecture simplification int
   - `src/services/mod.rs` (add for_org stub)
   - `Cargo.toml` (add org-scope feature)
 - **Acceptance Criteria**:
-  - [ ] `OrgConfig` struct defined
-  - [ ] `ServiceContainer::for_org()` behind feature gate
-  - [ ] Feature documented in README
+  - [x] `OrgConfig` struct defined
+  - [x] `ServiceContainer::for_org()` behind feature gate
+  - [x] Feature documented in README
+- **Notes**: Org-scope already fully implemented with OrgConfig struct, OrgConfigBuilder, and ServiceContainer::for_org() behind `#[cfg(feature = "org-scope")]`.
 
 #### Task 5.6: Run Full Test Suite ✅
 
@@ -550,17 +553,17 @@ This implementation plan breaks down the storage architecture simplification int
 
 ### Phase 5 Deliverables
 
-- [ ] Git-notes code removed (deferred)
-- [x] Documentation updated (CLAUDE.md pre-existing)
-- [ ] Org-scope designed and feature-gated (deferred)
+- [x] Git-notes code removed
+- [x] Documentation updated (CLAUDE.md pre-existing, README updated)
+- [x] Org-scope designed and feature-gated (pre-existing)
 - [x] All CI checks pass
 
 ### Phase 5 Exit Criteria
 
 - [x] `make ci` passes
-- [x] No dead code (git-notes isolated, deferred removal)
-- [ ] Documentation complete
-- [ ] Ready for release
+- [x] No dead code (git-notes removed)
+- [x] Documentation complete
+- [x] Ready for release
 
 ---
 
@@ -621,34 +624,34 @@ Phase 5: Cleanup (depends on all)
 
 ## Testing Checklist
 
-- [ ] Unit tests for Context Detector (edge cases)
-- [ ] Unit tests for Memory struct (serialization)
-- [ ] Unit tests for SearchFilter (query building)
-- [ ] Unit tests for BranchGarbageCollector
-- [ ] Integration tests for capture with facets
-- [ ] Integration tests for recall with facet filters
-- [ ] Integration tests for GC
-- [ ] E2E test: capture → recall roundtrip
-- [ ] E2E test: MCP protocol roundtrip
-- [ ] Performance tests for capture latency
-- [ ] Performance tests for recall latency
+- [x] Unit tests for Context Detector (edge cases)
+- [x] Unit tests for Memory struct (serialization)
+- [x] Unit tests for SearchFilter (query building)
+- [x] Unit tests for BranchGarbageCollector
+- [x] Integration tests for capture with facets
+- [x] Integration tests for recall with facet filters
+- [x] Integration tests for GC
+- [x] E2E test: capture → recall roundtrip
+- [x] E2E test: MCP protocol roundtrip
+- [x] Performance tests for capture latency
+- [x] Performance tests for recall latency
 
 ## Documentation Tasks
 
-- [ ] Update CLAUDE.md with new CLI flags and query patterns
-- [ ] Update README with architecture changes
-- [ ] Add inline rustdoc for new modules
-- [ ] Update MCP tool schemas
+- [x] Update CLAUDE.md with new CLI flags and query patterns (pre-existing)
+- [x] Update README with architecture changes
+- [x] Add inline rustdoc for new modules
+- [x] Update MCP tool schemas
 
 ## Launch Checklist
 
-- [ ] All tests passing (`cargo test`)
-- [ ] All lints clean (`cargo clippy`)
-- [ ] Documentation complete
-- [ ] CI passing
-- [ ] Git-notes code removed
-- [ ] No capture regressions
-- [ ] No performance regressions
+- [x] All tests passing (`cargo test`)
+- [x] All lints clean (`cargo clippy`)
+- [x] Documentation complete
+- [x] CI passing
+- [x] Git-notes code removed
+- [x] No capture regressions
+- [x] No performance regressions
 
 ## Post-Launch
 

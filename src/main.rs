@@ -140,30 +140,11 @@ enum Commands {
     /// Run consolidation.
     Consolidate,
 
-    /// Rebuild search index from git notes.
+    /// Rebuild search index from stored memories.
     Reindex {
         /// Path to the git repository (default: current directory).
         #[arg(short, long)]
         repo: Option<PathBuf>,
-    },
-
-    /// Enrich memories with LLM-generated tags.
-    Enrich {
-        /// Enrich all memories (those without tags).
-        #[arg(long)]
-        all: bool,
-
-        /// Update all memories, even those with existing tags.
-        #[arg(long)]
-        update_all: bool,
-
-        /// Enrich a specific memory by ID.
-        #[arg(long)]
-        id: Option<String>,
-
-        /// Show what would be changed without applying.
-        #[arg(long)]
-        dry_run: bool,
     },
 
     /// Manage configuration.
@@ -344,13 +325,6 @@ fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::error:
         Commands::Consolidate => commands::cmd_consolidate(&config),
 
         Commands::Reindex { repo } => commands::cmd_reindex(repo),
-
-        Commands::Enrich {
-            all,
-            update_all,
-            id,
-            dry_run,
-        } => commands::cmd_enrich(&config, all, update_all, id, dry_run),
 
         Commands::Config { show, set } => commands::cmd_config(config, show, set),
 

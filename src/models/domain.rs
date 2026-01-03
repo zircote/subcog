@@ -177,8 +177,8 @@ impl Domain {
     /// - If NOT in a git repository: returns a user-scoped domain
     ///
     /// This ensures memories are routed to the appropriate storage backend:
-    /// - Project domains use git notes storage
-    /// - User domains use sqlite storage
+    /// - Project domains use project-scoped `SQLite` storage
+    /// - User domains use user-scoped `SQLite` storage
     #[must_use]
     pub fn default_for_context() -> Self {
         use crate::storage::index::is_in_git_repo;

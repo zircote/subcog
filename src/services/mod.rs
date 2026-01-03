@@ -37,7 +37,6 @@ mod capture;
 mod consolidation;
 mod context;
 pub mod deduplication;
-mod enrichment;
 pub mod migration;
 mod path_manager;
 mod prompt;
@@ -55,7 +54,6 @@ pub use context::{ContextBuilderService, MemoryStatistics};
 pub use deduplication::{
     DeduplicationConfig, DeduplicationService, Deduplicator, DuplicateCheckResult, DuplicateReason,
 };
-pub use enrichment::{EnrichmentResult, EnrichmentService, EnrichmentStats};
 pub use path_manager::{INDEX_DB_NAME, PathManager, SUBCOG_DIR_NAME, VECTOR_INDEX_NAME};
 pub use prompt::{PromptFilter, PromptService, SaveOptions, SaveResult};
 pub use prompt_enrichment::{
@@ -240,7 +238,7 @@ impl ServiceContainer {
 
         let index_manager = DomainIndexManager::new(config)?;
 
-        // Create CaptureService with repo_path so it stores to git notes
+        // Create CaptureService with repo_path for project-scoped storage
         let capture_config = crate::config::Config::new().with_repo_path(&repo_root);
 
         // Create storage paths using PathManager
@@ -284,7 +282,7 @@ impl ServiceContainer {
     /// Creates a service container for user-scoped storage.
     ///
     /// Used when operating outside a git repository. Stores memories in the
-    /// user's local data directory using `SQLite` persistence (no git notes).
+    /// user's local data directory using `SQLite` persistence.
     ///
     /// # Storage Paths
     ///
@@ -322,7 +320,7 @@ impl ServiceContainer {
         };
         let index_manager = DomainIndexManager::new(config)?;
 
-        // Create CaptureService WITHOUT repo_path (no git notes)
+        // Create CaptureService WITHOUT repo_path (user-scoped storage)
         let capture_config = crate::config::Config::new();
 
         // Create backends using factory (centralizes initialization logic)
@@ -349,7 +347,7 @@ impl ServiceContainer {
     /// Creates a service container from the current directory, falling back to user scope.
     ///
     /// This is the recommended factory method for CLI and MCP entry points:
-    /// - If in a git repository → uses project scope (git notes + local index)
+    /// - If in a git repository → uses project scope (`SQLite` + local index)
     /// - If NOT in a git repository → uses user scope (SQLite-only)
     ///
     /// # Examples
@@ -730,8 +728,7 @@ impl ServiceContainer {
 
 // Note: parse_note_to_memory, parse_domain_string, and parse_status_string
 // were removed as part of Issue #43 (Storage Architecture Simplification).
-// Git notes are no longer used as the persistence layer - SQLite is now
-// the single source of truth.
+// SQLite is now the single source of truth for all storage.
 
 #[cfg(test)]
 mod tests {

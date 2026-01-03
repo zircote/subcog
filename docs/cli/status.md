@@ -26,19 +26,20 @@ The `status` command displays comprehensive information about the Subcog system 
 - Current working directory
 - Git repository status
 - Domain scope (project/user/org)
-- Organization/repository name
+- Project ID (auto-detected from git remote)
 
 ### Storage Status
 
 For each storage layer:
-- **Persistence**: Backend type and location
-- **Index**: Backend type and statistics
-- **Vector**: Backend type and index size
+- **Persistence**: SQLite database location and size
+- **Index**: SQLite + FTS5 statistics
+- **Vector**: usearch index size and dimensions
 
 ### Statistics
 
 - Total memory count
 - Count by namespace
+- Count by project/branch (faceted)
 - Recent activity
 - Top tags
 
@@ -69,14 +70,14 @@ Subcog Memory System
 Repository
 ──────────
   Path: /Users/user/project
-  Domain: project
-  Scope: zircote/subcog
+  Project: github.com/zircote/subcog
+  Branch: main
 
 Storage
 ───────
-  Persistence: Git Notes (refs/notes/subcog)
-  Index: SQLite + FTS5 (~/.subcog/index.db)
-  Vector: usearch HNSW (~/.subcog/vectors.usearch)
+  Persistence: SQLite (~/.local/share/subcog/subcog.db)
+  Index: SQLite + FTS5 (~/.local/share/subcog/subcog.db)
+  Vector: usearch HNSW (~/.local/share/subcog/vectors.usearch)
 
 Statistics
 ──────────
@@ -87,6 +88,10 @@ Statistics
     patterns     ████████     8
     learnings    ███████████████ 15
     context      ███████      7
+
+  By project:
+    github.com/zircote/subcog  ████████████████ 35
+    github.com/zircote/other   ███████ 7
 
   Recent activity (7d): 8 captures
 
@@ -115,22 +120,22 @@ Output:
 {
   "repository": {
     "path": "/Users/user/project",
-    "domain": "project",
-    "scope": "zircote/subcog"
+    "project_id": "github.com/zircote/subcog",
+    "branch": "main"
   },
   "storage": {
     "persistence": {
-      "type": "git_notes",
-      "ref": "refs/notes/subcog"
+      "type": "sqlite",
+      "path": "~/.local/share/subcog/subcog.db"
     },
     "index": {
       "type": "sqlite",
-      "path": "~/.subcog/index.db",
+      "path": "~/.local/share/subcog/subcog.db",
       "fts5": true
     },
     "vector": {
       "type": "usearch",
-      "path": "~/.subcog/vectors.usearch",
+      "path": "~/.local/share/subcog/vectors.usearch",
       "dimensions": 384
     }
   },
@@ -141,6 +146,10 @@ Output:
       "patterns": 8,
       "learnings": 15,
       "context": 7
+    },
+    "by_project": {
+      "github.com/zircote/subcog": 35,
+      "github.com/zircote/other": 7
     },
     "recent_7d": 8,
     "top_tags": [
@@ -174,6 +183,7 @@ Adds:
 - Vector index details
 - Last sync timestamp
 - Configuration source
+- Stale branch count (candidates for GC)
 
 ## Exit Codes
 
@@ -189,13 +199,14 @@ Adds:
 When verbose mode is enabled, the following health checks are performed:
 
 1. **Git repository**: Verifies `.git` directory exists
-2. **Git notes**: Checks refs/notes/subcog exists
-3. **SQLite index**: Verifies database is accessible
-4. **Vector index**: Checks usearch index is loaded
-5. **Embedding model**: Verifies model is available
+2. **SQLite database**: Checks database is accessible and schema is current
+3. **Vector index**: Checks usearch index is loaded
+4. **Embedding model**: Verifies model is available
+5. **Branch status**: Reports stale branches that may need GC
 
 ## See Also
 
 - [config](config.md) - Manage configuration
 - [sync](./sync.md) - Synchronize with remote
+- [gc](./gc.md) - Garbage collection for stale branches
 - [MCP subcog_status](../mcp/tools.md#subcog_status) - MCP equivalent

@@ -3,7 +3,6 @@
 //! This module organizes the CLI command implementations into separate files:
 //! - `core.rs`: Core commands (capture, recall, status, sync, consolidate, reindex)
 //! - `config.rs`: Configuration display command
-//! - `enrich.rs`: LLM-powered tag enrichment command
 //! - `gc.rs`: Garbage collection for stale branch memories
 //! - `hook.rs`: Claude Code hook event handlers
 //! - `migrate.rs`: Migration commands (embeddings)
@@ -11,7 +10,6 @@
 
 mod config;
 mod core;
-mod enrich;
 mod gc;
 mod hook;
 mod migrate;
@@ -24,7 +22,6 @@ use clap::Subcommand;
 // Re-export command functions
 pub use config::cmd_config;
 pub use core::{cmd_capture, cmd_consolidate, cmd_recall, cmd_reindex, cmd_status, cmd_sync};
-pub use enrich::cmd_enrich;
 pub use gc::cmd_gc;
 pub use hook::cmd_hook;
 pub use migrate::cmd_migrate_embeddings;

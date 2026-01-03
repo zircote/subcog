@@ -236,37 +236,10 @@ pub fn cmd_status(config: &SubcogConfig) -> Result<(), Box<dyn std::error::Error
     };
     println!("Vector Index: {usearch_status}");
 
-    // Check git notes
-    let notes_status = check_git_notes_status(&config.repo_path);
-    println!("Git Notes: {notes_status}");
-
     println!();
     println!("Use 'subcog config --show' to view full configuration");
 
     Ok(())
-}
-
-/// Check git notes status.
-fn check_git_notes_status(repo_path: &std::path::Path) -> &'static str {
-    use std::process::Command;
-
-    let result = Command::new("git")
-        .args(["notes", "--ref=subcog/memories", "list"])
-        .current_dir(repo_path)
-        .output();
-
-    match result {
-        Ok(output) if output.status.success() => {
-            let count = String::from_utf8_lossy(&output.stdout).lines().count();
-            if count > 0 {
-                "Available (has memories)"
-            } else {
-                "Available (empty)"
-            }
-        },
-        Ok(_) => "Initialized (no memories yet)",
-        Err(_) => "Not available (git error)",
-    }
 }
 
 /// Sync command.
@@ -356,7 +329,7 @@ pub fn cmd_consolidate(config: &SubcogConfig) -> Result<(), Box<dyn std::error::
             let mut service = ConsolidationService::new(backend);
             run_consolidation(&mut service)?;
         },
-        StorageBackendType::Filesystem | StorageBackendType::GitNotes => {
+        StorageBackendType::Filesystem => {
             let backend = FilesystemBackend::new(data_dir);
             let mut service = ConsolidationService::new(backend);
             run_consolidation(&mut service)?;
@@ -404,7 +377,7 @@ pub fn cmd_reindex(repo: Option<PathBuf>) -> Result<(), Box<dyn std::error::Erro
     // Use provided repo path or current directory
     let repo_path = repo.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
 
-    println!("Reindexing memories from git notes...");
+    println!("Reindexing memories from storage...");
     println!("Repository: {}", repo_path.display());
     println!();
 

@@ -161,12 +161,6 @@ impl PromptStorageFactory {
             StorageBackendType::Filesystem => PromptBackendType::Filesystem,
             StorageBackendType::PostgreSQL => PromptBackendType::PostgreSQL,
             StorageBackendType::Redis => PromptBackendType::Redis,
-            // GitNotes is deprecated (Issue #43 storage simplification).
-            // Map to SQLite as the new primary storage backend.
-            StorageBackendType::GitNotes => {
-                tracing::debug!("GitNotes backend requested but deprecated; using SQLite instead");
-                PromptBackendType::Sqlite
-            },
         };
 
         let path = storage_config.path.as_ref().map(PathBuf::from);

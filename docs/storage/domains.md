@@ -22,8 +22,10 @@ Project domain is derived from:
 
 ### Storage
 
-```
-refs/notes/subcog/project/zircote-subcog/...
+SQLite with faceted storage:
+```sql
+-- Memories filtered by project_id
+SELECT * FROM memories WHERE project_id = 'github.com/zircote/subcog';
 ```
 
 ### Use Cases
@@ -52,11 +54,13 @@ Uses the system username or configured identity.
 
 ### Storage
 
+SQLite global scope:
+```sql
+-- Memories without project context
+SELECT * FROM memories WHERE project_id IS NULL AND domain = 'user';
 ```
-~/.subcog/global/...
-# or
-refs/notes/subcog/global/...
-```
+
+Data location: `~/.local/share/subcog/subcog.db`
 
 ### Use Cases
 
@@ -86,8 +90,9 @@ Derived from:
 
 ### Storage
 
-```
-refs/notes/subcog/org/zircote/...
+SQLite with organization facet:
+```sql
+SELECT * FROM memories WHERE org_id = 'zircote';
 ```
 
 ### Use Cases

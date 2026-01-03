@@ -226,7 +226,7 @@ pub fn sync_tool() -> ToolDefinition {
 pub fn reindex_tool() -> ToolDefinition {
     ToolDefinition {
         name: "subcog_reindex".to_string(),
-        description: "Rebuild the search index from git notes. Use when index is out of sync with stored memories.".to_string(),
+        description: "Rebuild the search index from stored memories. Use when index is out of sync with storage.".to_string(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
