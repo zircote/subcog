@@ -21,11 +21,70 @@ use tracing::info_span;
 #[cfg(feature = "http")]
 use crate::mcp::auth::{JwtAuthenticator, JwtConfig};
 
-/// Maximum requests per rate limit window.
-const RATE_LIMIT_MAX_REQUESTS: usize = 1000;
+/// Default maximum requests per rate limit window.
+const DEFAULT_RATE_LIMIT_MAX_REQUESTS: usize = 1000;
 
-/// Rate limit window duration (1 minute).
-const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
+/// Default rate limit window duration (1 minute).
+const DEFAULT_RATE_LIMIT_WINDOW_SECS: u64 = 60;
+
+/// Maximum request body size (1MB) to prevent `DoS` via large payloads (SEC-H4).
+const MAX_REQUEST_BODY_SIZE: usize = 1024 * 1024;
+
+/// MCP rate limit configuration (ARCH-H1).
+#[derive(Debug, Clone)]
+pub struct RateLimitConfig {
+    /// Maximum requests per window.
+    pub max_requests: usize,
+    /// Window duration.
+    pub window: Duration,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            max_requests: DEFAULT_RATE_LIMIT_MAX_REQUESTS,
+            window: Duration::from_secs(DEFAULT_RATE_LIMIT_WINDOW_SECS),
+        }
+    }
+}
+
+impl RateLimitConfig {
+    /// Creates config from environment variables.
+    ///
+    /// Reads `SUBCOG_MCP_RATE_LIMIT_MAX_REQUESTS` and
+    /// `SUBCOG_MCP_RATE_LIMIT_WINDOW_SECS` from the environment.
+    #[must_use]
+    pub fn from_env() -> Self {
+        let max_requests = std::env::var("SUBCOG_MCP_RATE_LIMIT_MAX_REQUESTS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_RATE_LIMIT_MAX_REQUESTS);
+
+        let window_secs = std::env::var("SUBCOG_MCP_RATE_LIMIT_WINDOW_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_RATE_LIMIT_WINDOW_SECS);
+
+        Self {
+            max_requests,
+            window: Duration::from_secs(window_secs),
+        }
+    }
+
+    /// Sets maximum requests per window.
+    #[must_use]
+    pub const fn with_max_requests(mut self, max: usize) -> Self {
+        self.max_requests = max;
+        self
+    }
+
+    /// Sets window duration in seconds.
+    #[must_use]
+    pub const fn with_window_secs(mut self, secs: u64) -> Self {
+        self.window = Duration::from_secs(secs);
+        self
+    }
+}
 
 /// MCP protocol version.
 const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -55,6 +114,8 @@ pub struct McpServer {
     transport: Transport,
     /// HTTP port (if using HTTP transport).
     port: u16,
+    /// Rate limit configuration (ARCH-H1).
+    rate_limit: RateLimitConfig,
     /// JWT authenticator for HTTP transport (SEC-H1).
     #[cfg(feature = "http")]
     jwt_authenticator: Option<JwtAuthenticator>,
@@ -73,6 +134,7 @@ impl McpServer {
             prompts: PromptRegistry::new(),
             transport: Transport::Stdio,
             port: 3000,
+            rate_limit: RateLimitConfig::from_env(),
             #[cfg(feature = "http")]
             jwt_authenticator: None,
         }
@@ -103,6 +165,17 @@ impl McpServer {
         let config = JwtConfig::from_env()?;
         let authenticator = JwtAuthenticator::new(&config);
         Ok(self.with_jwt_authenticator(authenticator))
+    }
+
+    /// Sets the rate limit configuration (ARCH-H1).
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The rate limit configuration.
+    #[must_use]
+    pub const fn with_rate_limit(mut self, config: RateLimitConfig) -> Self {
+        self.rate_limit = config;
+        self
     }
 
     /// Tries to initialize `ResourceHandler` with services.
@@ -184,26 +257,24 @@ impl McpServer {
                 continue;
             }
 
-            // Rate limiting: reset window if expired
-            if window_start.elapsed() > RATE_LIMIT_WINDOW {
+            // Rate limiting: reset window if expired (ARCH-H1: configurable)
+            if window_start.elapsed() > self.rate_limit.window {
                 request_count = 0;
                 window_start = Instant::now();
             }
 
             // Check rate limit
-            if request_count >= RATE_LIMIT_MAX_REQUESTS {
-                tracing::warn!(
-                    "Rate limit exceeded: {request_count} requests in {RATE_LIMIT_WINDOW:?}",
-                );
+            if request_count >= self.rate_limit.max_requests {
+                let max_requests = self.rate_limit.max_requests;
+                let window = self.rate_limit.window;
+                tracing::warn!("Rate limit exceeded: {request_count} requests in {window:?}",);
                 metrics::counter!("mcp_rate_limit_exceeded_total").increment(1);
 
                 // Return rate limit error
                 let error_response = self.format_error(
                     None,
                     -32000,
-                    &format!(
-                        "Rate limit exceeded: max {RATE_LIMIT_MAX_REQUESTS} requests per {RATE_LIMIT_WINDOW:?}",
-                    ),
+                    &format!("Rate limit exceeded: max {max_requests} requests per {window:?}",),
                 );
                 writeln!(stdout, "{error_response}").map_err(|e| Error::OperationFailed {
                     operation: "write_stdout".to_string(),
@@ -262,6 +333,7 @@ impl McpServer {
             resources: std::mem::take(&mut self.resources),
             prompts: std::mem::take(&mut self.prompts),
             authenticator,
+            rate_limit_config: self.rate_limit.clone(),
             rate_limits: std::collections::HashMap::new(),
         }));
 
@@ -327,6 +399,24 @@ impl McpServer {
 
     /// Handles a JSON-RPC request.
     fn handle_request(&mut self, request: &str) -> String {
+        // SEC-H4: Check request size before processing to prevent DoS
+        if request.len() > MAX_REQUEST_BODY_SIZE {
+            tracing::warn!(
+                request_size = request.len(),
+                max_size = MAX_REQUEST_BODY_SIZE,
+                "Request exceeds maximum size limit"
+            );
+            return self.format_error(
+                None,
+                -32600,
+                &format!(
+                    "Request too large: {} bytes (max: {} bytes)",
+                    request.len(),
+                    MAX_REQUEST_BODY_SIZE
+                ),
+            );
+        }
+
         let start = Instant::now();
         let transport_label = match self.transport {
             Transport::Stdio => "stdio",
@@ -385,18 +475,23 @@ impl McpServer {
         response
     }
 
-    /// Dispatches a method call.
+    /// Dispatches a method call using the command pattern.
+    ///
+    /// Uses [`McpMethod`] enum for type-safe method dispatch instead of
+    /// string matching, following the Open/Closed Principle.
     fn dispatch_method(&mut self, method: &str, params: Option<Value>) -> DispatchResult {
-        match method {
-            "initialize" => self.handle_initialize(params),
-            "tools/list" => self.handle_list_tools(),
-            "tools/call" => self.handle_call_tool(params),
-            "resources/list" => self.handle_list_resources(),
-            "resources/read" => self.handle_read_resource(params),
-            "prompts/list" => self.handle_list_prompts(),
-            "prompts/get" => self.handle_get_prompt(params),
-            "ping" => Ok(serde_json::json!({})),
-            _ => Err((-32601, format!("Method not found: {method}"))),
+        use super::dispatch::McpMethod;
+
+        match McpMethod::from(method) {
+            McpMethod::Initialize => self.handle_initialize(params),
+            McpMethod::ListTools => self.handle_list_tools(),
+            McpMethod::CallTool => self.handle_call_tool(params),
+            McpMethod::ListResources => self.handle_list_resources(),
+            McpMethod::ReadResource => self.handle_read_resource(params),
+            McpMethod::ListPrompts => self.handle_list_prompts(),
+            McpMethod::GetPrompt => self.handle_get_prompt(params),
+            McpMethod::Ping => Ok(serde_json::json!({})),
+            McpMethod::Unknown(name) => Err((-32601, format!("Method not found: {name}"))),
         }
     }
 
@@ -749,6 +844,8 @@ mod http_transport {
         pub resources: ResourceHandler,
         pub prompts: PromptRegistry,
         pub authenticator: JwtAuthenticator,
+        /// Rate limit configuration (ARCH-H1).
+        pub rate_limit_config: super::RateLimitConfig,
         /// Per-client rate limits keyed by JWT subject/issuer.
         pub rate_limits: std::collections::HashMap<String, ClientRateLimit>,
     }
@@ -759,6 +856,29 @@ mod http_transport {
         headers: HeaderMap,
         body: String,
     ) -> impl IntoResponse {
+        // SEC-H4: Check request body size before processing to prevent DoS
+        if body.len() > super::MAX_REQUEST_BODY_SIZE {
+            tracing::warn!(
+                body_size = body.len(),
+                max_size = super::MAX_REQUEST_BODY_SIZE,
+                "Request body exceeds maximum size limit"
+            );
+            return (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32600,
+                        "message": format!(
+                            "Request body too large: {} bytes (max: {} bytes)",
+                            body.len(),
+                            super::MAX_REQUEST_BODY_SIZE
+                        )
+                    }
+                })),
+            );
+        }
+
         // Extract and validate Authorization header
         let auth_header = match headers.get("authorization") {
             Some(h) => match h.to_str() {
@@ -827,19 +947,24 @@ mod http_transport {
         // Per-client rate limiting using JWT subject as client identifier
         #[allow(clippy::redundant_clone)] // claims.sub used after entry() via client_id reference
         let client_id = claims.sub.clone();
+
+        // Extract rate limit config before mutable borrow of rate_limits
+        let rate_limit_window = state_guard.rate_limit_config.window;
+        let rate_limit_max = state_guard.rate_limit_config.max_requests;
+
         let rate_limit = state_guard
             .rate_limits
             .entry(client_id.clone())
             .or_default();
 
         // Reset window if expired
-        if rate_limit.window_start.elapsed() > super::RATE_LIMIT_WINDOW {
+        if rate_limit.window_start.elapsed() > rate_limit_window {
             rate_limit.request_count = 0;
             rate_limit.window_start = std::time::Instant::now();
         }
 
         // Check rate limit
-        if rate_limit.request_count >= super::RATE_LIMIT_MAX_REQUESTS {
+        if rate_limit.request_count >= rate_limit_max {
             tracing::warn!(
                 client = %client_id,
                 requests = rate_limit.request_count,
@@ -861,8 +986,8 @@ mod http_transport {
                         "code": -32000,
                         "message": format!(
                             "Rate limit exceeded: max {} requests per {:?}",
-                            super::RATE_LIMIT_MAX_REQUESTS,
-                            super::RATE_LIMIT_WINDOW
+                            rate_limit_max,
+                            rate_limit_window
                         )
                     }
                 })),
