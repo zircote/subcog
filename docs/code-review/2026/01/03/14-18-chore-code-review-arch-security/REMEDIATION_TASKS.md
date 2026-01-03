@@ -22,9 +22,12 @@
   - Scopes: `read` (recall, status), `write` (capture, enrich), `admin` (sync, reindex)
   - HTTP transport now checks JWT scopes before executing tools
 
-- [ ] **CRIT-004**: Sanitize memory content before injection
-  - File: `src/hooks/user_prompt.rs:134-178`
-  - Action: Add `sanitize_for_context()` function to strip injection patterns
+- [x] **CRIT-004**: Sanitize memory content before injection ✓ completed 2026-01-03
+  - File: `src/hooks/user_prompt.rs:113-178`
+  - Action: Added `sanitize_for_context()` function with 13 regex patterns
+  - Patterns: System impersonation, role switching, instruction override, XML injection, jailbreak, zero-width chars
+  - Applied sanitization to topics, memory content, and reminders in context building
+  - Added 14 unit tests for injection prevention
 
 - [ ] **CRIT-005**: Implement encryption at rest
   - File: `src/storage/persistence/filesystem.rs:23-89`
@@ -361,11 +364,11 @@
 
 | Phase | Status | Findings | Fixed |
 |-------|--------|----------|-------|
-| Critical | In Progress | 7 | 3 |
+| Critical | In Progress | 7 | 4 |
 | High | Pending | 44 | 0 |
 | Medium | Pending | 63 | 0 |
 | Low | Pending | 62 | 0 |
-| **Total** | | **176** | **3** |
+| **Total** | | **176** | **4** |
 
 ---
 
