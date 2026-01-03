@@ -143,12 +143,14 @@ impl Claims {
 /// Tool authorization configuration (CRIT-003).
 ///
 /// Maps tool names to required scopes for fine-grained access control.
+#[cfg(feature = "http")]
 #[derive(Debug, Clone)]
 pub struct ToolAuthorization {
     /// Default required scope if tool not explicitly mapped.
     pub default_scope: String,
 }
 
+#[cfg(feature = "http")]
 impl Default for ToolAuthorization {
     fn default() -> Self {
         Self {
@@ -157,6 +159,7 @@ impl Default for ToolAuthorization {
     }
 }
 
+#[cfg(feature = "http")]
 impl ToolAuthorization {
     /// Returns the required scope for a tool.
     ///
@@ -548,6 +551,7 @@ mod tests {
         assert!(!claims.has_any_scope(&["write", "admin"]));
     }
 
+    #[cfg(feature = "http")]
     #[test]
     fn test_tool_authorization_required_scopes() {
         let auth = ToolAuthorization::default();
@@ -575,6 +579,7 @@ mod tests {
         assert_eq!(auth.required_scope("unknown_tool"), "tools");
     }
 
+    #[cfg(feature = "http")]
     #[test]
     fn test_tool_authorization_is_authorized() {
         let auth = ToolAuthorization::default();
@@ -625,6 +630,7 @@ mod tests {
         assert!(!auth.is_authorized(&admin_user, "subcog_recall"));
     }
 
+    #[cfg(feature = "http")]
     #[test]
     fn test_tool_authorization_wildcard_scope() {
         let auth = ToolAuthorization::default();
@@ -645,6 +651,7 @@ mod tests {
         assert!(auth.is_authorized(&superuser, "unknown_tool"));
     }
 
+    #[cfg(feature = "http")]
     #[test]
     fn test_tool_authorization_multiple_scopes() {
         let auth = ToolAuthorization::default();

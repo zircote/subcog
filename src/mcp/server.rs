@@ -31,9 +31,11 @@ const DEFAULT_RATE_LIMIT_WINDOW_SECS: u64 = 60;
 const MAX_REQUEST_BODY_SIZE: usize = 1024 * 1024;
 
 /// Default allowed CORS origin (none by default for security).
+#[cfg(feature = "http")]
 const DEFAULT_CORS_ALLOWED_ORIGIN: &str = "";
 
 /// CORS configuration (HIGH-SEC-006).
+#[cfg(feature = "http")]
 #[derive(Debug, Clone)]
 pub struct CorsConfig {
     /// Allowed origins (comma-separated).
@@ -44,6 +46,7 @@ pub struct CorsConfig {
     pub max_age_secs: u64,
 }
 
+#[cfg(feature = "http")]
 impl Default for CorsConfig {
     fn default() -> Self {
         Self {
@@ -54,6 +57,7 @@ impl Default for CorsConfig {
     }
 }
 
+#[cfg(feature = "http")]
 impl CorsConfig {
     /// Creates config from environment variables.
     ///
