@@ -14,7 +14,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
-      - "5432:5432"
+      - "5433:5432"  # Host 5433 -> Container 5432 (avoid conflict)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U subcog"]
       interval: 10s
