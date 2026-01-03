@@ -4,18 +4,27 @@
 
 use crate::current_timestamp;
 use crate::embedding::Embedder;
+use crate::gc::branch_exists;
 use crate::models::{
     Memory, MemoryEvent, MemoryId, MemoryStatus, SearchFilter, SearchHit, SearchMode, SearchResult,
+    TombstoneHint,
 };
 use crate::security::record_event;
 use crate::storage::index::SqliteBackend;
 use crate::storage::traits::{IndexBackend, VectorBackend};
 use crate::{Error, Result};
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::instrument;
+
+/// Threshold for sparse results that triggers tombstone hint lookup.
+/// When active results are below this count, we check for tombstoned memories.
+const SPARSE_RESULT_THRESHOLD: usize = 3;
+
+/// Maximum number of branches to include in the tombstone hint.
+const MAX_HINT_BRANCHES: usize = 5;
 
 /// Service for searching and retrieving memories.
 ///
@@ -23,6 +32,22 @@ use tracing::instrument;
 /// - **Text**: BM25 full-text search via `SQLite` FTS5
 /// - **Vector**: Semantic similarity search via embedding + vector backend
 /// - **Hybrid**: Combines both using Reciprocal Rank Fusion (RRF)
+///
+/// # Facet Filtering
+///
+/// The service supports filtering by project-level facets:
+/// - `project_id`: Filter by project identifier
+/// - `branch`: Filter by git branch name
+/// - `file_path_pattern`: Filter by file path (glob-style patterns)
+///
+/// # Tombstone Handling
+///
+/// By default, tombstoned (soft-deleted) memories are excluded from results.
+/// Set `include_tombstoned: true` in the filter for audit/recovery purposes.
+///
+/// When search results are sparse (< 3 active results), the service automatically
+/// checks if tombstoned memories exist that match the query and provides a hint
+/// to the caller about their existence and associated branches.
 ///
 /// # Graceful Degradation
 ///
@@ -107,6 +132,22 @@ impl RecallService {
 
     /// Searches for memories matching a query.
     ///
+    /// # Facet Filtering
+    ///
+    /// The filter supports project-level facets for scoped searches:
+    /// - `project_id`: Limit results to a specific project
+    /// - `branch`: Limit results to a specific git branch
+    /// - `file_path_pattern`: Limit results to files matching a glob pattern
+    ///
+    /// # Tombstone Handling
+    ///
+    /// By default, tombstoned memories are excluded. To include them
+    /// (e.g., for audit or recovery), set `filter.include_tombstoned = true`.
+    ///
+    /// When active results are sparse (< 3), the service checks for tombstoned
+    /// memories that match the query and populates `tombstone_hint` with their
+    /// count and associated branch names.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::InvalidInput`] if:
@@ -122,7 +163,10 @@ impl RecallService {
             operation = "recall",
             mode = %mode,
             query_length = query.len(),
-            limit = limit
+            limit = limit,
+            project_id = filter.project_id.as_deref(),
+            branch = filter.branch.as_deref(),
+            include_tombstoned = filter.include_tombstoned
         )
     )]
     pub fn search(
@@ -136,13 +180,42 @@ impl RecallService {
         let domain_label = domain_label(filter);
         let mode_label = mode.as_str();
 
-        tracing::info!(mode = %mode_label, query_length = query.len(), limit = limit, "Searching memories");
+        tracing::info!(
+            mode = %mode_label,
+            query_length = query.len(),
+            limit = limit,
+            project_id = ?filter.project_id,
+            branch = ?filter.branch,
+            file_path_pattern = ?filter.file_path_pattern,
+            include_tombstoned = filter.include_tombstoned,
+            "Searching memories with facet filters"
+        );
 
         let result = (|| {
             // Validate query
             if query.trim().is_empty() {
                 return Err(Error::InvalidInput("Query cannot be empty".to_string()));
             }
+
+            // Lazy GC: Check if the filtered branch still exists
+            // This provides early feedback without slowing down searches
+            let branch_stale = if let Some(ref branch) = filter.branch {
+                let exists = branch_exists(branch);
+                if !exists {
+                    tracing::warn!(
+                        branch = %branch,
+                        "Search on stale branch - branch no longer exists in repository"
+                    );
+                    metrics::counter!(
+                        "memory_search_stale_branch_total",
+                        "branch" => branch.clone()
+                    )
+                    .increment(1);
+                }
+                !exists
+            } else {
+                false
+            };
 
             let mut memories = match mode {
                 SearchMode::Text => self.text_search(query, filter, limit)?,
@@ -155,6 +228,20 @@ impl RecallService {
             if mode != SearchMode::Hybrid {
                 normalize_scores(&mut memories);
             }
+
+            // Check for tombstoned memories if results are sparse and tombstones weren't requested
+            // Also provide a hint if searching on a stale branch
+            let tombstone_hint =
+                if memories.len() < SPARSE_RESULT_THRESHOLD && !filter.include_tombstoned {
+                    self.check_for_tombstones(query, mode, filter, limit)
+                } else if branch_stale {
+                    // Branch is stale - provide a hint even if we have results
+                    // The memories found might be from before the branch was deleted
+                    let branch_name = filter.branch.clone().unwrap_or_default();
+                    Some(TombstoneHint::new(memories.len(), vec![branch_name]))
+                } else {
+                    None
+                };
 
             // Safe cast: u128 milliseconds will practically never exceed u64::MAX
             let execution_time_ms = start.elapsed().as_millis() as u64;
@@ -177,6 +264,7 @@ impl RecallService {
                 total_count,
                 mode,
                 execution_time_ms,
+                tombstone_hint,
             })
         })();
 
@@ -198,10 +286,96 @@ impl RecallService {
         result
     }
 
-    /// Lists all memories, optionally filtered by namespace.
+    /// Checks for tombstoned memories that match the query.
+    ///
+    /// Called when active search results are sparse to provide visibility
+    /// into potentially relevant deleted content.
+    ///
+    /// Returns `None` if:
+    /// - No index backend is configured
+    /// - No tombstoned memories match the query
+    /// - An error occurs during the check (fails silently)
+    fn check_for_tombstones(
+        &self,
+        query: &str,
+        mode: SearchMode,
+        filter: &SearchFilter,
+        limit: usize,
+    ) -> Option<TombstoneHint> {
+        // Create a filter that includes tombstoned memories
+        let tombstone_filter = SearchFilter {
+            include_tombstoned: true,
+            ..filter.clone()
+        };
+
+        // Search with tombstones included
+        let tombstone_results = match mode {
+            SearchMode::Text => self.text_search(query, &tombstone_filter, limit),
+            SearchMode::Vector => self.vector_search(query, &tombstone_filter, limit),
+            SearchMode::Hybrid => self.hybrid_search(query, &tombstone_filter, limit),
+        };
+
+        let Ok(all_results) = tombstone_results else {
+            tracing::debug!("Tombstone check failed, skipping hint");
+            return None;
+        };
+
+        // Filter to only tombstoned memories (those with tombstoned_at set)
+        let tombstoned: Vec<_> = all_results
+            .into_iter()
+            .filter(|hit| hit.memory.tombstoned_at.is_some())
+            .collect();
+
+        if tombstoned.is_empty() {
+            return None;
+        }
+
+        // Collect unique branch names from tombstoned memories
+        let mut branches: HashSet<String> = HashSet::new();
+        for hit in &tombstoned {
+            if let Some(ref branch) = hit.memory.branch {
+                branches.insert(branch.clone());
+            }
+        }
+
+        // Convert to sorted vec and limit to MAX_HINT_BRANCHES
+        let mut branch_list: Vec<String> = branches.into_iter().collect();
+        branch_list.sort();
+        branch_list.truncate(MAX_HINT_BRANCHES);
+
+        let hint = TombstoneHint::new(tombstoned.len(), branch_list);
+
+        tracing::debug!(
+            tombstone_count = hint.count,
+            branches = ?hint.branches,
+            "Found tombstoned memories matching query"
+        );
+
+        metrics::counter!(
+            "memory_search_tombstone_hint_total",
+            "has_hint" => "true"
+        )
+        .increment(1);
+
+        Some(hint)
+    }
+
+    /// Lists all memories, optionally filtered by namespace and facets.
     ///
     /// Unlike `search`, this doesn't require a query and returns all matching memories.
     /// Returns minimal metadata (id, namespace) without content - details via drill-down.
+    ///
+    /// # Facet Filtering
+    ///
+    /// Supports the same facet filters as `search()`:
+    /// - `project_id`: Limit results to a specific project
+    /// - `branch`: Limit results to a specific git branch
+    /// - `file_path_pattern`: Limit results to files matching a glob pattern
+    ///
+    /// # Tombstone Handling
+    ///
+    /// By default, tombstoned memories are excluded from listing.
+    /// Set `filter.include_tombstoned = true` for audit/recovery operations.
     ///
     /// # Errors
     ///
@@ -210,10 +384,27 @@ impl RecallService {
     /// - The index backend list operation fails
     /// - Batch memory retrieval fails
     #[allow(clippy::cast_possible_truncation)]
-    #[instrument(skip(self, filter), fields(operation = "list_all", limit = limit))]
+    #[instrument(
+        skip(self, filter),
+        fields(
+            operation = "list_all",
+            limit = limit,
+            project_id = filter.project_id.as_deref(),
+            branch = filter.branch.as_deref(),
+            include_tombstoned = filter.include_tombstoned
+        )
+    )]
     pub fn list_all(&self, filter: &SearchFilter, limit: usize) -> Result<SearchResult> {
         let start = Instant::now();
         let domain_label = domain_label(filter);
+
+        tracing::debug!(
+            project_id = ?filter.project_id,
+            branch = ?filter.branch,
+            file_path_pattern = ?filter.file_path_pattern,
+            include_tombstoned = filter.include_tombstoned,
+            "Listing memories with facet filters"
+        );
 
         let result = (|| {
             let index = self.index.as_ref().ok_or_else(|| Error::OperationFailed {
@@ -265,6 +456,7 @@ impl RecallService {
                 total_count,
                 mode: SearchMode::Text,
                 execution_time_ms,
+                tombstone_hint: None,
             })
         })();
 
@@ -284,6 +476,78 @@ impl RecallService {
         .record(start.elapsed().as_secs_f64() * 1000.0);
 
         result
+    }
+
+    /// Searches for memories within a specific project scope.
+    ///
+    /// Convenience method that creates a filter with the `project_id` preset.
+    ///
+    /// # Errors
+    ///
+    /// Returns errors as per [`search()`](Self::search).
+    pub fn search_in_project(
+        &self,
+        query: &str,
+        project_id: &str,
+        mode: SearchMode,
+        limit: usize,
+    ) -> Result<SearchResult> {
+        let filter = SearchFilter::new().with_project_id(project_id);
+        self.search(query, mode, &filter, limit)
+    }
+
+    /// Searches for memories on a specific git branch.
+    ///
+    /// Convenience method that creates a filter with the branch preset.
+    ///
+    /// # Errors
+    ///
+    /// Returns errors as per [`search()`](Self::search).
+    pub fn search_on_branch(
+        &self,
+        query: &str,
+        branch: &str,
+        mode: SearchMode,
+        limit: usize,
+    ) -> Result<SearchResult> {
+        let filter = SearchFilter::new().with_branch(branch);
+        self.search(query, mode, &filter, limit)
+    }
+
+    /// Searches for memories related to files matching a pattern.
+    ///
+    /// Convenience method that creates a filter with a file path pattern.
+    /// Supports glob patterns like `src/**/*.rs` or `tests/*.rs`.
+    ///
+    /// # Errors
+    ///
+    /// Returns errors as per [`search()`](Self::search).
+    pub fn search_by_file_pattern(
+        &self,
+        query: &str,
+        file_pattern: &str,
+        mode: SearchMode,
+        limit: usize,
+    ) -> Result<SearchResult> {
+        let filter = SearchFilter::new().with_file_path_pattern(file_pattern);
+        self.search(query, mode, &filter, limit)
+    }
+
+    /// Searches including tombstoned (soft-deleted) memories.
+    ///
+    /// Use for audit trails or recovery operations.
+    ///
+    /// # Errors
+    ///
+    /// Returns errors as per [`search()`](Self::search).
+    pub fn search_with_tombstoned(
+        &self,
+        query: &str,
+        mode: SearchMode,
+        limit: usize,
+    ) -> Result<SearchResult> {
+        let filter = SearchFilter::new().with_include_tombstoned(true);
+        self.search(query, mode, &filter, limit)
     }
 
     /// Performs BM25 text search.
@@ -709,6 +973,75 @@ mod tests {
         }
     }
 
+    fn create_test_memory_with_facets(
+        id: &str,
+        content: &str,
+        project_id: Option<&str>,
+        branch: Option<&str>,
+        file_path: Option<&str>,
+    ) -> Memory {
+        use crate::models::Domain;
+
+        Memory {
+            id: MemoryId::new(id),
+            content: content.to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            status: MemoryStatus::Active,
+            created_at: 1_000_000,
+            updated_at: 1_000_000,
+            embedding: None,
+            tags: Vec::new(),
+            source: None,
+            project_id: project_id.map(String::from),
+            branch: branch.map(String::from),
+            file_path: file_path.map(String::from),
+            tombstoned_at: None,
+        }
+    }
+
+    fn create_tombstoned_memory(id: &str, content: &str) -> Memory {
+        use crate::models::Domain;
+
+        Memory {
+            id: MemoryId::new(id),
+            content: content.to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            status: MemoryStatus::Active,
+            created_at: 1_000_000,
+            updated_at: 1_000_000,
+            embedding: None,
+            tags: Vec::new(),
+            source: None,
+            project_id: None,
+            branch: None,
+            file_path: None,
+            tombstoned_at: Some(2_000_000),
+        }
+    }
+
+    fn create_tombstoned_memory_with_branch(id: &str, content: &str, branch: &str) -> Memory {
+        use crate::models::Domain;
+
+        Memory {
+            id: MemoryId::new(id),
+            content: content.to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            status: MemoryStatus::Active,
+            created_at: 1_000_000,
+            updated_at: 1_000_000,
+            embedding: None,
+            tags: Vec::new(),
+            source: None,
+            project_id: None,
+            branch: Some(branch.to_string()),
+            file_path: None,
+            tombstoned_at: Some(2_000_000),
+        }
+    }
+
     #[test]
     fn test_search_empty_query() {
         let service = RecallService::default();
@@ -931,6 +1264,513 @@ mod tests {
     fn test_domain_label() {
         let filter = SearchFilter::new();
         assert_eq!(domain_label(&filter), "all");
+    }
+
+    // ========================================================================
+    // Facet Filtering Tests (Issue #43 - Storage Simplification)
+    // ========================================================================
+
+    #[test]
+    fn test_search_filter_by_project_id() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+
+        // Create memories in different projects
+        let mem1 = create_test_memory_with_facets(
+            "proj1-mem1",
+            "Rust in project alpha",
+            Some("project-alpha"),
+            None,
+            None,
+        );
+        let mem2 = create_test_memory_with_facets(
+            "proj2-mem1",
+            "Rust in project beta",
+            Some("project-beta"),
+            None,
+            None,
+        );
+        let mem3 =
+            create_test_memory_with_facets("no-proj-mem", "Rust without project", None, None, None);
+
+        index.index(&mem1).unwrap();
+        index.index(&mem2).unwrap();
+        index.index(&mem3).unwrap();
+
+        let service = RecallService::with_index(index);
+
+        // Search within project-alpha
+        let filter = SearchFilter::new().with_project_id("project-alpha");
+        let result = service
+            .search("Rust", SearchMode::Text, &filter, 10)
+            .unwrap();
+
+        assert_eq!(result.memories.len(), 1);
+        assert_eq!(result.memories[0].memory.id.as_str(), "proj1-mem1");
+    }
+
+    #[test]
+    fn test_search_filter_by_branch() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+
+        // Create memories on different branches
+        let mem1 = create_test_memory_with_facets(
+            "main-mem",
+            "Rust on main branch",
+            None,
+            Some("main"),
+            None,
+        );
+        let mem2 = create_test_memory_with_facets(
+            "feature-mem",
+            "Rust on feature branch",
+            None,
+            Some("feature/auth"),
+            None,
+        );
+        let mem3 = create_test_memory_with_facets(
+            "no-branch-mem",
+            "Rust without branch",
+            None,
+            None,
+            None,
+        );
+
+        index.index(&mem1).unwrap();
+        index.index(&mem2).unwrap();
+        index.index(&mem3).unwrap();
+
+        let service = RecallService::with_index(index);
+
+        // Search on feature branch
+        let filter = SearchFilter::new().with_branch("feature/auth");
+        let result = service
+            .search("Rust", SearchMode::Text, &filter, 10)
+            .unwrap();
+
+        assert_eq!(result.memories.len(), 1);
+        assert_eq!(result.memories[0].memory.id.as_str(), "feature-mem");
+    }
+
+    #[test]
+    fn test_search_filter_by_file_path_pattern() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+
+        // Create memories with different file paths
+        let mem1 = create_test_memory_with_facets(
+            "src-mem",
+            "Rust source file",
+            None,
+            None,
+            Some("src/lib.rs"),
+        );
+        let mem2 = create_test_memory_with_facets(
+            "test-mem",
+            "Rust test file",
+            None,
+            None,
+            Some("tests/integration.rs"),
+        );
+        let mem3 = create_test_memory_with_facets(
+            "doc-mem",
+            "Rust documentation",
+            None,
+            None,
+            Some("docs/README.md"),
+        );
+
+        index.index(&mem1).unwrap();
+        index.index(&mem2).unwrap();
+        index.index(&mem3).unwrap();
+
+        let service = RecallService::with_index(index);
+
+        // Search for .rs files using glob pattern
+        let filter = SearchFilter::new().with_file_path_pattern("%.rs");
+        let result = service
+            .search("Rust", SearchMode::Text, &filter, 10)
+            .unwrap();
+
+        assert_eq!(result.memories.len(), 2);
+        let ids: Vec<_> = result
+            .memories
+            .iter()
+            .map(|h| h.memory.id.as_str())
+            .collect();
+        assert!(ids.contains(&"src-mem"));
+        assert!(ids.contains(&"test-mem"));
+    }
+
+    #[test]
+    fn test_search_excludes_tombstoned_by_default() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+
+        // Create active and tombstoned memories
+        let active = create_test_memory("active-mem", "Rust active memory");
+        let tombstoned = create_tombstoned_memory("tombstoned-mem", "Rust tombstoned memory");
+
+        index.index(&active).unwrap();
+        index.index(&tombstoned).unwrap();
+
+        let service = RecallService::with_index(index);
+
+        // Default search should exclude tombstoned
+        let result = service
+            .search("Rust", SearchMode::Text, &SearchFilter::new(), 10)
+            .unwrap();
+
+        assert_eq!(result.memories.len(), 1);
+        assert_eq!(result.memories[0].memory.id.as_str(), "active-mem");
+    }
+
+    #[test]
+    fn test_search_includes_tombstoned_when_requested() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+
+        // Create active and tombstoned memories
+        let active = create_test_memory("active-mem", "Rust active memory");
+        let tombstoned = create_tombstoned_memory("tombstoned-mem", "Rust tombstoned memory");
+
+        index.index(&active).unwrap();
+        index.index(&tombstoned).unwrap();
+
+        let service = RecallService::with_index(index);
+
+        // Search with include_tombstoned = true
+        let filter = SearchFilter::new().with_include_tombstoned(true);
+        let result = service
+            .search("Rust", SearchMode::Text, &filter, 10)
+            .unwrap();
+
+        assert_eq!(result.memories.len(), 2);
+        let ids: Vec<_> = result
+            .memories
+            .iter()
+            .map(|h| h.memory.id.as_str())
+            .collect();
+        assert!(ids.contains(&"active-mem"));
+        assert!(ids.contains(&"tombstoned-mem"));
+    }
+
+    #[test]
+    fn test_list_all_excludes_tombstoned_by_default() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+
+        let active = create_test_memory("active-mem", "Active memory");
+        let tombstoned = create_tombstoned_memory("tombstoned-mem", "Tombstoned memory");
+
+        index.index(&active).unwrap();
+        index.index(&tombstoned).unwrap();
+
+        let service = RecallService::with_index(index);
+
+        // Default list_all should exclude tombstoned
+        let result = service.list_all(&SearchFilter::new(), 10).unwrap();
+
+        assert_eq!(result.memories.len(), 1);
+        assert_eq!(result.memories[0].memory.id.as_str(), "active-mem");
+    }
+
+    #[test]
+    fn test_list_all_with_project_filter() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+
+        let mem1 = create_test_memory_with_facets(
+            "proj1-mem",
+            "Memory in project 1",
+            Some("project-1"),
+            None,
+            None,
+        );
+        let mem2 = create_test_memory_with_facets(
+            "proj2-mem",
+            "Memory in project 2",
+            Some("project-2"),
+            None,
+            None,
+        );
+
+        index.index(&mem1).unwrap();
+        index.index(&mem2).unwrap();
+
+        let service = RecallService::with_index(index);
+
+        let filter = SearchFilter::new().with_project_id("project-1");
+        let result = service.list_all(&filter, 10).unwrap();
+
+        assert_eq!(result.memories.len(), 1);
+        assert_eq!(result.memories[0].memory.id.as_str(), "proj1-mem");
+    }
+
+    #[test]
+    fn test_search_in_project_convenience_method() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+
+        let mem1 = create_test_memory_with_facets(
+            "proj-mem",
+            "Rust in my project",
+            Some("my-project"),
+            None,
+            None,
+        );
+        let mem2 = create_test_memory_with_facets(
+            "other-mem",
+            "Rust elsewhere",
+            Some("other-project"),
+            None,
+            None,
+        );
+
+        index.index(&mem1).unwrap();
+        index.index(&mem2).unwrap();
+
+        let service = RecallService::with_index(index);
+
+        let result = service
+            .search_in_project("Rust", "my-project", SearchMode::Text, 10)
+            .unwrap();
+
+        assert_eq!(result.memories.len(), 1);
+        assert_eq!(result.memories[0].memory.id.as_str(), "proj-mem");
+    }
+
+    #[test]
+    fn test_search_on_branch_convenience_method() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+
+        let mem1 =
+            create_test_memory_with_facets("main-mem", "Rust on main", None, Some("main"), None);
+        let mem2 = create_test_memory_with_facets(
+            "dev-mem",
+            "Rust on develop",
+            None,
+            Some("develop"),
+            None,
+        );
+
+        index.index(&mem1).unwrap();
+        index.index(&mem2).unwrap();
+
+        let service = RecallService::with_index(index);
+
+        let result = service
+            .search_on_branch("Rust", "develop", SearchMode::Text, 10)
+            .unwrap();
+
+        assert_eq!(result.memories.len(), 1);
+        assert_eq!(result.memories[0].memory.id.as_str(), "dev-mem");
+    }
+
+    #[test]
+    fn test_search_with_tombstoned_convenience_method() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+
+        let active = create_test_memory("active", "Rust active");
+        let tombstoned = create_tombstoned_memory("tombstoned", "Rust tombstoned");
+
+        index.index(&active).unwrap();
+        index.index(&tombstoned).unwrap();
+
+        let service = RecallService::with_index(index);
+
+        let result = service
+            .search_with_tombstoned("Rust", SearchMode::Text, 10)
+            .unwrap();
+
+        assert_eq!(result.memories.len(), 2);
+    }
+
+    #[test]
+    fn test_combined_facet_filters() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+
+        // Create memories with various combinations
+        let mem1 = create_test_memory_with_facets(
+            "target",
+            "Rust target memory",
+            Some("my-project"),
+            Some("main"),
+            Some("src/lib.rs"),
+        );
+        let mem2 = create_test_memory_with_facets(
+            "wrong-project",
+            "Rust wrong project",
+            Some("other-project"),
+            Some("main"),
+            Some("src/lib.rs"),
+        );
+        let mem3 = create_test_memory_with_facets(
+            "wrong-branch",
+            "Rust wrong branch",
+            Some("my-project"),
+            Some("develop"),
+            Some("src/lib.rs"),
+        );
+
+        index.index(&mem1).unwrap();
+        index.index(&mem2).unwrap();
+        index.index(&mem3).unwrap();
+
+        let service = RecallService::with_index(index);
+
+        // Filter by project AND branch
+        let filter = SearchFilter::new()
+            .with_project_id("my-project")
+            .with_branch("main");
+        let result = service
+            .search("Rust", SearchMode::Text, &filter, 10)
+            .unwrap();
+
+        assert_eq!(result.memories.len(), 1);
+        assert_eq!(result.memories[0].memory.id.as_str(), "target");
+    }
+
+    // ========================================================================
+    // Tombstone Hint Tests (Task 3.5 - Storage Simplification)
+    // ========================================================================
+
+    #[test]
+    fn test_tombstone_hint_when_sparse_results() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+
+        // Create only tombstoned memories (no active ones)
+        let tombstoned1 =
+            create_tombstoned_memory_with_branch("tomb1", "Rust tombstoned 1", "feature/auth");
+        let tombstoned2 =
+            create_tombstoned_memory_with_branch("tomb2", "Rust tombstoned 2", "feature/payments");
+
+        index.index(&tombstoned1).unwrap();
+        index.index(&tombstoned2).unwrap();
+
+        let service = RecallService::with_index(index);
+
+        // Search should return 0 active results but have a tombstone hint
+        let result = service
+            .search("Rust", SearchMode::Text, &SearchFilter::new(), 10)
+            .unwrap();
+
+        assert!(result.memories.is_empty());
+        assert!(result.tombstone_hint.is_some());
+
+        let hint = result.tombstone_hint.unwrap();
+        assert_eq!(hint.count, 2);
+        assert!(hint.branches.contains(&"feature/auth".to_string()));
+        assert!(hint.branches.contains(&"feature/payments".to_string()));
+    }
+
+    #[test]
+    fn test_tombstone_hint_with_few_active_results() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+
+        // Create 2 active and 3 tombstoned (sparse threshold is 3)
+        let active1 = create_test_memory("active1", "Rust active 1");
+        let active2 = create_test_memory("active2", "Rust active 2");
+        let tombstoned1 =
+            create_tombstoned_memory_with_branch("tomb1", "Rust tombstoned 1", "old-branch");
+        let tombstoned2 =
+            create_tombstoned_memory_with_branch("tomb2", "Rust tombstoned 2", "old-branch");
+        let tombstoned3 =
+            create_tombstoned_memory_with_branch("tomb3", "Rust tombstoned 3", "another-branch");
+
+        index.index(&active1).unwrap();
+        index.index(&active2).unwrap();
+        index.index(&tombstoned1).unwrap();
+        index.index(&tombstoned2).unwrap();
+        index.index(&tombstoned3).unwrap();
+
+        let service = RecallService::with_index(index);
+
+        let result = service
+            .search("Rust", SearchMode::Text, &SearchFilter::new(), 10)
+            .unwrap();
+
+        // Should have 2 active results (< 3 threshold)
+        assert_eq!(result.memories.len(), 2);
+
+        // Should have tombstone hint
+        assert!(result.tombstone_hint.is_some());
+        let hint = result.tombstone_hint.unwrap();
+        assert_eq!(hint.count, 3);
+        assert!(hint.branches.contains(&"old-branch".to_string()));
+        assert!(hint.branches.contains(&"another-branch".to_string()));
+    }
+
+    #[test]
+    fn test_no_tombstone_hint_when_enough_active_results() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+
+        // Create 5 active memories (above threshold)
+        for i in 0..5 {
+            let mem = create_test_memory(&format!("active{i}"), &format!("Rust active {i}"));
+            index.index(&mem).unwrap();
+        }
+
+        // Create some tombstoned
+        let tombstoned = create_tombstoned_memory("tomb1", "Rust tombstoned");
+        index.index(&tombstoned).unwrap();
+
+        let service = RecallService::with_index(index);
+
+        let result = service
+            .search("Rust", SearchMode::Text, &SearchFilter::new(), 10)
+            .unwrap();
+
+        // Should have 5 active results (>= 3 threshold)
+        assert_eq!(result.memories.len(), 5);
+
+        // Should NOT have tombstone hint
+        assert!(result.tombstone_hint.is_none());
+    }
+
+    #[test]
+    fn test_no_tombstone_hint_when_include_tombstoned() {
+        let index = SqliteBackend::in_memory().expect("in_memory failed");
+
+        // Create only tombstoned memories
+        let tombstoned = create_tombstoned_memory_with_branch("tomb1", "Rust tombstoned", "branch");
+        index.index(&tombstoned).unwrap();
+
+        let service = RecallService::with_index(index);
+
+        // Search with include_tombstoned = true
+        let filter = SearchFilter::new().with_include_tombstoned(true);
+        let result = service
+            .search("Rust", SearchMode::Text, &filter, 10)
+            .unwrap();
+
+        // Should have the tombstoned memory in results
+        assert_eq!(result.memories.len(), 1);
+
+        // Should NOT have tombstone hint (already included)
+        assert!(result.tombstone_hint.is_none());
+    }
+
+    #[test]
+    fn test_tombstone_hint_message() {
+        let hint = TombstoneHint::new(3, vec!["feature/auth".to_string(), "develop".to_string()]);
+
+        assert!(hint.has_tombstones());
+        let message = hint.message().unwrap();
+        assert!(message.contains("3 additional memories"));
+        assert!(message.contains("feature/auth"));
+        assert!(message.contains("develop"));
+    }
+
+    #[test]
+    fn test_tombstone_hint_message_no_branches() {
+        let hint = TombstoneHint::new(2, vec![]);
+
+        assert!(hint.has_tombstones());
+        let message = hint.message().unwrap();
+        assert!(message.contains("2 additional memories"));
+        assert!(!message.contains("branches:"));
+    }
+
+    #[test]
+    fn test_tombstone_hint_message_empty() {
+        let hint = TombstoneHint::new(0, vec![]);
+
+        assert!(!hint.has_tombstones());
+        assert!(hint.message().is_none());
     }
 
     // ========================================================================

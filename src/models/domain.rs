@@ -229,6 +229,51 @@ impl Domain {
 
     /// Returns the scope string for URN construction.
     ///
+    /// This method provides consistent URN scope generation across the codebase.
+    /// URN format: `subcog://{scope}/{namespace}/{id}`
+    ///
+    /// # Scope Values
+    ///
+    /// - `"global"` - Project-local domain (default, in git repo context)
+    /// - `"user"` - User-scoped domain (outside git repo or explicit user scope)
+    /// - `"{org}/{repo}"` - Repository-scoped domain
+    /// - `"org/{org}"` - Organization-scoped domain
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use subcog::models::Domain;
+    ///
+    /// // Project-local (global) scope
+    /// let domain = Domain::new();
+    /// assert_eq!(domain.urn_scope(), "global");
+    ///
+    /// // User scope
+    /// let domain = Domain::for_user();
+    /// assert_eq!(domain.urn_scope(), "user");
+    ///
+    /// // Repository scope
+    /// let domain = Domain::for_repository("zircote", "subcog");
+    /// assert_eq!(domain.urn_scope(), "zircote/subcog");
+    /// ```
+    #[must_use]
+    pub fn urn_scope(&self) -> String {
+        // Check for user scope first (explicit check)
+        if self.is_user() {
+            return "user".to_string();
+        }
+
+        // Check for global/project-local scope
+        if self.is_global() {
+            return "global".to_string();
+        }
+
+        // For other scopes, use the display representation
+        self.to_string()
+    }
+
+    /// Returns the scope string for URN construction.
+    ///
     /// - `"project"` for project-scoped (org + repo)
     /// - `"org/{name}"` for organization-scoped
     /// - `"global"` for global domain
@@ -423,5 +468,58 @@ mod tests {
         let json = serde_json::to_string(&domain).expect("serialize");
         let parsed: Domain = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parsed, domain);
+    }
+
+    // ========================================================================
+    // URN Scope Tests (Task 3.4: Storage Simplification)
+    // ========================================================================
+
+    #[test]
+    fn test_urn_scope_global() {
+        let domain = Domain::new();
+        assert!(domain.is_global());
+        assert_eq!(domain.urn_scope(), "global");
+    }
+
+    #[test]
+    fn test_urn_scope_user() {
+        let domain = Domain::for_user();
+        assert!(domain.is_user());
+        assert_eq!(domain.urn_scope(), "user");
+    }
+
+    #[test]
+    fn test_urn_scope_repository() {
+        let domain = Domain::for_repository("zircote", "subcog");
+        assert!(!domain.is_global());
+        assert!(!domain.is_user());
+        assert_eq!(domain.urn_scope(), "zircote/subcog");
+    }
+
+    #[test]
+    fn test_urn_scope_organization_only() {
+        let domain = Domain {
+            organization: Some("acme".to_string()),
+            project: None,
+            repository: None,
+        };
+        assert_eq!(domain.urn_scope(), "acme");
+    }
+
+    #[test]
+    fn test_urn_scope_backward_compatible() {
+        // Ensure existing URN patterns continue to work
+        // Global domain -> "global"
+        assert_eq!(Domain::new().urn_scope(), "global");
+        assert_eq!(Domain::new().to_string(), "global");
+
+        // User domain -> "user"
+        assert_eq!(Domain::for_user().urn_scope(), "user");
+        assert_eq!(Domain::for_user().to_string(), "user");
+
+        // Repository domain -> "org/repo"
+        let repo_domain = Domain::for_repository("org", "repo");
+        assert_eq!(repo_domain.urn_scope(), "org/repo");
+        assert_eq!(repo_domain.to_string(), "org/repo");
     }
 }

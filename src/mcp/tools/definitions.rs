@@ -30,6 +30,18 @@ pub fn capture_tool() -> ToolDefinition {
                 "source": {
                     "type": "string",
                     "description": "Optional source reference (file path, URL)"
+                },
+                "project_id": {
+                    "type": "string",
+                    "description": "Optional project identifier (auto-detected from git remote if not provided)"
+                },
+                "branch": {
+                    "type": "string",
+                    "description": "Optional branch name (auto-detected from git HEAD if not provided)"
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Optional file path context for the memory"
                 }
             },
             "required": ["content", "namespace"]
@@ -73,6 +85,23 @@ pub fn recall_tool() -> ToolDefinition {
                     "description": "Maximum number of results (default: 10)",
                     "minimum": 1,
                     "maximum": 50
+                },
+                "project_id": {
+                    "type": "string",
+                    "description": "Filter by project identifier (e.g., 'github.com/org/repo')"
+                },
+                "branch": {
+                    "type": "string",
+                    "description": "Filter by git branch name (e.g., 'main', 'feature/xyz')"
+                },
+                "file_path_pattern": {
+                    "type": "string",
+                    "description": "Filter by file path pattern (glob-style, e.g., 'src/**/*.rs')"
+                },
+                "include_tombstoned": {
+                    "type": "boolean",
+                    "description": "Include soft-deleted memories in results (default: false)",
+                    "default": false
                 }
             },
             "required": ["query"]
@@ -204,6 +233,33 @@ pub fn reindex_tool() -> ToolDefinition {
                 "repo_path": {
                     "type": "string",
                     "description": "Path to git repository (default: current directory)"
+                }
+            },
+            "required": []
+        }),
+    }
+}
+
+/// Defines the gc (garbage collection) tool.
+pub fn gc_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_gc".to_string(),
+        description: "Garbage collect stale branch memories. Identifies memories associated with deleted git branches and marks them as tombstoned.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "project_id": {
+                    "type": "string",
+                    "description": "Project identifier to run GC on (auto-detected from git remote if not provided)"
+                },
+                "branch": {
+                    "type": "string",
+                    "description": "Specific branch to check (if not provided, checks all branches)"
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "If true, show what would be cleaned up without making changes",
+                    "default": false
                 }
             },
             "required": []

@@ -921,6 +921,137 @@ impl StorageConfig {
     }
 }
 
+// ============================================================================
+// Organization Scope Configuration (Feature-Gated)
+// ============================================================================
+
+/// Configuration for organization-scoped storage.
+///
+/// Feature-gated behind `org-scope` feature. When enabled, provides shared
+/// memory storage across an organization using PostgreSQL for persistence
+/// and optionally Redis for distributed indexing.
+///
+/// # Architecture
+///
+/// ```text
+/// Org-Scope Storage
+///   ├── PostgreSQL (persistence + index)
+///   │     └── memories, fts_index tables
+///   └── Redis (optional, distributed cache)
+///         └── search index, embeddings cache
+/// ```
+///
+/// # Example Configuration
+///
+/// ```toml
+/// [storage.org]
+/// backend = "postgresql"
+/// connection_string = "postgresql://user:pass@host/subcog_org"
+///
+/// # Optional Redis for distributed index
+/// redis_url = "redis://localhost:6379/1"
+/// ```
+///
+/// # Environment Variables
+///
+/// | Variable | Description |
+/// |----------|-------------|
+/// | `SUBCOG_ORG_ID` | Organization identifier |
+/// | `SUBCOG_ORG_DATABASE_URL` | PostgreSQL connection URL |
+/// | `SUBCOG_ORG_REDIS_URL` | Redis connection URL (optional) |
+#[cfg(feature = "org-scope")]
+#[derive(Debug, Clone, Default)]
+pub struct OrgConfig {
+    /// Organization identifier.
+    ///
+    /// Used to namespace memories within shared storage. Must be unique
+    /// across all organizations using the same database.
+    pub org_id: String,
+
+    /// PostgreSQL connection URL for org storage.
+    ///
+    /// Required for org-scope storage. Supports environment variable
+    /// expansion (e.g., `${SUBCOG_ORG_DATABASE_URL}`).
+    ///
+    /// Format: `postgresql://user:password@host:port/database`
+    pub database_url: Option<String>,
+
+    /// Redis connection URL for org index (optional).
+    ///
+    /// When provided, enables distributed caching and search indexing
+    /// across multiple subcog instances.
+    ///
+    /// Format: `redis://host:port/db`
+    pub redis_url: Option<String>,
+}
+
+#[cfg(feature = "org-scope")]
+impl OrgConfig {
+    /// Creates a new org configuration with the given org ID.
+    #[must_use]
+    pub fn new(org_id: impl Into<String>) -> Self {
+        Self {
+            org_id: org_id.into(),
+            database_url: None,
+            redis_url: None,
+        }
+    }
+
+    /// Sets the PostgreSQL database URL.
+    #[must_use]
+    pub fn with_database_url(mut self, url: impl Into<String>) -> Self {
+        self.database_url = Some(url.into());
+        self
+    }
+
+    /// Sets the Redis URL for distributed indexing.
+    #[must_use]
+    pub fn with_redis_url(mut self, url: impl Into<String>) -> Self {
+        self.redis_url = Some(url.into());
+        self
+    }
+
+    /// Loads configuration from environment variables.
+    ///
+    /// Reads:
+    /// - `SUBCOG_ORG_ID` - Organization identifier
+    /// - `SUBCOG_ORG_DATABASE_URL` - PostgreSQL connection URL
+    /// - `SUBCOG_ORG_REDIS_URL` - Redis connection URL (optional)
+    #[must_use]
+    pub fn from_env() -> Self {
+        Self {
+            org_id: std::env::var("SUBCOG_ORG_ID").unwrap_or_default(),
+            database_url: std::env::var("SUBCOG_ORG_DATABASE_URL").ok(),
+            redis_url: std::env::var("SUBCOG_ORG_REDIS_URL").ok(),
+        }
+    }
+
+    /// Validates the configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - `org_id` is empty
+    /// - `database_url` is not set
+    pub fn validate(&self) -> Result<(), ConfigValidationError> {
+        if self.org_id.is_empty() {
+            return Err(ConfigValidationError::InvalidValue {
+                field: "org_id".to_string(),
+                message: "org_id is required for org-scope storage".to_string(),
+            });
+        }
+
+        if self.database_url.is_none() {
+            return Err(ConfigValidationError::InvalidValue {
+                field: "database_url".to_string(),
+                message: "database_url is required for org-scope storage".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
 /// Runtime prompt configuration.
 #[derive(Debug, Clone, Default)]
 pub struct PromptConfig {
@@ -1363,5 +1494,62 @@ mod tests {
         let result = expand_env_vars("${${INNER}}");
         // First finds ${${INNER} - var name is "${INNER", which won't exist
         assert_eq!(result, "${${INNER}}");
+    }
+
+    #[cfg(feature = "org-scope")]
+    mod org_scope_tests {
+        use super::*;
+
+        #[test]
+        fn test_org_config_new() {
+            let config = OrgConfig::new("my-org");
+            assert_eq!(config.org_id, "my-org");
+            assert!(config.database_url.is_none());
+            assert!(config.redis_url.is_none());
+        }
+
+        #[test]
+        fn test_org_config_builder() {
+            let config = OrgConfig::new("my-org")
+                .with_database_url("postgresql://localhost/subcog")
+                .with_redis_url("redis://localhost:6379/1");
+
+            assert_eq!(config.org_id, "my-org");
+            assert_eq!(
+                config.database_url,
+                Some("postgresql://localhost/subcog".to_string())
+            );
+            assert_eq!(
+                config.redis_url,
+                Some("redis://localhost:6379/1".to_string())
+            );
+        }
+
+        #[test]
+        fn test_org_config_validate_missing_org_id() {
+            let config = OrgConfig::default();
+            let result = config.validate();
+            assert!(result.is_err());
+            if let Err(ConfigValidationError::InvalidValue { field, .. }) = result {
+                assert_eq!(field, "org_id");
+            }
+        }
+
+        #[test]
+        fn test_org_config_validate_missing_database_url() {
+            let config = OrgConfig::new("my-org");
+            let result = config.validate();
+            assert!(result.is_err());
+            if let Err(ConfigValidationError::InvalidValue { field, .. }) = result {
+                assert_eq!(field, "database_url");
+            }
+        }
+
+        #[test]
+        fn test_org_config_validate_success() {
+            let config =
+                OrgConfig::new("my-org").with_database_url("postgresql://localhost/subcog");
+            assert!(config.validate().is_ok());
+        }
     }
 }

@@ -43,7 +43,7 @@
 //! - **FTS tokenization**: Whitespace + punctuation split (`SQLite`), language-aware (`PostgreSQL`)
 
 use crate::Result;
-use crate::models::{Memory, MemoryId, SearchFilter};
+use crate::models::{Memory, MemoryId, MemoryStatus, SearchFilter};
 
 /// Trait for index layer backends.
 ///
@@ -139,5 +139,82 @@ pub trait IndexBackend: Send + Sync {
     fn get_memories_batch(&self, ids: &[MemoryId]) -> Result<Vec<Option<Memory>>> {
         // Default implementation falls back to individual queries
         ids.iter().map(|id| self.get_memory(id)).collect()
+    }
+
+    /// Returns distinct branch names for a given project.
+    ///
+    /// This is used by the garbage collector to identify which branches
+    /// have associated memories, enabling efficient stale branch detection.
+    ///
+    /// # Arguments
+    ///
+    /// * `project_id` - The project identifier (e.g., "github.com/org/repo")
+    ///
+    /// # Returns
+    ///
+    /// A vector of unique branch names that have memories in the index.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    fn get_distinct_branches(&self, project_id: &str) -> Result<Vec<String>> {
+        // Default implementation: scan all memories and extract branches
+        // Backends should override this with an optimized query (e.g., SELECT DISTINCT)
+        use std::collections::HashSet;
+
+        let filter = SearchFilter::new()
+            .with_project_id(project_id)
+            .with_include_tombstoned(false);
+
+        let results = self.list_all(&filter, 10000)?;
+
+        let branches: HashSet<String> = results
+            .into_iter()
+            .filter_map(|(id, _)| self.get_memory(&id).ok().flatten())
+            .filter_map(|memory| memory.branch)
+            .collect();
+
+        Ok(branches.into_iter().collect())
+    }
+
+    /// Bulk updates the status and `tombstoned_at` fields for memories matching a filter.
+    ///
+    /// This is used by the garbage collector to efficiently tombstone memories
+    /// associated with deleted branches without fetching and re-indexing each one.
+    ///
+    /// # Arguments
+    ///
+    /// * `filter` - The filter to match memories (typically `project_id` + branch)
+    /// * `status` - The new status to set
+    /// * `tombstoned_at` - Optional timestamp for when the memory was tombstoned
+    ///
+    /// # Returns
+    ///
+    /// The number of memories updated.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    fn update_status(
+        &self,
+        filter: &SearchFilter,
+        status: MemoryStatus,
+        tombstoned_at: Option<u64>,
+    ) -> Result<usize> {
+        // Default implementation: fetch, modify, and re-index each memory
+        // Backends should override this with an optimized bulk UPDATE query
+        let results = self.list_all(filter, 10000)?;
+
+        let count = results
+            .into_iter()
+            .filter_map(|(id, _)| self.get_memory(&id).ok().flatten())
+            .filter_map(|mut memory| {
+                memory.status = status;
+                memory.tombstoned_at = tombstoned_at;
+                self.index(&memory).ok()
+            })
+            .count();
+
+        Ok(count)
     }
 }

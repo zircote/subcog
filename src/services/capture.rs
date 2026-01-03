@@ -2,10 +2,16 @@
 //!
 //! Handles capturing new memories, including validation, redaction, and storage.
 //! Now also generates embeddings and indexes memories for searchability.
+//!
+//! # Context Detection (Issue #43)
+//!
+//! When capturing memories, the service automatically detects git context (`project_id`, branch)
+//! from the current working directory if not explicitly provided in the request. This enables
+//! faceted storage and filtering without requiring callers to manually specify context.
 
 use crate::config::Config;
+use crate::context::GitContext;
 use crate::embedding::Embedder;
-use crate::git::{NotesManager, YamlFrontMatterParser};
 use crate::models::{CaptureRequest, CaptureResult, Memory, MemoryEvent, MemoryId, MemoryStatus};
 use crate::security::{ContentRedactor, SecretDetector, record_event};
 use crate::storage::traits::{IndexBackend, VectorBackend};
@@ -19,14 +25,14 @@ use tracing::instrument;
 /// # Storage Layers
 ///
 /// When fully configured, captures are written to three layers:
-/// 1. **Persistence** (Git Notes) - Authoritative storage, content-addressable
+/// 1. **Persistence** (`SQLite`) - Authoritative storage
 /// 2. **Index** (`SQLite` FTS5) - Full-text search via BM25
 /// 3. **Vector** (usearch) - Semantic similarity search
 ///
 /// # Graceful Degradation
 ///
 /// If embedder or index/vector backends are unavailable:
-/// - Capture still succeeds (Git Notes is authoritative)
+/// - Capture still succeeds (`SQLite` is authoritative)
 /// - A warning is logged for each failed secondary store
 /// - The memory may not be immediately searchable
 pub struct CaptureService {
@@ -174,36 +180,31 @@ impl CaptureService {
                 (request.content.clone(), false)
             };
 
+            // Auto-detect git context if facet fields not provided (Issue #43)
+            let git_context = GitContext::from_cwd();
+            let project_id = request.project_id.clone().or(git_context.project_id);
+            let branch = request.branch.clone().or(git_context.branch);
+            let file_path = request.file_path.clone();
+
+            if project_id.is_some() || branch.is_some() {
+                tracing::debug!(
+                    project_id = ?project_id,
+                    branch = ?branch,
+                    file_path = ?file_path,
+                    "Detected git context for memory capture"
+                );
+            }
+
             // Get current timestamp
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
 
-            // Store to git notes if configured and get the SHA as memory ID
-            let memory_id = if let Some(ref repo_path) = self.config.repo_path {
-                let notes = NotesManager::new(repo_path);
-
-                // Serialize memory content with initial front matter (ID will be the note SHA)
-                let metadata = serde_json::json!({
-                    "namespace": request.namespace.as_str(),
-                    "domain": request.domain.to_string(),
-                    "status": MemoryStatus::Active.as_str(),
-                    "created_at": now,
-                    "updated_at": now,
-                    "tags": request.tags
-                });
-
-                let note_content = YamlFrontMatterParser::serialize(&metadata, &content)?;
-                let note_oid = notes.add_to_head(&note_content)?;
-
-                // Use the note SHA as the memory ID (short form - first 12 chars)
-                MemoryId::new(note_oid.to_string()[..12].to_string())
-            } else {
-                // Fallback to UUID if no git repo configured (SHA only, no namespace prefix)
-                let uuid = uuid::Uuid::new_v4();
-                MemoryId::new(uuid.to_string().replace('-', "")[..12].to_string())
-            };
+            // Generate UUID-based memory ID (Issue #43: removed git-notes storage)
+            // SQLite is now the single source of truth for persistence
+            let uuid = uuid::Uuid::new_v4();
+            let memory_id = MemoryId::new(uuid.to_string().replace('-', "")[..12].to_string());
 
             let span = tracing::Span::current();
             span.record("memory.id", memory_id.as_str());
@@ -232,7 +233,7 @@ impl CaptureService {
                 None
             };
 
-            // Create memory
+            // Create memory with auto-detected context (Issue #43)
             let mut memory = Memory {
                 id: memory_id.clone(),
                 content,
@@ -244,14 +245,16 @@ impl CaptureService {
                 embedding: embedding.clone(),
                 tags: request.tags,
                 source: request.source,
-                project_id: None,
-                branch: None,
-                file_path: None,
+                project_id,
+                branch,
+                file_path,
                 tombstoned_at: None,
             };
 
-            // Generate URN (always use subcog:// format)
-            let urn = self.generate_urn(&memory);
+            // Generate URN using the centralized Memory::urn() method (Task 3.4)
+            // URN format: subcog://{scope}/{namespace}/{id}
+            // Scope is derived from domain via Domain::urn_scope()
+            let urn = memory.urn();
 
             // Collect warnings
             let mut warnings = Vec::new();
@@ -341,23 +344,6 @@ impl CaptureService {
         .record(start.elapsed().as_secs_f64() * 1000.0);
 
         result
-    }
-
-    /// Generates a URN for the memory.
-    #[allow(clippy::unused_self)] // Method kept for potential future use of self
-    fn generate_urn(&self, memory: &Memory) -> String {
-        let domain_part = if memory.domain.is_global() {
-            "global".to_string()
-        } else {
-            memory.domain.to_string()
-        };
-
-        format!(
-            "subcog://{}/{}/{}",
-            domain_part,
-            memory.namespace.as_str(),
-            memory.id.as_str()
-        )
     }
 
     /// Validates a capture request without storing.
@@ -513,31 +499,71 @@ mod tests {
         assert!(!result.issues.is_empty());
     }
 
+    // ========================================================================
+    // URN Generation Tests (Task 3.4: Storage Simplification)
+    // ========================================================================
+
     #[test]
-    fn test_generate_urn() {
+    fn test_capture_urn_global_domain() {
         let service = CaptureService::new(test_config());
+        let request = test_request("Test content");
 
-        let memory = Memory {
-            id: MemoryId::new("test_123"),
-            content: "Test".to_string(),
-            namespace: Namespace::Decisions,
-            domain: Domain::for_repository("zircote", "subcog"),
-            status: MemoryStatus::Active,
-            created_at: 0,
-            updated_at: 0,
-            embedding: None,
-            tags: vec![],
-            source: None,
-            project_id: None,
-            branch: None,
-            file_path: None,
-            tombstoned_at: None,
-        };
+        let result = service.capture(request).unwrap();
+        // Default domain is global, so URN should start with subcog://global/
+        assert!(
+            result.urn.starts_with("subcog://global/"),
+            "Expected URN to start with 'subcog://global/', got: {}",
+            result.urn
+        );
+        assert!(result.urn.contains("/decisions/"));
+    }
 
-        let urn = service.generate_urn(&memory);
-        assert!(urn.contains("subcog"));
-        assert!(urn.contains("decisions"));
-        assert!(urn.contains("test_123"));
+    #[test]
+    fn test_capture_urn_user_domain() {
+        let service = CaptureService::new(test_config());
+        let mut request = test_request("Test content");
+        request.domain = Domain::for_user();
+
+        let result = service.capture(request).unwrap();
+        // User domain should produce subcog://user/ URN
+        assert!(
+            result.urn.starts_with("subcog://user/"),
+            "Expected URN to start with 'subcog://user/', got: {}",
+            result.urn
+        );
+        assert!(result.urn.contains("/decisions/"));
+    }
+
+    #[test]
+    fn test_capture_urn_repository_domain() {
+        let service = CaptureService::new(test_config());
+        let mut request = test_request("Test content");
+        request.domain = Domain::for_repository("zircote", "subcog");
+
+        let result = service.capture(request).unwrap();
+        // Repository domain should produce subcog://org/repo/ URN
+        assert!(
+            result.urn.starts_with("subcog://zircote/subcog/"),
+            "Expected URN to start with 'subcog://zircote/subcog/', got: {}",
+            result.urn
+        );
+        assert!(result.urn.contains("/decisions/"));
+    }
+
+    #[test]
+    fn test_capture_urn_format() {
+        let service = CaptureService::new(test_config());
+        let request = test_request("Test content");
+
+        let result = service.capture(request).unwrap();
+
+        // URN should follow format: subcog://{scope}/{namespace}/{id}
+        let parts: Vec<&str> = result.urn.split('/').collect();
+        assert_eq!(parts[0], "subcog:");
+        assert_eq!(parts[1], ""); // empty after ://
+        assert_eq!(parts[2], "global"); // scope
+        assert_eq!(parts[3], "decisions"); // namespace
+        assert_eq!(parts[4].len(), 12); // id (12 hex chars)
     }
 
     // ========================================================================

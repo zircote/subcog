@@ -187,18 +187,8 @@ impl PostToolUseHandler {
             .into_iter()
             .filter(|hit| hit.score >= self.min_relevance)
             .map(|hit| {
-                // Build full URN: subcog://{domain}/{namespace}/{id}
-                let domain_part = if hit.memory.domain.is_global() {
-                    "global".to_string()
-                } else {
-                    hit.memory.domain.to_string()
-                };
-                let urn = format!(
-                    "subcog://{}/{}/{}",
-                    domain_part,
-                    hit.memory.namespace.as_str(),
-                    hit.memory.id.as_str()
-                );
+                // Use Memory::urn() for consistent URN generation (Task 3.4)
+                let urn = hit.memory.urn();
                 RelatedMemory {
                     urn,
                     namespace: hit.memory.namespace.as_str().to_string(),

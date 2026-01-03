@@ -45,6 +45,7 @@ pub mod cli;
 pub mod config;
 pub mod context;
 pub mod embedding;
+pub mod gc;
 pub mod git;
 pub mod hooks;
 pub mod llm;
@@ -59,6 +60,7 @@ pub mod storage;
 pub use config::{FeatureFlags, SubcogConfig};
 pub use context::GitContext;
 pub use embedding::Embedder;
+pub use gc::{BranchGarbageCollector, GcResult};
 pub use llm::LlmProvider;
 pub use models::{
     CaptureRequest, CaptureResult, DetailLevel, Domain, Memory, MemoryId, MemoryStatus, Namespace,
@@ -68,6 +70,10 @@ pub use services::{
     CaptureService, ConsolidationService, ContextBuilderService, RecallService, SyncService,
 };
 pub use storage::{CompositeStorage, IndexBackend, PersistenceBackend, VectorBackend};
+
+// Feature-gated re-exports
+#[cfg(feature = "org-scope")]
+pub use config::OrgConfig;
 
 /// Error type for subcog operations.
 ///

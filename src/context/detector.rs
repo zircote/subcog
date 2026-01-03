@@ -163,17 +163,17 @@ fn detect_project_id(repo: &Repository) -> Option<String> {
         }
     }
 
-    // Try any other remote
-    if let Ok(remotes) = repo.remotes() {
-        for remote_name in remotes.iter().flatten() {
-            if let Ok(remote) = repo.find_remote(remote_name) {
-                if let Some(url) = remote.url() {
-                    if let Some(project_id) = sanitize_git_url(url) {
-                        return Some(project_id);
-                    }
-                }
-            }
-        }
+    // Try any other remote using iterator chain
+    let from_remote = repo.remotes().ok().and_then(|remotes| {
+        remotes
+            .iter()
+            .flatten()
+            .filter_map(|name| repo.find_remote(name).ok())
+            .find_map(|remote| remote.url().and_then(sanitize_git_url))
+    });
+
+    if from_remote.is_some() {
+        return from_remote;
     }
 
     // Fall back to repository directory name
@@ -265,11 +265,9 @@ fn sanitize_http_url(url: &str) -> Option<String> {
         .or_else(|| url.strip_prefix("git://"))?;
 
     // Strip credentials if present (user:pass@host -> host)
-    let without_creds = if let Some(at_pos) = without_protocol.find('@') {
-        &without_protocol[at_pos + 1..]
-    } else {
-        without_protocol
-    };
+    let without_creds = without_protocol
+        .find('@')
+        .map_or(without_protocol, |at_pos| &without_protocol[at_pos + 1..]);
 
     if without_creds.is_empty() {
         return None;

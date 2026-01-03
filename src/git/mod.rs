@@ -1,6 +1,6 @@
 //! Git operations.
 //!
-//! Low-level git operations for notes management.
+//! Low-level git operations for notes management, remote sync, and YAML parsing.
 
 mod notes;
 mod parser;

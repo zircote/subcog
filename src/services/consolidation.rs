@@ -233,7 +233,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             source: target.source.or(source_source),
             project_id: target.project_id.clone(),
             branch: target.branch.clone(),
-            file_path: target.file_path.clone(),
+            file_path: target.file_path,
             tombstoned_at: None,
         };
 

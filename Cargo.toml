@@ -190,5 +190,8 @@ usearch-hnsw = ["dep:usearch"]
 fastembed-embeddings = ["dep:fastembed"]
 # HTTP transport with JWT authentication
 http = ["dep:axum", "dep:tower-http"]
+# Organization-scoped storage (requires PostgreSQL, optionally Redis)
+# Feature-gated stub for future implementation
+org-scope = []
 # All features enabled
 full = ["postgres", "postgres-tls", "redis", "usearch-hnsw", "fastembed-embeddings", "http"]

@@ -1,14 +1,18 @@
 //! Core tool execution handlers.
 //!
 //! Contains handlers for subcog's core memory operations:
-//! capture, recall, status, namespaces, consolidate, enrich, sync, reindex.
+//! capture, recall, status, namespaces, consolidate, enrich, sync, reindex, gc.
 
+use std::sync::Arc;
+
+use crate::context::GitContext;
+use crate::gc::BranchGarbageCollector;
 use crate::mcp::tool_types::{
-    CaptureArgs, ConsolidateArgs, EnrichArgs, RecallArgs, ReindexArgs, SyncArgs,
+    CaptureArgs, ConsolidateArgs, EnrichArgs, GcArgs, RecallArgs, ReindexArgs, SyncArgs,
     build_filter_description, format_content_for_detail, parse_namespace, parse_search_mode,
 };
 use crate::models::{CaptureRequest, DetailLevel, Domain, SearchFilter, SearchMode};
-use crate::services::{ServiceContainer, parse_filter_query};
+use crate::services::ServiceContainer;
 use crate::{Error, Result};
 use serde_json::Value;
 
@@ -22,6 +26,7 @@ pub fn execute_capture(arguments: Value) -> Result<ToolResult> {
     let namespace = parse_namespace(&args.namespace);
 
     // Use context-aware domain: project if in git repo, user if not
+    // Facet fields are optional overrides - if not provided, CaptureService auto-detects from git context
     let request = CaptureRequest {
         content: args.content,
         namespace,
@@ -29,9 +34,9 @@ pub fn execute_capture(arguments: Value) -> Result<ToolResult> {
         tags: args.tags.unwrap_or_default(),
         source: args.source,
         skip_security_check: false,
-        project_id: None, // Auto-detected by CaptureService (Issue #43)
-        branch: None,     // Auto-detected by CaptureService (Issue #43)
-        file_path: None,  // Optional context (Issue #43)
+        project_id: args.project_id,
+        branch: args.branch,
+        file_path: args.file_path,
     };
 
     let services = ServiceContainer::from_current_dir_or_user()?;
@@ -66,7 +71,7 @@ pub fn execute_recall(arguments: Value) -> Result<ToolResult> {
 
     // Build filter from the filter query string
     let mut filter = if let Some(filter_query) = &args.filter {
-        parse_filter_query(filter_query)
+        crate::services::parse_filter_query(filter_query)
     } else {
         SearchFilter::new()
     };
@@ -74,6 +79,23 @@ pub fn execute_recall(arguments: Value) -> Result<ToolResult> {
     // Support legacy namespace parameter (deprecated but still works)
     if let Some(ns) = &args.namespace {
         filter = filter.with_namespace(parse_namespace(ns));
+    }
+
+    // Apply facet filters from arguments
+    if let Some(project_id) = args.project_id {
+        filter = filter.with_project_id(project_id);
+    }
+
+    if let Some(branch) = args.branch {
+        filter = filter.with_branch(branch);
+    }
+
+    if let Some(path_pattern) = args.file_path_pattern {
+        filter = filter.with_file_path_pattern(path_pattern);
+    }
+
+    if args.include_tombstoned {
+        filter = filter.with_include_tombstoned(true);
     }
 
     let limit = args.limit.unwrap_or(10).min(50);
@@ -107,17 +129,8 @@ pub fn execute_recall(arguments: Value) -> Result<ToolResult> {
             format!(" [{}]", hit.memory.tags.join(", "))
         };
 
-        // Build URN: subcog://{domain}/{namespace}/{id}
-        // Domain: global, project, or org/repo path
-        let domain_part = if hit.memory.domain.is_global() {
-            "global".to_string()
-        } else {
-            hit.memory.domain.to_string()
-        };
-        let urn = format!(
-            "subcog://{}/{}/{}",
-            domain_part, hit.memory.namespace, hit.memory.id
-        );
+        // Use Memory::urn() for consistent URN generation (Task 3.4)
+        let urn = hit.memory.urn();
 
         // Display both normalized score and raw score for transparency
         // Format: "1.00 (raw: 0.0325)" or just "1.00" if they're the same
@@ -225,23 +238,13 @@ pub fn execute_consolidate(arguments: Value) -> Result<ToolResult> {
         });
     }
 
-    // Build context for sampling request - use full URNs
+    // Build context for sampling request - use Memory::urn() for consistent URN generation (Task 3.4)
     let memories_text: String = result
         .memories
         .iter()
         .enumerate()
         .map(|(i, hit)| {
-            let domain_part = if hit.memory.domain.is_global() {
-                "global".to_string()
-            } else {
-                hit.memory.domain.to_string()
-            };
-            let urn = format!(
-                "subcog://{}/{}/{}",
-                domain_part,
-                hit.memory.namespace.as_str(),
-                hit.memory.id.as_str()
-            );
+            let urn = hit.memory.urn();
             format!("{}. [{}] {}", i + 1, urn, hit.memory.content)
         })
         .collect::<Vec<_>>()
@@ -402,4 +405,126 @@ pub fn execute_reindex(arguments: Value) -> Result<ToolResult> {
             is_error: true,
         }),
     }
+}
+
+/// Executes the gc (garbage collection) tool.
+///
+/// Identifies memories associated with deleted git branches and marks them
+/// as tombstoned. This helps keep the memory index clean.
+pub fn execute_gc(arguments: Value) -> Result<ToolResult> {
+    let args: GcArgs =
+        serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+    // Get project ID from args or auto-detect from git context
+    let project_id = if let Some(id) = args.project_id {
+        id
+    } else {
+        let ctx = GitContext::from_cwd();
+        ctx.project_id.ok_or_else(|| Error::OperationFailed {
+            operation: "gc".to_string(),
+            cause: "Not in a git repository and no project_id provided".to_string(),
+        })?
+    };
+
+    // Create service container to get index backend
+    let container = ServiceContainer::from_current_dir()?;
+    let index = container.index()?;
+    let index_arc = Arc::new(index);
+
+    // If a specific branch is provided, tombstone memories for that branch directly
+    // Otherwise, run full GC to find stale branches
+    let result = if let Some(ref branch) = args.branch {
+        use crate::gc::GcResult;
+        use crate::models::{MemoryStatus, SearchFilter};
+        use crate::storage::traits::IndexBackend;
+        use std::time::Instant;
+
+        let start = Instant::now();
+        let filter = SearchFilter::new()
+            .with_project_id(&project_id)
+            .with_branch(branch)
+            .with_include_tombstoned(false);
+
+        let count = if args.dry_run {
+            // Count memories that would be affected
+            index_arc.list_all(&filter, 10000)?.len()
+        } else {
+            // Tombstone the memories
+            index_arc.update_status(
+                &filter,
+                MemoryStatus::Tombstoned,
+                Some(crate::current_timestamp()),
+            )?
+        };
+
+        GcResult {
+            branches_checked: 1,
+            stale_branches: if count > 0 {
+                vec![branch.clone()]
+            } else {
+                vec![]
+            },
+            memories_tombstoned: count,
+            dry_run: args.dry_run,
+            duration_ms: u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+        }
+    } else {
+        // Full GC: find stale branches by comparing against git
+        let gc = BranchGarbageCollector::new(index_arc);
+        gc.gc_stale_branches(&project_id, args.dry_run)?
+    };
+
+    // Build output message
+    let mode = if args.dry_run { "dry-run" } else { "execute" };
+
+    let output = if result.stale_branches.is_empty() {
+        format!(
+            "**Subcog Garbage Collection**\n\n\
+             Project: {}\n\
+             Mode: {}\n\n\
+             No stale branches found.\n\n\
+             Checked {} branches in {}ms",
+            project_id, mode, result.branches_checked, result.duration_ms
+        )
+    } else {
+        let action = if args.dry_run {
+            "Would tombstone"
+        } else {
+            "Tombstoned"
+        };
+
+        let branches_list = result
+            .stale_branches
+            .iter()
+            .map(|b| format!("  - {b}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        format!(
+            "**Subcog Garbage Collection**\n\n\
+             Project: {}\n\
+             Mode: {}\n\n\
+             Stale branches found:\n{}\n\n\
+             {} {} memories from {} stale branches\n\n\
+             Completed in {}ms (checked {} branches total){}",
+            project_id,
+            mode,
+            branches_list,
+            action,
+            result.memories_tombstoned,
+            result.stale_branches.len(),
+            result.duration_ms,
+            result.branches_checked,
+            if args.dry_run {
+                "\n\n_This was a dry run. Call again without dry_run=true to apply changes._"
+            } else {
+                ""
+            }
+        )
+    };
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text { text: output }],
+        is_error: false,
+    })
 }

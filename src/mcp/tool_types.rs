@@ -18,6 +18,12 @@ pub struct CaptureArgs {
     pub tags: Option<Vec<String>>,
     /// Optional source reference (file path, URL, etc.).
     pub source: Option<String>,
+    /// Optional project identifier (auto-detected from git remote if not provided).
+    pub project_id: Option<String>,
+    /// Optional branch name (auto-detected from git HEAD if not provided).
+    pub branch: Option<String>,
+    /// Optional file path context for the memory.
+    pub file_path: Option<String>,
 }
 
 /// Arguments for the recall tool.
@@ -35,6 +41,15 @@ pub struct RecallArgs {
     pub detail: Option<String>,
     /// Maximum number of results to return (default: 10).
     pub limit: Option<usize>,
+    /// Filter by project identifier.
+    pub project_id: Option<String>,
+    /// Filter by git branch name.
+    pub branch: Option<String>,
+    /// Filter by file path pattern (glob-style, e.g., "src/**/*.rs").
+    pub file_path_pattern: Option<String>,
+    /// Include tombstoned (soft-deleted) memories in results.
+    #[serde(default)]
+    pub include_tombstoned: bool,
 }
 
 /// Arguments for the consolidate tool.
@@ -75,6 +90,20 @@ pub struct SyncArgs {
 pub struct ReindexArgs {
     /// Path to git repository (default: current directory).
     pub repo_path: Option<String>,
+}
+
+/// Arguments for the gc (garbage collection) tool.
+#[derive(Debug, Deserialize)]
+pub struct GcArgs {
+    /// Optional project identifier to run GC on.
+    /// If not provided, auto-detects from current git repository.
+    pub project_id: Option<String>,
+    /// Optional specific branch to check.
+    /// If not provided, checks all branches.
+    pub branch: Option<String>,
+    /// If true, show what would be cleaned up without making changes.
+    #[serde(default)]
+    pub dry_run: bool,
 }
 
 // ============================================================================
@@ -286,6 +315,23 @@ pub fn build_filter_description(filter: &SearchFilter) -> String {
 
     if filter.created_after.is_some() {
         parts.push("since:active".to_string());
+    }
+
+    // Add facet filter descriptions
+    if let Some(ref project_id) = filter.project_id {
+        parts.push(format!("project:{project_id}"));
+    }
+
+    if let Some(ref branch) = filter.branch {
+        parts.push(format!("branch:{branch}"));
+    }
+
+    if let Some(ref path_pattern) = filter.file_path_pattern {
+        parts.push(format!("path:{path_pattern}"));
+    }
+
+    if filter.include_tombstoned {
+        parts.push("include:tombstoned".to_string());
     }
 
     if parts.is_empty() {

@@ -2,7 +2,7 @@
 //!
 //! Provides domain-scoped storage for prompt templates with pluggable backends:
 //!
-//! - **Project scope**: Git notes (`refs/notes/_prompts`)
+//! - **Project scope**: `SQLite` or Filesystem
 //! - **User scope**: `SQLite`, PostgreSQL, Redis, or Filesystem
 //! - **Org scope**: `SQLite` or Filesystem (org-isolated)
 //!
@@ -21,32 +21,31 @@
 //!
 //! ```text
 //! 1. Check explicit backend type in config/env
-//!     ├─► PostgreSQL if SUBCOG_POSTGRES_URL set + domain supports it
-//!     ├─► Redis if SUBCOG_REDIS_URL set + domain supports it
-//!     └─► Continue to step 2
+//!     |-> PostgreSQL if SUBCOG_POSTGRES_URL set + domain supports it
+//!     |-> Redis if SUBCOG_REDIS_URL set + domain supports it
+//!     +-> Continue to step 2
 //!
 //! 2. Check domain scope
-//!     ├─► Project → Git Notes (portable, versioned with repo)
-//!     ├─► User → SQLite (local, performant, no server required)
-//!     └─► Org → SQLite with org-prefixed path
+//!     |-> Project -> SQLite (local, versioned with repo)
+//!     |-> User -> SQLite (local, performant, no server required)
+//!     +-> Org -> SQLite with org-prefixed path
 //!
 //! 3. Fallback
-//!     └─► Filesystem (always available, human-readable YAML files)
+//!     +-> Filesystem (always available, human-readable YAML files)
 //! ```
 //!
 //! ## Selection Priority by Domain
 //!
 //! | Domain | Priority Order | Rationale |
 //! |--------|----------------|-----------|
-//! | Project | Git Notes → Filesystem | Version control integration |
-//! | User | `PostgreSQL` → `Redis` → `SQLite` → Filesystem | Configured external, then local |
-//! | Org | `PostgreSQL` → `Redis` → `SQLite` → Filesystem | Shared org database preferred |
+//! | Project | `SQLite` -> Filesystem | Local storage, version control friendly |
+//! | User | `PostgreSQL` -> `Redis` -> `SQLite` -> Filesystem | Configured external, then local |
+//! | Org | `PostgreSQL` -> `Redis` -> `SQLite` -> Filesystem | Shared org database preferred |
 //!
 //! ## Backend Capabilities
 //!
 //! | Backend | ACID | Shared | Versioned | Query | Setup |
 //! |---------|------|--------|-----------|-------|-------|
-//! | Git Notes | No | Via git | Yes | Tags only | Git repo |
 //! | PostgreSQL | Yes | Yes | No | Full SQL | Server |
 //! | Redis | No | Yes | No | Pattern | Server |
 //! | `SQLite` | Yes | No | No | Full SQL | None |
@@ -58,7 +57,7 @@
 //!
 //! | Domain | Backend | Location |
 //! |--------|---------|----------|
-//! | Project | Git Notes | `.git/refs/notes/_prompts` |
+//! | Project | `SQLite` | `.subcog/memories.db` |
 //! | User | `SQLite` | `~/.config/subcog/memories.db` |
 //! | User | PostgreSQL | Configured connection |
 //! | User | Redis | Configured connection |
@@ -74,14 +73,12 @@
 //! 3. Returns error if no identifier can be resolved
 
 mod filesystem;
-mod git_notes;
 mod postgresql;
 mod redis;
 mod sqlite;
 mod traits;
 
 pub use filesystem::FilesystemPromptStorage;
-pub use git_notes::GitNotesPromptStorage;
 pub use postgresql::PostgresPromptStorage;
 pub use redis::RedisPromptStorage;
 pub use sqlite::SqlitePromptStorage;
@@ -96,8 +93,6 @@ use std::sync::Arc;
 /// Backend type for prompt storage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PromptBackendType {
-    /// Git notes (project scope only).
-    GitNotes,
     /// `SQLite` database.
     #[default]
     Sqlite,
@@ -117,7 +112,7 @@ impl PromptStorageFactory {
     ///
     /// # Domain Routing
     ///
-    /// - **Project**: Git notes in the repository
+    /// - **Project**: `SQLite` at `.subcog/memories.db`
     /// - **User**: `SQLite` at `~/.config/subcog/memories.db` (default)
     /// - **Org**: `SQLite` at `~/.config/subcog/orgs/{org}/memories.db`
     ///
@@ -162,11 +157,16 @@ impl PromptStorageFactory {
         };
 
         let backend = match storage_config.backend {
-            StorageBackendType::GitNotes => PromptBackendType::GitNotes,
             StorageBackendType::Sqlite => PromptBackendType::Sqlite,
             StorageBackendType::Filesystem => PromptBackendType::Filesystem,
             StorageBackendType::PostgreSQL => PromptBackendType::PostgreSQL,
             StorageBackendType::Redis => PromptBackendType::Redis,
+            // GitNotes is deprecated (Issue #43 storage simplification).
+            // Map to SQLite as the new primary storage backend.
+            StorageBackendType::GitNotes => {
+                tracing::debug!("GitNotes backend requested but deprecated; using SQLite instead");
+                PromptBackendType::Sqlite
+            },
         };
 
         let path = storage_config.path.as_ref().map(PathBuf::from);
@@ -175,9 +175,10 @@ impl PromptStorageFactory {
         Self::create_with_backend(backend, path, connection_url)
     }
 
-    /// Creates project-scoped storage (git notes).
+    /// Creates project-scoped storage (`SQLite`).
     fn create_project_storage(config: &Config) -> Result<Arc<dyn PromptStorage>> {
-        let repo_path = config
+        // Try to get repo path from config or current directory
+        let base_path = config
             .repo_path
             .clone()
             .or_else(|| std::env::current_dir().ok())
@@ -187,7 +188,25 @@ impl PromptStorageFactory {
                 )
             })?;
 
-        Ok(Arc::new(GitNotesPromptStorage::new(repo_path)))
+        // Try SQLite in .subcog directory
+        let db_path = base_path.join(".subcog").join("memories.db");
+        if let Some(parent) = db_path.parent() {
+            if !parent.exists() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+        }
+
+        match SqlitePromptStorage::new(&db_path) {
+            Ok(storage) => Ok(Arc::new(storage)),
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to create SQLite prompt storage: {e}, falling back to filesystem"
+                );
+                // Fallback to filesystem
+                let fs_path = base_path.join(".subcog").join("prompts");
+                Ok(Arc::new(FilesystemPromptStorage::new(fs_path)?))
+            },
+        }
     }
 
     /// Creates user-scoped storage based on configuration.
@@ -340,7 +359,7 @@ impl PromptStorageFactory {
     /// # Arguments
     ///
     /// * `backend` - The backend type to use
-    /// * `path` - Path for file-based backends (repo path for git, db path for `SQLite`, dir for filesystem)
+    /// * `path` - Path for file-based backends (db path for `SQLite`, dir for filesystem)
     /// * `connection_url` - Connection URL for network backends (PostgreSQL, Redis)
     ///
     /// # Errors
@@ -352,16 +371,6 @@ impl PromptStorageFactory {
         connection_url: Option<String>,
     ) -> Result<Arc<dyn PromptStorage>> {
         match backend {
-            PromptBackendType::GitNotes => {
-                let repo_path = path
-                    .or_else(|| std::env::current_dir().ok())
-                    .ok_or_else(|| {
-                        Error::InvalidInput(
-                            "Repository path required for git notes backend".to_string(),
-                        )
-                    })?;
-                Ok(Arc::new(GitNotesPromptStorage::new(repo_path)))
-            },
             PromptBackendType::Sqlite => {
                 let db_path = path
                     .or_else(SqlitePromptStorage::default_user_path)
@@ -415,30 +424,6 @@ mod tests {
     fn test_prompt_backend_type_default() {
         let default = PromptBackendType::default();
         assert_eq!(default, PromptBackendType::Sqlite);
-    }
-
-    #[test]
-    fn test_create_with_git_notes_backend() {
-        let dir = TempDir::new().unwrap();
-
-        // Initialize git repo
-        git2::Repository::init(dir.path()).unwrap();
-        {
-            let repo = git2::Repository::open(dir.path()).unwrap();
-            let sig = git2::Signature::now("test", "test@test.com").unwrap();
-            let tree_id = repo.index().unwrap().write_tree().unwrap();
-            let tree = repo.find_tree(tree_id).unwrap();
-            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-                .unwrap();
-        }
-
-        let storage = PromptStorageFactory::create_with_backend(
-            PromptBackendType::GitNotes,
-            Some(dir.path().to_path_buf()),
-            None,
-        );
-
-        assert!(storage.is_ok());
     }
 
     #[test]

@@ -281,8 +281,58 @@ impl SearchFilter {
     }
 }
 
+/// Hint about tombstoned memories that may be relevant to a search.
+///
+/// When search results are sparse (< 3 active results), the system checks
+/// if there are tombstoned memories that match the query. This hint provides
+/// visibility into potentially relevant deleted content.
+#[derive(Debug, Clone, Default)]
+pub struct TombstoneHint {
+    /// Total count of tombstoned memories matching the query.
+    pub count: usize,
+    /// Branch names where tombstoned memories were found.
+    /// Limited to first 5 branches for display purposes.
+    pub branches: Vec<String>,
+}
+
+impl TombstoneHint {
+    /// Creates a new tombstone hint.
+    #[must_use]
+    pub fn new(count: usize, branches: Vec<String>) -> Self {
+        // Vec::len() call prevents clippy::missing_const_for_fn false positive
+        let _ = branches.len();
+        Self { count, branches }
+    }
+
+    /// Returns true if there are tombstoned memories.
+    #[must_use]
+    pub const fn has_tombstones(&self) -> bool {
+        self.count > 0
+    }
+
+    /// Formats the hint as a human-readable message.
+    #[must_use]
+    pub fn message(&self) -> Option<String> {
+        if self.count == 0 {
+            return None;
+        }
+
+        let branch_info = if self.branches.is_empty() {
+            String::new()
+        } else {
+            let branch_list = self.branches.join(", ");
+            format!(" in branches: {branch_list}")
+        };
+
+        Some(format!(
+            "{} additional memories found in deleted/merged branches{}",
+            self.count, branch_info
+        ))
+    }
+}
+
 /// Result of a memory search.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SearchResult {
     /// The matching memories.
     pub memories: Vec<SearchHit>,
@@ -292,6 +342,13 @@ pub struct SearchResult {
     pub mode: SearchMode,
     /// Search execution time in milliseconds.
     pub execution_time_ms: u64,
+    /// Hint about tombstoned memories when active results are sparse.
+    ///
+    /// Populated when:
+    /// - Active results < 3
+    /// - `include_tombstoned` was false (default)
+    /// - Tombstoned memories exist that match the query
+    pub tombstone_hint: Option<TombstoneHint>,
 }
 
 /// A single search hit with scoring.

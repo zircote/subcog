@@ -2,7 +2,7 @@
 //!
 //! Provides full-text search using `SQLite`'s FTS5 extension.
 
-use crate::models::{Memory, MemoryId, SearchFilter};
+use crate::models::{Memory, MemoryId, MemoryStatus, SearchFilter};
 use crate::storage::traits::IndexBackend;
 use crate::{Error, Result};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -285,6 +285,18 @@ impl SqliteBackend {
         );
     }
 
+    /// Generates IN clause placeholders and advances the parameter index.
+    fn generate_in_placeholders(count: usize, param_idx: &mut usize) -> String {
+        (0..count)
+            .map(|_| {
+                let p = format!("?{}", *param_idx);
+                *param_idx += 1;
+                p
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
     /// Builds a WHERE clause from a search filter with numbered parameters.
     /// Returns the clause string, the parameters, and the next parameter index.
     fn build_filter_clause_numbered(
@@ -297,35 +309,17 @@ impl SqliteBackend {
         let mut param_idx = start_param;
 
         if !filter.namespaces.is_empty() {
-            let placeholders: Vec<String> = filter
-                .namespaces
-                .iter()
-                .map(|_| {
-                    let p = format!("?{param_idx}");
-                    param_idx += 1;
-                    p
-                })
-                .collect();
-            conditions.push(format!("m.namespace IN ({})", placeholders.join(",")));
-            for ns in &filter.namespaces {
-                params.push(ns.as_str().to_string());
-            }
+            let placeholders =
+                Self::generate_in_placeholders(filter.namespaces.len(), &mut param_idx);
+            conditions.push(format!("m.namespace IN ({placeholders})"));
+            params.extend(filter.namespaces.iter().map(|ns| ns.as_str().to_string()));
         }
 
         if !filter.statuses.is_empty() {
-            let placeholders: Vec<String> = filter
-                .statuses
-                .iter()
-                .map(|_| {
-                    let p = format!("?{param_idx}");
-                    param_idx += 1;
-                    p
-                })
-                .collect();
-            conditions.push(format!("m.status IN ({})", placeholders.join(",")));
-            for s in &filter.statuses {
-                params.push(s.as_str().to_string());
-            }
+            let placeholders =
+                Self::generate_in_placeholders(filter.statuses.len(), &mut param_idx);
+            conditions.push(format!("m.status IN ({placeholders})"));
+            params.extend(filter.statuses.iter().map(|s| s.as_str().to_string()));
         }
 
         // Tag filtering (AND logic - must have ALL tags)
@@ -482,7 +476,7 @@ fn fetch_memory_row(conn: &Connection, id: &MemoryId) -> Result<Option<MemoryRow
 }
 
 fn build_memory_from_row(row: MemoryRow) -> Memory {
-    use crate::models::{Domain, MemoryStatus, Namespace};
+    use crate::models::{Domain, Namespace};
 
     let namespace = Namespace::parse(&row.namespace).unwrap_or_default();
     let domain = row.domain.map_or_else(Domain::new, |d: String| {
@@ -512,6 +506,7 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
         "superseded" => MemoryStatus::Superseded,
         "pending" => MemoryStatus::Pending,
         "deleted" => MemoryStatus::Deleted,
+        "tombstoned" => MemoryStatus::Tombstoned,
         _ => MemoryStatus::Active,
     };
 
@@ -1019,6 +1014,169 @@ impl IndexBackend for SqliteBackend {
         result
     }
 
+    /// Returns distinct branch names for a given project (Task 4.2).
+    ///
+    /// Uses an optimized `SELECT DISTINCT` query instead of scanning all memories.
+    #[instrument(skip(self), fields(operation = "get_distinct_branches", backend = "sqlite", project_id = %project_id))]
+    fn get_distinct_branches(&self, project_id: &str) -> Result<Vec<String>> {
+        let start = Instant::now();
+        let result = (|| {
+            let conn = acquire_lock(&self.conn);
+
+            let mut stmt = conn
+                .prepare(
+                    "SELECT DISTINCT branch FROM memories
+                     WHERE project_id = ?1 AND branch IS NOT NULL AND tombstoned_at IS NULL",
+                )
+                .map_err(|e| Error::OperationFailed {
+                    operation: "prepare_get_distinct_branches".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            let rows = stmt
+                .query_map(params![project_id], |row| {
+                    let branch: String = row.get(0)?;
+                    Ok(branch)
+                })
+                .map_err(|e| Error::OperationFailed {
+                    operation: "execute_get_distinct_branches".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            let mut branches = Vec::new();
+            for row in rows {
+                let branch = row.map_err(|e| Error::OperationFailed {
+                    operation: "read_branch_row".to_string(),
+                    cause: e.to_string(),
+                })?;
+                branches.push(branch);
+            }
+
+            Ok(branches)
+        })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        self.record_operation_metrics("get_distinct_branches", start, status);
+        result
+    }
+
+    /// Bulk updates status and `tombstoned_at` for memories matching a filter (Task 4.3).
+    ///
+    /// Uses an optimized bulk `UPDATE` query instead of fetch-modify-reindex.
+    #[instrument(
+        skip(self, filter),
+        fields(
+            operation = "update_status",
+            backend = "sqlite",
+            status = %status.as_str(),
+            tombstoned = tombstoned_at.is_some()
+        )
+    )]
+    fn update_status(
+        &self,
+        filter: &SearchFilter,
+        status: MemoryStatus,
+        tombstoned_at: Option<u64>,
+    ) -> Result<usize> {
+        let start = Instant::now();
+        let result = (|| {
+            let conn = acquire_lock(&self.conn);
+
+            // Build WHERE clause from filter
+            // Note: We need to build the clause without the 'm.' table alias since we're
+            // updating a single table
+            let mut conditions = Vec::new();
+            let mut params: Vec<String> = Vec::new();
+            let mut param_idx = 3; // Start after status and tombstoned_at
+
+            // Add filter conditions
+            if let Some(ref project_id) = filter.project_id {
+                conditions.push(format!("project_id = ?{param_idx}"));
+                param_idx += 1;
+                params.push(project_id.clone());
+            }
+
+            if let Some(ref branch) = filter.branch {
+                conditions.push(format!("branch = ?{param_idx}"));
+                param_idx += 1;
+                params.push(branch.clone());
+            }
+
+            if !filter.namespaces.is_empty() {
+                let placeholders: Vec<String> = filter
+                    .namespaces
+                    .iter()
+                    .map(|_| {
+                        let p = format!("?{param_idx}");
+                        param_idx += 1;
+                        p
+                    })
+                    .collect();
+                conditions.push(format!("namespace IN ({})", placeholders.join(",")));
+                for ns in &filter.namespaces {
+                    params.push(ns.as_str().to_string());
+                }
+            }
+
+            if !filter.statuses.is_empty() {
+                let placeholders: Vec<String> = filter
+                    .statuses
+                    .iter()
+                    .map(|_| {
+                        let p = format!("?{param_idx}");
+                        param_idx += 1;
+                        p
+                    })
+                    .collect();
+                conditions.push(format!("status IN ({})", placeholders.join(",")));
+                for s in &filter.statuses {
+                    params.push(s.as_str().to_string());
+                }
+            }
+
+            // Exclude already tombstoned unless include_tombstoned is true
+            if !filter.include_tombstoned {
+                conditions.push("tombstoned_at IS NULL".to_string());
+            }
+
+            let where_clause = if conditions.is_empty() {
+                String::new()
+            } else {
+                format!(" WHERE {}", conditions.join(" AND "))
+            };
+
+            let sql = format!("UPDATE memories SET status = ?1, tombstoned_at = ?2{where_clause}");
+
+            // Build parameters as boxed dyn ToSql for mixed types
+            #[allow(clippy::cast_possible_wrap)]
+            let tombstoned_at_i64: Option<i64> = tombstoned_at.map(|t| t as i64);
+
+            // Create parameter list with proper types
+            let mut all_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            all_params.push(Box::new(status.as_str().to_string()));
+            all_params.push(Box::new(tombstoned_at_i64));
+            for p in params {
+                all_params.push(Box::new(p));
+            }
+
+            let param_refs: Vec<&dyn rusqlite::ToSql> =
+                all_params.iter().map(Box::as_ref).collect();
+
+            let updated =
+                conn.execute(&sql, param_refs.as_slice())
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "execute_update_status".to_string(),
+                        cause: e.to_string(),
+                    })?;
+
+            Ok(updated)
+        })();
+
+        let status_str = if result.is_ok() { "success" } else { "error" };
+        self.record_operation_metrics("update_status", start, status_str);
+        result
+    }
+
     /// Re-indexes all memories in a single transaction (DB-H2).
     ///
     /// This is more efficient than the default implementation which creates
@@ -1170,7 +1328,7 @@ impl crate::storage::traits::PersistenceBackend for SqliteBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Domain, MemoryStatus, Namespace};
+    use crate::models::{Domain, Namespace};
 
     fn create_test_memory(id: &str, content: &str, namespace: Namespace) -> Memory {
         Memory {
@@ -1186,6 +1344,30 @@ mod tests {
             source: None,
             project_id: None,
             branch: None,
+            file_path: None,
+            tombstoned_at: None,
+        }
+    }
+
+    fn create_test_memory_with_branch(
+        id: &str,
+        content: &str,
+        project_id: &str,
+        branch: &str,
+    ) -> Memory {
+        Memory {
+            id: MemoryId::new(id),
+            content: content.to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            status: MemoryStatus::Active,
+            created_at: 1_234_567_890,
+            updated_at: 1_234_567_890,
+            embedding: None,
+            tags: vec!["test".to_string()],
+            source: None,
+            project_id: Some(project_id.to_string()),
+            branch: Some(branch.to_string()),
             file_path: None,
             tombstoned_at: None,
         }
@@ -1590,5 +1772,118 @@ mod tests {
             0,
             "Should not match partial tag due to proper escaping"
         );
+    }
+
+    #[test]
+    fn test_get_distinct_branches() {
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        // Index memories with different branches for same project
+        let memory1 =
+            create_test_memory_with_branch("id1", "Feature A", "github.com/org/repo", "feature-a");
+        let memory2 =
+            create_test_memory_with_branch("id2", "Feature B", "github.com/org/repo", "feature-b");
+        let memory3 = create_test_memory_with_branch(
+            "id3",
+            "Another on A",
+            "github.com/org/repo",
+            "feature-a",
+        );
+        let memory4 =
+            create_test_memory_with_branch("id4", "Other project", "github.com/org/other", "main");
+
+        backend.index(&memory1).unwrap();
+        backend.index(&memory2).unwrap();
+        backend.index(&memory3).unwrap();
+        backend.index(&memory4).unwrap();
+
+        // Get distinct branches for the first project
+        let branches = backend
+            .get_distinct_branches("github.com/org/repo")
+            .unwrap();
+
+        assert_eq!(branches.len(), 2);
+        assert!(branches.contains(&"feature-a".to_string()));
+        assert!(branches.contains(&"feature-b".to_string()));
+
+        // Get distinct branches for the other project
+        let branches = backend
+            .get_distinct_branches("github.com/org/other")
+            .unwrap();
+        assert_eq!(branches.len(), 1);
+        assert!(branches.contains(&"main".to_string()));
+
+        // Non-existent project should return empty
+        let branches = backend.get_distinct_branches("nonexistent").unwrap();
+        assert!(branches.is_empty());
+    }
+
+    #[test]
+    fn test_update_status_by_branch() {
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        // Index memories on different branches
+        let memory1 =
+            create_test_memory_with_branch("id1", "Feature A", "github.com/org/repo", "feature-a");
+        let memory2 =
+            create_test_memory_with_branch("id2", "Feature B", "github.com/org/repo", "feature-b");
+        let memory3 = create_test_memory_with_branch(
+            "id3",
+            "Another on A",
+            "github.com/org/repo",
+            "feature-a",
+        );
+
+        backend.index(&memory1).unwrap();
+        backend.index(&memory2).unwrap();
+        backend.index(&memory3).unwrap();
+
+        // Update status for feature-a branch only
+        let filter = SearchFilter::new()
+            .with_project_id("github.com/org/repo")
+            .with_branch("feature-a");
+
+        let updated = backend
+            .update_status(&filter, MemoryStatus::Tombstoned, Some(1_234_567_900))
+            .unwrap();
+
+        assert_eq!(updated, 2, "Should update 2 memories on feature-a branch");
+
+        // Verify feature-a memories are tombstoned
+        let mem1 = backend.get_memory(&MemoryId::new("id1")).unwrap().unwrap();
+        assert_eq!(mem1.status, MemoryStatus::Tombstoned);
+        assert_eq!(mem1.tombstoned_at, Some(1_234_567_900));
+
+        let mem3 = backend.get_memory(&MemoryId::new("id3")).unwrap().unwrap();
+        assert_eq!(mem3.status, MemoryStatus::Tombstoned);
+
+        // Verify feature-b memory is NOT tombstoned
+        let mem2 = backend.get_memory(&MemoryId::new("id2")).unwrap().unwrap();
+        assert_eq!(mem2.status, MemoryStatus::Active);
+        assert!(mem2.tombstoned_at.is_none());
+    }
+
+    #[test]
+    fn test_update_status_no_match() {
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        let memory =
+            create_test_memory_with_branch("id1", "Feature", "github.com/org/repo", "main");
+        backend.index(&memory).unwrap();
+
+        // Try to update non-existent branch
+        let filter = SearchFilter::new()
+            .with_project_id("github.com/org/repo")
+            .with_branch("nonexistent");
+
+        let updated = backend
+            .update_status(&filter, MemoryStatus::Tombstoned, Some(1_234_567_900))
+            .unwrap();
+
+        assert_eq!(updated, 0, "Should update 0 memories");
+
+        // Original memory should be unchanged
+        let mem = backend.get_memory(&MemoryId::new("id1")).unwrap().unwrap();
+        assert_eq!(mem.status, MemoryStatus::Active);
     }
 }

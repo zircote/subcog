@@ -99,6 +99,51 @@ pub struct Memory {
     pub tombstoned_at: Option<u64>,
 }
 
+impl Memory {
+    /// Generates the URN (Uniform Resource Name) for this memory.
+    ///
+    /// URN format: `subcog://{scope}/{namespace}/{id}`
+    ///
+    /// The scope is derived from the domain using [`Domain::urn_scope()`]:
+    /// - `"global"` for project-local memories (default when in git repo)
+    /// - `"user"` for user-scoped memories (outside git repo or explicit)
+    /// - `"{org}/{repo}"` for repository-scoped memories
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use subcog::models::{Memory, MemoryId, Domain, Namespace, MemoryStatus};
+    ///
+    /// let memory = Memory {
+    ///     id: MemoryId::new("abc123"),
+    ///     content: "Use PostgreSQL".to_string(),
+    ///     namespace: Namespace::Decisions,
+    ///     domain: Domain::new(),
+    ///     status: MemoryStatus::Active,
+    ///     created_at: 0,
+    ///     updated_at: 0,
+    ///     embedding: None,
+    ///     tags: vec![],
+    ///     source: None,
+    ///     project_id: None,
+    ///     branch: None,
+    ///     file_path: None,
+    ///     tombstoned_at: None,
+    /// };
+    ///
+    /// assert_eq!(memory.urn(), "subcog://global/decisions/abc123");
+    /// ```
+    #[must_use]
+    pub fn urn(&self) -> String {
+        format!(
+            "subcog://{}/{}/{}",
+            self.domain.urn_scope(),
+            self.namespace.as_str(),
+            self.id.as_str()
+        )
+    }
+}
+
 /// Result of a memory operation with optional metadata.
 #[derive(Debug, Clone)]
 pub struct MemoryResult {
@@ -108,4 +153,74 @@ pub struct MemoryResult {
     pub score: Option<f32>,
     /// BM25 score if text search was used.
     pub bm25_score: Option<f32>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{Domain, MemoryStatus, Namespace};
+
+    fn test_memory(domain: Domain) -> Memory {
+        Memory {
+            id: MemoryId::new("test123"),
+            content: "Test content".to_string(),
+            namespace: Namespace::Decisions,
+            domain,
+            status: MemoryStatus::Active,
+            created_at: 0,
+            updated_at: 0,
+            embedding: None,
+            tags: vec![],
+            source: None,
+            project_id: None,
+            branch: None,
+            file_path: None,
+            tombstoned_at: None,
+        }
+    }
+
+    #[test]
+    fn test_urn_global_domain() {
+        let memory = test_memory(Domain::new());
+        assert_eq!(memory.urn(), "subcog://global/decisions/test123");
+    }
+
+    #[test]
+    fn test_urn_user_domain() {
+        let memory = test_memory(Domain::for_user());
+        assert_eq!(memory.urn(), "subcog://user/decisions/test123");
+    }
+
+    #[test]
+    fn test_urn_repository_domain() {
+        let memory = test_memory(Domain::for_repository("zircote", "subcog"));
+        assert_eq!(memory.urn(), "subcog://zircote/subcog/decisions/test123");
+    }
+
+    #[test]
+    fn test_urn_different_namespaces() {
+        let mut memory = test_memory(Domain::new());
+
+        memory.namespace = Namespace::Learnings;
+        assert_eq!(memory.urn(), "subcog://global/learnings/test123");
+
+        memory.namespace = Namespace::Patterns;
+        assert_eq!(memory.urn(), "subcog://global/patterns/test123");
+
+        memory.namespace = Namespace::TechDebt;
+        assert_eq!(memory.urn(), "subcog://global/tech-debt/test123");
+    }
+
+    #[test]
+    fn test_urn_backward_compatible() {
+        // These URN formats should match the existing format used throughout the codebase
+        let global_memory = test_memory(Domain::new());
+        assert!(global_memory.urn().starts_with("subcog://global/"));
+
+        let user_memory = test_memory(Domain::for_user());
+        assert!(user_memory.urn().starts_with("subcog://user/"));
+
+        let repo_memory = test_memory(Domain::for_repository("org", "repo"));
+        assert!(repo_memory.urn().starts_with("subcog://org/repo/"));
+    }
 }

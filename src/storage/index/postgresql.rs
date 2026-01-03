@@ -18,7 +18,7 @@
 
 #[cfg(feature = "postgres")]
 mod implementation {
-    use crate::models::{Memory, MemoryId, SearchFilter};
+    use crate::models::{Memory, MemoryId, MemoryStatus, SearchFilter};
     use crate::storage::migrations::{Migration, MigrationRunner};
     use crate::storage::traits::IndexBackend;
     use crate::{Error, Result};
@@ -699,6 +699,66 @@ mod implementation {
                 .map_err(|e| query_error("postgres_clear", e))?;
             Ok(())
         }
+
+        /// Async implementation of `get_distinct_branches` operation (Task 4.2).
+        async fn get_distinct_branches_async(&self, project_id: &str) -> Result<Vec<String>> {
+            let client = self.pool.get().await.map_err(pool_error)?;
+
+            let query = format!(
+                "SELECT DISTINCT branch FROM {} WHERE project_id = $1 AND branch IS NOT NULL AND tombstoned_at IS NULL",
+                self.table_name
+            );
+
+            let rows = client
+                .query(&query, &[&project_id])
+                .await
+                .map_err(|e| query_error("postgres_get_distinct_branches", e))?;
+
+            Ok(rows.iter().map(|row| row.get(0)).collect())
+        }
+
+        /// Async implementation of `update_status` operation (Task 4.3).
+        #[allow(clippy::cast_possible_wrap)]
+        async fn update_status_async(
+            &self,
+            filter: &SearchFilter,
+            status: MemoryStatus,
+            tombstoned_at: Option<u64>,
+        ) -> Result<usize> {
+            let client = self.pool.get().await.map_err(pool_error)?;
+
+            // Build WHERE clause from filter (starting at $3 since $1 is status, $2 is tombstoned_at)
+            let (filter_clause, filter_params) = Self::build_where_clause(filter, 3);
+
+            let where_clause = if filter_clause.is_empty() {
+                String::new()
+            } else {
+                format!(" WHERE {}", filter_clause.trim_start_matches(" AND "))
+            };
+
+            let sql = format!(
+                "UPDATE {} SET status = $1, tombstoned_at = $2{}",
+                self.table_name, where_clause
+            );
+
+            let tombstoned_at_i64: Option<i64> = tombstoned_at.map(|t| t as i64);
+            let status_str = status.as_str();
+
+            // Build parameters
+            let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
+            params.push(&status_str);
+            params.push(&tombstoned_at_i64);
+            for p in &filter_params {
+                params.push(p);
+            }
+
+            let rows = client
+                .execute(&sql, &params)
+                .await
+                .map_err(|e| query_error("postgres_update_status", e))?;
+
+            Ok(usize::try_from(rows).unwrap_or(usize::MAX))
+        }
     }
 
     impl IndexBackend for PostgresIndexBackend {
@@ -730,6 +790,19 @@ mod implementation {
 
         fn clear(&self) -> Result<()> {
             self.block_on(self.clear_async())
+        }
+
+        fn get_distinct_branches(&self, project_id: &str) -> Result<Vec<String>> {
+            self.block_on(self.get_distinct_branches_async(project_id))
+        }
+
+        fn update_status(
+            &self,
+            filter: &SearchFilter,
+            status: MemoryStatus,
+            tombstoned_at: Option<u64>,
+        ) -> Result<usize> {
+            self.block_on(self.update_status_async(filter, status, tombstoned_at))
         }
     }
 
@@ -820,7 +893,7 @@ pub use implementation::PostgresIndexBackend;
 
 #[cfg(not(feature = "postgres"))]
 mod stub {
-    use crate::models::{Memory, MemoryId, SearchFilter};
+    use crate::models::{Memory, MemoryId, MemoryStatus, SearchFilter};
     use crate::storage::traits::IndexBackend;
     use crate::{Error, Result};
 
@@ -874,6 +947,19 @@ mod stub {
         }
 
         fn clear(&self) -> Result<()> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+
+        fn get_distinct_branches(&self, _project_id: &str) -> Result<Vec<String>> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+
+        fn update_status(
+            &self,
+            _filter: &SearchFilter,
+            _status: MemoryStatus,
+            _tombstoned_at: Option<u64>,
+        ) -> Result<usize> {
             Err(Error::FeatureNotEnabled("postgres".to_string()))
         }
     }

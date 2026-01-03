@@ -40,14 +40,18 @@ pub fn parse_search_mode(s: &str) -> SearchMode {
 }
 
 /// Capture command.
+#[allow(clippy::too_many_arguments)]
 pub fn cmd_capture(
     config: &SubcogConfig,
     content: String,
     namespace: String,
     tags: Option<String>,
     source: Option<String>,
+    project: Option<String>,
+    branch: Option<String>,
+    file_path: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Get repo path so captures are stored to git notes
+    // Get repo path for context detection
     let cwd = std::env::current_dir()?;
     let mut service_config = subcog::config::Config::from(config.clone());
     service_config = service_config.with_repo_path(&cwd);
@@ -58,6 +62,7 @@ pub fn cmd_capture(
         .unwrap_or_default();
 
     // Use context-aware domain: project if in git repo, user if not
+    // Facet fields are optional overrides - if not provided, CaptureService auto-detects from git context
     let request = CaptureRequest {
         content,
         namespace: parse_namespace(&namespace),
@@ -65,9 +70,9 @@ pub fn cmd_capture(
         tags: tag_list,
         source,
         skip_security_check: false,
-        project_id: None, // Auto-detected by CaptureService (Issue #43)
-        branch: None,     // Auto-detected by CaptureService (Issue #43)
-        file_path: None,  // Optional context (Issue #43)
+        project_id: project,
+        branch,
+        file_path,
     };
 
     let result = service.capture(request)?;
@@ -91,12 +96,23 @@ pub fn cmd_capture(
 /// * `namespace` - Optional namespace filter
 /// * `limit` - Maximum number of results
 /// * `raw` - If true, display raw (un-normalized) scores instead of normalized scores
+/// * `project` - Optional project identifier filter
+/// * `branch` - Optional branch name filter
+/// * `path` - Optional file path pattern filter (glob-style)
+/// * `include_tombstoned` - If true, include soft-deleted memories
+/// * `all_projects` - If true, search across all projects (clears project filter)
+#[allow(clippy::too_many_arguments)]
 pub fn cmd_recall(
     query: String,
     mode: String,
     namespace: Option<String>,
     limit: usize,
     raw: bool,
+    project: Option<String>,
+    branch: Option<String>,
+    path: Option<String>,
+    include_tombstoned: bool,
+    all_projects: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use subcog::services::ServiceContainer;
 
@@ -105,8 +121,31 @@ pub fn cmd_recall(
     let service = services.recall()?;
 
     let mut filter = SearchFilter::new();
+
+    // Apply namespace filter
     if let Some(ns) = namespace {
         filter = filter.with_namespace(parse_namespace(&ns));
+    }
+
+    // Apply facet filters
+    // Note: --all-projects clears any project filter, otherwise use provided or auto-detect
+    if !all_projects {
+        if let Some(project_id) = project {
+            filter = filter.with_project_id(project_id);
+        }
+        // If no project specified and not --all-projects, the index will scope by domain
+    }
+
+    if let Some(branch_name) = branch {
+        filter = filter.with_branch(branch_name);
+    }
+
+    if let Some(path_pattern) = path {
+        filter = filter.with_file_path_pattern(path_pattern);
+    }
+
+    if include_tombstoned {
+        filter = filter.with_include_tombstoned(true);
     }
 
     let result = service.search(&query, parse_search_mode(&mode), &filter, limit);
@@ -119,11 +158,13 @@ pub fn cmd_recall(
             for hit in &search_result.memories {
                 // Use raw_score if --raw flag is set, otherwise use normalized score
                 let display_score = if raw { hit.raw_score } else { hit.score };
+
+                // Use Memory::urn() for consistent URN generation (Task 3.4)
+                let urn = hit.memory.urn();
+
                 println!(
                     "  [{:.4}] {} ({})",
-                    display_score,
-                    hit.memory.id.as_str(),
-                    hit.memory.namespace
+                    display_score, urn, hit.memory.namespace
                 );
                 // Truncate content for display
                 let content = if hit.memory.content.len() > 100 {
