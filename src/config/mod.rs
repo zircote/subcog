@@ -26,6 +26,10 @@ use std::path::PathBuf;
 /// expand_env_vars("prefix-${VAR}-suffix") // Expands VAR in the middle
 /// expand_env_vars("no vars here") // Returns unchanged (no allocation)
 /// ```
+/// Maximum number of environment variable expansions per string (SEC-M5).
+/// Prevents `DoS` attacks from strings with many `${VAR}` patterns.
+const MAX_ENV_VAR_EXPANSIONS: usize = 100;
+
 fn expand_env_vars(input: &str) -> Cow<'_, str> {
     // Fast path: no ${} pattern at all
     if !input.contains("${") {
@@ -34,8 +38,19 @@ fn expand_env_vars(input: &str) -> Cow<'_, str> {
 
     let mut result = input.to_string();
     let mut start = 0;
+    let mut expansion_count = 0;
 
     while let Some(var_start) = result[start..].find("${") {
+        // SEC-M5: Limit expansions to prevent DoS from many ${} patterns
+        expansion_count += 1;
+        if expansion_count > MAX_ENV_VAR_EXPANSIONS {
+            tracing::warn!(
+                count = expansion_count,
+                "Environment variable expansion limit reached"
+            );
+            break;
+        }
+
         let var_start = start + var_start;
         if let Some(var_end) = result[var_start..].find('}') {
             let var_end = var_start + var_end;
@@ -43,6 +58,9 @@ fn expand_env_vars(input: &str) -> Cow<'_, str> {
             if let Ok(value) = std::env::var(var_name) {
                 result.replace_range(var_start..=var_end, &value);
                 // Continue from where we inserted the value
+                // Note: We intentionally skip past the inserted value to prevent
+                // recursive expansion if the value contains ${} patterns.
+                // This is a security feature, not a limitation.
                 start = var_start + value.len();
             } else {
                 // Skip past this ${...} if var not found
@@ -459,6 +477,13 @@ impl SearchIntentConfig {
         settings
     }
 
+    /// Sets whether search intent detection is enabled.
+    #[must_use]
+    pub const fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
     /// Sets whether LLM is enabled.
     #[must_use]
     pub const fn with_use_llm(mut self, use_llm: bool) -> Self {
@@ -474,11 +499,98 @@ impl SearchIntentConfig {
     }
 
     /// Sets the minimum confidence threshold.
+    ///
+    /// Value is clamped to the range [0.0, 1.0].
     #[must_use]
     pub const fn with_min_confidence(mut self, confidence: f32) -> Self {
-        self.min_confidence = confidence;
+        self.min_confidence = confidence.clamp(0.0, 1.0);
         self
     }
+
+    /// Sets the base memory count for adaptive injection.
+    #[must_use]
+    pub const fn with_base_count(mut self, count: usize) -> Self {
+        self.base_count = count;
+        self
+    }
+
+    /// Sets the maximum memory count for adaptive injection.
+    #[must_use]
+    pub const fn with_max_count(mut self, count: usize) -> Self {
+        self.max_count = count;
+        self
+    }
+
+    /// Sets the maximum tokens for injected memories.
+    #[must_use]
+    pub const fn with_max_tokens(mut self, tokens: usize) -> Self {
+        self.max_tokens = tokens;
+        self
+    }
+
+    /// Sets the namespace weights configuration.
+    #[must_use]
+    pub fn with_weights(mut self, weights: NamespaceWeightsConfig) -> Self {
+        self.weights = weights;
+        self
+    }
+
+    /// Validates and builds the configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - `base_count` is greater than `max_count`
+    /// - `max_tokens` is zero
+    /// - `llm_timeout_ms` is zero when LLM is enabled
+    pub fn build(self) -> Result<Self, ConfigValidationError> {
+        if self.base_count > self.max_count {
+            return Err(ConfigValidationError::InvalidRange {
+                field: "base_count/max_count".to_string(),
+                message: format!(
+                    "base_count ({}) cannot be greater than max_count ({})",
+                    self.base_count, self.max_count
+                ),
+            });
+        }
+
+        if self.max_tokens == 0 {
+            return Err(ConfigValidationError::InvalidValue {
+                field: "max_tokens".to_string(),
+                message: "max_tokens must be greater than 0".to_string(),
+            });
+        }
+
+        if self.use_llm && self.llm_timeout_ms == 0 {
+            return Err(ConfigValidationError::InvalidValue {
+                field: "llm_timeout_ms".to_string(),
+                message: "llm_timeout_ms must be greater than 0 when LLM is enabled".to_string(),
+            });
+        }
+
+        Ok(self)
+    }
+}
+
+/// Errors that can occur during configuration validation.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ConfigValidationError {
+    /// Invalid range between two related fields.
+    #[error("Invalid range for {field}: {message}")]
+    InvalidRange {
+        /// The field name(s) with invalid range.
+        field: String,
+        /// Description of the issue.
+        message: String,
+    },
+    /// Invalid value for a field.
+    #[error("Invalid value for {field}: {message}")]
+    InvalidValue {
+        /// The field name with invalid value.
+        field: String,
+        /// Description of the issue.
+        message: String,
+    },
 }
 
 /// Available LLM providers.
