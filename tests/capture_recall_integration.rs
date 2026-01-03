@@ -61,6 +61,42 @@ fn create_recall_service(temp_dir: &TempDir) -> RecallService {
     RecallService::with_backends(index, embedder, vector)
 }
 
+/// Create capture and recall services with SHARED backends.
+/// This ensures vector writes from capture are visible to recall.
+fn create_shared_services(temp_dir: &TempDir) -> (CaptureService, RecallService) {
+    let config = subcog::config::Config::default();
+    let embedder: Arc<dyn subcog::Embedder> = Arc::new(FastEmbedEmbedder::new());
+
+    let index_path = temp_dir.path().join("test_index.db");
+    let index = SqliteBackend::new(&index_path).expect("Failed to create SQLite index");
+    let index_arc: Arc<dyn subcog::IndexBackend + Send + Sync> = Arc::new(
+        SqliteBackend::new(&index_path).expect("Failed to create SQLite index for capture"),
+    );
+
+    let vector_path = temp_dir.path().join("test_vectors");
+    #[cfg(feature = "usearch-hnsw")]
+    let vector: Arc<dyn subcog::VectorBackend + Send + Sync> = Arc::new(
+        UsearchBackend::new(&vector_path, FastEmbedEmbedder::DEFAULT_DIMENSIONS)
+            .expect("Failed to create vector backend"),
+    );
+    #[cfg(not(feature = "usearch-hnsw"))]
+    let vector: Arc<dyn subcog::VectorBackend + Send + Sync> = Arc::new(UsearchBackend::new(
+        &vector_path,
+        FastEmbedEmbedder::DEFAULT_DIMENSIONS,
+    ));
+
+    let capture = CaptureService::with_backends(
+        config,
+        Arc::clone(&embedder),
+        index_arc,
+        Arc::clone(&vector),
+    );
+
+    let recall = RecallService::with_backends(index, Arc::clone(&embedder), vector);
+
+    (capture, recall)
+}
+
 /// Test: Capture → Text search roundtrip
 ///
 /// Captures a memory and immediately retrieves it via text search.
@@ -124,8 +160,8 @@ fn test_capture_recall_text_search_roundtrip() {
 fn test_capture_recall_vector_search_roundtrip() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
 
-    let capture_service = create_capture_service(&temp_dir);
-    let recall_service = create_recall_service(&temp_dir);
+    // Use shared services so vector backend state is shared between capture and recall
+    let (capture_service, recall_service) = create_shared_services(&temp_dir);
 
     // Capture a memory with specific semantic content
     let request = CaptureRequest {
@@ -178,11 +214,22 @@ fn test_capture_recall_vector_search_roundtrip() {
 
     #[cfg(not(feature = "usearch-hnsw"))]
     {
-        // Without native usearch, vector search gracefully returns empty
-        // This is expected graceful degradation behavior
+        // The fallback UsearchBackend implements brute-force cosine similarity
+        // search, so it should also find results (just with O(n) performance
+        // instead of O(log n) with the native HNSW index).
         assert!(
-            result.memories.is_empty(),
-            "Without usearch-hnsw feature, vector search returns empty (graceful degradation)"
+            !result.memories.is_empty(),
+            "Fallback usearch should find at least one memory via brute-force search"
+        );
+
+        // The captured memory should be in results
+        let found = result
+            .memories
+            .iter()
+            .any(|m| m.memory.content.contains("Redis"));
+        assert!(
+            found,
+            "Should find Redis memory via semantic search (fallback)"
         );
     }
 }

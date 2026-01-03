@@ -1,5 +1,7 @@
 //! Memory event types for audit and observability.
 
+use std::sync::Arc;
+
 use super::{Domain, MemoryId, Namespace};
 
 /// Events emitted during memory operations.
@@ -22,8 +24,8 @@ pub enum MemoryEvent {
     Retrieved {
         /// The ID of the retrieved memory.
         memory_id: MemoryId,
-        /// The search query that matched.
-        query: String,
+        /// The search query that matched (`Arc<str>` for zero-copy sharing, PERF-C1).
+        query: Arc<str>,
         /// The similarity score.
         score: f32,
         /// Timestamp (Unix epoch seconds).
