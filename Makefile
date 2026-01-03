@@ -74,8 +74,13 @@ clean:
 doc:
 	cargo doc --no-deps --open
 
-# Run benchmarks
+# Run benchmarks (quick validation mode for CI)
 bench:
+	cargo bench --bench search_intent -- --test
+	cargo bench --bench embedding --features fastembed-embeddings -- --test
+
+# Run full benchmarks (for performance analysis)
+bench-full:
 	cargo bench
 
 # MSRV check - verify builds with minimum supported Rust version
@@ -103,7 +108,8 @@ help:
 	@echo "    test           Run all tests"
 	@echo "    test-verbose   Run tests with output"
 	@echo "    test-lib       Run library tests only"
-	@echo "    bench          Run benchmarks"
+	@echo "    bench          Run benchmarks (quick validation)"
+	@echo "    bench-full     Run full benchmarks (performance analysis)"
 	@echo ""
 	@echo "  Quality:"
 	@echo "    lint           Run clippy linting (warnings allowed)"

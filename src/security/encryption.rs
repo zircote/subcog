@@ -126,8 +126,8 @@ mod implementation {
         ///
         /// Returns an error if the key is invalid.
         pub fn new(config: EncryptionConfig) -> Result<Self> {
-            let key = Key::<Aes256Gcm>::from_slice(&config.key);
-            let cipher = Aes256Gcm::new(key);
+            let key = Key::<Aes256Gcm>::from(config.key);
+            let cipher = Aes256Gcm::new(&key);
             Ok(Self { cipher })
         }
 
@@ -152,12 +152,12 @@ mod implementation {
             // Generate random nonce
             let mut nonce_bytes = [0u8; NONCE_SIZE];
             rand::rng().fill_bytes(&mut nonce_bytes);
-            let nonce = Nonce::from_slice(&nonce_bytes);
+            let nonce = Nonce::from(nonce_bytes);
 
             // Encrypt
             let ciphertext =
                 self.cipher
-                    .encrypt(nonce, plaintext)
+                    .encrypt(&nonce, plaintext)
                     .map_err(|e| Error::OperationFailed {
                         operation: "encrypt".to_string(),
                         cause: format!("AES-256-GCM encryption failed: {e}"),
@@ -203,13 +203,16 @@ mod implementation {
             // Extract nonce and ciphertext
             let nonce_start = MAGIC_HEADER.len();
             let nonce_end = nonce_start + NONCE_SIZE;
-            let nonce = Nonce::from_slice(&encrypted[nonce_start..nonce_end]);
+            let nonce_array: [u8; NONCE_SIZE] = encrypted[nonce_start..nonce_end]
+                .try_into()
+                .map_err(|_| Error::InvalidInput("Invalid nonce length".to_string()))?;
+            let nonce = Nonce::from(nonce_array);
             let ciphertext = &encrypted[nonce_end..];
 
             // Decrypt
             let plaintext =
                 self.cipher
-                    .decrypt(nonce, ciphertext)
+                    .decrypt(&nonce, ciphertext)
                     .map_err(|e| Error::OperationFailed {
                         operation: "decrypt".to_string(),
                         cause: format!(
