@@ -16,9 +16,11 @@
   - File: `src/storage/vector/usearch.rs:17-30`
   - Action: Added `recover_lock()` helper with `unwrap_or_else(|p| p.into_inner())` pattern
 
-- [ ] **CRIT-003**: Add MCP tool authorization
-  - File: `src/mcp/tools.rs:45-312`
-  - Action: Check `auth.has_role()` before executing tools
+- [x] **CRIT-003**: Add MCP tool authorization ✓ completed 2026-01-03
+  - File: `src/mcp/auth.rs`, `src/mcp/server.rs`
+  - Action: Added `ToolAuthorization` struct with scope-based access control
+  - Scopes: `read` (recall, status), `write` (capture, enrich), `admin` (sync, reindex)
+  - HTTP transport now checks JWT scopes before executing tools
 
 - [ ] **CRIT-004**: Sanitize memory content before injection
   - File: `src/hooks/user_prompt.rs:134-178`
@@ -359,11 +361,11 @@
 
 | Phase | Status | Findings | Fixed |
 |-------|--------|----------|-------|
-| Critical | Pending | 7 | 0 |
+| Critical | In Progress | 7 | 3 |
 | High | Pending | 44 | 0 |
 | Medium | Pending | 63 | 0 |
 | Low | Pending | 62 | 0 |
-| **Total** | | **176** | **0** |
+| **Total** | | **176** | **3** |
 
 ---
 

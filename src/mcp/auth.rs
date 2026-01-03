@@ -85,6 +85,96 @@ pub struct Claims {
     pub scopes: Vec<String>,
 }
 
+impl Claims {
+    /// Checks if the claims include a specific scope (CRIT-003).
+    ///
+    /// # Arguments
+    ///
+    /// * `scope` - The scope to check for (e.g., "read", "write", "admin").
+    ///
+    /// # Returns
+    ///
+    /// `true` if the claims include the specified scope or the wildcard "*" scope.
+    #[must_use]
+    pub fn has_scope(&self, scope: &str) -> bool {
+        self.scopes.iter().any(|s| s == scope || s == "*")
+    }
+
+    /// Checks if the claims include any of the specified scopes.
+    ///
+    /// # Arguments
+    ///
+    /// * `scopes` - The scopes to check for.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the claims include any of the specified scopes or the wildcard "*" scope.
+    #[must_use]
+    pub fn has_any_scope(&self, scopes: &[&str]) -> bool {
+        scopes.iter().any(|s| self.has_scope(s))
+    }
+}
+
+/// Tool authorization configuration (CRIT-003).
+///
+/// Maps tool names to required scopes for fine-grained access control.
+#[derive(Debug, Clone)]
+pub struct ToolAuthorization {
+    /// Default required scope if tool not explicitly mapped.
+    pub default_scope: String,
+}
+
+impl Default for ToolAuthorization {
+    fn default() -> Self {
+        Self {
+            default_scope: "tools".to_string(),
+        }
+    }
+}
+
+impl ToolAuthorization {
+    /// Returns the required scope for a tool.
+    ///
+    /// Tool scope mapping:
+    /// - `subcog_capture`, `subcog_enrich`, `subcog_consolidate`: "write"
+    /// - `subcog_recall`, `subcog_status`, `subcog_namespaces`: "read"
+    /// - `subcog_sync`: "admin"
+    /// - `prompt_save`, `prompt_delete`: "write"
+    /// - `prompt_list`, `prompt_get`, `prompt_run`: "read"
+    /// - All others: default "tools" scope
+    #[must_use]
+    pub fn required_scope(&self, tool_name: &str) -> &str {
+        match tool_name {
+            // Write operations
+            "subcog_capture" | "subcog_enrich" | "subcog_consolidate" => "write",
+            "prompt_save" | "prompt_delete" => "write",
+            // Read operations
+            "subcog_recall" | "subcog_status" | "subcog_namespaces" => "read",
+            "prompt_list" | "prompt_get" | "prompt_run" => "read",
+            // Admin operations
+            "subcog_sync" | "subcog_reindex" => "admin",
+            // Default
+            _ => &self.default_scope,
+        }
+    }
+
+    /// Checks if claims authorize access to a tool.
+    ///
+    /// # Arguments
+    ///
+    /// * `claims` - The JWT claims to check.
+    /// * `tool_name` - The name of the tool being called.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the claims include the required scope for the tool.
+    #[must_use]
+    pub fn is_authorized(&self, claims: &Claims, tool_name: &str) -> bool {
+        let required = self.required_scope(tool_name);
+        claims.has_scope(required)
+    }
+}
+
 /// JWT authentication configuration.
 #[derive(Debug, Clone)]
 pub struct JwtConfig {
@@ -379,5 +469,174 @@ mod tests {
 
         assert_eq!(config.issuer, Some("my-issuer".to_string()));
         assert_eq!(config.audience, Some("my-audience".to_string()));
+    }
+
+    // CRIT-003: Tool Authorization Tests
+
+    #[test]
+    fn test_claims_has_scope() {
+        let claims = Claims {
+            sub: "test-user".to_string(),
+            exp: 0,
+            iat: 0,
+            iss: None,
+            aud: None,
+            scopes: vec!["read".to_string(), "write".to_string()],
+        };
+
+        assert!(claims.has_scope("read"));
+        assert!(claims.has_scope("write"));
+        assert!(!claims.has_scope("admin"));
+    }
+
+    #[test]
+    fn test_claims_has_scope_wildcard() {
+        let claims = Claims {
+            sub: "admin-user".to_string(),
+            exp: 0,
+            iat: 0,
+            iss: None,
+            aud: None,
+            scopes: vec!["*".to_string()],
+        };
+
+        // Wildcard should match any scope
+        assert!(claims.has_scope("read"));
+        assert!(claims.has_scope("write"));
+        assert!(claims.has_scope("admin"));
+        assert!(claims.has_scope("anything"));
+    }
+
+    #[test]
+    fn test_claims_has_any_scope() {
+        let claims = Claims {
+            sub: "test-user".to_string(),
+            exp: 0,
+            iat: 0,
+            iss: None,
+            aud: None,
+            scopes: vec!["read".to_string()],
+        };
+
+        assert!(claims.has_any_scope(&["read", "write"]));
+        assert!(claims.has_any_scope(&["admin", "read"]));
+        assert!(!claims.has_any_scope(&["write", "admin"]));
+    }
+
+    #[test]
+    fn test_tool_authorization_required_scopes() {
+        let auth = ToolAuthorization::default();
+
+        // Write operations
+        assert_eq!(auth.required_scope("subcog_capture"), "write");
+        assert_eq!(auth.required_scope("subcog_enrich"), "write");
+        assert_eq!(auth.required_scope("subcog_consolidate"), "write");
+        assert_eq!(auth.required_scope("prompt_save"), "write");
+        assert_eq!(auth.required_scope("prompt_delete"), "write");
+
+        // Read operations
+        assert_eq!(auth.required_scope("subcog_recall"), "read");
+        assert_eq!(auth.required_scope("subcog_status"), "read");
+        assert_eq!(auth.required_scope("subcog_namespaces"), "read");
+        assert_eq!(auth.required_scope("prompt_list"), "read");
+        assert_eq!(auth.required_scope("prompt_get"), "read");
+        assert_eq!(auth.required_scope("prompt_run"), "read");
+
+        // Admin operations
+        assert_eq!(auth.required_scope("subcog_sync"), "admin");
+        assert_eq!(auth.required_scope("subcog_reindex"), "admin");
+
+        // Unknown tool uses default
+        assert_eq!(auth.required_scope("unknown_tool"), "tools");
+    }
+
+    #[test]
+    fn test_tool_authorization_is_authorized() {
+        let auth = ToolAuthorization::default();
+
+        // User with read scope
+        let read_user = Claims {
+            sub: "reader".to_string(),
+            exp: 0,
+            iat: 0,
+            iss: None,
+            aud: None,
+            scopes: vec!["read".to_string()],
+        };
+
+        assert!(auth.is_authorized(&read_user, "subcog_recall"));
+        assert!(auth.is_authorized(&read_user, "subcog_status"));
+        assert!(!auth.is_authorized(&read_user, "subcog_capture"));
+        assert!(!auth.is_authorized(&read_user, "subcog_sync"));
+
+        // User with write scope
+        let write_user = Claims {
+            sub: "writer".to_string(),
+            exp: 0,
+            iat: 0,
+            iss: None,
+            aud: None,
+            scopes: vec!["write".to_string()],
+        };
+
+        assert!(auth.is_authorized(&write_user, "subcog_capture"));
+        assert!(auth.is_authorized(&write_user, "prompt_save"));
+        assert!(!auth.is_authorized(&write_user, "subcog_recall"));
+        assert!(!auth.is_authorized(&write_user, "subcog_sync"));
+
+        // User with admin scope
+        let admin_user = Claims {
+            sub: "admin".to_string(),
+            exp: 0,
+            iat: 0,
+            iss: None,
+            aud: None,
+            scopes: vec!["admin".to_string()],
+        };
+
+        assert!(auth.is_authorized(&admin_user, "subcog_sync"));
+        assert!(auth.is_authorized(&admin_user, "subcog_reindex"));
+        assert!(!auth.is_authorized(&admin_user, "subcog_capture"));
+        assert!(!auth.is_authorized(&admin_user, "subcog_recall"));
+    }
+
+    #[test]
+    fn test_tool_authorization_wildcard_scope() {
+        let auth = ToolAuthorization::default();
+
+        let superuser = Claims {
+            sub: "superuser".to_string(),
+            exp: 0,
+            iat: 0,
+            iss: None,
+            aud: None,
+            scopes: vec!["*".to_string()],
+        };
+
+        // Wildcard should authorize all tools
+        assert!(auth.is_authorized(&superuser, "subcog_recall"));
+        assert!(auth.is_authorized(&superuser, "subcog_capture"));
+        assert!(auth.is_authorized(&superuser, "subcog_sync"));
+        assert!(auth.is_authorized(&superuser, "unknown_tool"));
+    }
+
+    #[test]
+    fn test_tool_authorization_multiple_scopes() {
+        let auth = ToolAuthorization::default();
+
+        let multi_scope_user = Claims {
+            sub: "multi".to_string(),
+            exp: 0,
+            iat: 0,
+            iss: None,
+            aud: None,
+            scopes: vec!["read".to_string(), "write".to_string()],
+        };
+
+        // Should have access to both read and write operations
+        assert!(auth.is_authorized(&multi_scope_user, "subcog_recall"));
+        assert!(auth.is_authorized(&multi_scope_user, "subcog_capture"));
+        // But not admin
+        assert!(!auth.is_authorized(&multi_scope_user, "subcog_sync"));
     }
 }

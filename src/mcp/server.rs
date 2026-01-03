@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use tracing::info_span;
 
 #[cfg(feature = "http")]
-use crate::mcp::auth::{JwtAuthenticator, JwtConfig};
+use crate::mcp::auth::{JwtAuthenticator, JwtConfig, ToolAuthorization};
 
 /// Default maximum requests per rate limit window.
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS: usize = 1000;
@@ -333,6 +333,7 @@ impl McpServer {
             resources: std::mem::take(&mut self.resources),
             prompts: std::mem::take(&mut self.prompts),
             authenticator,
+            tool_auth: ToolAuthorization::default(),
             rate_limit_config: self.rate_limit.clone(),
             rate_limits: std::collections::HashMap::new(),
         }));
@@ -811,7 +812,7 @@ mod http_transport {
     use super::{
         DispatchResult, JsonRpcRequest, PromptRegistry, ResourceHandler, ToolRegistry, Value,
     };
-    use crate::mcp::auth::JwtAuthenticator;
+    use crate::mcp::auth::{Claims, JwtAuthenticator, ToolAuthorization};
     use axum::{
         Json,
         extract::State,
@@ -844,6 +845,8 @@ mod http_transport {
         pub resources: ResourceHandler,
         pub prompts: PromptRegistry,
         pub authenticator: JwtAuthenticator,
+        /// Tool authorization for scope-based access control (CRIT-003).
+        pub tool_auth: ToolAuthorization,
         /// Rate limit configuration (ARCH-H1).
         pub rate_limit_config: super::RateLimitConfig,
         /// Per-client rate limits keyed by JWT subject/issuer.
@@ -1015,7 +1018,8 @@ mod http_transport {
                     );
                 };
 
-                let result = dispatch_http_method(&mut state_guard, &req.method, req.params);
+                let result =
+                    dispatch_http_method(&mut state_guard, &req.method, req.params, &claims);
 
                 let response = match result {
                     Ok(value) => serde_json::json!({
@@ -1049,10 +1053,19 @@ mod http_transport {
     }
 
     /// Dispatches a method call for HTTP transport.
+    ///
+    /// # Authorization (CRIT-003)
+    ///
+    /// Tool calls are authorized based on JWT scopes:
+    /// - `read`: subcog_recall, subcog_status, subcog_namespaces, prompt_list, prompt_get, prompt_run
+    /// - `write`: subcog_capture, subcog_enrich, subcog_consolidate, prompt_save, prompt_delete
+    /// - `admin`: subcog_sync, subcog_reindex
+    /// - `*`: Wildcard scope grants all permissions
     fn dispatch_http_method(
         state: &mut McpHttpState,
         method: &str,
         params: Option<Value>,
+        claims: &Claims,
     ) -> DispatchResult {
         match method {
             "initialize" => Ok(serde_json::json!({
@@ -1089,6 +1102,32 @@ mod http_transport {
                     .get("name")
                     .and_then(|v| v.as_str())
                     .ok_or((-32602, "Missing tool name".to_string()))?;
+
+                // CRIT-003: Check authorization before executing tool
+                if !state.tool_auth.is_authorized(claims, name) {
+                    let required_scope = state.tool_auth.required_scope(name);
+                    tracing::warn!(
+                        tool = name,
+                        required_scope = required_scope,
+                        user_scopes = ?claims.scopes,
+                        sub = %claims.sub,
+                        "Tool authorization denied"
+                    );
+                    metrics::counter!(
+                        "mcp_tool_auth_denied_total",
+                        "tool" => name.to_string(),
+                        "required_scope" => required_scope.to_string()
+                    )
+                    .increment(1);
+                    return Err((
+                        -32000,
+                        format!(
+                            "Forbidden: tool '{}' requires '{}' scope",
+                            name, required_scope
+                        ),
+                    ));
+                }
+
                 let arguments = params
                     .get("arguments")
                     .cloned()
