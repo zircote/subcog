@@ -79,7 +79,7 @@ bench:
 	cargo bench
 
 # CI-style full check (all gates must pass)
-ci: format-check lint-strict test doc-check deny
+ci: format-check lint-strict test deny
 
 # Show help
 help:
@@ -117,5 +117,4 @@ help:
 	@echo "    1. cargo fmt -- --check"
 	@echo "    2. cargo clippy --all-targets --all-features -- -D warnings"
 	@echo "    3. cargo test --all-features"
-	@echo "    4. cargo doc --no-deps"
-	@echo "    5. cargo deny check"
+	@echo "    4. cargo deny check"

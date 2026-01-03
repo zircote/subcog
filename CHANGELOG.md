@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- Added request body size limits (1MB) to MCP server to prevent DoS attacks
+- Added deserialization size validation before JSON parsing
+- Path traversal protection already implemented in filesystem backend
+- OpenAI API key format validation (already fixed in previous session)
+- PostgreSQL connection string validation (already fixed in previous session)
+
+### Changed
+
+- Centralized `DEFAULT_DIMENSIONS` constant in `embedding` module (was duplicated in 4 files)
+- Made MCP rate limits configurable via `SUBCOG_MCP_RATE_LIMIT_MAX_REQUESTS` and `SUBCOG_MCP_RATE_LIMIT_WINDOW_SECS`
+- Reduced deduplication search limit from 10 to 3 for performance
+- Added word limit (1000) to pseudo-embedding generation for performance
+
+### Fixed
+
+- Fixed vector search integration test to share backends between CaptureService and RecallService
+- Fixed rustdoc warning for unclosed HTML tag in events.rs
+- Pre-allocated HashMap in RRF fusion for performance (PERF-M1)
+
+### Removed
+
+- Removed placeholder functions (`add`, `divide`, `Config`) from lib.rs
+
 ## [0.2.0] - 2026-01-02
 
 ### Added
