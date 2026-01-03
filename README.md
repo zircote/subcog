@@ -188,6 +188,151 @@ The migration command:
 
 Subcog uses a **three-layer storage architecture** to separate concerns:
 
+### System Architecture Diagram
+
+```mermaid
+flowchart TB
+    subgraph Access["Access Layer"]
+        CLI["CLI<br/>subcog capture/recall/sync"]
+        MCP["MCP Server<br/>JSON-RPC over stdio"]
+        Hooks["Claude Code Hooks<br/>SessionStart, UserPrompt, Stop"]
+    end
+
+    subgraph Services["Service Layer"]
+        Capture["CaptureService<br/>Memory ingestion"]
+        Recall["RecallService<br/>Hybrid search"]
+        Sync["SyncService<br/>Git remote sync"]
+        GC["GCService<br/>Branch cleanup"]
+        Dedup["DeduplicationService<br/>3-tier duplicate detection"]
+        Context["ContextBuilder<br/>Adaptive injection"]
+    end
+
+    subgraph Storage["Three-Layer Storage"]
+        subgraph Persistence["Persistence Layer<br/>(Authoritative)"]
+            SQLiteP["SQLite<br/>(default)"]
+            PostgresP["PostgreSQL"]
+            FS["Filesystem"]
+        end
+
+        subgraph Index["Index Layer<br/>(Searchable)"]
+            SQLiteI["SQLite + FTS5<br/>(default)"]
+            PostgresI["PostgreSQL FTS"]
+            Redis["RediSearch"]
+        end
+
+        subgraph Vector["Vector Layer<br/>(Embeddings)"]
+            usearch["usearch HNSW<br/>(default)"]
+            pgvector["pgvector"]
+            RedisV["Redis Vector"]
+        end
+    end
+
+    subgraph External["External Systems"]
+        FastEmbed["FastEmbed<br/>all-MiniLM-L6-v2"]
+        LLM["LLM Provider<br/>Anthropic/OpenAI/Ollama"]
+        Git["Git Remote<br/>notes/subcog/*"]
+    end
+
+    CLI --> Capture
+    CLI --> Recall
+    CLI --> Sync
+    MCP --> Capture
+    MCP --> Recall
+    Hooks --> Context
+    Hooks --> Capture
+
+    Capture --> Persistence
+    Capture --> Index
+    Capture --> Vector
+    Capture --> FastEmbed
+    Capture --> Dedup
+
+    Recall --> Index
+    Recall --> Vector
+    Recall --> FastEmbed
+
+    Sync --> Git
+
+    Context --> Recall
+    Context --> LLM
+
+    Dedup --> Recall
+    Dedup --> FastEmbed
+
+    GC --> Persistence
+    GC --> Index
+
+    style Access fill:#e1f5fe
+    style Services fill:#fff3e0
+    style Storage fill:#e8f5e9
+    style External fill:#fce4ec
+```
+
+### Data Flow Diagram
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI/MCP
+    participant CaptureService
+    participant Dedup
+    participant FastEmbed
+    participant Persistence
+    participant Index
+    participant Vector
+
+    User->>CLI/MCP: subcog capture "decision..."
+    CLI/MCP->>CaptureService: CaptureRequest
+    CaptureService->>Dedup: Check duplicate
+    Dedup->>Index: Hash tag lookup (exact)
+    Dedup->>FastEmbed: Generate embedding
+    Dedup->>Vector: Similarity search (semantic)
+    Dedup-->>CaptureService: Not duplicate
+
+    CaptureService->>FastEmbed: Generate embedding
+    FastEmbed-->>CaptureService: [384-dim vector]
+
+    par Store in all layers
+        CaptureService->>Persistence: Store memory
+        CaptureService->>Index: Index for FTS
+        CaptureService->>Vector: Store embedding
+    end
+
+    CaptureService-->>CLI/MCP: CaptureResult{id, urn}
+    CLI/MCP-->>User: Memory captured
+```
+
+### Hybrid Search Flow
+
+```mermaid
+flowchart LR
+    Query["Query: 'database storage decision'"]
+
+    subgraph Search["Parallel Search"]
+        BM25["BM25 Search<br/>(Index Layer)"]
+        VectorSearch["Vector Search<br/>(Vector Layer)"]
+    end
+
+    subgraph Results["Raw Results"]
+        BM25Results["id1: 2.3<br/>id2: 1.8<br/>id3: 1.2"]
+        VectorResults["id2: 0.92<br/>id1: 0.85<br/>id4: 0.78"]
+    end
+
+    RRF["RRF Fusion<br/>score = sum(1/(k+rank))"]
+
+    Final["Final Results<br/>(normalized 0.0-1.0)<br/>id2: 1.00<br/>id1: 0.87<br/>id3: 0.45<br/>id4: 0.38"]
+
+    Query --> BM25
+    Query --> VectorSearch
+    BM25 --> BM25Results
+    VectorSearch --> VectorResults
+    BM25Results --> RRF
+    VectorResults --> RRF
+    RRF --> Final
+```
+
+### ASCII Architecture Reference
+
 ```
                               +-----------------+
                               |   Access Layer  |
@@ -232,25 +377,6 @@ Subcog uses a **three-layer storage architecture** to separate concerns:
 | **Persistence** | Authoritative storage, ACID guarantees | SQLite | PostgreSQL, Filesystem |
 | **Index** | Full-text search, BM25 ranking | SQLite + FTS5 | PostgreSQL, RediSearch |
 | **Vector** | Embedding storage, ANN search | usearch (HNSW) | pgvector, Redis Vector |
-
-### Hybrid Search Flow
-
-```
-Query: "database storage decision"
-       |
-       +---> BM25 Search (Index Layer)
-       |     Returns: [(id1, 2.3), (id2, 1.8), (id3, 1.2)]
-       |
-       +---> Vector Search (Vector Layer)
-       |     Returns: [(id2, 0.92), (id1, 0.85), (id4, 0.78)]
-       |
-       v
-   RRF Fusion: score = sum(1 / (k + rank))
-       |
-       v
-   Final: [(id2, 1.0), (id1, 0.87), (id3, 0.45), (id4, 0.38)]
-          (normalized 0.0 - 1.0)
-```
 
 For detailed architecture documentation, see [`src/storage/traits/mod.rs`](src/storage/traits/mod.rs).
 

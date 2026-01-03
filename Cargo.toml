@@ -132,6 +132,10 @@ harness = false
 name = "search"
 harness = false
 
+[[bench]]
+name = "query_parser"
+harness = false
+
 [profile.dev]
 # Faster compile times during development
 debug = 1

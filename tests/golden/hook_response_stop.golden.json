@@ -1,0 +1,15 @@
+{
+  "description": "Stop hook response format (Claude Code compliant)",
+  "schema": {
+    "hookSpecificOutput": {
+      "hookEventName": "Stop",
+      "additionalContext": "string (markdown formatted session summary)"
+    }
+  },
+  "example": {
+    "hookSpecificOutput": {
+      "hookEventName": "Stop",
+      "additionalContext": "**Subcog Session Summary**\n\n## Statistics\n- Duration: 45 minutes\n- Memories captured: 5\n- Memories recalled: 12\n\n## Captured This Session\n- [decisions] Database schema design\n- [patterns] Repository pattern implementation\n- [learnings] Async trait limitations\n\n## Sync Status\nLocal changes synced to remote."
+    }
+  }
+}
