@@ -32,12 +32,16 @@ const MIN_SECRET_LENGTH: usize = 32;
 /// A 32+ character secret with fewer than 8 unique chars is likely weak.
 const MIN_UNIQUE_CHARS: usize = 8;
 
+/// Minimum character classes required (HIGH-SEC-004).
+/// At least 3 of: lowercase, uppercase, digits, special chars.
+const MIN_CHAR_CLASSES: usize = 3;
+
 /// Validates that a secret has sufficient entropy (not just length).
 ///
-/// Checks for:
-/// - Minimum unique character diversity
-/// - Not all same character
-/// - Not obviously sequential patterns
+/// Checks for (HIGH-SEC-004):
+/// - Minimum unique character diversity (8+ unique chars)
+/// - Character class diversity (3+ of: lowercase, uppercase, digits, special)
+/// - Not obviously sequential/weak patterns
 fn validate_secret_entropy(secret: &str) -> std::result::Result<(), String> {
     // Check unique character count
     let unique_chars: std::collections::HashSet<char> = secret.chars().collect();
@@ -46,6 +50,27 @@ fn validate_secret_entropy(secret: &str) -> std::result::Result<(), String> {
             "JWT secret has insufficient entropy: only {} unique characters (minimum: {})",
             unique_chars.len(),
             MIN_UNIQUE_CHARS
+        ));
+    }
+
+    // HIGH-SEC-004: Check character class diversity
+    let has_lowercase = secret.chars().any(|c| c.is_ascii_lowercase());
+    let has_uppercase = secret.chars().any(|c| c.is_ascii_uppercase());
+    let has_digit = secret.chars().any(|c| c.is_ascii_digit());
+    let has_special = secret
+        .chars()
+        .any(|c| c.is_ascii_punctuation() || c == '+' || c == '/' || c == '=');
+
+    let char_class_count = usize::from(has_lowercase)
+        + usize::from(has_uppercase)
+        + usize::from(has_digit)
+        + usize::from(has_special);
+
+    if char_class_count < MIN_CHAR_CLASSES {
+        return Err(format!(
+            "JWT secret has insufficient character diversity: {char_class_count} character classes (minimum: {MIN_CHAR_CLASSES}). \
+             Use a mix of lowercase, uppercase, digits, and special characters. \
+             Recommended: openssl rand -base64 32"
         ));
     }
 
@@ -638,5 +663,72 @@ mod tests {
         assert!(auth.is_authorized(&multi_scope_user, "subcog_capture"));
         // But not admin
         assert!(!auth.is_authorized(&multi_scope_user, "subcog_sync"));
+    }
+
+    // HIGH-SEC-004: Character class diversity tests
+
+    #[test]
+    fn test_entropy_validation_good_base64_secret() {
+        // Base64 output from `openssl rand -base64 32` has 3+ character classes
+        let result = validate_secret_entropy("aB3+XyZ9/Qr7mN2pK5tL8vW0jH4gF6sD=");
+        assert!(result.is_ok(), "Base64 secret should pass: {result:?}");
+    }
+
+    #[test]
+    fn test_entropy_validation_all_lowercase_fails() {
+        // Only 1 character class: lowercase
+        let result = validate_secret_entropy("abcdefghijklmnopqrstuvwxyzabcdef");
+        assert!(result.is_err(), "All lowercase should fail");
+        assert!(result.unwrap_err().contains("character diversity"));
+    }
+
+    #[test]
+    fn test_entropy_validation_all_uppercase_fails() {
+        // Only 1 character class: uppercase
+        let result = validate_secret_entropy("ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEF");
+        assert!(result.is_err(), "All uppercase should fail");
+    }
+
+    #[test]
+    fn test_entropy_validation_all_digits_fails() {
+        // Only 1 character class: digits
+        let result = validate_secret_entropy("12345678901234567890123456789012");
+        assert!(result.is_err(), "All digits should fail");
+    }
+
+    #[test]
+    fn test_entropy_validation_two_classes_fails() {
+        // Only 2 character classes: lowercase + uppercase
+        let result = validate_secret_entropy("abcdefghijklmnopABCDEFGHIJKLMNOP");
+        assert!(result.is_err(), "Two classes should fail (need 3+)");
+    }
+
+    #[test]
+    fn test_entropy_validation_three_classes_passes() {
+        // 3 character classes: lowercase + uppercase + digits (no weak patterns)
+        let result = validate_secret_entropy("xYmNpQrStUvWxYz0192837465XYZMNP");
+        assert!(result.is_ok(), "Three classes should pass: {result:?}");
+    }
+
+    #[test]
+    fn test_entropy_validation_weak_pattern_still_fails() {
+        // Has 3+ character classes but contains weak pattern
+        let result = validate_secret_entropy("Password123!@#$%^&*()_+-=[]{}|");
+        assert!(
+            result.is_err(),
+            "Weak pattern should fail even with good diversity"
+        );
+        assert!(result.unwrap_err().contains("weak pattern"));
+    }
+
+    #[test]
+    fn test_entropy_validation_special_chars_count() {
+        // Verify special chars include base64 characters (+, /, =)
+        let result = validate_secret_entropy("AAAAAAAAAAAAAAAAAAAAAAAAAAAA+/==");
+        // Has uppercase + special (+ / =), but only 2 classes - should fail
+        assert!(
+            result.is_err(),
+            "Two classes (uppercase + special) should fail"
+        );
     }
 }

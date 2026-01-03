@@ -180,8 +180,12 @@ impl FilesystemBackend {
     /// Tries to create an encryptor from environment configuration.
     #[cfg(feature = "encryption")]
     fn try_create_encryptor() -> Option<Encryptor> {
-        match EncryptionConfig::try_from_env() {
-            Some(config) => match Encryptor::new(config) {
+        EncryptionConfig::try_from_env().map_or_else(
+            || {
+                tracing::debug!("Encryption key not configured, storing files unencrypted");
+                None
+            },
+            |config| match Encryptor::new(config) {
                 Ok(enc) => {
                     tracing::info!("Encryption at rest enabled for filesystem backend");
                     Some(enc)
@@ -191,24 +195,54 @@ impl FilesystemBackend {
                     None
                 },
             },
-            None => {
-                tracing::debug!("Encryption key not configured, storing files unencrypted");
-                None
-            },
+        )
+    }
+
+    /// Decrypts data if it's encrypted, returns as-is otherwise.
+    ///
+    /// This helper reduces nesting in the `get` method (`clippy::excessive_nesting` fix).
+    #[cfg(feature = "encryption")]
+    fn decrypt_if_needed(&self, raw_data: Vec<u8>) -> Result<Vec<u8>> {
+        if !is_encrypted(&raw_data) {
+            return Ok(raw_data);
         }
+        self.encryptor.as_ref().map_or_else(
+            || {
+                Err(Error::OperationFailed {
+                    operation: "decrypt_memory".to_string(),
+                    cause: "File is encrypted but no encryption key configured".to_string(),
+                })
+            },
+            |encryptor| encryptor.decrypt(&raw_data),
+        )
+    }
+
+    /// Decrypts data if it's encrypted, returns as-is otherwise.
+    ///
+    /// Non-encryption version - returns error if data is encrypted.
+    #[cfg(not(feature = "encryption"))]
+    fn decrypt_if_needed(&self, raw_data: Vec<u8>) -> Result<Vec<u8>> {
+        if is_encrypted(&raw_data) {
+            return Err(Error::OperationFailed {
+                operation: "decrypt_memory".to_string(),
+                cause: "File is encrypted but encryption feature not enabled".to_string(),
+            });
+        }
+        Ok(raw_data)
     }
 
     /// Returns whether encryption is enabled.
+    #[cfg(feature = "encryption")]
     #[must_use]
-    pub fn encryption_enabled(&self) -> bool {
-        #[cfg(feature = "encryption")]
-        {
-            self.encryptor.is_some()
-        }
-        #[cfg(not(feature = "encryption"))]
-        {
-            false
-        }
+    pub const fn encryption_enabled(&self) -> bool {
+        self.encryptor.is_some()
+    }
+
+    /// Returns whether encryption is enabled.
+    #[cfg(not(feature = "encryption"))]
+    #[must_use]
+    pub const fn encryption_enabled(&self) -> bool {
+        false
     }
 
     /// Returns the path for a memory file.
@@ -323,29 +357,8 @@ impl PersistenceBackend for FilesystemBackend {
             cause: e.to_string(),
         })?;
 
-        // CRIT-005: Decrypt if file is encrypted
-        let json_bytes = if is_encrypted(&raw_data) {
-            #[cfg(feature = "encryption")]
-            {
-                if let Some(ref encryptor) = self.encryptor {
-                    encryptor.decrypt(&raw_data)?
-                } else {
-                    return Err(Error::OperationFailed {
-                        operation: "decrypt_memory".to_string(),
-                        cause: "File is encrypted but no encryption key configured".to_string(),
-                    });
-                }
-            }
-            #[cfg(not(feature = "encryption"))]
-            {
-                return Err(Error::OperationFailed {
-                    operation: "decrypt_memory".to_string(),
-                    cause: "File is encrypted but encryption feature not enabled".to_string(),
-                });
-            }
-        } else {
-            raw_data
-        };
+        // CRIT-005: Decrypt if file is encrypted (uses helper to reduce nesting)
+        let json_bytes = self.decrypt_if_needed(raw_data)?;
 
         let json = String::from_utf8(json_bytes).map_err(|e| Error::OperationFailed {
             operation: "decode_memory_file".to_string(),

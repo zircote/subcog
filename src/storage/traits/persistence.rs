@@ -86,6 +86,25 @@ pub trait PersistenceBackend: Send + Sync {
     /// Returns an error if the list operation fails.
     fn list_ids(&self) -> Result<Vec<MemoryId>>;
 
+    /// Retrieves multiple memories by their IDs in a single batch operation.
+    ///
+    /// This method avoids N+1 queries by fetching all requested memories
+    /// in a single database round-trip (where supported by the backend).
+    ///
+    /// # Default Implementation
+    ///
+    /// Falls back to calling `get()` for each ID. Backends should override
+    /// this with an optimized batch query (e.g., `SELECT ... WHERE id IN (...)`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any retrieval operation fails.
+    fn get_batch(&self, ids: &[MemoryId]) -> Result<Vec<Memory>> {
+        ids.iter()
+            .filter_map(|id| self.get(id).transpose())
+            .collect()
+    }
+
     /// Checks if a memory exists.
     ///
     /// # Errors

@@ -353,6 +353,40 @@ mod implementation {
                 })
                 .collect())
         }
+
+        /// Async implementation of `get_batch` operation using single IN query.
+        ///
+        /// Avoids N+1 queries by fetching all IDs in a single round-trip.
+        #[allow(clippy::cast_sign_loss)]
+        async fn get_batch_async(&self, ids: &[MemoryId]) -> Result<Vec<Memory>> {
+            if ids.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let client = self.pool.get().await.map_err(pool_error)?;
+
+            // Build parameterized IN clause: $1, $2, $3, ...
+            let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("${i}")).collect();
+            let query = format!(
+                r"SELECT id, content, namespace, domain_org, domain_project, domain_repo,
+                    status, tags, source, embedding, created_at, updated_at
+                FROM {} WHERE id IN ({})",
+                self.table_name,
+                placeholders.join(", ")
+            );
+
+            // Build params array
+            let id_strs: Vec<&str> = ids.iter().map(MemoryId::as_str).collect();
+            let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
+                id_strs.iter().map(|s| s as _).collect();
+
+            let rows = client
+                .query(&query, &params)
+                .await
+                .map_err(|e| query_error("postgres_persistence_get_batch", e))?;
+
+            Ok(rows.iter().map(Self::row_to_memory).collect())
+        }
     }
 
     impl PersistenceBackend for PostgresBackend {
@@ -370,6 +404,11 @@ mod implementation {
 
         fn list_ids(&self) -> Result<Vec<MemoryId>> {
             self.block_on(self.list_ids_async())
+        }
+
+        /// Optimized batch retrieval using a single IN query (HIGH-PERF-002).
+        fn get_batch(&self, ids: &[MemoryId]) -> Result<Vec<Memory>> {
+            self.block_on(self.get_batch_async(ids))
         }
     }
 }

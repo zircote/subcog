@@ -207,8 +207,7 @@ impl AuthContext {
         } else {
             let required: Vec<_> = permissions.iter().map(Permission::as_str).collect();
             Err(Error::Unauthorized(format!(
-                "One of permissions {:?} required",
-                required
+                "One of permissions {required:?} required"
             )))
         }
     }

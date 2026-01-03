@@ -30,6 +30,77 @@ const DEFAULT_RATE_LIMIT_WINDOW_SECS: u64 = 60;
 /// Maximum request body size (1MB) to prevent `DoS` via large payloads (SEC-H4).
 const MAX_REQUEST_BODY_SIZE: usize = 1024 * 1024;
 
+/// Default allowed CORS origin (none by default for security).
+const DEFAULT_CORS_ALLOWED_ORIGIN: &str = "";
+
+/// CORS configuration (HIGH-SEC-006).
+#[derive(Debug, Clone)]
+pub struct CorsConfig {
+    /// Allowed origins (comma-separated).
+    pub allowed_origins: Vec<String>,
+    /// Allow credentials (cookies, auth headers).
+    pub allow_credentials: bool,
+    /// Max age for preflight cache (seconds).
+    pub max_age_secs: u64,
+}
+
+impl Default for CorsConfig {
+    fn default() -> Self {
+        Self {
+            allowed_origins: Vec::new(), // Deny all by default
+            allow_credentials: false,
+            max_age_secs: 3600,
+        }
+    }
+}
+
+impl CorsConfig {
+    /// Creates config from environment variables.
+    ///
+    /// Reads `SUBCOG_MCP_CORS_ALLOWED_ORIGINS` (comma-separated list),
+    /// `SUBCOG_MCP_CORS_ALLOW_CREDENTIALS`, and `SUBCOG_MCP_CORS_MAX_AGE_SECS`.
+    #[must_use]
+    pub fn from_env() -> Self {
+        let allowed_origins = std::env::var("SUBCOG_MCP_CORS_ALLOWED_ORIGINS")
+            .unwrap_or_else(|_| DEFAULT_CORS_ALLOWED_ORIGIN.to_string())
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
+
+        let allow_credentials = std::env::var("SUBCOG_MCP_CORS_ALLOW_CREDENTIALS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(false);
+
+        let max_age_secs = std::env::var("SUBCOG_MCP_CORS_MAX_AGE_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(3600);
+
+        Self {
+            allowed_origins,
+            allow_credentials,
+            max_age_secs,
+        }
+    }
+
+    /// Sets allowed origins.
+    #[must_use]
+    pub fn with_origins(mut self, origins: Vec<String>) -> Self {
+        self.allowed_origins = origins;
+        self
+    }
+
+    /// Allows credentials.
+    #[must_use]
+    pub const fn with_credentials(mut self, allow: bool) -> Self {
+        self.allow_credentials = allow;
+        self
+    }
+}
+
 /// MCP rate limit configuration (ARCH-H1).
 #[derive(Debug, Clone)]
 pub struct RateLimitConfig {
@@ -119,6 +190,9 @@ pub struct McpServer {
     /// JWT authenticator for HTTP transport (SEC-H1).
     #[cfg(feature = "http")]
     jwt_authenticator: Option<JwtAuthenticator>,
+    /// CORS configuration for HTTP transport (HIGH-SEC-006).
+    #[cfg(feature = "http")]
+    cors_config: CorsConfig,
 }
 
 impl McpServer {
@@ -137,7 +211,20 @@ impl McpServer {
             rate_limit: RateLimitConfig::from_env(),
             #[cfg(feature = "http")]
             jwt_authenticator: None,
+            #[cfg(feature = "http")]
+            cors_config: CorsConfig::from_env(),
         }
+    }
+
+    /// Sets the CORS configuration for HTTP transport (HIGH-SEC-006).
+    ///
+    /// By default, no origins are allowed (deny all CORS requests).
+    /// Use this to explicitly allow specific origins.
+    #[cfg(feature = "http")]
+    #[must_use]
+    pub fn with_cors_config(mut self, config: CorsConfig) -> Self {
+        self.cors_config = config;
+        self
     }
 
     /// Sets the JWT authenticator for HTTP transport (SEC-H1).
@@ -313,9 +400,10 @@ impl McpServer {
     /// Requires the `http` feature and `SUBCOG_MCP_JWT_SECRET` environment variable.
     #[cfg(feature = "http")]
     fn run_http(&mut self) -> Result<()> {
-        use axum::http::header;
+        use axum::http::{Method, header};
         use axum::{Router, routing::post};
         use std::sync::{Arc, Mutex};
+        use tower_http::cors::CorsLayer;
         use tower_http::set_header::SetResponseHeaderLayer;
         use tower_http::trace::TraceLayer;
 
@@ -338,9 +426,47 @@ impl McpServer {
             rate_limits: std::collections::HashMap::new(),
         }));
 
+        // Build CORS layer from configuration (HIGH-SEC-006)
+        // By default, no origins are allowed (deny all CORS requests)
+        let cors_layer = if self.cors_config.allowed_origins.is_empty() {
+            // No origins configured - CORS preflight will fail (secure default)
+            tracing::info!("CORS: No origins configured, all cross-origin requests denied");
+            CorsLayer::new()
+        } else {
+            // Parse allowed origins into HeaderValues
+            let origins: Vec<_> = self
+                .cors_config
+                .allowed_origins
+                .iter()
+                .filter_map(|o| o.parse().ok())
+                .collect();
+
+            tracing::info!(
+                origins = ?self.cors_config.allowed_origins,
+                allow_credentials = self.cors_config.allow_credentials,
+                "CORS: Configured with explicit origins"
+            );
+
+            let mut layer = CorsLayer::new()
+                .allow_origin(origins)
+                .allow_methods([Method::POST, Method::OPTIONS])
+                .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+                .max_age(std::time::Duration::from_secs(
+                    self.cors_config.max_age_secs,
+                ));
+
+            if self.cors_config.allow_credentials {
+                layer = layer.allow_credentials(true);
+            }
+
+            layer
+        };
+
         // Build the router with security headers
         let app = Router::new()
             .route("/mcp", post(handle_http_request))
+            // CORS layer (HIGH-SEC-006) - must be before other layers
+            .layer(cors_layer)
             // Security headers (OWASP recommendations)
             .layer(SetResponseHeaderLayer::overriding(
                 header::X_CONTENT_TYPE_OPTIONS,
@@ -1057,9 +1183,9 @@ mod http_transport {
     /// # Authorization (CRIT-003)
     ///
     /// Tool calls are authorized based on JWT scopes:
-    /// - `read`: subcog_recall, subcog_status, subcog_namespaces, prompt_list, prompt_get, prompt_run
-    /// - `write`: subcog_capture, subcog_enrich, subcog_consolidate, prompt_save, prompt_delete
-    /// - `admin`: subcog_sync, subcog_reindex
+    /// - `read`: `subcog_recall`, `subcog_status`, `subcog_namespaces`, `prompt_list`, `prompt_get`, `prompt_run`
+    /// - `write`: `subcog_capture`, `subcog_enrich`, `subcog_consolidate`, `prompt_save`, `prompt_delete`
+    /// - `admin`: `subcog_sync`, `subcog_reindex`
     /// - `*`: Wildcard scope grants all permissions
     fn dispatch_http_method(
         state: &mut McpHttpState,
@@ -1121,10 +1247,7 @@ mod http_transport {
                     .increment(1);
                     return Err((
                         -32000,
-                        format!(
-                            "Forbidden: tool '{}' requires '{}' scope",
-                            name, required_scope
-                        ),
+                        format!("Forbidden: tool '{name}' requires '{required_scope}' scope"),
                     ));
                 }
 
@@ -1361,5 +1484,66 @@ mod tests {
         let response = server.handle_request(request);
 
         assert!(response.contains("error"));
+    }
+}
+
+#[cfg(all(test, feature = "http"))]
+mod cors_tests {
+    use super::*;
+
+    #[test]
+    fn test_cors_config_default() {
+        let config = CorsConfig::default();
+        assert!(config.allowed_origins.is_empty());
+        assert!(!config.allow_credentials);
+        assert_eq!(config.max_age_secs, 3600);
+    }
+
+    #[test]
+    fn test_cors_config_with_origins() {
+        let config = CorsConfig::default()
+            .with_origins(vec!["https://example.com".to_string()])
+            .with_credentials(true);
+
+        assert_eq!(config.allowed_origins.len(), 1);
+        assert_eq!(config.allowed_origins[0], "https://example.com");
+        assert!(config.allow_credentials);
+    }
+
+    #[test]
+    fn test_cors_config_from_env_defaults() {
+        // Test that from_env() returns sensible defaults when env vars are not set
+        // (assumes test environment doesn't have SUBCOG_MCP_CORS_* set)
+        let config = CorsConfig::from_env();
+        // Default max_age should be 3600
+        assert_eq!(config.max_age_secs, 3600);
+        // Default allow_credentials should be false
+        assert!(!config.allow_credentials);
+    }
+
+    #[test]
+    fn test_cors_origin_parsing() {
+        // Test the parsing logic used in from_env
+        let origins_str = "https://a.com, https://b.com, ";
+        let origins: Vec<String> = origins_str
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
+
+        assert_eq!(origins.len(), 2);
+        assert_eq!(origins[0], "https://a.com");
+        assert_eq!(origins[1], "https://b.com");
+    }
+
+    #[test]
+    fn test_mcp_server_with_cors_config() {
+        let cors = CorsConfig::default().with_origins(vec!["https://trusted.com".to_string()]);
+
+        let server = McpServer::new().with_cors_config(cors);
+
+        assert_eq!(server.cors_config.allowed_origins.len(), 1);
+        assert_eq!(server.cors_config.allowed_origins[0], "https://trusted.com");
     }
 }

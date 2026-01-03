@@ -1100,8 +1100,7 @@ mod tests {
             let sanitized = sanitize_for_context(pattern);
             assert!(
                 sanitized.contains("[REDACTED]"),
-                "Failed to sanitize: {}",
-                pattern
+                "Failed to sanitize: {pattern}",
             );
         }
     }
@@ -1119,8 +1118,7 @@ mod tests {
             let sanitized = sanitize_for_context(pattern);
             assert!(
                 sanitized.contains("[REDACTED]"),
-                "Failed to sanitize: {}",
-                pattern
+                "Failed to sanitize: {pattern}",
             );
         }
     }
@@ -1148,8 +1146,7 @@ mod tests {
             let sanitized = sanitize_for_context(pattern);
             assert!(
                 sanitized.contains("[REDACTED]"),
-                "Failed to sanitize jailbreak: {}",
-                pattern
+                "Failed to sanitize jailbreak: {pattern}",
             );
         }
     }
@@ -1206,8 +1203,7 @@ mod tests {
             let sanitized = sanitize_for_context(pattern);
             assert!(
                 sanitized.contains("[REDACTED]"),
-                "Case insensitive failed: {}",
-                pattern
+                "Case insensitive failed: {pattern}",
             );
         }
     }

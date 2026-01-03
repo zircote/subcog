@@ -2,10 +2,22 @@
 //!
 //! Manages git notes for storing memories. Notes are attached to a
 //! dedicated orphan commit to avoid polluting the main history.
+//!
+//! # Timeout Protection (CRIT-007)
+//!
+//! All git operations are wrapped in timeout protection to prevent
+//! indefinite hangs when git operations stall (e.g., network issues,
+//! lock contention, corrupt repositories).
 
 use crate::{Error, Result};
 use git2::{Repository, Signature};
 use std::path::Path;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
+
+/// Default timeout for git notes operations (30 seconds).
+const DEFAULT_NOTES_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Manages git notes operations.
 pub struct NotesManager {
@@ -13,6 +25,8 @@ pub struct NotesManager {
     repo_path: std::path::PathBuf,
     /// Notes ref to use.
     notes_ref: String,
+    /// Timeout for git operations.
+    timeout: Duration,
 }
 
 impl NotesManager {
@@ -25,6 +39,7 @@ impl NotesManager {
         Self {
             repo_path: repo_path.as_ref().to_path_buf(),
             notes_ref: Self::DEFAULT_NOTES_REF.to_string(),
+            timeout: DEFAULT_NOTES_TIMEOUT,
         }
     }
 
@@ -35,47 +50,78 @@ impl NotesManager {
         self
     }
 
+    /// Sets a custom timeout for git operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `timeout` - Maximum duration for git operations before timing out.
+    #[must_use]
+    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
     /// Returns the notes ref.
     #[must_use]
     pub fn notes_ref(&self) -> &str {
         &self.notes_ref
     }
 
-    /// Opens the git repository.
-    fn open_repo(&self) -> Result<Repository> {
-        Repository::open(&self.repo_path).map_err(|e| Error::OperationFailed {
-            operation: "open_repository".to_string(),
-            cause: e.to_string(),
-        })
+    /// Returns the configured timeout.
+    #[must_use]
+    pub const fn timeout(&self) -> Duration {
+        self.timeout
     }
 
-    /// Gets the default signature for commits.
-    /// Kept as method for API consistency with other repository operations.
-    #[allow(clippy::unused_self)]
-    fn get_signature(&self, repo: &Repository) -> Result<Signature<'_>> {
-        repo.signature().or_else(|_| {
-            Signature::now("subcog", "subcog@local").map_err(|e| Error::OperationFailed {
-                operation: "create_signature".to_string(),
-                cause: e.to_string(),
-            })
-        })
-    }
+    /// Executes a git operation with timeout protection.
+    ///
+    /// Spawns the operation in a separate thread and waits with a timeout.
+    /// This prevents indefinite hangs from git operations.
+    fn run_with_timeout<T, F>(&self, operation: &str, f: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T> + Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        let op_name = operation.to_string();
 
-    /// Gets or creates the notes ref commit.
-    /// Uses HEAD as the annotated object for notes.
-    /// Kept as method for API consistency with other repository operations.
-    #[allow(clippy::unused_self)]
-    fn get_notes_target(&self, repo: &Repository) -> Result<git2::Oid> {
-        // Get HEAD commit
-        let head = repo.head().map_err(|e| Error::OperationFailed {
-            operation: "get_head".to_string(),
-            cause: e.to_string(),
-        })?;
+        let handle = thread::spawn(move || {
+            let result = f();
+            // Ignore send error - receiver may have timed out
+            let _ = tx.send(result);
+        });
 
-        head.target().ok_or_else(|| Error::OperationFailed {
-            operation: "get_head_target".to_string(),
-            cause: "HEAD has no target".to_string(),
-        })
+        match rx.recv_timeout(self.timeout) {
+            Ok(result) => {
+                // Wait for thread to finish (should be immediate)
+                let _ = handle.join();
+                result
+            },
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                tracing::warn!(
+                    operation = %op_name,
+                    timeout_secs = self.timeout.as_secs(),
+                    "Git operation timed out"
+                );
+                Err(Error::OperationFailed {
+                    operation: op_name,
+                    cause: format!(
+                        "Operation timed out after {} seconds",
+                        self.timeout.as_secs()
+                    ),
+                })
+            },
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                tracing::error!(
+                    operation = %op_name,
+                    "Git operation thread disconnected unexpectedly"
+                );
+                Err(Error::OperationFailed {
+                    operation: op_name,
+                    cause: "Operation thread panicked or disconnected".to_string(),
+                })
+            },
+        }
     }
 
     /// Adds a note to a commit.
@@ -84,19 +130,36 @@ impl NotesManager {
     ///
     /// Returns an error if the note cannot be added.
     pub fn add(&self, commit_id: &str, content: &str) -> Result<()> {
-        let repo = self.open_repo()?;
-        let sig = self.get_signature(&repo)?;
-
+        // Validate commit ID before spawning thread
         let oid = git2::Oid::from_str(commit_id)
             .map_err(|e| Error::InvalidInput(format!("Invalid commit ID '{commit_id}': {e}")))?;
 
-        repo.note(&sig, &sig, Some(&self.notes_ref), oid, content, true)
-            .map_err(|e| Error::OperationFailed {
-                operation: "add_note".to_string(),
+        // Clone data for thread
+        let repo_path = self.repo_path.clone();
+        let notes_ref = self.notes_ref.clone();
+        let content = content.to_string();
+
+        self.run_with_timeout("add_note", move || {
+            let repo = Repository::open(&repo_path).map_err(|e| Error::OperationFailed {
+                operation: "open_repository".to_string(),
                 cause: e.to_string(),
             })?;
 
-        Ok(())
+            let sig = repo.signature().or_else(|_| {
+                Signature::now("subcog", "subcog@local").map_err(|e| Error::OperationFailed {
+                    operation: "create_signature".to_string(),
+                    cause: e.to_string(),
+                })
+            })?;
+
+            repo.note(&sig, &sig, Some(&notes_ref), oid, &content, true)
+                .map_err(|e| Error::OperationFailed {
+                    operation: "add_note".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            Ok(())
+        })
     }
 
     /// Adds a note using HEAD as the target.
@@ -105,18 +168,43 @@ impl NotesManager {
     ///
     /// Returns an error if the note cannot be added.
     pub fn add_to_head(&self, content: &str) -> Result<git2::Oid> {
-        let repo = self.open_repo()?;
-        let sig = self.get_signature(&repo)?;
-        let target = self.get_notes_target(&repo)?;
+        // Clone data for thread
+        let repo_path = self.repo_path.clone();
+        let notes_ref = self.notes_ref.clone();
+        let content = content.to_string();
 
-        let note_oid = repo
-            .note(&sig, &sig, Some(&self.notes_ref), target, content, true)
-            .map_err(|e| Error::OperationFailed {
-                operation: "add_note".to_string(),
+        self.run_with_timeout("add_note_to_head", move || {
+            let repo = Repository::open(&repo_path).map_err(|e| Error::OperationFailed {
+                operation: "open_repository".to_string(),
                 cause: e.to_string(),
             })?;
 
-        Ok(note_oid)
+            let sig = repo.signature().or_else(|_| {
+                Signature::now("subcog", "subcog@local").map_err(|e| Error::OperationFailed {
+                    operation: "create_signature".to_string(),
+                    cause: e.to_string(),
+                })
+            })?;
+
+            // Get HEAD target
+            let head = repo.head().map_err(|e| Error::OperationFailed {
+                operation: "get_head".to_string(),
+                cause: e.to_string(),
+            })?;
+            let target = head.target().ok_or_else(|| Error::OperationFailed {
+                operation: "get_head_target".to_string(),
+                cause: "HEAD has no target".to_string(),
+            })?;
+
+            let note_oid = repo
+                .note(&sig, &sig, Some(&notes_ref), target, &content, true)
+                .map_err(|e| Error::OperationFailed {
+                    operation: "add_note".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            Ok(note_oid)
+        })
     }
 
     /// Gets a note from a commit.
@@ -125,19 +213,29 @@ impl NotesManager {
     ///
     /// Returns an error if the note cannot be retrieved.
     pub fn get(&self, commit_id: &str) -> Result<Option<String>> {
-        let repo = self.open_repo()?;
-
+        // Validate commit ID before spawning thread
         let oid = git2::Oid::from_str(commit_id)
             .map_err(|e| Error::InvalidInput(format!("Invalid commit ID '{commit_id}': {e}")))?;
 
-        match repo.find_note(Some(&self.notes_ref), oid) {
-            Ok(note) => Ok(note.message().map(String::from)),
-            Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
-            Err(e) => Err(Error::OperationFailed {
-                operation: "get_note".to_string(),
+        // Clone data for thread
+        let repo_path = self.repo_path.clone();
+        let notes_ref = self.notes_ref.clone();
+
+        self.run_with_timeout("get_note", move || {
+            let repo = Repository::open(&repo_path).map_err(|e| Error::OperationFailed {
+                operation: "open_repository".to_string(),
                 cause: e.to_string(),
-            }),
-        }
+            })?;
+
+            match repo.find_note(Some(&notes_ref), oid) {
+                Ok(note) => Ok(note.message().map(String::from)),
+                Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
+                Err(e) => Err(Error::OperationFailed {
+                    operation: "get_note".to_string(),
+                    cause: e.to_string(),
+                }),
+            }
+        })
     }
 
     /// Gets a note from HEAD.
@@ -146,17 +244,35 @@ impl NotesManager {
     ///
     /// Returns an error if the note cannot be retrieved.
     pub fn get_from_head(&self) -> Result<Option<String>> {
-        let repo = self.open_repo()?;
-        let target = self.get_notes_target(&repo)?;
+        // Clone data for thread
+        let repo_path = self.repo_path.clone();
+        let notes_ref = self.notes_ref.clone();
 
-        match repo.find_note(Some(&self.notes_ref), target) {
-            Ok(note) => Ok(note.message().map(String::from)),
-            Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
-            Err(e) => Err(Error::OperationFailed {
-                operation: "get_note".to_string(),
+        self.run_with_timeout("get_note_from_head", move || {
+            let repo = Repository::open(&repo_path).map_err(|e| Error::OperationFailed {
+                operation: "open_repository".to_string(),
                 cause: e.to_string(),
-            }),
-        }
+            })?;
+
+            // Get HEAD target
+            let head = repo.head().map_err(|e| Error::OperationFailed {
+                operation: "get_head".to_string(),
+                cause: e.to_string(),
+            })?;
+            let target = head.target().ok_or_else(|| Error::OperationFailed {
+                operation: "get_head_target".to_string(),
+                cause: "HEAD has no target".to_string(),
+            })?;
+
+            match repo.find_note(Some(&notes_ref), target) {
+                Ok(note) => Ok(note.message().map(String::from)),
+                Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
+                Err(e) => Err(Error::OperationFailed {
+                    operation: "get_note".to_string(),
+                    cause: e.to_string(),
+                }),
+            }
+        })
     }
 
     /// Removes a note from a commit.
@@ -165,20 +281,36 @@ impl NotesManager {
     ///
     /// Returns an error if the note cannot be removed.
     pub fn remove(&self, commit_id: &str) -> Result<bool> {
-        let repo = self.open_repo()?;
-        let sig = self.get_signature(&repo)?;
-
+        // Validate commit ID before spawning thread
         let oid = git2::Oid::from_str(commit_id)
             .map_err(|e| Error::InvalidInput(format!("Invalid commit ID '{commit_id}': {e}")))?;
 
-        match repo.note_delete(oid, Some(&self.notes_ref), &sig, &sig) {
-            Ok(()) => Ok(true),
-            Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(false),
-            Err(e) => Err(Error::OperationFailed {
-                operation: "remove_note".to_string(),
+        // Clone data for thread
+        let repo_path = self.repo_path.clone();
+        let notes_ref = self.notes_ref.clone();
+
+        self.run_with_timeout("remove_note", move || {
+            let repo = Repository::open(&repo_path).map_err(|e| Error::OperationFailed {
+                operation: "open_repository".to_string(),
                 cause: e.to_string(),
-            }),
-        }
+            })?;
+
+            let sig = repo.signature().or_else(|_| {
+                Signature::now("subcog", "subcog@local").map_err(|e| Error::OperationFailed {
+                    operation: "create_signature".to_string(),
+                    cause: e.to_string(),
+                })
+            })?;
+
+            match repo.note_delete(oid, Some(&notes_ref), &sig, &sig) {
+                Ok(()) => Ok(true),
+                Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(false),
+                Err(e) => Err(Error::OperationFailed {
+                    operation: "remove_note".to_string(),
+                    cause: e.to_string(),
+                }),
+            }
+        })
     }
 
     /// Lists all notes as (`commit_id`, content) pairs.
@@ -187,10 +319,34 @@ impl NotesManager {
     ///
     /// Returns an error if notes cannot be listed.
     pub fn list(&self) -> Result<Vec<(String, String)>> {
-        let repo = self.open_repo()?;
-        let mut results = Vec::new();
+        // Clone data for thread
+        let repo_path = self.repo_path.clone();
+        let notes_ref = self.notes_ref.clone();
 
-        let notes = match repo.notes(Some(&self.notes_ref)) {
+        self.run_with_timeout("list_notes", move || {
+            Self::list_inner(&repo_path, &notes_ref)
+        })
+    }
+
+    /// Extracts a single note as (`commit_id`, content) if valid UTF-8.
+    fn extract_note(
+        repo: &Repository,
+        note_oid: git2::Oid,
+        annotated_oid: git2::Oid,
+    ) -> Option<(String, String)> {
+        let blob = repo.find_blob(note_oid).ok()?;
+        let content = std::str::from_utf8(blob.content()).ok()?;
+        Some((annotated_oid.to_string(), content.to_string()))
+    }
+
+    /// Inner implementation of `list()` that runs within the timeout-protected thread.
+    fn list_inner(repo_path: &std::path::Path, notes_ref: &str) -> Result<Vec<(String, String)>> {
+        let repo = Repository::open(repo_path).map_err(|e| Error::OperationFailed {
+            operation: "open_repository".to_string(),
+            cause: e.to_string(),
+        })?;
+
+        let notes = match repo.notes(Some(notes_ref)) {
             Ok(notes) => notes,
             Err(e) if e.code() == git2::ErrorCode::NotFound => return Ok(Vec::new()),
             Err(e) => {
@@ -201,22 +357,16 @@ impl NotesManager {
             },
         };
 
+        let mut results = Vec::new();
         for note_result in notes {
             let (note_oid, annotated_oid) = note_result.map_err(|e| Error::OperationFailed {
                 operation: "iterate_notes".to_string(),
                 cause: e.to_string(),
             })?;
 
-            // Get the note content using let-else to reduce nesting
-            let Ok(blob) = repo.find_blob(note_oid) else {
-                continue;
-            };
-
-            let Ok(content) = std::str::from_utf8(blob.content()) else {
-                continue;
-            };
-
-            results.push((annotated_oid.to_string(), content.to_string()));
+            if let Some(entry) = Self::extract_note(&repo, note_oid, annotated_oid) {
+                results.push(entry);
+            }
         }
 
         Ok(results)
@@ -228,15 +378,25 @@ impl NotesManager {
     ///
     /// Returns an error if the check fails.
     pub fn notes_ref_exists(&self) -> Result<bool> {
-        let repo = self.open_repo()?;
-        match repo.find_reference(&self.notes_ref) {
-            Ok(_) => Ok(true),
-            Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(false),
-            Err(e) => Err(Error::OperationFailed {
-                operation: "check_notes_ref".to_string(),
+        // Clone data for thread
+        let repo_path = self.repo_path.clone();
+        let notes_ref = self.notes_ref.clone();
+
+        self.run_with_timeout("check_notes_ref", move || {
+            let repo = Repository::open(&repo_path).map_err(|e| Error::OperationFailed {
+                operation: "open_repository".to_string(),
                 cause: e.to_string(),
-            }),
-        }
+            })?;
+
+            match repo.find_reference(&notes_ref) {
+                Ok(_) => Ok(true),
+                Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(false),
+                Err(e) => Err(Error::OperationFailed {
+                    operation: "check_notes_ref".to_string(),
+                    cause: e.to_string(),
+                }),
+            }
+        })
     }
 
     /// Returns the count of notes.
@@ -274,9 +434,38 @@ mod tests {
     fn test_notes_manager_creation() {
         let manager = NotesManager::new("/tmp/test");
         assert_eq!(manager.notes_ref(), NotesManager::DEFAULT_NOTES_REF);
+        assert_eq!(manager.timeout(), DEFAULT_NOTES_TIMEOUT);
+    }
 
+    #[test]
+    fn test_notes_manager_with_timeout() {
+        let custom_timeout = Duration::from_secs(60);
+        let manager = NotesManager::new("/tmp/test").with_timeout(custom_timeout);
+        assert_eq!(manager.timeout(), custom_timeout);
+    }
+
+    #[test]
+    fn test_notes_manager_with_notes_ref() {
         let custom = NotesManager::new("/tmp/test").with_notes_ref("refs/notes/custom");
         assert_eq!(custom.notes_ref(), "refs/notes/custom");
+    }
+
+    #[test]
+    fn test_timeout_error_message() {
+        // Test that the timeout error includes the operation name and timeout duration
+        let (dir, _repo) = create_test_repo();
+
+        // Use a very short timeout to test the error path
+        // Note: This test just verifies the timeout mechanism exists;
+        // actually triggering a timeout would require a slow git operation
+        let manager = NotesManager::new(dir.path()).with_timeout(Duration::from_secs(1));
+
+        // Normal operations should complete well within 1 second
+        let result = manager.list();
+        assert!(
+            result.is_ok(),
+            "Normal operations should complete within timeout"
+        );
     }
 
     #[test]

@@ -47,7 +47,7 @@ mod implementation {
     use rand::RngCore;
 
     /// Magic bytes to identify encrypted files.
-    /// Format: "SUBCOG_ENC_V1\0" (14 bytes)
+    /// Format: `SUBCOG_ENC_V1\0` (14 bytes)
     pub const MAGIC_HEADER: &[u8] = b"SUBCOG_ENC_V1\0";
 
     /// Nonce size for AES-256-GCM (12 bytes / 96 bits).
@@ -274,7 +274,7 @@ mod implementation {
         #[test]
         fn test_encrypt_decrypt_large() {
             let encryptor = Encryptor::new(test_config()).unwrap();
-            let plaintext: Vec<u8> = (0..10000).map(|i| (i % 256) as u8).collect();
+            let plaintext: Vec<u8> = (0u32..10000).map(|i| (i % 256) as u8).collect();
 
             let encrypted = encryptor.encrypt(&plaintext).unwrap();
             let decrypted = encryptor.decrypt(&encrypted).unwrap();
