@@ -74,7 +74,8 @@ hex = "0.4"
 lru = "0.16"
 
 # FastEmbed for semantic embeddings (optional - fallback to pseudo-embeddings if not available)
-fastembed = { version = "4", optional = true }
+# Use rustls instead of native-tls (openssl) for TLS
+fastembed = { version = "4", optional = true, default-features = false, features = ["ort-download-binaries", "hf-hub-rustls-tls"] }
 
 # usearch HNSW vector search (optional - pure Rust fallback if not available)
 usearch = { version = "2.21", optional = true }
@@ -178,7 +179,7 @@ must_use_candidate = "allow"
 redundant_pub_crate = "allow"
 
 [features]
-default = []
+default = ["fastembed-embeddings"]
 # Optional backend features
 postgres = ["dep:tokio-postgres", "dep:deadpool-postgres"]
 postgres-tls = ["postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:webpki-roots"]

@@ -13,6 +13,12 @@ mod fastembed;
 pub use fallback::FallbackEmbedder;
 pub use fastembed::{FastEmbedEmbedder, cosine_similarity};
 
+/// Default embedding dimensions for the all-MiniLM-L6-v2 model.
+///
+/// This is the authoritative source for embedding dimensions across the codebase (QUAL-H2).
+/// All vector backends should use this constant for consistency.
+pub const DEFAULT_DIMENSIONS: usize = 384;
+
 use crate::Result;
 
 /// Trait for embedding generators.

@@ -4,11 +4,8 @@
 //! When the `fastembed-embeddings` feature is enabled, this uses real ONNX-based
 //! semantic embeddings. Otherwise, falls back to deterministic hash-based pseudo-embeddings.
 
-use super::Embedder;
+use super::{DEFAULT_DIMENSIONS, Embedder};
 use crate::{Error, Result};
-
-/// Default embedding dimensions for all-MiniLM-L6-v2.
-pub const DEFAULT_DIMENSIONS: usize = 384;
 
 // ============================================================================
 // Native FastEmbed Implementation (with feature)
@@ -217,33 +214,45 @@ mod fallback {
         #[allow(clippy::cast_precision_loss)]
         #[allow(clippy::cast_possible_truncation)]
         fn pseudo_embed(&self, text: &str) -> Vec<f32> {
+            // Limit word iteration to prevent DoS on very long texts (PERF-H1)
+            const MAX_WORDS: usize = 1000;
             let mut embedding = vec![0.0f32; self.dimensions];
 
             // Generate deterministic values based on text content
             // Iterate directly without collecting to avoid allocation
-            for (i, word) in text.split_whitespace().enumerate() {
+            // Limit to MAX_WORDS to bound computation time
+            for (i, word) in text.split_whitespace().take(MAX_WORDS).enumerate() {
                 let mut hasher = DefaultHasher::new();
                 word.hash(&mut hasher);
                 let hash = hasher.finish();
-
-                // Distribute hash across embedding dimensions
-                for j in 0..8 {
-                    let idx = ((hash >> (j * 8)) as usize + i) % self.dimensions;
-                    let value = ((hash >> (j * 4)) & 0xFF) as f32 / 255.0 - 0.5;
-                    embedding[idx] += value;
-                }
+                Self::distribute_hash(&mut embedding, hash, i, self.dimensions);
             }
 
-            // Normalize the embedding using SIMD-friendly pattern
-            let norm_sq: f32 = embedding.iter().map(|x| x * x).sum();
-            if norm_sq > 0.0 {
-                let inv_norm = norm_sq.sqrt().recip();
-                for v in &mut embedding {
-                    *v *= inv_norm;
-                }
-            }
-
+            Self::normalize_embedding(&mut embedding);
             embedding
+        }
+
+        /// Distributes a hash value across embedding dimensions.
+        #[allow(clippy::cast_precision_loss)]
+        #[allow(clippy::cast_possible_truncation)]
+        fn distribute_hash(embedding: &mut [f32], hash: u64, word_idx: usize, dimensions: usize) {
+            for j in 0..8 {
+                let idx = ((hash >> (j * 8)) as usize + word_idx) % dimensions;
+                let value = ((hash >> (j * 4)) & 0xFF) as f32 / 255.0 - 0.5;
+                embedding[idx] += value;
+            }
+        }
+
+        /// Normalizes an embedding vector in-place.
+        fn normalize_embedding(embedding: &mut [f32]) {
+            let norm_sq: f32 = embedding.iter().map(|x| x * x).sum();
+            if norm_sq <= 0.0 {
+                return;
+            }
+            let inv_norm = norm_sq.sqrt().recip();
+            for v in embedding.iter_mut() {
+                *v *= inv_norm;
+            }
         }
     }
 
