@@ -852,6 +852,25 @@ The following hooks run automatically on file save:
 
 ### Completed Specifications
 
+- **[Storage Architecture Simplification](docs/spec/completed/2026-01-03-storage-simplification/)** (2026-01-03)
+  - **Completed**: 2026-01-03
+  - **Outcome**: Success - All 32 tasks + 176 code review fixes delivered
+  - **Effort**: ~10 hours (planned 24-40 hours, 60-75% under budget)
+  - **Features**:
+    - Removed git-notes storage layer (fixes critical CaptureService HEAD overwrite bug)
+    - User-level SQLite/PostgreSQL storage with project/branch/path faceting
+    - Context detection from git remote, branch, and cwd
+    - Branch garbage collection with lazy/explicit modes
+    - Tombstone pattern for soft deletes
+    - 7 CRITICAL security fixes (CRIT-001 to CRIT-007)
+    - 30 HIGH priority fixes (security, performance, testing, database)
+    - 77 MEDIUM priority fixes (quality, architecture, compliance)
+  - **Quality**: 896+ tests passing, all clippy lints resolved, make ci passes
+  - **PR**: https://github.com/zircote/subcog/pull/44
+  - **Satisfaction**: Very satisfied
+  - **Key learnings**: Bottom-up development prevents rework, code review timing matters (176 findings post-implementation), LRU caches require careful const handling, rustdoc link resolution is strict
+  - **Key docs**: REQUIREMENTS.md, ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, DECISIONS.md, PROGRESS.md, RETROSPECTIVE.md
+
 - **[Pre-Compact Deduplication](docs/spec/completed/2026-01-01-pre-compact-deduplication/)** (2026-01-02)
   - **Completed**: 2026-01-02
   - **Outcome**: Success - All 7 phases delivered (25/26 tasks, 1 deferred)
