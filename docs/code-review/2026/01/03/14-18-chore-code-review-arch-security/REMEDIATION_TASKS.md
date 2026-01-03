@@ -12,9 +12,9 @@
   - File: `src/storage/migrations.rs:186-245`
   - Action: Used `client.transaction()` / `tx.commit()` in `apply_migration()`
 
-- [ ] **CRIT-002**: Handle mutex poisoning in usearch
-  - File: `src/storage/vector/usearch.rs:67-89`
-  - Action: Use `unwrap_or_else(|p| p.into_inner())` pattern
+- [x] **CRIT-002**: Handle mutex poisoning in usearch ✓ completed 2026-01-03
+  - File: `src/storage/vector/usearch.rs:17-30`
+  - Action: Added `recover_lock()` helper with `unwrap_or_else(|p| p.into_inner())` pattern
 
 - [ ] **CRIT-003**: Add MCP tool authorization
   - File: `src/mcp/tools.rs:45-312`
