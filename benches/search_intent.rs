@@ -259,7 +259,8 @@ fn bench_context_building(c: &mut Criterion) {
     let mut group = c.benchmark_group("context_building");
 
     // Create test intent
-    let intent = SearchIntent::new(SearchIntentType::HowTo, 0.85)
+    let intent = SearchIntent::new(SearchIntentType::HowTo)
+        .with_confidence(0.85)
         .with_keywords(vec!["how to".to_string(), "implement".to_string()])
         .with_topics(vec![
             "authentication".to_string(),
@@ -281,7 +282,8 @@ fn bench_context_building(c: &mut Criterion) {
 
     // Benchmark with different confidence levels
     for confidence in [0.3, 0.5, 0.7, 0.9] {
-        let test_intent = SearchIntent::new(SearchIntentType::HowTo, confidence)
+        let test_intent = SearchIntent::new(SearchIntentType::HowTo)
+            .with_confidence(confidence)
             .with_topics(vec!["test".to_string()]);
 
         group.bench_with_input(
