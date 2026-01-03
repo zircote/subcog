@@ -1097,6 +1097,10 @@ mod tests {
             embedding: None,
             tags: vec!["alpha".to_string()],
             source: None,
+            project_id: None,
+            branch: None,
+            file_path: None,
+            tombstoned_at: None,
         };
         let other = Memory {
             id: MemoryId::new("patterns-1"),
@@ -1109,6 +1113,10 @@ mod tests {
             embedding: None,
             tags: vec!["beta".to_string()],
             source: None,
+            project_id: None,
+            branch: None,
+            file_path: None,
+            tombstoned_at: None,
         };
 
         index.index(&memory).expect("index memory");

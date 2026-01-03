@@ -180,6 +180,10 @@ mod tests {
             embedding: None,
             tags,
             source: None,
+            project_id: None,
+            branch: None,
+            file_path: None,
+            tombstoned_at: None,
         }
     }
 

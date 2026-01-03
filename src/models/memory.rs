@@ -41,7 +41,7 @@ impl From<&str> for MemoryId {
 }
 
 /// A captured memory entry.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Memory {
     /// Unique identifier.
     pub id: MemoryId,
@@ -58,11 +58,45 @@ pub struct Memory {
     /// Last update timestamp (Unix epoch seconds).
     pub updated_at: u64,
     /// Optional embedding vector.
+    #[serde(default)]
     pub embedding: Option<Vec<f32>>,
     /// Optional tags for categorization.
+    #[serde(default)]
     pub tags: Vec<String>,
     /// Optional source reference (file path, URL, etc.).
+    #[serde(default)]
     pub source: Option<String>,
+
+    // --- Facet fields for storage simplification (Issue #43) ---
+    /// Project identifier derived from git remote URL or repository name.
+    ///
+    /// Used for filtering memories by project in multi-project environments.
+    /// Example: `"zircote/subcog"` or `"my-project"`.
+    #[serde(default)]
+    pub project_id: Option<String>,
+
+    /// Git branch name where the memory was captured.
+    ///
+    /// Enables branch-scoped memory queries (e.g., feature branch context).
+    /// Example: `"main"`, `"feature/auth-system"`.
+    #[serde(default)]
+    pub branch: Option<String>,
+
+    /// Source file path associated with this memory.
+    ///
+    /// Used for file-scoped memory surfacing. This differs from `source`
+    /// which may contain URLs or other reference types.
+    /// Example: `"src/services/capture.rs"`.
+    #[serde(default)]
+    pub file_path: Option<String>,
+
+    /// Unix timestamp (seconds) when the memory was marked as tombstoned.
+    ///
+    /// A tombstoned memory is logically deleted but retained for sync
+    /// consistency. When set, the memory should be excluded from search
+    /// results but preserved in storage for replication.
+    #[serde(default)]
+    pub tombstoned_at: Option<u64>,
 }
 
 /// Result of a memory operation with optional metadata.

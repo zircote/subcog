@@ -17,6 +17,13 @@ pub struct CaptureRequest {
     pub source: Option<String>,
     /// Whether to skip security filtering.
     pub skip_security_check: bool,
+    // Facet fields for storage simplification (Issue #43)
+    /// Optional project identifier (auto-detected from git remote if not provided).
+    pub project_id: Option<String>,
+    /// Optional branch name (auto-detected from git if not provided).
+    pub branch: Option<String>,
+    /// Optional file path context.
+    pub file_path: Option<String>,
 }
 
 impl CaptureRequest {
@@ -54,6 +61,27 @@ impl CaptureRequest {
     #[must_use]
     pub fn with_source(mut self, source: impl Into<String>) -> Self {
         self.source = Some(source.into());
+        self
+    }
+
+    /// Sets the project ID (Issue #43).
+    #[must_use]
+    pub fn with_project_id(mut self, project_id: impl Into<String>) -> Self {
+        self.project_id = Some(project_id.into());
+        self
+    }
+
+    /// Sets the branch name (Issue #43).
+    #[must_use]
+    pub fn with_branch(mut self, branch: impl Into<String>) -> Self {
+        self.branch = Some(branch.into());
+        self
+    }
+
+    /// Sets the file path context (Issue #43).
+    #[must_use]
+    pub fn with_file_path(mut self, file_path: impl Into<String>) -> Self {
+        self.file_path = Some(file_path.into());
         self
     }
 }

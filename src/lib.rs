@@ -43,6 +43,7 @@ use thiserror::Error as ThisError;
 // Module declarations
 pub mod cli;
 pub mod config;
+pub mod context;
 pub mod embedding;
 pub mod git;
 pub mod hooks;
@@ -56,6 +57,7 @@ pub mod storage;
 
 // Re-exports for convenience
 pub use config::{FeatureFlags, SubcogConfig};
+pub use context::GitContext;
 pub use embedding::Embedder;
 pub use llm::LlmProvider;
 pub use models::{

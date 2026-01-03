@@ -147,13 +147,16 @@ impl std::str::FromStr for Namespace {
 }
 
 /// Domain separation for memories.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct Domain {
     /// Organization or team identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub organization: Option<String>,
     /// Project identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
     /// Repository identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
 }
 
@@ -258,7 +261,8 @@ impl fmt::Display for Domain {
 }
 
 /// Status of a memory entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum MemoryStatus {
     /// Active and searchable.
     #[default]
@@ -271,6 +275,8 @@ pub enum MemoryStatus {
     Pending,
     /// Marked for deletion.
     Deleted,
+    /// Memory from deleted branch, excluded from search by default.
+    Tombstoned,
 }
 
 impl MemoryStatus {
@@ -283,6 +289,21 @@ impl MemoryStatus {
             Self::Superseded => "superseded",
             Self::Pending => "pending",
             Self::Deleted => "deleted",
+            Self::Tombstoned => "tombstoned",
+        }
+    }
+
+    /// Parses a status from a string.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "active" => Some(Self::Active),
+            "archived" => Some(Self::Archived),
+            "superseded" => Some(Self::Superseded),
+            "pending" => Some(Self::Pending),
+            "deleted" => Some(Self::Deleted),
+            "tombstoned" => Some(Self::Tombstoned),
+            _ => None,
         }
     }
 }
@@ -290,5 +311,117 @@ impl MemoryStatus {
 impl fmt::Display for MemoryStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for MemoryStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| format!("unknown memory status: {s}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_memory_status_as_str() {
+        assert_eq!(MemoryStatus::Active.as_str(), "active");
+        assert_eq!(MemoryStatus::Archived.as_str(), "archived");
+        assert_eq!(MemoryStatus::Superseded.as_str(), "superseded");
+        assert_eq!(MemoryStatus::Pending.as_str(), "pending");
+        assert_eq!(MemoryStatus::Deleted.as_str(), "deleted");
+        assert_eq!(MemoryStatus::Tombstoned.as_str(), "tombstoned");
+    }
+
+    #[test]
+    fn test_memory_status_display() {
+        assert_eq!(format!("{}", MemoryStatus::Active), "active");
+        assert_eq!(format!("{}", MemoryStatus::Tombstoned), "tombstoned");
+    }
+
+    #[test]
+    fn test_memory_status_parse() {
+        assert_eq!(MemoryStatus::parse("active"), Some(MemoryStatus::Active));
+        assert_eq!(MemoryStatus::parse("ACTIVE"), Some(MemoryStatus::Active));
+        assert_eq!(
+            MemoryStatus::parse("tombstoned"),
+            Some(MemoryStatus::Tombstoned)
+        );
+        assert_eq!(
+            MemoryStatus::parse("TOMBSTONED"),
+            Some(MemoryStatus::Tombstoned)
+        );
+        assert_eq!(MemoryStatus::parse("invalid"), None);
+    }
+
+    #[test]
+    fn test_memory_status_from_str() {
+        assert_eq!("active".parse::<MemoryStatus>(), Ok(MemoryStatus::Active));
+        assert_eq!(
+            "tombstoned".parse::<MemoryStatus>(),
+            Ok(MemoryStatus::Tombstoned)
+        );
+        assert!("invalid".parse::<MemoryStatus>().is_err());
+    }
+
+    #[test]
+    fn test_memory_status_default() {
+        assert_eq!(MemoryStatus::default(), MemoryStatus::Active);
+    }
+
+    #[test]
+    fn test_memory_status_serde() {
+        // Test serialization
+        let status = MemoryStatus::Tombstoned;
+        let json = serde_json::to_string(&status).expect("serialize");
+        assert_eq!(json, "\"tombstoned\"");
+
+        // Test deserialization
+        let parsed: MemoryStatus = serde_json::from_str("\"tombstoned\"").expect("deserialize");
+        assert_eq!(parsed, MemoryStatus::Tombstoned);
+
+        // Test all variants roundtrip
+        for status in [
+            MemoryStatus::Active,
+            MemoryStatus::Archived,
+            MemoryStatus::Superseded,
+            MemoryStatus::Pending,
+            MemoryStatus::Deleted,
+            MemoryStatus::Tombstoned,
+        ] {
+            let json = serde_json::to_string(&status).expect("serialize");
+            let parsed: MemoryStatus = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(parsed, status);
+        }
+    }
+
+    #[test]
+    fn test_domain_serde() {
+        // Test empty domain
+        let domain = Domain::new();
+        let json = serde_json::to_string(&domain).expect("serialize");
+        assert_eq!(json, "{}");
+
+        let parsed: Domain = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed, domain);
+
+        // Test domain with all fields
+        let domain = Domain {
+            organization: Some("org".to_string()),
+            project: Some("proj".to_string()),
+            repository: Some("repo".to_string()),
+        };
+        let json = serde_json::to_string(&domain).expect("serialize");
+        let parsed: Domain = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed, domain);
+
+        // Test user domain
+        let domain = Domain::for_user();
+        let json = serde_json::to_string(&domain).expect("serialize");
+        let parsed: Domain = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed, domain);
     }
 }

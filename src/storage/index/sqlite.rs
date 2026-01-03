@@ -112,6 +112,11 @@ struct MemoryRow {
     created_at: i64,
     tags: Option<String>,
     content: String,
+    // Facet fields for storage simplification (Issue #43)
+    project_id: Option<String>,
+    branch: Option<String>,
+    file_path: Option<String>,
+    tombstoned_at: Option<i64>,
 }
 
 impl SqliteBackend {
@@ -193,6 +198,12 @@ impl SqliteBackend {
         // Add source column if it doesn't exist (for migration)
         let _ = conn.execute("ALTER TABLE memories ADD COLUMN source TEXT", []);
 
+        // Add facet columns for storage simplification (Issue #43)
+        let _ = conn.execute("ALTER TABLE memories ADD COLUMN project_id TEXT", []);
+        let _ = conn.execute("ALTER TABLE memories ADD COLUMN branch TEXT", []);
+        let _ = conn.execute("ALTER TABLE memories ADD COLUMN file_path TEXT", []);
+        let _ = conn.execute("ALTER TABLE memories ADD COLUMN tombstoned_at INTEGER", []);
+
         // Create indexes for common query patterns (DB-H1)
         Self::create_indexes(&conn);
 
@@ -246,6 +257,30 @@ impl SqliteBackend {
         // Composite index for common filter patterns
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_namespace_status ON memories(namespace, status)",
+            [],
+        );
+
+        // Facet indexes for storage simplification (Issue #43)
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_project_id ON memories(project_id)",
+            [],
+        );
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_branch ON memories(branch)",
+            [],
+        );
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_file_path ON memories(file_path)",
+            [],
+        );
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_tombstoned_at ON memories(tombstoned_at)",
+            [],
+        );
+
+        // Composite index for project + branch filtering
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_project_branch ON memories(project_id, branch)",
             [],
         );
     }
@@ -350,6 +385,32 @@ impl SqliteBackend {
             params.push(before.to_string());
         }
 
+        // Facet filters for storage simplification (Issue #43)
+        if let Some(ref project_id) = filter.project_id {
+            conditions.push(format!("m.project_id = ?{param_idx}"));
+            param_idx += 1;
+            params.push(project_id.clone());
+        }
+
+        if let Some(ref branch) = filter.branch {
+            conditions.push(format!("m.branch = ?{param_idx}"));
+            param_idx += 1;
+            params.push(branch.clone());
+        }
+
+        // File path pattern (glob-style converted to SQL LIKE)
+        if let Some(ref pattern) = filter.file_path_pattern {
+            let sql_pattern = pattern.replace('*', "%").replace('?', "_");
+            conditions.push(format!("m.file_path LIKE ?{param_idx} ESCAPE '\\'"));
+            param_idx += 1;
+            params.push(sql_pattern);
+        }
+
+        // Exclude tombstoned memories by default unless include_tombstoned is true
+        if !filter.include_tombstoned {
+            conditions.push("m.tombstoned_at IS NULL".to_string());
+        }
+
         let clause = if conditions.is_empty() {
             String::new()
         } else {
@@ -385,7 +446,8 @@ impl SqliteBackend {
 fn fetch_memory_row(conn: &Connection, id: &MemoryId) -> Result<Option<MemoryRow>> {
     let mut stmt = conn
         .prepare(
-            "SELECT m.id, m.namespace, m.domain, m.status, m.created_at, m.tags, f.content
+            "SELECT m.id, m.namespace, m.domain, m.status, m.created_at, m.tags, f.content,
+                    m.project_id, m.branch, m.file_path, m.tombstoned_at
              FROM memories m
              JOIN memories_fts f ON m.id = f.id
              WHERE m.id = ?1",
@@ -405,6 +467,10 @@ fn fetch_memory_row(conn: &Connection, id: &MemoryId) -> Result<Option<MemoryRow
                 created_at: row.get(4)?,
                 tags: row.get(5)?,
                 content: row.get(6)?,
+                project_id: row.get(7)?,
+                branch: row.get(8)?,
+                file_path: row.get(9)?,
+                tombstoned_at: row.get(10)?,
             })
         })
         .optional();
@@ -462,6 +528,9 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
     #[allow(clippy::cast_sign_loss)]
     let created_at_u64 = row.created_at as u64;
 
+    #[allow(clippy::cast_sign_loss)]
+    let tombstoned_at_u64 = row.tombstoned_at.map(|t| t as u64);
+
     Memory {
         id: MemoryId::new(row.id),
         content: row.content,
@@ -473,6 +542,10 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
         embedding: None,
         tags,
         source: None,
+        project_id: row.project_id,
+        branch: row.branch,
+        file_path: row.file_path,
+        tombstoned_at: tombstoned_at_u64,
     }
 }
 
@@ -507,9 +580,11 @@ impl IndexBackend for SqliteBackend {
                 // Note: Cast u64 to i64 for SQLite compatibility (rusqlite doesn't impl ToSql for u64)
                 #[allow(clippy::cast_possible_wrap)]
                 let created_at_i64 = memory.created_at as i64;
+                #[allow(clippy::cast_possible_wrap)]
+                let tombstoned_at_i64 = memory.tombstoned_at.map(|t| t as i64);
                 conn.execute(
-                    "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags, source)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags, source, project_id, branch, file_path, tombstoned_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                     params![
                         memory.id.as_str(),
                         memory.namespace.as_str(),
@@ -517,7 +592,11 @@ impl IndexBackend for SqliteBackend {
                         memory.status.as_str(),
                         created_at_i64,
                         tags_str,
-                        memory.source.as_deref()
+                        memory.source.as_deref(),
+                        memory.project_id.as_deref(),
+                        memory.branch.as_deref(),
+                        memory.file_path.as_deref(),
+                        tombstoned_at_i64
                     ],
                 )
                 .map_err(|e| Error::OperationFailed {
@@ -880,7 +959,8 @@ impl IndexBackend for SqliteBackend {
             let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
 
             let sql = format!(
-                "SELECT m.id, m.namespace, m.domain, m.status, m.created_at, m.tags, f.content
+                "SELECT m.id, m.namespace, m.domain, m.status, m.created_at, m.tags, f.content,
+                        m.project_id, m.branch, m.file_path, m.tombstoned_at
                  FROM memories m
                  JOIN memories_fts f ON m.id = f.id
                  WHERE m.id IN ({})",
@@ -907,6 +987,10 @@ impl IndexBackend for SqliteBackend {
                         created_at: row.get(4)?,
                         tags: row.get(5)?,
                         content: row.get(6)?,
+                        project_id: row.get(7)?,
+                        branch: row.get(8)?,
+                        file_path: row.get(9)?,
+                        tombstoned_at: row.get(10)?,
                     })
                 })
                 .map_err(|e| Error::OperationFailed {
@@ -966,9 +1050,11 @@ impl IndexBackend for SqliteBackend {
                     // Note: Cast u64 to i64 for SQLite compatibility (rusqlite doesn't impl ToSql for u64)
                     #[allow(clippy::cast_possible_wrap)]
                     let created_at_i64 = memory.created_at as i64;
+                    #[allow(clippy::cast_possible_wrap)]
+                    let tombstoned_at_i64 = memory.tombstoned_at.map(|t| t as i64);
                     conn.execute(
-                        "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags, source)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags, source, project_id, branch, file_path, tombstoned_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                         params![
                             memory.id.as_str(),
                             memory.namespace.as_str(),
@@ -976,7 +1062,11 @@ impl IndexBackend for SqliteBackend {
                             memory.status.as_str(),
                             created_at_i64,
                             tags_str,
-                            memory.source.as_deref()
+                            memory.source.as_deref(),
+                            memory.project_id.as_deref(),
+                            memory.branch.as_deref(),
+                            memory.file_path.as_deref(),
+                            tombstoned_at_i64
                         ],
                     )
                     .map_err(|e| Error::OperationFailed {
@@ -1094,6 +1184,10 @@ mod tests {
             embedding: None,
             tags: vec!["test".to_string()],
             source: None,
+            project_id: None,
+            branch: None,
+            file_path: None,
+            tombstoned_at: None,
         }
     }
 

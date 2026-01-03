@@ -76,6 +76,21 @@ mod implementation {
                 CREATE INDEX IF NOT EXISTS {table}_created_idx ON {table} (created_at DESC);
             ",
         },
+        Migration {
+            version: 5,
+            description: "Add facet columns for storage simplification (Issue #43)",
+            sql: r"
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS project_id TEXT;
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS branch TEXT;
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS file_path TEXT;
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tombstoned_at BIGINT;
+                CREATE INDEX IF NOT EXISTS {table}_project_id_idx ON {table} (project_id);
+                CREATE INDEX IF NOT EXISTS {table}_branch_idx ON {table} (branch);
+                CREATE INDEX IF NOT EXISTS {table}_file_path_idx ON {table} (file_path);
+                CREATE INDEX IF NOT EXISTS {table}_tombstoned_at_idx ON {table} (tombstoned_at);
+                CREATE INDEX IF NOT EXISTS {table}_project_branch_idx ON {table} (project_id, branch);
+            ",
+        },
     ];
 
     /// Allowed table names for SQL injection prevention.
@@ -405,6 +420,8 @@ mod implementation {
             Self::add_namespace_filter(filter, &mut clauses, &mut params, &mut param_num);
             Self::add_domain_filter(filter, &mut clauses, &mut params, &mut param_num);
             Self::add_status_filter(filter, &mut clauses, &mut params, &mut param_num);
+            // Facet filters for storage simplification (Issue #43)
+            Self::add_facet_filters(filter, &mut clauses, &mut params, &mut param_num);
 
             let clause = if clauses.is_empty() {
                 String::new()
@@ -490,21 +507,61 @@ mod implementation {
             }
         }
 
+        /// Adds facet filters to WHERE clause (Issue #43).
+        fn add_facet_filters(
+            filter: &SearchFilter,
+            clauses: &mut Vec<String>,
+            params: &mut Vec<String>,
+            param_num: &mut i32,
+        ) {
+            // Project ID filter
+            if let Some(ref project_id) = filter.project_id {
+                clauses.push(format!("project_id = ${param_num}"));
+                *param_num += 1;
+                params.push(project_id.clone());
+            }
+
+            // Branch filter
+            if let Some(ref branch) = filter.branch {
+                clauses.push(format!("branch = ${param_num}"));
+                *param_num += 1;
+                params.push(branch.clone());
+            }
+
+            // File path pattern filter (LIKE with wildcards)
+            if let Some(ref pattern) = filter.file_path_pattern {
+                let sql_pattern = pattern.replace('*', "%").replace('?', "_");
+                clauses.push(format!("file_path LIKE ${param_num}"));
+                *param_num += 1;
+                params.push(sql_pattern);
+            }
+
+            // Tombstoned filter (exclude by default)
+            if !filter.include_tombstoned {
+                clauses.push("tombstoned_at IS NULL".to_string());
+            }
+        }
+
         /// Async implementation of index operation.
         #[allow(clippy::cast_possible_wrap)]
         async fn index_async(&self, memory: &Memory) -> Result<()> {
             let client = self.pool.get().await.map_err(pool_error)?;
 
             let upsert = format!(
-                r"INSERT INTO {} (id, content, namespace, domain, status, tags, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                r"INSERT INTO {} (id, content, namespace, domain, status, tags, created_at, updated_at,
+                    project_id, branch, file_path, tombstoned_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 ON CONFLICT (id) DO UPDATE SET
                     content = EXCLUDED.content,
                     namespace = EXCLUDED.namespace,
                     domain = EXCLUDED.domain,
                     status = EXCLUDED.status,
                     tags = EXCLUDED.tags,
-                    updated_at = EXCLUDED.updated_at",
+                    updated_at = EXCLUDED.updated_at,
+                    project_id = EXCLUDED.project_id,
+                    branch = EXCLUDED.branch,
+                    file_path = EXCLUDED.file_path,
+                    tombstoned_at = EXCLUDED.tombstoned_at",
                 self.table_name
             );
 
@@ -512,6 +569,7 @@ mod implementation {
             let domain_str = memory.domain.to_string();
             let namespace_str = memory.namespace.as_str();
             let status_str = memory.status.as_str();
+            let tombstoned_at_i64: Option<i64> = memory.tombstoned_at.map(|t| t as i64);
 
             client
                 .execute(
@@ -525,6 +583,10 @@ mod implementation {
                         &tags,
                         &(memory.created_at as i64),
                         &(memory.updated_at as i64),
+                        &memory.project_id,
+                        &memory.branch,
+                        &memory.file_path,
+                        &tombstoned_at_i64,
                     ],
                 )
                 .await

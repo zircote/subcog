@@ -65,6 +65,9 @@ pub fn cmd_capture(
         tags: tag_list,
         source,
         skip_security_check: false,
+        project_id: None, // Auto-detected by CaptureService (Issue #43)
+        branch: None,     // Auto-detected by CaptureService (Issue #43)
+        file_path: None,  // Optional context (Issue #43)
     };
 
     let result = service.capture(request)?;

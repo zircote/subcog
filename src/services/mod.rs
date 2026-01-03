@@ -743,6 +743,10 @@ fn parse_note_to_memory(note_id: &str, content: &str) -> Result<Memory> {
         embedding: None,
         tags,
         source,
+        project_id: None,
+        branch: None,
+        file_path: None,
+        tombstoned_at: None,
     })
 }
 

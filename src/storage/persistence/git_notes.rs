@@ -167,6 +167,10 @@ impl GitNotesBackend {
             embedding: None,
             tags,
             source,
+            project_id: None,
+            branch: None,
+            file_path: None,
+            tombstoned_at: None,
         })
     }
 }
@@ -386,6 +390,10 @@ mod tests {
             embedding: None,
             tags: vec!["database".to_string(), "architecture".to_string()],
             source: Some("src/main.rs".to_string()),
+            project_id: None,
+            branch: None,
+            file_path: None,
+            tombstoned_at: None,
         }
     }
 

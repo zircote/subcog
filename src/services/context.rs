@@ -397,6 +397,10 @@ mod tests {
             embedding: None,
             tags: vec![],
             source: None,
+            project_id: None,
+            branch: None,
+            file_path: None,
+            tombstoned_at: None,
         }];
 
         let section = format_section("Test Section", &memories);

@@ -98,6 +98,10 @@ impl StoredMemory {
             embedding: self.embedding.clone(),
             tags: self.tags.clone(),
             source: self.source.clone(),
+            project_id: None,
+            branch: None,
+            file_path: None,
+            tombstoned_at: None,
         }
     }
 }
@@ -327,6 +331,10 @@ mod tests {
             embedding: None,
             tags: vec!["test".to_string()],
             source: Some("test.rs".to_string()),
+            project_id: None,
+            branch: None,
+            file_path: None,
+            tombstoned_at: None,
         }
     }
 

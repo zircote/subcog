@@ -676,6 +676,10 @@ const fn create_placeholder_memory(id: MemoryId) -> Memory {
         embedding: None,
         tags: Vec::new(),
         source: None,
+        project_id: None,
+        branch: None,
+        file_path: None,
+        tombstoned_at: None,
     }
 }
 
@@ -698,6 +702,10 @@ mod tests {
             embedding: None,
             tags: Vec::new(),
             source: None,
+            project_id: None,
+            branch: None,
+            file_path: None,
+            tombstoned_at: None,
         }
     }
 
@@ -1182,6 +1190,10 @@ mod proptests {
             embedding: None,
             tags: Vec::new(),
             source: None,
+            project_id: None,
+            branch: None,
+            file_path: None,
+            tombstoned_at: None,
         }
     }
 

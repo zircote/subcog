@@ -244,6 +244,10 @@ impl CaptureService {
                 embedding: embedding.clone(),
                 tags: request.tags,
                 source: request.source,
+                project_id: None,
+                branch: None,
+                file_path: None,
+                tombstoned_at: None,
             };
 
             // Generate URN (always use subcog:// format)
@@ -424,6 +428,9 @@ mod tests {
             tags: vec!["test".to_string()],
             source: Some("test.rs".to_string()),
             skip_security_check: false,
+            project_id: None,
+            branch: None,
+            file_path: None,
         }
     }
 
@@ -521,6 +528,10 @@ mod tests {
             embedding: None,
             tags: vec![],
             source: None,
+            project_id: None,
+            branch: None,
+            file_path: None,
+            tombstoned_at: None,
         };
 
         let urn = service.generate_urn(&memory);

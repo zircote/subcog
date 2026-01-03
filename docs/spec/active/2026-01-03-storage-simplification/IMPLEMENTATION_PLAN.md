@@ -42,7 +42,7 @@ This implementation plan breaks down the storage architecture simplification int
 
 ### Tasks
 
-#### Task 1.1: Create Context Detector Module
+#### Task 1.1: Create Context Detector Module ✅
 
 - **Description**: Create `src/context/mod.rs` and `src/context/detector.rs` with `GitContext` struct and detection logic
 - **Dependencies**: None
@@ -51,49 +51,49 @@ This implementation plan breaks down the storage architecture simplification int
   - `src/context/detector.rs` (new)
   - `src/lib.rs` (add `pub mod context`)
 - **Acceptance Criteria**:
-  - [ ] `GitContext::from_cwd()` returns correct project_id, branch, file_path
-  - [ ] Handles non-git directories gracefully (all fields None)
-  - [ ] Handles detached HEAD (branch = None)
-  - [ ] Handles worktrees correctly
-  - [ ] Git remote URL credentials are sanitized
-  - [ ] Unit tests for all edge cases
+  - [x] `GitContext::from_cwd()` returns correct project_id, branch, file_path
+  - [x] Handles non-git directories gracefully (all fields None)
+  - [x] Handles detached HEAD (branch = None)
+  - [x] Handles worktrees correctly
+  - [x] Git remote URL credentials are sanitized
+  - [x] Unit tests for all edge cases
 
-#### Task 1.2: Extend Memory Struct with Facet Fields
+#### Task 1.2: Extend Memory Struct with Facet Fields ✅
 
 - **Description**: Add `project_id`, `branch`, `file_path`, `tombstoned_at` fields to `Memory` struct
 - **Dependencies**: None
 - **Files**:
   - `src/models/memory.rs`
 - **Acceptance Criteria**:
-  - [ ] Fields added with Option<String>/Option<u64> types
-  - [ ] Default impl updated
-  - [ ] Serialization/deserialization works
-  - [ ] Existing tests pass
+  - [x] Fields added with Option<String>/Option<u64> types
+  - [x] Default impl updated
+  - [x] Serialization/deserialization works
+  - [x] Existing tests pass
 
-#### Task 1.3: Add Tombstoned Status to MemoryStatus
+#### Task 1.3: Add Tombstoned Status to MemoryStatus ✅
 
 - **Description**: Add `MemoryStatus::Tombstoned` variant
 - **Dependencies**: None
 - **Files**:
   - `src/models/domain.rs`
 - **Acceptance Criteria**:
-  - [ ] `Tombstoned` variant added
-  - [ ] `as_str()` returns "tombstoned"
-  - [ ] `FromStr` parses "tombstoned"
-  - [ ] Existing tests pass
+  - [x] `Tombstoned` variant added
+  - [x] `as_str()` returns "tombstoned"
+  - [x] `FromStr` parses "tombstoned"
+  - [x] Existing tests pass
 
-#### Task 1.4: Extend SearchFilter with Facet Fields
+#### Task 1.4: Extend SearchFilter with Facet Fields ✅
 
 - **Description**: Add `project_id`, `branch`, `file_path_pattern`, `include_tombstoned` to `SearchFilter`
 - **Dependencies**: None
 - **Files**:
   - `src/models/search.rs`
 - **Acceptance Criteria**:
-  - [ ] Fields added with appropriate types
-  - [ ] Default impl sets `include_tombstoned = false`
-  - [ ] Builder pattern updated
+  - [x] Fields added with appropriate types
+  - [x] Default impl sets `include_tombstoned = false`
+  - [x] Builder pattern updated
 
-#### Task 1.5: Create SQLite Schema Migration for Facets
+#### Task 1.5: Create SQLite Schema Migration for Facets ✅
 
 - **Description**: Add migration to add facet columns and indexes to SQLite schema
 - **Dependencies**: Task 1.2
@@ -101,13 +101,13 @@ This implementation plan breaks down the storage architecture simplification int
   - `src/storage/migrations/mod.rs` (add migration)
   - `src/storage/index/sqlite.rs` (update schema version)
 - **Acceptance Criteria**:
-  - [ ] Migration adds `project_id`, `branch`, `file_path`, `tombstoned_at` columns
-  - [ ] Indexes created: `idx_memories_project`, `idx_memories_branch`, `idx_memories_path`, `idx_memories_project_branch`
-  - [ ] Partial index for active memories
-  - [ ] Migration is idempotent (can run multiple times)
-  - [ ] Existing data preserved
+  - [x] Migration adds `project_id`, `branch`, `file_path`, `tombstoned_at` columns
+  - [x] Indexes created: `idx_memories_project`, `idx_memories_branch`, `idx_memories_path`, `idx_memories_project_branch`
+  - [x] Partial index for active memories
+  - [x] Migration is idempotent (can run multiple times)
+  - [x] Existing data preserved
 
-#### Task 1.6: Create PostgreSQL Schema Migration for Facets
+#### Task 1.6: Create PostgreSQL Schema Migration for Facets ✅
 
 - **Description**: Add migration to add facet columns and indexes to PostgreSQL schema
 - **Dependencies**: Task 1.2
@@ -115,50 +115,51 @@ This implementation plan breaks down the storage architecture simplification int
   - `src/storage/persistence/postgresql.rs`
   - `src/storage/index/postgresql.rs`
 - **Acceptance Criteria**:
-  - [ ] Migration adds `project_id`, `branch`, `file_path`, `tombstoned_at` columns
-  - [ ] Indexes created with appropriate types
-  - [ ] Partial index for active memories
-  - [ ] Migration is idempotent
+  - [x] Migration adds `project_id`, `branch`, `file_path`, `tombstoned_at` columns
+  - [x] Indexes created with appropriate types
+  - [x] Partial index for active memories
+  - [x] Migration is idempotent
 
-#### Task 1.7: Update SQLite Index Backend for Facets
+#### Task 1.7: Update SQLite Index Backend for Facets ✅
 
 - **Description**: Update `SqliteIndexBackend` to read/write facet fields
 - **Dependencies**: Task 1.2, Task 1.5
 - **Files**:
   - `src/storage/index/sqlite.rs`
 - **Acceptance Criteria**:
-  - [ ] `index()` writes facet fields
-  - [ ] `search()` reads facet fields
-  - [ ] `build_filter_clause` handles facet filters
-  - [ ] Tests for faceted queries
+  - [x] `index()` writes facet fields
+  - [x] `search()` reads facet fields
+  - [x] `build_filter_clause` handles facet filters
+  - [x] Tests for faceted queries
 
-#### Task 1.8: Update PostgreSQL Backend for Facets
+#### Task 1.8: Update PostgreSQL Backend for Facets ✅
 
 - **Description**: Update PostgreSQL persistence and index backends to read/write facet fields
 - **Dependencies**: Task 1.2, Task 1.6
 - **Files**:
   - `src/storage/persistence/postgresql.rs`
   - `src/storage/index/postgresql.rs`
+  - `src/storage/index/redis.rs` (also updated for consistency)
 - **Acceptance Criteria**:
-  - [ ] Persistence layer stores facet fields
-  - [ ] Index layer stores and queries facet fields
-  - [ ] Tests pass
+  - [x] Persistence layer stores facet fields
+  - [x] Index layer stores and queries facet fields
+  - [x] Tests pass
 
 ### Phase 1 Deliverables
 
-- [ ] `src/context/` module with `GitContext`
-- [ ] Extended `Memory` struct with facet fields
-- [ ] Extended `SearchFilter` with facet filters
-- [ ] SQLite migration for facet columns
-- [ ] PostgreSQL migration for facet columns
-- [ ] All existing tests pass
+- [x] `src/context/` module with `GitContext`
+- [x] Extended `Memory` struct with facet fields
+- [x] Extended `SearchFilter` with facet filters
+- [x] SQLite migration for facet columns
+- [x] PostgreSQL migration for facet columns
+- [x] All existing tests pass
 
 ### Phase 1 Exit Criteria
 
-- [ ] `cargo test` passes
-- [ ] `cargo clippy` clean
-- [ ] Schema migrations work on fresh database
-- [ ] Schema migrations work on existing database (with null facets)
+- [x] `cargo test` passes
+- [x] `cargo clippy` clean
+- [x] Schema migrations work on fresh database
+- [x] Schema migrations work on existing database (with null facets)
 
 ---
 
@@ -170,15 +171,22 @@ This implementation plan breaks down the storage architecture simplification int
 
 ### Tasks
 
-#### Task 2.1: Update CaptureRequest with Facet Fields
+#### Task 2.1: Update CaptureRequest with Facet Fields ✅
 
 - **Description**: Add optional facet fields to `CaptureRequest` struct
 - **Dependencies**: Phase 1
 - **Files**:
   - `src/models/capture.rs`
+  - `src/services/capture.rs` (test helper)
+  - `src/mcp/tools/handlers/core.rs`
+  - `src/hooks/pre_compact/orchestrator.rs`
+  - `src/commands/core.rs`
+  - `tests/capture_recall_integration.rs`
 - **Acceptance Criteria**:
-  - [ ] `project_id`, `branch`, `file_path` fields added
-  - [ ] All fields optional (auto-detection as fallback)
+  - [x] `project_id`, `branch`, `file_path` fields added
+  - [x] All fields optional (auto-detection as fallback)
+  - [x] Builder methods added
+  - [x] All call sites updated
 
 #### Task 2.2: Integrate Context Detection in CaptureService
 

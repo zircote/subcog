@@ -231,6 +231,10 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             embedding: None, // Will need re-embedding
             tags: merged_tags,
             source: target.source.or(source_source),
+            project_id: target.project_id.clone(),
+            branch: target.branch.clone(),
+            file_path: target.file_path.clone(),
+            tombstoned_at: None,
         };
 
         // Store merged memory
@@ -321,6 +325,10 @@ mod tests {
             embedding: None,
             tags: vec!["test".to_string()],
             source: None,
+            project_id: None,
+            branch: None,
+            file_path: None,
+            tombstoned_at: None,
         }
     }
 
