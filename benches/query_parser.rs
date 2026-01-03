@@ -98,13 +98,13 @@ fn bench_query_scaling(c: &mut Criterion) {
     let mut group = c.benchmark_group("query_scaling");
 
     // Test how parsing scales with number of tokens
-    for count in [1, 5, 10, 20, 50] {
+    for count in [1u64, 5, 10, 20, 50] {
         let query: String = (0..count)
             .map(|i| format!("tag:tag{i}"))
             .collect::<Vec<_>>()
             .join(" ");
 
-        group.throughput(Throughput::Elements(count as u64));
+        group.throughput(Throughput::Elements(count));
         group.bench_with_input(
             BenchmarkId::new("token_count", count),
             &query,
@@ -178,12 +178,12 @@ fn bench_namespace_parsing(c: &mut Criterion) {
 
     // Benchmark Namespace::all()
     group.bench_function("all", |b| {
-        b.iter(|| Namespace::all());
+        b.iter(Namespace::all);
     });
 
     // Benchmark Namespace::user_namespaces()
     group.bench_function("user_namespaces", |b| {
-        b.iter(|| Namespace::user_namespaces());
+        b.iter(Namespace::user_namespaces);
     });
 
     // Benchmark is_system check
@@ -208,7 +208,7 @@ fn bench_filter_operations(c: &mut Criterion) {
 
     // Benchmark filter creation
     group.bench_function("create_empty", |b| {
-        b.iter(|| subcog::SearchFilter::new());
+        b.iter(subcog::SearchFilter::new);
     });
 
     // Benchmark filter with_namespace
@@ -306,7 +306,7 @@ fn bench_domain(c: &mut Criterion) {
 
     // Benchmark Domain creation
     group.bench_function("new_global", |b| {
-        b.iter(|| subcog::Domain::new());
+        b.iter(subcog::Domain::new);
     });
 
     group.bench_function("for_repository", |b| {
@@ -314,7 +314,7 @@ fn bench_domain(c: &mut Criterion) {
     });
 
     group.bench_function("for_user", |b| {
-        b.iter(|| subcog::Domain::for_user());
+        b.iter(subcog::Domain::for_user);
     });
 
     // Benchmark is_global check

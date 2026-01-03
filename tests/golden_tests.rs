@@ -8,7 +8,13 @@
 //! - Hook response format compliance
 
 // Golden tests use expect/unwrap/panic for simplicity - panics are acceptable in tests
-#![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::unnecessary_map_or
+)]
 
 use serde_json::Value;
 use std::fs;
@@ -30,7 +36,8 @@ fn golden_dir() -> PathBuf {
 /// Load a golden file as a string.
 fn load_golden(filename: &str) -> String {
     let path = golden_dir().join(filename);
-    fs::read_to_string(&path).unwrap_or_else(|e| panic!("Failed to read golden file {path:?}: {e}"))
+    fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("Failed to read golden file {}: {e}", path.display()))
 }
 
 /// Load a golden JSON file as a Value.

@@ -8,7 +8,11 @@
 //! - Memory exhaustion attempts
 
 // Fuzz tests use expect/unwrap for simplicity - panics are acceptable in tests
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::uninlined_format_args
+)]
 
 use proptest::prelude::*;
 use subcog::services::parse_filter_query;
@@ -168,7 +172,7 @@ proptest! {
 
     /// Fuzz: Duration with large numbers should not overflow.
     #[test]
-    fn fuzz_large_duration_no_overflow(num in 1_000_000u64..u64::MAX / 100000) {
+    fn fuzz_large_duration_no_overflow(num in 1_000_000u64..u64::MAX / 100_000) {
         let query = format!("since:{num}d");
         let filter = parse_filter_query(&query);
         // Should handle gracefully (saturating_sub)
@@ -434,7 +438,7 @@ mod adversarial_tests {
         for pattern in single_tag_patterns {
             let filter = parse_filter_query(pattern);
             // Should parse as literal tags (single tag = AND logic)
-            assert_eq!(filter.tags.len(), 1, "Failed for pattern: {}", pattern);
+            assert_eq!(filter.tags.len(), 1, "Failed for pattern: {pattern}");
         }
 
         // Patterns with commas are correctly split into OR tags

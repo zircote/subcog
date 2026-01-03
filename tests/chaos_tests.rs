@@ -8,11 +8,13 @@
 
 // Chaos tests use expect/unwrap/panic for simplicity - panics are acceptable in tests
 // Excessive nesting is acceptable in concurrent test code with thread spawns
+// Needless collect is sometimes needed for clearer concurrent test structure
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,
     clippy::panic,
-    clippy::excessive_nesting
+    clippy::excessive_nesting,
+    clippy::needless_collect
 )]
 
 use std::sync::Arc;
