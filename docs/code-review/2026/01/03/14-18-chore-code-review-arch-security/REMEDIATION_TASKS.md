@@ -29,9 +29,14 @@
   - Applied sanitization to topics, memory content, and reminders in context building
   - Added 14 unit tests for injection prevention
 
-- [ ] **CRIT-005**: Implement encryption at rest
-  - File: `src/storage/persistence/filesystem.rs:23-89`
-  - Action: Add AES-256-GCM encryption with key from env/secrets manager
+- [x] **CRIT-005**: Implement encryption at rest ✓ completed 2026-01-03
+  - File: `src/security/encryption.rs`, `src/storage/persistence/filesystem.rs`
+  - Action: Added AES-256-GCM encryption module with `encryption` feature flag
+  - Key from `SUBCOG_ENCRYPTION_KEY` env var (base64-encoded 32 bytes)
+  - Format: `SUBCOG_ENC_V1` magic header + 12-byte nonce + ciphertext + auth tag
+  - Filesystem backend auto-encrypts on store, auto-decrypts on get
+  - Backwards compatible: reads unencrypted files when encryption enabled
+  - Added 11 unit tests for encryption roundtrip, tampering detection, key validation
 
 - [ ] **CRIT-006**: Add service-layer authorization
   - File: `src/services/mod.rs:156-234`
@@ -364,11 +369,11 @@
 
 | Phase | Status | Findings | Fixed |
 |-------|--------|----------|-------|
-| Critical | In Progress | 7 | 4 |
+| Critical | In Progress | 7 | 5 |
 | High | Pending | 44 | 0 |
 | Medium | Pending | 63 | 0 |
 | Low | Pending | 62 | 0 |
-| **Total** | | **176** | **4** |
+| **Total** | | **176** | **5** |
 
 ---
 

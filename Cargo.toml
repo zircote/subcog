@@ -70,6 +70,11 @@ once_cell = "1.20"
 sha2 = "0.10"
 hex = "0.4"
 
+# Encryption at rest (optional)
+aes-gcm = { version = "0.10", optional = true }
+rand = { version = "0.9", optional = true }
+base64 = { version = "0.22", optional = true }
+
 # LRU cache for recent capture tracking
 lru = "0.16"
 
@@ -196,8 +201,10 @@ usearch-hnsw = ["dep:usearch"]
 fastembed-embeddings = ["dep:fastembed"]
 # HTTP transport with JWT authentication
 http = ["dep:axum", "dep:tower-http"]
+# Encryption at rest for filesystem backend (AES-256-GCM)
+encryption = ["dep:aes-gcm", "dep:rand", "dep:base64"]
 # Organization-scoped storage (requires PostgreSQL, optionally Redis)
 # Feature-gated stub for future implementation
 org-scope = []
 # All features enabled
-full = ["postgres", "postgres-tls", "redis", "usearch-hnsw", "fastembed-embeddings", "http"]
+full = ["postgres", "postgres-tls", "redis", "usearch-hnsw", "fastembed-embeddings", "http", "encryption"]
