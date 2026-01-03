@@ -234,7 +234,7 @@ impl Domain {
     ///
     /// # Scope Values
     ///
-    /// - `"global"` - Project-local domain (default, in git repo context)
+    /// - `"project"` - Project-local domain (default, in git repo context)
     /// - `"user"` - User-scoped domain (outside git repo or explicit user scope)
     /// - `"{org}/{repo}"` - Repository-scoped domain
     /// - `"org/{org}"` - Organization-scoped domain
@@ -244,9 +244,9 @@ impl Domain {
     /// ```rust
     /// use subcog::models::Domain;
     ///
-    /// // Project-local (global) scope
+    /// // Project-local scope
     /// let domain = Domain::new();
-    /// assert_eq!(domain.urn_scope(), "global");
+    /// assert_eq!(domain.urn_scope(), "project");
     ///
     /// // User scope
     /// let domain = Domain::for_user();
@@ -263,9 +263,9 @@ impl Domain {
             return "user".to_string();
         }
 
-        // Check for global/project-local scope
+        // Check for project-local scope (empty domain)
         if self.is_global() {
-            return "global".to_string();
+            return "project".to_string();
         }
 
         // For other scopes, use the display representation
@@ -299,8 +299,8 @@ impl fmt::Display for Domain {
             (None, Some(proj), _) if proj == "user" => write!(f, "user"),
             (None, Some(proj), _) => write!(f, "{proj}"),
             (None, None, Some(repo)) => write!(f, "{repo}"),
-            // Global/project domain shows as "global" (legacy) or "project"
-            (None, None, None) => write!(f, "global"),
+            // Project-local domain (empty domain)
+            (None, None, None) => write!(f, "project"),
         }
     }
 }
@@ -475,10 +475,10 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_urn_scope_global() {
+    fn test_urn_scope_project() {
         let domain = Domain::new();
         assert!(domain.is_global());
-        assert_eq!(domain.urn_scope(), "global");
+        assert_eq!(domain.urn_scope(), "project");
     }
 
     #[test]
@@ -507,11 +507,11 @@ mod tests {
     }
 
     #[test]
-    fn test_urn_scope_backward_compatible() {
-        // Ensure existing URN patterns continue to work
-        // Global domain -> "global"
-        assert_eq!(Domain::new().urn_scope(), "global");
-        assert_eq!(Domain::new().to_string(), "global");
+    fn test_urn_scope_consistency() {
+        // Ensure URN patterns are consistent
+        // Project-local domain -> "project"
+        assert_eq!(Domain::new().urn_scope(), "project");
+        assert_eq!(Domain::new().to_string(), "project");
 
         // User domain -> "user"
         assert_eq!(Domain::for_user().urn_scope(), "user");

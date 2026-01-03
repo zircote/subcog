@@ -504,15 +504,15 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_capture_urn_global_domain() {
+    fn test_capture_urn_project_domain() {
         let service = CaptureService::new(test_config());
         let request = test_request("Test content");
 
         let result = service.capture(request).unwrap();
-        // Default domain is global, so URN should start with subcog://global/
+        // Default domain is project, so URN should start with subcog://project/
         assert!(
-            result.urn.starts_with("subcog://global/"),
-            "Expected URN to start with 'subcog://global/', got: {}",
+            result.urn.starts_with("subcog://project/"),
+            "Expected URN to start with 'subcog://project/', got: {}",
             result.urn
         );
         assert!(result.urn.contains("/decisions/"));
@@ -561,7 +561,7 @@ mod tests {
         let parts: Vec<&str> = result.urn.split('/').collect();
         assert_eq!(parts[0], "subcog:");
         assert_eq!(parts[1], ""); // empty after ://
-        assert_eq!(parts[2], "global"); // scope
+        assert_eq!(parts[2], "project"); // scope
         assert_eq!(parts[3], "decisions"); // namespace
         assert_eq!(parts[4].len(), 12); // id (12 hex chars)
     }

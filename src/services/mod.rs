@@ -356,7 +356,7 @@ impl ServiceContainer {
     /// // Works in any directory
     /// let container = ServiceContainer::from_current_dir_or_user()?;
     ///
-    /// // In git repo: subcog://global/{namespace}/{id}
+    /// // In git repo: subcog://project/{namespace}/{id}
     /// // Outside git: subcog://user/{namespace}/{id}
     /// let result = container.capture().capture(request)?;
     /// ```

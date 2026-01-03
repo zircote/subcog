@@ -131,7 +131,7 @@ impl Memory {
     ///     tombstoned_at: None,
     /// };
     ///
-    /// assert_eq!(memory.urn(), "subcog://global/decisions/abc123");
+    /// assert_eq!(memory.urn(), "subcog://project/decisions/abc123");
     /// ```
     #[must_use]
     pub fn urn(&self) -> String {
@@ -180,9 +180,9 @@ mod tests {
     }
 
     #[test]
-    fn test_urn_global_domain() {
+    fn test_urn_project_domain() {
         let memory = test_memory(Domain::new());
-        assert_eq!(memory.urn(), "subcog://global/decisions/test123");
+        assert_eq!(memory.urn(), "subcog://project/decisions/test123");
     }
 
     #[test]
@@ -202,20 +202,20 @@ mod tests {
         let mut memory = test_memory(Domain::new());
 
         memory.namespace = Namespace::Learnings;
-        assert_eq!(memory.urn(), "subcog://global/learnings/test123");
+        assert_eq!(memory.urn(), "subcog://project/learnings/test123");
 
         memory.namespace = Namespace::Patterns;
-        assert_eq!(memory.urn(), "subcog://global/patterns/test123");
+        assert_eq!(memory.urn(), "subcog://project/patterns/test123");
 
         memory.namespace = Namespace::TechDebt;
-        assert_eq!(memory.urn(), "subcog://global/tech-debt/test123");
+        assert_eq!(memory.urn(), "subcog://project/tech-debt/test123");
     }
 
     #[test]
-    fn test_urn_backward_compatible() {
-        // These URN formats should match the existing format used throughout the codebase
-        let global_memory = test_memory(Domain::new());
-        assert!(global_memory.urn().starts_with("subcog://global/"));
+    fn test_urn_consistency() {
+        // These URN formats should match the domain naming conventions
+        let project_memory = test_memory(Domain::new());
+        assert!(project_memory.urn().starts_with("subcog://project/"));
 
         let user_memory = test_memory(Domain::for_user());
         assert!(user_memory.urn().starts_with("subcog://user/"));

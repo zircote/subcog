@@ -155,7 +155,7 @@ mod tests {
         let captured: Vec<CapturedMemory> = vec![];
         let skipped = vec![SkippedDuplicate {
             reason: "exact_match".to_string(),
-            matched_urn: "subcog://global/decisions/abc123".to_string(),
+            matched_urn: "subcog://project/decisions/abc123".to_string(),
             similarity_score: None,
             namespace: "decisions".to_string(),
         }];
@@ -165,7 +165,7 @@ mod tests {
         let msg = result.unwrap();
         assert!(msg.contains("Skipped 1 duplicates"));
         assert!(msg.contains("exact_match"));
-        assert!(msg.contains("subcog://global/decisions/abc123"));
+        assert!(msg.contains("subcog://project/decisions/abc123"));
     }
 
     #[test]
@@ -173,7 +173,7 @@ mod tests {
         let captured: Vec<CapturedMemory> = vec![];
         let skipped = vec![SkippedDuplicate {
             reason: "semantic_similar".to_string(),
-            matched_urn: "subcog://global/patterns/def456".to_string(),
+            matched_urn: "subcog://project/patterns/def456".to_string(),
             similarity_score: Some(0.92),
             namespace: "patterns".to_string(),
         }];
@@ -242,7 +242,7 @@ mod tests {
         }];
         let skipped = vec![SkippedDuplicate {
             reason: "recent_capture".to_string(),
-            matched_urn: "subcog://global/context/old-mem".to_string(),
+            matched_urn: "subcog://project/context/old-mem".to_string(),
             similarity_score: None,
             namespace: "context".to_string(),
         }];
