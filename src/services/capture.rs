@@ -401,7 +401,7 @@ impl CaptureService {
 
     /// Captures a memory with authorization check (CRIT-006).
     ///
-    /// This method requires [`Permission::Write`] to be present in the auth context.
+    /// This method requires [`super::auth::Permission::Write`] to be present in the auth context.
     /// Use this for MCP/HTTP endpoints where authorization is required.
     ///
     /// # Arguments

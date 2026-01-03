@@ -601,7 +601,7 @@ impl RecallService {
 
     /// Searches for memories with authorization check (CRIT-006).
     ///
-    /// This method requires [`Permission::Read`] to be present in the auth context.
+    /// This method requires [`super::auth::Permission::Read`] to be present in the auth context.
     /// Use this for MCP/HTTP endpoints where authorization is required.
     ///
     /// # Arguments
@@ -630,7 +630,7 @@ impl RecallService {
 
     /// Retrieves a memory by ID with authorization check (CRIT-006).
     ///
-    /// This method requires [`Permission::Read`] to be present in the auth context.
+    /// This method requires [`super::auth::Permission::Read`] to be present in the auth context.
     ///
     /// # Errors
     ///
