@@ -6,8 +6,8 @@
 //! When the `usearch-hnsw` feature is enabled, this uses the native usearch
 //! library for optimized ANN search. Otherwise, a pure-Rust fallback is used.
 
-use crate::models::{MemoryId, SearchFilter};
-use crate::storage::traits::VectorBackend;
+use crate::models::MemoryId;
+use crate::storage::traits::{VectorBackend, VectorFilter};
 use crate::{Error, Result};
 use std::collections::HashMap;
 use std::fs;
@@ -40,8 +40,8 @@ const HNSW_EXPANSION_SEARCH: usize = 64;
 mod native {
     use super::{
         DEFAULT_USEARCH_DIMENSIONS, Error, HNSW_CONNECTIVITY, HNSW_EXPANSION_ADD,
-        HNSW_EXPANSION_SEARCH, HashMap, MemoryId, Mutex, PathBuf, Result, SearchFilter,
-        VectorBackend, fs,
+        HNSW_EXPANSION_SEARCH, HashMap, MemoryId, Mutex, PathBuf, Result, VectorBackend,
+        VectorFilter, fs,
     };
     use usearch::{Index, IndexOptions, MetricKind, ScalarKind};
 
@@ -361,7 +361,7 @@ mod native {
         fn search(
             &self,
             query_embedding: &[f32],
-            _filter: &SearchFilter,
+            _filter: &VectorFilter,
             limit: usize,
         ) -> Result<Vec<(MemoryId, f32)>> {
             self.validate_embedding(query_embedding)?;
@@ -448,7 +448,10 @@ mod native {
 
 #[cfg(not(feature = "usearch-hnsw"))]
 mod fallback {
-    use super::*;
+    use super::{
+        DEFAULT_USEARCH_DIMENSIONS, Error, HashMap, MemoryId, Mutex, PathBuf, Result,
+        VectorBackend, VectorFilter, fs,
+    };
 
     /// Inner mutable state protected by a Mutex.
     struct InnerState {
@@ -680,7 +683,7 @@ mod fallback {
         fn search(
             &self,
             query_embedding: &[f32],
-            _filter: &SearchFilter,
+            _filter: &VectorFilter,
             limit: usize,
         ) -> Result<Vec<(MemoryId, f32)>> {
             self.validate_embedding(query_embedding)?;
@@ -886,7 +889,7 @@ mod tests {
         // Search with a query similar to id0
         let query = create_normalized_embedding(384, 0.0);
         let results = backend
-            .search(&query, &SearchFilter::new(), 3)
+            .search(&query, &VectorFilter::new(), 3)
             .expect("search failed");
 
         assert_eq!(results.len(), 3);
@@ -902,7 +905,7 @@ mod tests {
 
         let query = create_random_embedding(384);
         let results = backend
-            .search(&query, &SearchFilter::new(), 10)
+            .search(&query, &VectorFilter::new(), 10)
             .expect("search failed");
 
         assert!(results.is_empty());
@@ -999,7 +1002,7 @@ mod tests {
         // Search should find the updated vector
         let query = create_normalized_embedding(384, 2.0);
         let results = backend
-            .search(&query, &SearchFilter::new(), 1)
+            .search(&query, &VectorFilter::new(), 1)
             .expect("search failed");
 
         assert!(!results.is_empty());

@@ -6,4 +6,4 @@ mod vector;
 
 pub use index::IndexBackend;
 pub use persistence::PersistenceBackend;
-pub use vector::VectorBackend;
+pub use vector::{VectorBackend, VectorFilter};

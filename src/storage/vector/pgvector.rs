@@ -4,16 +4,14 @@
 
 #[cfg(feature = "postgres")]
 mod implementation {
-    use crate::models::{MemoryId, SearchFilter};
+    use crate::embedding::DEFAULT_DIMENSIONS;
+    use crate::models::MemoryId;
     use crate::storage::migrations::{Migration, MigrationRunner};
-    use crate::storage::traits::VectorBackend;
+    use crate::storage::traits::{VectorBackend, VectorFilter};
     use crate::{Error, Result};
     use deadpool_postgres::{Config, Pool, Runtime};
     use tokio::runtime::Handle;
     use tokio_postgres::NoTls;
-
-    /// Default embedding dimensions for all-MiniLM-L6-v2.
-    pub const DEFAULT_DIMENSIONS: usize = 384;
 
     /// Embedded migrations compiled into the binary.
     /// Note: Migration 1 assumes pgvector extension is already installed.
@@ -232,7 +230,7 @@ mod implementation {
         async fn search_async(
             &self,
             query_embedding: &[f32],
-            filter: &SearchFilter,
+            filter: &VectorFilter,
             limit: usize,
         ) -> Result<Vec<(MemoryId, f32)>> {
             let client = self.pool.get().await.map_err(pool_error)?;
@@ -273,7 +271,7 @@ mod implementation {
         }
 
         /// Builds namespace filter clause.
-        fn build_namespace_filter(filter: &SearchFilter) -> (String, Vec<String>) {
+        fn build_namespace_filter(filter: &VectorFilter) -> (String, Vec<String>) {
             if filter.namespaces.is_empty() {
                 return (String::new(), Vec::new());
             }
@@ -336,7 +334,7 @@ mod implementation {
         fn search(
             &self,
             query_embedding: &[f32],
-            filter: &SearchFilter,
+            filter: &VectorFilter,
             limit: usize,
         ) -> Result<Vec<(MemoryId, f32)>> {
             self.block_on(self.search_async(query_embedding, filter, limit))
@@ -353,16 +351,17 @@ mod implementation {
 }
 
 #[cfg(feature = "postgres")]
-pub use implementation::{DEFAULT_DIMENSIONS, PgvectorBackend};
+pub use implementation::PgvectorBackend;
+
+// Re-export centralized DEFAULT_DIMENSIONS from embedding module
+pub use crate::embedding::DEFAULT_DIMENSIONS;
 
 #[cfg(not(feature = "postgres"))]
 mod stub {
-    use crate::models::{MemoryId, SearchFilter};
-    use crate::storage::traits::VectorBackend;
+    use crate::embedding::DEFAULT_DIMENSIONS;
+    use crate::models::MemoryId;
+    use crate::storage::traits::{VectorBackend, VectorFilter};
     use crate::{Error, Result};
-
-    /// Default embedding dimensions for all-MiniLM-L6-v2.
-    pub const DEFAULT_DIMENSIONS: usize = 384;
 
     /// pgvector-based vector backend (stub).
     pub struct PgvectorBackend {
@@ -422,7 +421,7 @@ mod stub {
         fn search(
             &self,
             _query_embedding: &[f32],
-            _filter: &SearchFilter,
+            _filter: &VectorFilter,
             _limit: usize,
         ) -> Result<Vec<(MemoryId, f32)>> {
             Err(Error::NotImplemented(format!(
@@ -448,4 +447,4 @@ mod stub {
 }
 
 #[cfg(not(feature = "postgres"))]
-pub use stub::{DEFAULT_DIMENSIONS, PgvectorBackend};
+pub use stub::PgvectorBackend;

@@ -47,8 +47,8 @@
 //! via `Arc<dyn VectorBackend>`. The connection is cached and reused
 //! across operations for efficiency.
 
-use crate::models::{MemoryId, SearchFilter};
-use crate::storage::traits::VectorBackend;
+use crate::models::MemoryId;
+use crate::storage::traits::{VectorBackend, VectorFilter};
 use crate::{Error, Result};
 
 #[cfg(feature = "redis")]
@@ -91,7 +91,9 @@ pub struct RedisVectorBackend {
 
 impl RedisVectorBackend {
     /// Default embedding dimensions for all-MiniLM-L6-v2.
-    pub const DEFAULT_DIMENSIONS: usize = 384;
+    ///
+    /// Re-exported from `crate::embedding::DEFAULT_DIMENSIONS` for convenience.
+    pub const DEFAULT_DIMENSIONS: usize = crate::embedding::DEFAULT_DIMENSIONS;
 
     /// Creates a new Redis vector backend.
     ///
@@ -505,7 +507,7 @@ impl VectorBackend for RedisVectorBackend {
     fn search(
         &self,
         query_embedding: &[f32],
-        _filter: &SearchFilter,
+        _filter: &VectorFilter,
         limit: usize,
     ) -> Result<Vec<(MemoryId, f32)>> {
         self.validate_embedding(query_embedding)?;
@@ -618,7 +620,7 @@ impl VectorBackend for RedisVectorBackend {
     fn search(
         &self,
         _query_embedding: &[f32],
-        _filter: &SearchFilter,
+        _filter: &VectorFilter,
         _limit: usize,
     ) -> Result<Vec<(MemoryId, f32)>> {
         Err(Error::NotImplemented(
@@ -707,7 +709,7 @@ mod tests {
         assert!(backend.remove(&id).is_err());
         assert!(
             backend
-                .search(&embedding, &SearchFilter::new(), 10)
+                .search(&embedding, &VectorFilter::new(), 10)
                 .is_err()
         );
         assert!(backend.count().is_err());
