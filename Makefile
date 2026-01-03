@@ -85,7 +85,9 @@ msrv:
 	rustup run $$MSRV cargo check --all-features
 
 # CI-style full check (all gates must pass)
-ci: format-check lint-strict test deny msrv
+# Matches GitHub Actions: fmt, clippy, test, doc, deny, msrv, bench
+# (coverage requires tarpaulin, skip locally)
+ci: format-check lint-strict test doc-check deny msrv bench
 
 # Show help
 help:
@@ -124,5 +126,7 @@ help:
 	@echo "    1. cargo fmt -- --check"
 	@echo "    2. cargo clippy --all-targets --all-features -- -D warnings"
 	@echo "    3. cargo test --all-features"
-	@echo "    4. cargo deny check"
-	@echo "    5. rustup run \$$MSRV cargo check --all-features (MSRV from Cargo.toml)"
+	@echo "    4. cargo doc --no-deps"
+	@echo "    5. cargo deny check"
+	@echo "    6. rustup run \$$MSRV cargo check --all-features"
+	@echo "    7. cargo bench"
