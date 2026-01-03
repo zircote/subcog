@@ -5,7 +5,6 @@
 
 use crate::config::Config;
 use crate::embedding::Embedder;
-use crate::git::{NotesManager, YamlFrontMatterParser};
 use crate::models::{CaptureRequest, CaptureResult, Memory, MemoryEvent, MemoryId, MemoryStatus};
 use crate::security::{ContentRedactor, SecretDetector, record_event};
 use crate::storage::traits::{IndexBackend, VectorBackend};
@@ -18,17 +17,16 @@ use tracing::instrument;
 ///
 /// # Storage Layers
 ///
-/// When fully configured, captures are written to three layers:
-/// 1. **Persistence** (Git Notes) - Authoritative storage, content-addressable
-/// 2. **Index** (`SQLite` FTS5) - Full-text search via BM25
-/// 3. **Vector** (usearch) - Semantic similarity search
+/// When fully configured, captures are written to two layers:
+/// 1. **Index** (`SQLite` FTS5) - Authoritative storage with full-text search via BM25
+/// 2. **Vector** (usearch) - Semantic similarity search
 ///
 /// # Graceful Degradation
 ///
-/// If embedder or index/vector backends are unavailable:
-/// - Capture still succeeds (Git Notes is authoritative)
+/// If embedder or vector backend is unavailable:
+/// - Capture still succeeds (Index layer is authoritative)
 /// - A warning is logged for each failed secondary store
-/// - The memory may not be immediately searchable
+/// - The memory may not be searchable via semantic similarity
 pub struct CaptureService {
     /// Configuration.
     config: Config,
@@ -190,30 +188,9 @@ impl CaptureService {
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
 
-            // Store to git notes if configured and get the SHA as memory ID
-            let memory_id = if let Some(ref repo_path) = self.config.repo_path {
-                let notes = NotesManager::new(repo_path);
-
-                // Serialize memory content with initial front matter (ID will be the note SHA)
-                let metadata = serde_json::json!({
-                    "namespace": request.namespace.as_str(),
-                    "domain": request.domain.to_string(),
-                    "status": MemoryStatus::Active.as_str(),
-                    "created_at": now,
-                    "updated_at": now,
-                    "tags": request.tags
-                });
-
-                let note_content = YamlFrontMatterParser::serialize(&metadata, &content)?;
-                let note_oid = notes.add_to_head(&note_content)?;
-
-                // Use the note SHA as the memory ID (short form - first 12 chars)
-                MemoryId::new(note_oid.to_string()[..12].to_string())
-            } else {
-                // Fallback to UUID if no git repo configured (SHA only, no namespace prefix)
-                let uuid = uuid::Uuid::new_v4();
-                MemoryId::new(uuid.to_string().replace('-', "")[..12].to_string())
-            };
+            // Generate memory ID from UUID (12 hex chars for consistency)
+            let uuid = uuid::Uuid::new_v4();
+            let memory_id = MemoryId::new(uuid.to_string().replace('-', "")[..12].to_string());
 
             let span = tracing::Span::current();
             span.record("memory.id", memory_id.as_str());
