@@ -97,6 +97,80 @@ mod implementation {
         }
     }
 
+    /// Validates PostgreSQL connection URL format (SEC-M2).
+    ///
+    /// Prevents connection string injection by validating:
+    /// - URL scheme is `postgresql://` or `postgres://`
+    /// - Host contains only valid characters (alphanumeric, `.`, `-`, `_`)
+    /// - Database name contains only valid characters
+    /// - No dangerous URL parameters that could alter connection behavior
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::InvalidInput` if the connection URL is invalid or contains
+    /// potentially dangerous parameters.
+    fn validate_connection_url(url_str: &str) -> Result<()> {
+        // Check scheme
+        if !url_str.starts_with("postgresql://") && !url_str.starts_with("postgres://") {
+            return Err(Error::InvalidInput(
+                "Connection URL must start with postgresql:// or postgres://".to_string(),
+            ));
+        }
+
+        // Parse URL to validate components using reqwest's re-exported url crate
+        let parsed = reqwest::Url::parse(url_str)
+            .map_err(|e| Error::InvalidInput(format!("Invalid connection URL format: {e}")))?;
+
+        // Validate host (prevent injection via malformed hostnames)
+        if let Some(host) = parsed.host_str() {
+            let is_valid_host = host
+                .chars()
+                .all(|c: char| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_');
+            if !is_valid_host {
+                tracing::warn!(
+                    host = host,
+                    "PostgreSQL connection URL contains suspicious host characters"
+                );
+                return Err(Error::InvalidInput(
+                    "Connection URL host contains invalid characters".to_string(),
+                ));
+            }
+        }
+
+        // Validate database name if present
+        if let Some(path) = parsed.path().strip_prefix('/') {
+            let is_valid_db = path.is_empty()
+                || path
+                    .chars()
+                    .all(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+            if !is_valid_db {
+                tracing::warn!(
+                    database = path,
+                    "PostgreSQL connection URL contains suspicious database name"
+                );
+                return Err(Error::InvalidInput(
+                    "Connection URL database name contains invalid characters".to_string(),
+                ));
+            }
+        }
+
+        // Block dangerous connection parameters that could alter behavior
+        let dangerous_params = ["host", "hostaddr", "client_encoding", "options"];
+        for (key, _) in parsed.query_pairs() {
+            if dangerous_params.contains(&key.as_ref()) {
+                tracing::warn!(
+                    param = key.as_ref(),
+                    "PostgreSQL connection URL contains blocked parameter"
+                );
+                return Err(Error::InvalidInput(format!(
+                    "Connection URL parameter '{key}' is not allowed in query string"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
     /// PostgreSQL-based index backend.
     ///
     /// Uses `deadpool_postgres::Pool` for thread-safe connection pooling,
@@ -214,8 +288,13 @@ mod implementation {
             roots
         }
 
-        /// Parses the connection URL into a tokio-postgres config.
+        /// Parses the connection URL into a tokio-postgres config (SEC-M2).
+        ///
+        /// Validates the URL for security before parsing to prevent injection attacks.
         fn parse_connection_url(url: &str) -> Result<tokio_postgres::Config> {
+            // Validate URL format and block dangerous parameters (SEC-M2)
+            validate_connection_url(url)?;
+
             url.parse::<tokio_postgres::Config>()
                 .map_err(|e| Error::OperationFailed {
                     operation: "postgres_parse_url".to_string(),
@@ -589,6 +668,87 @@ mod implementation {
 
         fn clear(&self) -> Result<()> {
             self.block_on(self.clear_async())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_validate_connection_url_valid() {
+            // Valid PostgreSQL URLs
+            assert!(validate_connection_url("postgresql://localhost/mydb").is_ok());
+            assert!(validate_connection_url("postgres://user:pass@localhost:5432/mydb").is_ok());
+            assert!(
+                validate_connection_url(
+                    "postgresql://user:pass@db.example.com:5432/mydb?sslmode=require"
+                )
+                .is_ok()
+            );
+            assert!(validate_connection_url("postgresql://localhost/my_db-test").is_ok());
+        }
+
+        #[test]
+        fn test_validate_connection_url_invalid_scheme() {
+            // Invalid scheme
+            assert!(validate_connection_url("mysql://localhost/mydb").is_err());
+            assert!(validate_connection_url("http://localhost/mydb").is_err());
+            assert!(validate_connection_url("localhost/mydb").is_err());
+        }
+
+        #[test]
+        fn test_validate_connection_url_invalid_host() {
+            // Invalid host characters (injection attempts)
+            assert!(validate_connection_url("postgresql://local<script>host/mydb").is_err());
+            assert!(validate_connection_url("postgresql://host;drop table/mydb").is_err());
+        }
+
+        #[test]
+        fn test_validate_connection_url_invalid_database() {
+            // Invalid database name characters
+            assert!(validate_connection_url("postgresql://localhost/my;db").is_err());
+            assert!(validate_connection_url("postgresql://localhost/db<script>").is_err());
+        }
+
+        #[test]
+        fn test_validate_connection_url_blocked_params() {
+            // Blocked dangerous parameters
+            assert!(validate_connection_url("postgresql://localhost/mydb?host=evil.com").is_err());
+            assert!(
+                validate_connection_url("postgresql://localhost/mydb?hostaddr=1.2.3.4").is_err()
+            );
+            assert!(
+                validate_connection_url("postgresql://localhost/mydb?options=-c log_statement=all")
+                    .is_err()
+            );
+            assert!(
+                validate_connection_url("postgresql://localhost/mydb?client_encoding=SQL_ASCII")
+                    .is_err()
+            );
+        }
+
+        #[test]
+        fn test_validate_connection_url_allowed_params() {
+            // Allowed parameters should pass
+            assert!(validate_connection_url("postgresql://localhost/mydb?sslmode=require").is_ok());
+            assert!(
+                validate_connection_url(
+                    "postgresql://localhost/mydb?connect_timeout=10&application_name=subcog"
+                )
+                .is_ok()
+            );
+        }
+
+        #[test]
+        fn test_validate_table_name() {
+            // Valid table names
+            assert!(validate_table_name("memories_index").is_ok());
+            assert!(validate_table_name("subcog_memories").is_ok());
+
+            // Invalid table names
+            assert!(validate_table_name("users").is_err());
+            assert!(validate_table_name("memories_index; DROP TABLE users").is_err());
         }
     }
 }

@@ -69,6 +69,33 @@ fn acquire_lock_with_timeout<T>(mutex: &Mutex<T>, timeout: Duration) -> Result<M
     }
 }
 
+/// Escapes SQL LIKE wildcards in a string (SEC-M4).
+///
+/// `SQLite` LIKE patterns treat `%` as "any characters" and `_` as "single character".
+/// If user input contains these characters, they must be escaped to be treated literally.
+/// Uses `\` as the escape character (requires `ESCAPE '\'` in LIKE clause).
+///
+/// # Examples
+///
+/// ```ignore
+/// assert_eq!(escape_like_wildcards("100%"), "100\\%");
+/// assert_eq!(escape_like_wildcards("user_name"), "user\\_name");
+/// assert_eq!(escape_like_wildcards("path\\file"), "path\\\\file");
+/// ```
+fn escape_like_wildcards(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '%' | '_' | '\\' => {
+                result.push('\\');
+                result.push(c);
+            },
+            _ => result.push(c),
+        }
+    }
+    result
+}
+
 /// SQLite-based index backend with FTS5.
 pub struct SqliteBackend {
     /// Connection to the `SQLite` database.
@@ -170,6 +197,10 @@ impl SqliteBackend {
         Self::create_indexes(&conn);
 
         // Create FTS5 virtual table for full-text search (standalone, not synced with memories)
+        // Note: FTS5 virtual tables use inverted indexes for MATCH queries and don't support
+        // traditional B-tree indexes. Joins with the memories table use memories.id (PRIMARY KEY)
+        // which is already indexed. The FTS5 MATCH operation returns a small result set first,
+        // making the join efficient. See: https://sqlite.org/fts5.html
         conn.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
                 id,
@@ -264,10 +295,13 @@ impl SqliteBackend {
 
         // Tag filtering (AND logic - must have ALL tags)
         // Use ',tag,' pattern with wrapped column to match whole tags only
+        // Escape LIKE wildcards in tags to prevent SQL injection (SEC-M4)
         for tag in &filter.tags {
-            conditions.push(format!("(',' || m.tags || ',') LIKE ?{param_idx}"));
+            conditions.push(format!(
+                "(',' || m.tags || ',') LIKE ?{param_idx} ESCAPE '\\'"
+            ));
             param_idx += 1;
-            params.push(format!("%,{tag},%"));
+            params.push(format!("%,{},%", escape_like_wildcards(tag)));
         }
 
         // Tag filtering (OR logic - must have ANY tag)
@@ -276,9 +310,9 @@ impl SqliteBackend {
                 .tags_any
                 .iter()
                 .map(|tag| {
-                    let cond = format!("(',' || m.tags || ',') LIKE ?{param_idx}");
+                    let cond = format!("(',' || m.tags || ',') LIKE ?{param_idx} ESCAPE '\\'");
                     param_idx += 1;
-                    params.push(format!("%,{tag},%"));
+                    params.push(format!("%,{},%", escape_like_wildcards(tag)));
                     cond
                 })
                 .collect();
@@ -286,10 +320,13 @@ impl SqliteBackend {
         }
 
         // Excluded tags (NOT LIKE) - match whole tags only
+        // Escape LIKE wildcards (SEC-M4)
         for tag in &filter.excluded_tags {
-            conditions.push(format!("(',' || m.tags || ',') NOT LIKE ?{param_idx}"));
+            conditions.push(format!(
+                "(',' || m.tags || ',') NOT LIKE ?{param_idx} ESCAPE '\\'"
+            ));
             param_idx += 1;
-            params.push(format!("%,{tag},%"));
+            params.push(format!("%,{},%", escape_like_wildcards(tag)));
         }
 
         // Source pattern (glob-style converted to SQL LIKE)
@@ -1405,5 +1442,59 @@ mod tests {
     fn test_db_path() {
         let backend = SqliteBackend::in_memory().unwrap();
         assert!(backend.db_path().is_none());
+    }
+
+    #[test]
+    fn test_escape_like_wildcards() {
+        // No special characters
+        assert_eq!(escape_like_wildcards("normal"), "normal");
+        assert_eq!(escape_like_wildcards("test-tag"), "test-tag");
+
+        // Percent sign (LIKE wildcard for "any characters")
+        assert_eq!(escape_like_wildcards("100%"), "100\\%");
+        assert_eq!(escape_like_wildcards("%prefix"), "\\%prefix");
+
+        // Underscore (LIKE wildcard for "single character")
+        assert_eq!(escape_like_wildcards("user_name"), "user\\_name");
+        assert_eq!(escape_like_wildcards("_private"), "\\_private");
+
+        // Backslash (the escape character itself)
+        assert_eq!(escape_like_wildcards("path\\file"), "path\\\\file");
+
+        // Multiple special characters
+        assert_eq!(escape_like_wildcards("100%_test\\"), "100\\%\\_test\\\\");
+
+        // Empty string
+        assert_eq!(escape_like_wildcards(""), "");
+    }
+
+    #[test]
+    fn test_tag_filtering_with_special_characters() {
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        // Create memory with tag containing LIKE wildcard characters
+        let mut memory = create_test_memory("id1", "Test content", Namespace::Decisions);
+        memory.tags = vec!["100%_complete".to_string(), "normal-tag".to_string()];
+        backend.index(&memory).unwrap();
+
+        // Search with exact tag match (should find it)
+        let mut filter = SearchFilter::new();
+        filter.tags.push("100%_complete".to_string());
+        let results = backend.search("Test", &filter, 10).unwrap();
+        assert_eq!(
+            results.len(),
+            1,
+            "Should find memory with escaped wildcards"
+        );
+
+        // Search with partial match that would work without escaping (should NOT find)
+        let mut filter2 = SearchFilter::new();
+        filter2.tags.push("100".to_string()); // Without escaping, % would match anything
+        let results2 = backend.search("Test", &filter2, 10).unwrap();
+        assert_eq!(
+            results2.len(),
+            0,
+            "Should not match partial tag due to proper escaping"
+        );
     }
 }
