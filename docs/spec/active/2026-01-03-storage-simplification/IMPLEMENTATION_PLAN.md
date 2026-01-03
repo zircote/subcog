@@ -1,0 +1,648 @@
+---
+document_type: implementation_plan
+project_id: SPEC-2026-01-03-001
+version: 1.0.0
+last_updated: 2026-01-03T01:30:00Z
+status: draft
+estimated_effort: 24-40 hours
+---
+
+# Storage Architecture Simplification - Implementation Plan
+
+## Overview
+
+This implementation plan breaks down the storage architecture simplification into 5 phases, progressing from foundational changes to git-notes removal to garbage collection.
+
+**Approach**: Bottom-up - build new components, integrate, then remove old code.
+
+## Team & Resources
+
+| Role | Responsibility | Allocation |
+|------|----------------|------------|
+| Claude (Implementer) | All implementation | 100% |
+| User | Review & approval | As needed |
+
+## Phase Summary
+
+| Phase | Focus | Tasks | Estimated Effort |
+|-------|-------|-------|------------------|
+| Phase 1: Foundation | Facet support, context detection | 8 tasks | 6-10 hours |
+| Phase 2: Capture Path | Update CaptureService, remove git-notes | 6 tasks | 4-6 hours |
+| Phase 3: Recall Path | Update RecallService, facet filters | 5 tasks | 4-6 hours |
+| Phase 4: Garbage Collection | Branch GC, tombstones | 6 tasks | 4-8 hours |
+| Phase 5: Cleanup & Polish | Remove dead code, docs, org-scope design | 7 tasks | 6-10 hours |
+
+---
+
+## Phase 1: Foundation
+
+**Goal**: Add facet support to data models and storage schemas
+**Prerequisites**: None
+**Estimated Effort**: 6-10 hours
+
+### Tasks
+
+#### Task 1.1: Create Context Detector Module
+
+- **Description**: Create `src/context/mod.rs` and `src/context/detector.rs` with `GitContext` struct and detection logic
+- **Dependencies**: None
+- **Files**:
+  - `src/context/mod.rs` (new)
+  - `src/context/detector.rs` (new)
+  - `src/lib.rs` (add `pub mod context`)
+- **Acceptance Criteria**:
+  - [ ] `GitContext::from_cwd()` returns correct project_id, branch, file_path
+  - [ ] Handles non-git directories gracefully (all fields None)
+  - [ ] Handles detached HEAD (branch = None)
+  - [ ] Handles worktrees correctly
+  - [ ] Git remote URL credentials are sanitized
+  - [ ] Unit tests for all edge cases
+
+#### Task 1.2: Extend Memory Struct with Facet Fields
+
+- **Description**: Add `project_id`, `branch`, `file_path`, `tombstoned_at` fields to `Memory` struct
+- **Dependencies**: None
+- **Files**:
+  - `src/models/memory.rs`
+- **Acceptance Criteria**:
+  - [ ] Fields added with Option<String>/Option<u64> types
+  - [ ] Default impl updated
+  - [ ] Serialization/deserialization works
+  - [ ] Existing tests pass
+
+#### Task 1.3: Add Tombstoned Status to MemoryStatus
+
+- **Description**: Add `MemoryStatus::Tombstoned` variant
+- **Dependencies**: None
+- **Files**:
+  - `src/models/domain.rs`
+- **Acceptance Criteria**:
+  - [ ] `Tombstoned` variant added
+  - [ ] `as_str()` returns "tombstoned"
+  - [ ] `FromStr` parses "tombstoned"
+  - [ ] Existing tests pass
+
+#### Task 1.4: Extend SearchFilter with Facet Fields
+
+- **Description**: Add `project_id`, `branch`, `file_path_pattern`, `include_tombstoned` to `SearchFilter`
+- **Dependencies**: None
+- **Files**:
+  - `src/models/search.rs`
+- **Acceptance Criteria**:
+  - [ ] Fields added with appropriate types
+  - [ ] Default impl sets `include_tombstoned = false`
+  - [ ] Builder pattern updated
+
+#### Task 1.5: Create SQLite Schema Migration for Facets
+
+- **Description**: Add migration to add facet columns and indexes to SQLite schema
+- **Dependencies**: Task 1.2
+- **Files**:
+  - `src/storage/migrations/mod.rs` (add migration)
+  - `src/storage/index/sqlite.rs` (update schema version)
+- **Acceptance Criteria**:
+  - [ ] Migration adds `project_id`, `branch`, `file_path`, `tombstoned_at` columns
+  - [ ] Indexes created: `idx_memories_project`, `idx_memories_branch`, `idx_memories_path`, `idx_memories_project_branch`
+  - [ ] Partial index for active memories
+  - [ ] Migration is idempotent (can run multiple times)
+  - [ ] Existing data preserved
+
+#### Task 1.6: Create PostgreSQL Schema Migration for Facets
+
+- **Description**: Add migration to add facet columns and indexes to PostgreSQL schema
+- **Dependencies**: Task 1.2
+- **Files**:
+  - `src/storage/persistence/postgresql.rs`
+  - `src/storage/index/postgresql.rs`
+- **Acceptance Criteria**:
+  - [ ] Migration adds `project_id`, `branch`, `file_path`, `tombstoned_at` columns
+  - [ ] Indexes created with appropriate types
+  - [ ] Partial index for active memories
+  - [ ] Migration is idempotent
+
+#### Task 1.7: Update SQLite Index Backend for Facets
+
+- **Description**: Update `SqliteIndexBackend` to read/write facet fields
+- **Dependencies**: Task 1.2, Task 1.5
+- **Files**:
+  - `src/storage/index/sqlite.rs`
+- **Acceptance Criteria**:
+  - [ ] `index()` writes facet fields
+  - [ ] `search()` reads facet fields
+  - [ ] `build_filter_clause` handles facet filters
+  - [ ] Tests for faceted queries
+
+#### Task 1.8: Update PostgreSQL Backend for Facets
+
+- **Description**: Update PostgreSQL persistence and index backends to read/write facet fields
+- **Dependencies**: Task 1.2, Task 1.6
+- **Files**:
+  - `src/storage/persistence/postgresql.rs`
+  - `src/storage/index/postgresql.rs`
+- **Acceptance Criteria**:
+  - [ ] Persistence layer stores facet fields
+  - [ ] Index layer stores and queries facet fields
+  - [ ] Tests pass
+
+### Phase 1 Deliverables
+
+- [ ] `src/context/` module with `GitContext`
+- [ ] Extended `Memory` struct with facet fields
+- [ ] Extended `SearchFilter` with facet filters
+- [ ] SQLite migration for facet columns
+- [ ] PostgreSQL migration for facet columns
+- [ ] All existing tests pass
+
+### Phase 1 Exit Criteria
+
+- [ ] `cargo test` passes
+- [ ] `cargo clippy` clean
+- [ ] Schema migrations work on fresh database
+- [ ] Schema migrations work on existing database (with null facets)
+
+---
+
+## Phase 2: Capture Path
+
+**Goal**: Update CaptureService to use facets and remove git-notes dependency
+**Prerequisites**: Phase 1 complete
+**Estimated Effort**: 4-6 hours
+
+### Tasks
+
+#### Task 2.1: Update CaptureRequest with Facet Fields
+
+- **Description**: Add optional facet fields to `CaptureRequest` struct
+- **Dependencies**: Phase 1
+- **Files**:
+  - `src/models/capture.rs`
+- **Acceptance Criteria**:
+  - [ ] `project_id`, `branch`, `file_path` fields added
+  - [ ] All fields optional (auto-detection as fallback)
+
+#### Task 2.2: Integrate Context Detection in CaptureService
+
+- **Description**: Update `CaptureService::capture()` to auto-detect facets if not provided
+- **Dependencies**: Task 2.1
+- **Files**:
+  - `src/services/capture.rs`
+- **Acceptance Criteria**:
+  - [ ] Auto-detects facets from cwd if not provided in request
+  - [ ] Explicit facets in request override detection
+  - [ ] Graceful fallback if detection fails (null facets)
+
+#### Task 2.3: Remove Git-Notes Code from CaptureService
+
+- **Description**: Remove the git-notes storage path from `capture()` method
+- **Dependencies**: Task 2.2
+- **Files**:
+  - `src/services/capture.rs` (lines 183-206)
+- **Acceptance Criteria**:
+  - [ ] Git-notes code block removed
+  - [ ] Memory ID generated as UUID (not git SHA)
+  - [ ] `NotesManager` import removed
+  - [ ] No compile errors
+
+#### Task 2.4: Update ServiceContainer Factory Methods
+
+- **Description**: Simplify `ServiceContainer` to not require `repo_path`
+- **Dependencies**: Task 2.3
+- **Files**:
+  - `src/services/mod.rs`
+- **Acceptance Criteria**:
+  - [ ] `repo_path` field removed or made optional
+  - [ ] `for_user()` is the primary factory method
+  - [ ] `from_current_dir_or_user()` simplified
+  - [ ] All dependent code updated
+
+#### Task 2.5: Update MCP Capture Handler
+
+- **Description**: Update `execute_capture` to accept optional facet overrides
+- **Dependencies**: Task 2.1
+- **Files**:
+  - `src/mcp/tools/handlers/core.rs`
+  - `src/mcp/tools/schemas/` (if schema files exist)
+- **Acceptance Criteria**:
+  - [ ] `CaptureArgs` has optional facet fields
+  - [ ] Facets passed to `CaptureRequest`
+  - [ ] Backward compatible (existing calls work)
+
+#### Task 2.6: Update CLI Capture Command
+
+- **Description**: Add `--project`, `--branch`, `--path` flags to capture CLI
+- **Dependencies**: Task 2.1
+- **Files**:
+  - `src/cli/capture.rs`
+  - `src/main.rs` (if args defined there)
+- **Acceptance Criteria**:
+  - [ ] New flags added with clap
+  - [ ] Flags passed to CaptureRequest
+  - [ ] Help text updated
+
+### Phase 2 Deliverables
+
+- [ ] CaptureService with facet support and no git-notes
+- [ ] MCP capture handler with facet parameters
+- [ ] CLI capture with facet flags
+- [ ] All capture tests pass
+
+### Phase 2 Exit Criteria
+
+- [ ] `cargo test` passes
+- [ ] Capture works in git repo (facets auto-detected)
+- [ ] Capture works outside git repo (null facets)
+- [ ] Capture with explicit facets works
+- [ ] No references to git-notes in capture path
+
+---
+
+## Phase 3: Recall Path
+
+**Goal**: Update RecallService with facet filtering
+**Prerequisites**: Phase 2 complete
+**Estimated Effort**: 4-6 hours
+
+### Tasks
+
+#### Task 3.1: Update RecallService for Facet Filtering
+
+- **Description**: Update `search()` and `list_all()` to filter by facets
+- **Dependencies**: Phase 1 (SearchFilter changes)
+- **Files**:
+  - `src/services/recall.rs`
+- **Acceptance Criteria**:
+  - [ ] `search()` applies facet filters from SearchFilter
+  - [ ] `list_all()` applies facet filters
+  - [ ] Tombstoned memories excluded by default
+  - [ ] `include_tombstoned` flag works
+
+#### Task 3.2: Update MCP Recall Handler
+
+- **Description**: Update `execute_recall` to accept facet filter parameters
+- **Dependencies**: Task 3.1
+- **Files**:
+  - `src/mcp/tools/handlers/core.rs`
+- **Acceptance Criteria**:
+  - [ ] `RecallArgs` has facet filter fields
+  - [ ] Filters passed to RecallService
+  - [ ] Backward compatible
+
+#### Task 3.3: Update CLI Recall Command
+
+- **Description**: Add facet filter flags to recall CLI
+- **Dependencies**: Task 3.1
+- **Files**:
+  - `src/cli/recall.rs`
+- **Acceptance Criteria**:
+  - [ ] `--project`, `--branch`, `--path` flags added
+  - [ ] `--include-tombstoned` flag added
+  - [ ] `--all-projects` flag added (clears project filter)
+  - [ ] Help text updated
+
+#### Task 3.4: Update URN Generation
+
+- **Description**: Update URN scheme to work with faceted model
+- **Dependencies**: None
+- **Files**:
+  - `src/services/capture.rs` (generate_urn)
+  - Any URN parsing code
+- **Acceptance Criteria**:
+  - [ ] URN format: `subcog://{scope}/{namespace}/{id}`
+  - [ ] Scope derived from facets or "user"
+  - [ ] Backward compatible parsing
+
+#### Task 3.5: Add Tombstone Hint to Search Results
+
+- **Description**: When active results are sparse, check tombstones and hint
+- **Dependencies**: Task 3.1
+- **Files**:
+  - `src/services/recall.rs`
+- **Acceptance Criteria**:
+  - [ ] If active results < 3 and tombstones exist, add hint
+  - [ ] Hint includes branch names and count
+  - [ ] Hint visible in MCP response
+
+### Phase 3 Deliverables
+
+- [ ] RecallService with facet filtering
+- [ ] MCP recall handler with facet parameters
+- [ ] CLI recall with facet flags
+- [ ] Tombstone hints
+
+### Phase 3 Exit Criteria
+
+- [ ] `cargo test` passes
+- [ ] Recall with project filter works
+- [ ] Recall with branch filter works
+- [ ] Recall with path pattern works
+- [ ] Tombstoned memories hidden by default
+- [ ] `--include-tombstoned` shows them
+
+---
+
+## Phase 4: Garbage Collection
+
+**Goal**: Implement branch garbage collection with lazy GC and CLI
+**Prerequisites**: Phase 3 complete
+**Estimated Effort**: 4-8 hours
+
+### Tasks
+
+#### Task 4.1: Create Branch Garbage Collector Module
+
+- **Description**: Create `src/gc/mod.rs` and `src/gc/branch.rs` with `BranchGarbageCollector`
+- **Dependencies**: Phase 1
+- **Files**:
+  - `src/gc/mod.rs` (new)
+  - `src/gc/branch.rs` (new)
+  - `src/lib.rs` (add `pub mod gc`)
+- **Acceptance Criteria**:
+  - [ ] `BranchGarbageCollector` struct
+  - [ ] `gc_stale_branches(project_id)` method
+  - [ ] Uses git2 to get current branches
+  - [ ] Tombstones memories for deleted branches
+  - [ ] Returns count of tombstoned memories
+
+#### Task 4.2: Add get_distinct_branches to IndexBackend
+
+- **Description**: Add method to get unique branches for a project
+- **Dependencies**: Task 4.1
+- **Files**:
+  - `src/storage/traits/index.rs`
+  - `src/storage/index/sqlite.rs`
+  - `src/storage/index/postgresql.rs`
+- **Acceptance Criteria**:
+  - [ ] Trait method added
+  - [ ] SQLite implementation
+  - [ ] PostgreSQL implementation
+  - [ ] Tests
+
+#### Task 4.3: Add update_status to IndexBackend
+
+- **Description**: Add method to bulk update status by filter
+- **Dependencies**: Task 4.1
+- **Files**:
+  - `src/storage/traits/index.rs`
+  - `src/storage/index/sqlite.rs`
+  - `src/storage/index/postgresql.rs`
+- **Acceptance Criteria**:
+  - [ ] Trait method added
+  - [ ] SQLite implementation (updates status, sets tombstoned_at)
+  - [ ] PostgreSQL implementation
+  - [ ] Tests
+
+#### Task 4.4: Integrate Lazy GC in RecallService
+
+- **Description**: Add opportunistic GC check during recall
+- **Dependencies**: Task 4.1
+- **Files**:
+  - `src/services/recall.rs`
+- **Acceptance Criteria**:
+  - [ ] GC runs on each recall if project_id is set
+  - [ ] GC overhead < 10ms (only checks if branches changed)
+  - [ ] GC errors don't fail recall (log warning)
+
+#### Task 4.5: Create GC CLI Command
+
+- **Description**: Add `subcog gc` command with flags
+- **Dependencies**: Task 4.1
+- **Files**:
+  - `src/cli/gc.rs` (new)
+  - `src/cli/mod.rs` (add gc)
+  - `src/main.rs` (add subcommand)
+- **Acceptance Criteria**:
+  - [ ] `subcog gc` - GC current project
+  - [ ] `subcog gc --branch=X` - GC specific branch
+  - [ ] `subcog gc --dry-run` - Show what would be tombstoned
+  - [ ] `subcog gc --purge --older-than=30d` - Permanent delete
+
+#### Task 4.6: Add GC MCP Tool (Optional)
+
+- **Description**: Add `subcog_gc` MCP tool for programmatic GC
+- **Dependencies**: Task 4.1
+- **Files**:
+  - `src/mcp/tools/handlers/core.rs`
+  - `src/mcp/tools/schemas/`
+- **Acceptance Criteria**:
+  - [ ] `subcog_gc` tool registered
+  - [ ] Accepts project_id, branch, dry_run parameters
+  - [ ] Returns GC results
+
+### Phase 4 Deliverables
+
+- [ ] `src/gc/` module with `BranchGarbageCollector`
+- [ ] Lazy GC during recall
+- [ ] CLI `subcog gc` command
+- [ ] (Optional) MCP GC tool
+
+### Phase 4 Exit Criteria
+
+- [ ] `cargo test` passes
+- [ ] GC correctly tombstones deleted branch memories
+- [ ] Lazy GC doesn't impact recall latency significantly
+- [ ] CLI GC works with all flags
+
+---
+
+## Phase 5: Cleanup & Polish
+
+**Goal**: Remove dead code, update docs, design org-scope
+**Prerequisites**: Phase 4 complete
+**Estimated Effort**: 6-10 hours
+
+### Tasks
+
+#### Task 5.1: Remove Git-Notes Module
+
+- **Description**: Delete git-notes files and remove from module tree
+- **Dependencies**: Phase 2 complete
+- **Files**:
+  - `src/git/notes.rs` (delete)
+  - `src/git/mod.rs` (remove notes module)
+  - `src/storage/persistence/git_notes.rs` (delete)
+  - `src/storage/prompt/git_notes.rs` (delete if exists)
+- **Acceptance Criteria**:
+  - [ ] Files deleted
+  - [ ] No dangling imports
+  - [ ] `cargo build` succeeds
+
+#### Task 5.2: Evaluate git2 Dependency
+
+- **Description**: Check if git2 is still needed after git-notes removal
+- **Dependencies**: Task 5.1
+- **Files**:
+  - `Cargo.toml`
+  - All files using git2
+- **Acceptance Criteria**:
+  - [ ] Document remaining git2 usages
+  - [ ] If only for context detection, consider lightweight alternative
+  - [ ] If removable, remove from Cargo.toml
+
+#### Task 5.3: Update CLAUDE.md Documentation
+
+- **Description**: Update CLAUDE.md with new query patterns and CLI flags
+- **Dependencies**: Phase 3
+- **Files**:
+  - `CLAUDE.md`
+- **Acceptance Criteria**:
+  - [ ] New CLI flags documented
+  - [ ] New MCP parameters documented
+  - [ ] Example queries with facets
+  - [ ] GC command documented
+
+#### Task 5.4: Update README Documentation
+
+- **Description**: Update README with architecture changes
+- **Dependencies**: All phases
+- **Files**:
+  - `README.md`
+- **Acceptance Criteria**:
+  - [ ] Architecture section updated
+  - [ ] CLI usage updated
+  - [ ] Storage paths documented
+
+#### Task 5.5: Design Org-Scope (Feature-Gated)
+
+- **Description**: Document org-scope design in code, feature-gate implementation
+- **Dependencies**: None
+- **Files**:
+  - `src/config/mod.rs` (add OrgConfig struct)
+  - `src/services/mod.rs` (add for_org stub)
+  - `Cargo.toml` (add org-scope feature)
+- **Acceptance Criteria**:
+  - [ ] `OrgConfig` struct defined
+  - [ ] `ServiceContainer::for_org()` behind feature gate
+  - [ ] Feature documented in README
+
+#### Task 5.6: Run Full Test Suite
+
+- **Description**: Ensure all tests pass and add missing coverage
+- **Dependencies**: All phases
+- **Files**:
+  - All test files
+- **Acceptance Criteria**:
+  - [ ] `cargo test` passes
+  - [ ] Coverage > 90% for new code
+  - [ ] Integration tests for faceted capture/recall
+  - [ ] Integration tests for GC
+
+#### Task 5.7: Run CI Checks
+
+- **Description**: Ensure all CI checks pass
+- **Dependencies**: All phases
+- **Files**:
+  - All source files
+- **Acceptance Criteria**:
+  - [ ] `cargo fmt -- --check` passes
+  - [ ] `cargo clippy --all-targets --all-features` passes
+  - [ ] `cargo doc --no-deps` passes
+  - [ ] `cargo deny check` passes (if git2 removed)
+
+### Phase 5 Deliverables
+
+- [ ] Git-notes code removed
+- [ ] Documentation updated
+- [ ] Org-scope designed and feature-gated
+- [ ] All CI checks pass
+
+### Phase 5 Exit Criteria
+
+- [ ] `make ci` passes
+- [ ] No dead code
+- [ ] Documentation complete
+- [ ] Ready for release
+
+---
+
+## Dependency Graph
+
+```
+Phase 1: Foundation
+├── Task 1.1: Context Detector (independent)
+├── Task 1.2: Memory Struct (independent)
+├── Task 1.3: MemoryStatus (independent)
+├── Task 1.4: SearchFilter (independent)
+├── Task 1.5: SQLite Migration (depends on 1.2)
+├── Task 1.6: PostgreSQL Migration (depends on 1.2)
+├── Task 1.7: SQLite Backend (depends on 1.2, 1.5)
+└── Task 1.8: PostgreSQL Backend (depends on 1.2, 1.6)
+
+Phase 2: Capture Path (depends on Phase 1)
+├── Task 2.1: CaptureRequest (depends on Phase 1)
+├── Task 2.2: Context Integration (depends on 2.1)
+├── Task 2.3: Remove Git-Notes (depends on 2.2)
+├── Task 2.4: ServiceContainer (depends on 2.3)
+├── Task 2.5: MCP Handler (depends on 2.1)
+└── Task 2.6: CLI Command (depends on 2.1)
+
+Phase 3: Recall Path (depends on Phase 2)
+├── Task 3.1: RecallService (depends on Phase 1)
+├── Task 3.2: MCP Handler (depends on 3.1)
+├── Task 3.3: CLI Command (depends on 3.1)
+├── Task 3.4: URN Generation (independent)
+└── Task 3.5: Tombstone Hints (depends on 3.1)
+
+Phase 4: Garbage Collection (depends on Phase 3)
+├── Task 4.1: GC Module (depends on Phase 1)
+├── Task 4.2: get_distinct_branches (depends on 4.1)
+├── Task 4.3: update_status (depends on 4.1)
+├── Task 4.4: Lazy GC (depends on 4.1, Phase 3)
+├── Task 4.5: CLI Command (depends on 4.1)
+└── Task 4.6: MCP Tool (optional, depends on 4.1)
+
+Phase 5: Cleanup (depends on all)
+├── Task 5.1: Remove Git-Notes (depends on Phase 2)
+├── Task 5.2: Evaluate git2 (depends on 5.1)
+├── Task 5.3: CLAUDE.md (depends on Phase 3)
+├── Task 5.4: README (depends on all)
+├── Task 5.5: Org-Scope Design (independent)
+├── Task 5.6: Test Suite (depends on all)
+└── Task 5.7: CI Checks (depends on all)
+```
+
+## Risk Mitigation Tasks
+
+| Risk | Mitigation Task | Phase |
+|------|-----------------|-------|
+| Capture regression | Comprehensive before/after tests | Phase 2 |
+| Performance degradation | Benchmark comparison | Phase 5 |
+| Schema migration failure | Test on existing database | Phase 1 |
+| Orphaned git2 usage | Grep for all usages before removal | Phase 5 |
+
+## Testing Checklist
+
+- [ ] Unit tests for Context Detector (edge cases)
+- [ ] Unit tests for Memory struct (serialization)
+- [ ] Unit tests for SearchFilter (query building)
+- [ ] Unit tests for BranchGarbageCollector
+- [ ] Integration tests for capture with facets
+- [ ] Integration tests for recall with facet filters
+- [ ] Integration tests for GC
+- [ ] E2E test: capture → recall roundtrip
+- [ ] E2E test: MCP protocol roundtrip
+- [ ] Performance tests for capture latency
+- [ ] Performance tests for recall latency
+
+## Documentation Tasks
+
+- [ ] Update CLAUDE.md with new CLI flags and query patterns
+- [ ] Update README with architecture changes
+- [ ] Add inline rustdoc for new modules
+- [ ] Update MCP tool schemas
+
+## Launch Checklist
+
+- [ ] All tests passing (`cargo test`)
+- [ ] All lints clean (`cargo clippy`)
+- [ ] Documentation complete
+- [ ] CI passing
+- [ ] Git-notes code removed
+- [ ] No capture regressions
+- [ ] No performance regressions
+
+## Post-Launch
+
+- [ ] Monitor for issues (24-48 hours)
+- [ ] Gather feedback on new facet UX
+- [ ] Update CLAUDE.md with learnings
+- [ ] Archive planning documents to completed/
