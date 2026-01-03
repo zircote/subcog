@@ -32,12 +32,14 @@
 // Drop timing not critical for correctness in service code
 #![allow(clippy::significant_drop_tightening)]
 
+mod backend_factory;
 mod capture;
 mod consolidation;
 mod context;
 pub mod deduplication;
 mod enrichment;
 pub mod migration;
+mod path_manager;
 mod prompt;
 mod prompt_enrichment;
 mod prompt_parser;
@@ -46,6 +48,7 @@ mod recall;
 mod sync;
 mod topic_index;
 
+pub use backend_factory::{BackendFactory, BackendSet};
 pub use capture::CaptureService;
 pub use consolidation::ConsolidationService;
 pub use context::{ContextBuilderService, MemoryStatistics};
@@ -53,6 +56,7 @@ pub use deduplication::{
     DeduplicationConfig, DeduplicationService, Deduplicator, DuplicateCheckResult, DuplicateReason,
 };
 pub use enrichment::{EnrichmentResult, EnrichmentService, EnrichmentStats};
+pub use path_manager::{INDEX_DB_NAME, PathManager, SUBCOG_DIR_NAME, VECTOR_INDEX_NAME};
 pub use prompt::{PromptFilter, PromptService, SaveOptions, SaveResult};
 pub use prompt_enrichment::{
     ENRICHMENT_TIMEOUT, EnrichmentRequest, EnrichmentStatus, PROMPT_ENRICHMENT_SYSTEM_PROMPT,
@@ -65,7 +69,7 @@ pub use sync::SyncService;
 pub use topic_index::{TopicIndexService, TopicInfo};
 
 use crate::config::SubcogConfig;
-use crate::embedding::{Embedder, FastEmbedEmbedder};
+use crate::embedding::Embedder;
 use crate::git::{NotesManager, YamlFrontMatterParser};
 use crate::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace};
 use crate::storage::index::{
@@ -73,7 +77,6 @@ use crate::storage::index::{
     find_repo_root, get_user_data_dir,
 };
 use crate::storage::traits::{IndexBackend, VectorBackend};
-use crate::storage::vector::UsearchBackend;
 use crate::{Error, Result};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -232,81 +235,27 @@ impl ServiceContainer {
         // Create CaptureService with repo_path so it stores to git notes
         let capture_config = crate::config::Config::new().with_repo_path(&repo_root);
 
-        // Create storage backends for CaptureService
-        let subcog_dir = repo_root.join(".subcog");
-        let index_path = subcog_dir.join("index.db");
-        let vector_path = subcog_dir.join("vectors.idx");
+        // Create storage paths using PathManager
+        let paths = PathManager::for_repo(&repo_root);
 
         // Ensure .subcog directory exists
-        if let Err(e) = std::fs::create_dir_all(&subcog_dir) {
+        if let Err(e) = paths.ensure_subcog_dir() {
             tracing::warn!("Failed to create .subcog directory: {e}");
         }
 
-        // Create embedder (singleton, always available)
-        let embedder: Arc<dyn Embedder> = Arc::new(FastEmbedEmbedder::new());
+        // Create backends using factory (centralizes initialization logic)
+        let backends = BackendFactory::create_all(&paths.index_path(), &paths.vector_path());
 
-        // Create index backend (SQLite FTS5)
-        let index: Arc<dyn IndexBackend + Send + Sync> = match SqliteBackend::new(&index_path) {
-            Ok(backend) => Arc::new(backend),
-            Err(e) => {
-                tracing::warn!("Failed to create index backend: {e}");
-                // Continue without index backend - CaptureService handles gracefully
-                return Ok(Self {
-                    capture: CaptureService::new(capture_config)
-                        .with_embedder(Arc::clone(&embedder)),
-                    sync: SyncService::default(),
-                    index_manager: Mutex::new(index_manager),
-                    repo_path: Some(repo_root),
-                    embedder: Some(embedder),
-                    vector: None,
-                });
-            },
-        };
-
-        // Create vector backend (usearch HNSW)
-        // Note: Fallback UsearchBackend::new() returns Self, native returns Result<Self>
-        #[cfg(feature = "usearch-hnsw")]
-        let vector_result =
-            UsearchBackend::new(&vector_path, FastEmbedEmbedder::DEFAULT_DIMENSIONS);
-        #[cfg(not(feature = "usearch-hnsw"))]
-        let vector_result: Result<UsearchBackend> = Ok(UsearchBackend::new(
-            &vector_path,
-            FastEmbedEmbedder::DEFAULT_DIMENSIONS,
-        ));
-
-        let vector: Arc<dyn VectorBackend + Send + Sync> = match vector_result {
-            Ok(backend) => Arc::new(backend),
-            Err(e) => {
-                tracing::warn!("Failed to create vector backend: {e}");
-                // Continue without vector backend - CaptureService handles gracefully
-                return Ok(Self {
-                    capture: CaptureService::new(capture_config)
-                        .with_embedder(Arc::clone(&embedder))
-                        .with_index(Arc::clone(&index)),
-                    sync: SyncService::default(),
-                    index_manager: Mutex::new(index_manager),
-                    repo_path: Some(repo_root),
-                    embedder: Some(embedder),
-                    vector: None,
-                });
-            },
-        };
-
-        // Create CaptureService with all backends
-        let capture = CaptureService::with_backends(
-            capture_config,
-            Arc::clone(&embedder),
-            Arc::clone(&index),
-            Arc::clone(&vector),
-        );
+        // Build CaptureService based on available backends
+        let capture = Self::build_capture_service(capture_config, &backends);
 
         Ok(Self {
             capture,
             sync: SyncService::default(),
             index_manager: Mutex::new(index_manager),
             repo_path: Some(repo_root),
-            embedder: Some(embedder),
-            vector: Some(vector),
+            embedder: backends.embedder,
+            vector: backends.vector,
         })
     }
 
@@ -355,9 +304,8 @@ impl ServiceContainer {
             ),
         })?;
 
-        // Create storage paths
-        let index_path = user_data_dir.join("index.db");
-        let vector_path = user_data_dir.join("vectors.idx");
+        // Create storage paths using PathManager
+        let paths = PathManager::for_user(&user_data_dir);
 
         // Create domain index config for user-only mode (no repo)
         let config = DomainIndexConfig {
@@ -369,60 +317,11 @@ impl ServiceContainer {
         // Create CaptureService WITHOUT repo_path (no git notes)
         let capture_config = crate::config::Config::new();
 
-        // Create embedder
-        let embedder: Arc<dyn Embedder> = Arc::new(FastEmbedEmbedder::new());
+        // Create backends using factory (centralizes initialization logic)
+        let backends = BackendFactory::create_all(&paths.index_path(), &paths.vector_path());
 
-        // Create index backend (SQLite FTS5)
-        let index: Arc<dyn IndexBackend + Send + Sync> = match SqliteBackend::new(&index_path) {
-            Ok(backend) => Arc::new(backend),
-            Err(e) => {
-                tracing::warn!("Failed to create index backend for user scope: {e}");
-                return Ok(Self {
-                    capture: CaptureService::new(capture_config)
-                        .with_embedder(Arc::clone(&embedder)),
-                    sync: SyncService::no_op(),
-                    index_manager: Mutex::new(index_manager),
-                    repo_path: None,
-                    embedder: Some(embedder),
-                    vector: None,
-                });
-            },
-        };
-
-        // Create vector backend (usearch HNSW)
-        #[cfg(feature = "usearch-hnsw")]
-        let vector_result =
-            UsearchBackend::new(&vector_path, FastEmbedEmbedder::DEFAULT_DIMENSIONS);
-        #[cfg(not(feature = "usearch-hnsw"))]
-        let vector_result: Result<UsearchBackend> = Ok(UsearchBackend::new(
-            &vector_path,
-            FastEmbedEmbedder::DEFAULT_DIMENSIONS,
-        ));
-
-        let vector: Arc<dyn VectorBackend + Send + Sync> = match vector_result {
-            Ok(backend) => Arc::new(backend),
-            Err(e) => {
-                tracing::warn!("Failed to create vector backend for user scope: {e}");
-                return Ok(Self {
-                    capture: CaptureService::new(capture_config)
-                        .with_embedder(Arc::clone(&embedder))
-                        .with_index(Arc::clone(&index)),
-                    sync: SyncService::no_op(),
-                    index_manager: Mutex::new(index_manager),
-                    repo_path: None,
-                    embedder: Some(embedder),
-                    vector: None,
-                });
-            },
-        };
-
-        // Create CaptureService with all backends (but no repo_path = no git notes)
-        let capture = CaptureService::with_backends(
-            capture_config,
-            Arc::clone(&embedder),
-            Arc::clone(&index),
-            Arc::clone(&vector),
-        );
+        // Build CaptureService based on available backends
+        let capture = Self::build_capture_service(capture_config, &backends);
 
         tracing::info!(
             user_data_dir = %user_data_dir.display(),
@@ -434,8 +333,8 @@ impl ServiceContainer {
             sync: SyncService::no_op(),
             index_manager: Mutex::new(index_manager),
             repo_path: None,
-            embedder: Some(embedder),
-            vector: Some(vector),
+            embedder: backends.embedder,
+            vector: backends.vector,
         })
     }
 
@@ -493,8 +392,8 @@ impl ServiceContainer {
     ///
     /// Returns an error if the index cannot be initialized.
     pub fn recall_for_scope(&self, scope: DomainScope) -> Result<RecallService> {
-        // Get index path while holding the lock, then release before I/O
-        let index_path = {
+        // Use high-level API that handles path resolution and directory creation
+        let index = {
             let manager = self
                 .index_manager
                 .lock()
@@ -502,18 +401,8 @@ impl ServiceContainer {
                     operation: "lock_index_manager".to_string(),
                     cause: e.to_string(),
                 })?;
-            manager.get_index_path(scope)?
+            manager.create_backend(scope)?
         }; // Lock released here
-
-        // Ensure parent directory exists (I/O outside mutex)
-        if let Some(parent) = index_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| Error::OperationFailed {
-                operation: "create_index_dir".to_string(),
-                cause: e.to_string(),
-            })?;
-        }
-
-        let index = SqliteBackend::new(&index_path)?;
 
         // Start with index-only service
         let mut service = RecallService::with_index(index);
@@ -581,17 +470,41 @@ impl ServiceContainer {
     ///
     /// Returns an error if the index cannot be initialized.
     pub fn index(&self) -> Result<SqliteBackend> {
-        let index_path = self.get_index_path(DomainScope::Project)?;
-
-        // Ensure parent directory exists
-        if let Some(parent) = index_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| Error::OperationFailed {
-                operation: "create_index_dir".to_string(),
+        let manager = self
+            .index_manager
+            .lock()
+            .map_err(|e| Error::OperationFailed {
+                operation: "lock_index_manager".to_string(),
                 cause: e.to_string(),
             })?;
+        manager.create_backend(DomainScope::Project)
+    }
+
+    /// Builds a `CaptureService` from available backends.
+    ///
+    /// Applies graceful degradation: uses whatever backends are available.
+    fn build_capture_service(
+        config: crate::config::Config,
+        backends: &BackendSet,
+    ) -> CaptureService {
+        let mut service = CaptureService::new(config);
+
+        // Add embedder if available
+        if let Some(ref embedder) = backends.embedder {
+            service = service.with_embedder(Arc::clone(embedder));
         }
 
-        SqliteBackend::new(&index_path)
+        // Add index backend if available
+        if let Some(ref index) = backends.index {
+            service = service.with_index(Arc::clone(index));
+        }
+
+        // Add vector backend if available
+        if let Some(ref vector) = backends.vector {
+            service = service.with_vector(Arc::clone(vector));
+        }
+
+        service
     }
 
     /// Creates a deduplication service without embedding support.
@@ -704,18 +617,17 @@ impl ServiceContainer {
             return Ok(0);
         }
 
-        // Get index path and create backend
-        let index_path = self.get_index_path(scope)?;
-
-        // Ensure parent directory exists
-        if let Some(parent) = index_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| Error::OperationFailed {
-                operation: "create_index_dir".to_string(),
-                cause: e.to_string(),
-            })?;
-        }
-
-        let index = SqliteBackend::new(&index_path)?;
+        // Create index backend using high-level API
+        let index = {
+            let manager = self
+                .index_manager
+                .lock()
+                .map_err(|e| Error::OperationFailed {
+                    operation: "lock_index_manager".to_string(),
+                    cause: e.to_string(),
+                })?;
+            manager.create_backend(scope)?
+        };
 
         // Clear and reindex
         index.clear()?;

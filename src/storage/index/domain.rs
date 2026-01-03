@@ -211,6 +211,67 @@ impl DomainIndexManager {
     pub fn has_scope(&self, scope: DomainScope) -> bool {
         self.indices.contains_key(&scope)
     }
+
+    /// Creates a new `SQLite` backend for the specified scope.
+    ///
+    /// This is a high-level method that:
+    /// 1. Determines the correct index path for the scope
+    /// 2. Ensures the parent directory exists
+    /// 3. Creates and returns a new `SqliteBackend`
+    ///
+    /// Unlike `get_or_create`, this always creates a fresh backend instance
+    /// rather than returning a cached one. This is useful when the caller
+    /// needs to manage the backend's lifecycle independently.
+    ///
+    /// # Arguments
+    ///
+    /// * `scope` - The domain scope for the index
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The index path cannot be determined (e.g., missing repo path for project scope)
+    /// - The parent directory cannot be created
+    /// - The `SQLite` backend fails to initialize
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// let manager = DomainIndexManager::new(config)?;
+    /// let backend = manager.create_backend(DomainScope::Project)?;
+    /// // backend is ready for use
+    /// ```
+    pub fn create_backend(&self, scope: DomainScope) -> Result<SqliteBackend> {
+        self.create_index(scope)
+    }
+
+    /// Creates a new `SQLite` backend with full path resolution.
+    ///
+    /// Returns both the created backend and the path it was created at.
+    /// This is useful when the caller needs to know the path for logging
+    /// or other purposes.
+    ///
+    /// # Arguments
+    ///
+    /// * `scope` - The domain scope for the index
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the backend cannot be created.
+    pub fn create_backend_with_path(&self, scope: DomainScope) -> Result<(SqliteBackend, PathBuf)> {
+        let path = self.get_index_path(scope)?;
+
+        // Ensure parent directory exists
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| Error::OperationFailed {
+                operation: "create_index_dir".to_string(),
+                cause: e.to_string(),
+            })?;
+        }
+
+        let backend = SqliteBackend::new(&path)?;
+        Ok((backend, path))
+    }
 }
 
 /// Gets the user data directory for subcog.
