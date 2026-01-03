@@ -1,6 +1,44 @@
 version: "3.9"
 
 services:
+  # ==========================================================================
+  # Database Services
+  # ==========================================================================
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: subcog
+      POSTGRES_PASSWORD: subcog
+      POSTGRES_DB: subcog
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U subcog"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis/redis-stack:latest
+    ports:
+      - "6379:6379"
+      - "8001:8001"  # RedisInsight UI
+    volumes:
+      - redis_data:/data
+    environment:
+      REDIS_ARGS: "--appendonly yes"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================================================
+  # Observability Services
+  # ==========================================================================
   grafana:
     build:
       context: ..
@@ -71,3 +109,7 @@ services:
     depends_on:
       - tempo
       - loki
+
+volumes:
+  postgres_data:
+  redis_data:

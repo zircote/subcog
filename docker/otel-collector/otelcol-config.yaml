@@ -35,7 +35,7 @@ processors:
         action: upsert
   transform:
     traces:
-      - set(attributes["traceID"], trace_id)
+      - set(attributes["traceId"], trace_id)
 
 connectors:
   spanmetrics:
@@ -62,7 +62,7 @@ exporters:
     labels:
       attributes:
         - action: insert
-          key: traceID
+          key: traceId
           from_attribute: trace_id
         - action: insert
           key: spanId
