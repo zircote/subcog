@@ -45,56 +45,17 @@
         "type": "tempo",
         "uid": "tempo"
       },
-      "description": "Search for traces by service, operation, or trace ID",
+      "description": "View and inspect traces - click a trace to see span details",
       "gridPos": {
-        "h": 8,
+        "h": 12,
         "w": 24,
         "x": 0,
         "y": 0
       },
       "id": 1,
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "traceID"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "View Trace",
-                    "internal": {
-                      "datasourceName": "Tempo",
-                      "datasourceUid": "tempo",
-                      "query": {
-                        "query": "${__value.raw}",
-                        "queryType": "traceId"
-                      }
-                    }
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
       "options": {
-        "showHeader": true,
-        "cellHeight": "sm"
+        "createFocusSpanLink": false
       },
-      "pluginVersion": "10.4.3",
       "targets": [
         {
           "datasource": {
@@ -102,27 +63,15 @@
             "uid": "tempo"
           },
           "query": "{}",
-          "limit": 50,
-          "queryType": "traceql",
-          "refId": "A"
+          "queryType": "traceqlSearch",
+          "refId": "A",
+          "limit": 20,
+          "tableType": "traces",
+          "filters": []
         }
       ],
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "renameByName": {
-              "traceID": "Trace ID",
-              "rootServiceName": "Service",
-              "rootTraceName": "Operation",
-              "startTimeUnixNano": "Start Time",
-              "durationMs": "Duration (ms)"
-            }
-          }
-        }
-      ],
-      "title": "Trace Search",
-      "type": "table"
+      "title": "Traces",
+      "type": "traces"
     },
     {
       "datasource": {

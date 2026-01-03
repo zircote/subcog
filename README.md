@@ -95,8 +95,8 @@ subcog migrate embeddings
 
 Search results return normalized scores in the 0.0-1.0 range:
 - **1.0**: Best match in the result set
-- **≥0.7**: Strong semantic match
-- **≥0.5**: Moderate relevance
+- **>=0.7**: Strong semantic match
+- **>=0.5**: Moderate relevance
 - **<0.5**: Weak match
 
 Use `--raw` flag to see the underlying RRF (Reciprocal Rank Fusion) scores.
@@ -186,32 +186,73 @@ The migration command:
 
 ## Architecture
 
+Subcog uses a **three-layer storage architecture** to separate concerns:
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Access Layer                            │
-│  ┌─────────┐  ┌─────────────┐  ┌────────────────────────┐   │
-│  │   CLI   │  │  MCP Server │  │  Claude Code Hooks     │   │
-│  └────┬────┘  └──────┬──────┘  └───────────┬────────────┘   │
-└───────┼──────────────┼─────────────────────┼────────────────┘
-        │              │                     │
-┌───────┴──────────────┴─────────────────────┴────────────────┐
-│                     Service Layer                            │
-│  ┌────────────────┐  ┌─────────────────┐  ┌──────────────┐  │
-│  │ CaptureService │  │  RecallService  │  │ SyncService  │  │
-│  └────────────────┘  └─────────────────┘  └──────────────┘  │
-│  ┌────────────────┐  ┌─────────────────┐                    │
-│  │   GC Service   │  │  ContextDetect  │                    │
-│  └────────────────┘  └─────────────────┘                    │
-└─────────────────────────────┬───────────────────────────────┘
-                              │
-┌─────────────────────────────┴───────────────────────────────┐
-│                    Storage Layer                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
-│  │ Persistence  │  │    Index     │  │     Vector       │   │
-│  │   (SQLite)   │  │ (SQLite FTS) │  │    (usearch)     │   │
-│  └──────────────┘  └──────────────┘  └──────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+                              +-----------------+
+                              |   Access Layer  |
+                              +-----------------+
+                              |  CLI | MCP | Hooks
+                              +--------+--------+
+                                       |
+                              +--------v--------+
+                              |  Service Layer  |
+                              +-----------------+
+                              | Capture | Recall | Sync | GC
+                              +--------+--------+
+                                       |
+        +------------------------------+------------------------------+
+        |                              |                              |
++-------v-------+             +--------v-------+             +--------v-------+
+|  Persistence  |             |     Index      |             |     Vector     |
+|    Layer      |             |     Layer      |             |     Layer      |
++---------------+             +----------------+             +----------------+
+|               |             |                |             |                |
+| - Authoritative             | - Full-text    |             | - Embeddings   |
+|   source of truth           |   search (BM25)|             |   (384-dim)    |
+| - ACID storage              | - Faceted      |             | - Similarity   |
+| - Durable                   |   filtering    |             |   search (ANN) |
+|               |             |                |             |                |
++-------+-------+             +--------+-------+             +--------+-------+
+        |                              |                              |
++-------v-------+             +--------v-------+             +--------v-------+
+|    SQLite     |             | SQLite + FTS5  |             |    usearch     |
+|  (default)    |             |   (default)    |             |   (HNSW)       |
++---------------+             +----------------+             +----------------+
+|  PostgreSQL   |             |  PostgreSQL    |             |   pgvector     |
++---------------+             +----------------+             +----------------+
+|  Filesystem   |             |  RediSearch    |             | Redis Vector   |
++---------------+             +----------------+             +----------------+
 ```
+
+### Layer Responsibilities
+
+| Layer | Purpose | Default Backend | Alternatives |
+|-------|---------|-----------------|--------------|
+| **Persistence** | Authoritative storage, ACID guarantees | SQLite | PostgreSQL, Filesystem |
+| **Index** | Full-text search, BM25 ranking | SQLite + FTS5 | PostgreSQL, RediSearch |
+| **Vector** | Embedding storage, ANN search | usearch (HNSW) | pgvector, Redis Vector |
+
+### Hybrid Search Flow
+
+```
+Query: "database storage decision"
+       |
+       +---> BM25 Search (Index Layer)
+       |     Returns: [(id1, 2.3), (id2, 1.8), (id3, 1.2)]
+       |
+       +---> Vector Search (Vector Layer)
+       |     Returns: [(id2, 0.92), (id1, 0.85), (id4, 0.78)]
+       |
+       v
+   RRF Fusion: score = sum(1 / (k + rank))
+       |
+       v
+   Final: [(id2, 1.0), (id1, 0.87), (id3, 0.45), (id4, 0.38)]
+          (normalized 0.0 - 1.0)
+```
+
+For detailed architecture documentation, see [`src/storage/traits/mod.rs`](src/storage/traits/mod.rs).
 
 ## Development
 
@@ -249,6 +290,7 @@ src/
 ├── main.rs             # CLI entry point
 ├── models/             # Data structures (Memory, Domain, Namespace)
 ├── storage/            # Storage backends (Git Notes, SQLite, usearch)
+│   └── traits/         # Backend trait definitions (see mod.rs for docs)
 ├── services/           # Business logic (Capture, Recall, Sync)
 ├── mcp/                # MCP server implementation
 ├── hooks/              # Claude Code hook handlers
@@ -256,15 +298,11 @@ src/
 └── observability/      # Tracing, metrics, logging
 
 docs/
+├── QUICKSTART.md       # Getting started guide
+├── TROUBLESHOOTING.md  # Common issues and solutions
+├── PERFORMANCE.md      # Performance tuning guide
 ├── research/           # Research documents
 └── spec/               # Specification documents
-    └── active/
-        └── 2025-12-28-subcog-rust-rewrite/
-            ├── README.md
-            ├── REQUIREMENTS.md
-            ├── ARCHITECTURE.md
-            ├── IMPLEMENTATION_PLAN.md
-            └── ...
 ```
 
 ## Configuration
@@ -331,13 +369,25 @@ subcog gc --purge --older-than 30d
 |--------|--------|--------|
 | Cold start | <10ms | ~5ms |
 | Capture latency | <30ms | ~25ms |
-| Search latency (100 memories) | <20ms | ~82µs |
-| Search latency (1,000 memories) | <50ms | ~413µs |
+| Search latency (100 memories) | <20ms | ~82us |
+| Search latency (1,000 memories) | <50ms | ~413us |
 | Search latency (10,000 memories) | <100ms | ~3.7ms |
 | Binary size | <100MB | ~50MB |
 | Memory (idle) | <50MB | ~30MB |
 
 All performance targets are exceeded by 10-100x. Benchmarks run via `cargo bench`.
+
+For performance tuning, see [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [QUICKSTART.md](docs/QUICKSTART.md) | Getting started guide |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and solutions |
+| [PERFORMANCE.md](docs/PERFORMANCE.md) | Performance tuning guide |
+| [environment-variables.md](docs/environment-variables.md) | Environment variable reference |
+| [URN-GUIDE.md](docs/URN-GUIDE.md) | Memory URN scheme documentation |
 
 ## Specification
 

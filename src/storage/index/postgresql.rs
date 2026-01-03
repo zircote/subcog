@@ -18,7 +18,7 @@
 
 #[cfg(feature = "postgres")]
 mod implementation {
-    use crate::models::{Memory, MemoryId, MemoryStatus, SearchFilter};
+    use crate::models::{Memory, MemoryId, SearchFilter};
     use crate::storage::migrations::{Migration, MigrationRunner};
     use crate::storage::traits::IndexBackend;
     use crate::{Error, Result};
@@ -74,21 +74,6 @@ mod implementation {
             sql: r"
                 CREATE INDEX IF NOT EXISTS {table}_status_idx ON {table} (status);
                 CREATE INDEX IF NOT EXISTS {table}_created_idx ON {table} (created_at DESC);
-            ",
-        },
-        Migration {
-            version: 5,
-            description: "Add facet columns for storage simplification (Issue #43)",
-            sql: r"
-                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS project_id TEXT;
-                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS branch TEXT;
-                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS file_path TEXT;
-                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tombstoned_at BIGINT;
-                CREATE INDEX IF NOT EXISTS {table}_project_id_idx ON {table} (project_id);
-                CREATE INDEX IF NOT EXISTS {table}_branch_idx ON {table} (branch);
-                CREATE INDEX IF NOT EXISTS {table}_file_path_idx ON {table} (file_path);
-                CREATE INDEX IF NOT EXISTS {table}_tombstoned_at_idx ON {table} (tombstoned_at);
-                CREATE INDEX IF NOT EXISTS {table}_project_branch_idx ON {table} (project_id, branch);
             ",
         },
     ];
@@ -420,8 +405,6 @@ mod implementation {
             Self::add_namespace_filter(filter, &mut clauses, &mut params, &mut param_num);
             Self::add_domain_filter(filter, &mut clauses, &mut params, &mut param_num);
             Self::add_status_filter(filter, &mut clauses, &mut params, &mut param_num);
-            // Facet filters for storage simplification (Issue #43)
-            Self::add_facet_filters(filter, &mut clauses, &mut params, &mut param_num);
 
             let clause = if clauses.is_empty() {
                 String::new()
@@ -507,61 +490,21 @@ mod implementation {
             }
         }
 
-        /// Adds facet filters to WHERE clause (Issue #43).
-        fn add_facet_filters(
-            filter: &SearchFilter,
-            clauses: &mut Vec<String>,
-            params: &mut Vec<String>,
-            param_num: &mut i32,
-        ) {
-            // Project ID filter
-            if let Some(ref project_id) = filter.project_id {
-                clauses.push(format!("project_id = ${param_num}"));
-                *param_num += 1;
-                params.push(project_id.clone());
-            }
-
-            // Branch filter
-            if let Some(ref branch) = filter.branch {
-                clauses.push(format!("branch = ${param_num}"));
-                *param_num += 1;
-                params.push(branch.clone());
-            }
-
-            // File path pattern filter (LIKE with wildcards)
-            if let Some(ref pattern) = filter.file_path_pattern {
-                let sql_pattern = pattern.replace('*', "%").replace('?', "_");
-                clauses.push(format!("file_path LIKE ${param_num}"));
-                *param_num += 1;
-                params.push(sql_pattern);
-            }
-
-            // Tombstoned filter (exclude by default)
-            if !filter.include_tombstoned {
-                clauses.push("tombstoned_at IS NULL".to_string());
-            }
-        }
-
         /// Async implementation of index operation.
         #[allow(clippy::cast_possible_wrap)]
         async fn index_async(&self, memory: &Memory) -> Result<()> {
             let client = self.pool.get().await.map_err(pool_error)?;
 
             let upsert = format!(
-                r"INSERT INTO {} (id, content, namespace, domain, status, tags, created_at, updated_at,
-                    project_id, branch, file_path, tombstoned_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                r"INSERT INTO {} (id, content, namespace, domain, status, tags, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 ON CONFLICT (id) DO UPDATE SET
                     content = EXCLUDED.content,
                     namespace = EXCLUDED.namespace,
                     domain = EXCLUDED.domain,
                     status = EXCLUDED.status,
                     tags = EXCLUDED.tags,
-                    updated_at = EXCLUDED.updated_at,
-                    project_id = EXCLUDED.project_id,
-                    branch = EXCLUDED.branch,
-                    file_path = EXCLUDED.file_path,
-                    tombstoned_at = EXCLUDED.tombstoned_at",
+                    updated_at = EXCLUDED.updated_at",
                 self.table_name
             );
 
@@ -569,7 +512,6 @@ mod implementation {
             let domain_str = memory.domain.to_string();
             let namespace_str = memory.namespace.as_str();
             let status_str = memory.status.as_str();
-            let tombstoned_at_i64: Option<i64> = memory.tombstoned_at.map(|t| t as i64);
 
             client
                 .execute(
@@ -583,10 +525,6 @@ mod implementation {
                         &tags,
                         &(memory.created_at as i64),
                         &(memory.updated_at as i64),
-                        &memory.project_id,
-                        &memory.branch,
-                        &memory.file_path,
-                        &tombstoned_at_i64,
                     ],
                 )
                 .await
@@ -699,66 +637,6 @@ mod implementation {
                 .map_err(|e| query_error("postgres_clear", e))?;
             Ok(())
         }
-
-        /// Async implementation of `get_distinct_branches` operation (Task 4.2).
-        async fn get_distinct_branches_async(&self, project_id: &str) -> Result<Vec<String>> {
-            let client = self.pool.get().await.map_err(pool_error)?;
-
-            let query = format!(
-                "SELECT DISTINCT branch FROM {} WHERE project_id = $1 AND branch IS NOT NULL AND tombstoned_at IS NULL",
-                self.table_name
-            );
-
-            let rows = client
-                .query(&query, &[&project_id])
-                .await
-                .map_err(|e| query_error("postgres_get_distinct_branches", e))?;
-
-            Ok(rows.iter().map(|row| row.get(0)).collect())
-        }
-
-        /// Async implementation of `update_status` operation (Task 4.3).
-        #[allow(clippy::cast_possible_wrap)]
-        async fn update_status_async(
-            &self,
-            filter: &SearchFilter,
-            status: MemoryStatus,
-            tombstoned_at: Option<u64>,
-        ) -> Result<usize> {
-            let client = self.pool.get().await.map_err(pool_error)?;
-
-            // Build WHERE clause from filter (starting at $3 since $1 is status, $2 is tombstoned_at)
-            let (filter_clause, filter_params) = Self::build_where_clause(filter, 3);
-
-            let where_clause = if filter_clause.is_empty() {
-                String::new()
-            } else {
-                format!(" WHERE {}", filter_clause.trim_start_matches(" AND "))
-            };
-
-            let sql = format!(
-                "UPDATE {} SET status = $1, tombstoned_at = $2{}",
-                self.table_name, where_clause
-            );
-
-            let tombstoned_at_i64: Option<i64> = tombstoned_at.map(|t| t as i64);
-            let status_str = status.as_str();
-
-            // Build parameters
-            let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
-            params.push(&status_str);
-            params.push(&tombstoned_at_i64);
-            for p in &filter_params {
-                params.push(p);
-            }
-
-            let rows = client
-                .execute(&sql, &params)
-                .await
-                .map_err(|e| query_error("postgres_update_status", e))?;
-
-            Ok(usize::try_from(rows).unwrap_or(usize::MAX))
-        }
     }
 
     impl IndexBackend for PostgresIndexBackend {
@@ -790,19 +668,6 @@ mod implementation {
 
         fn clear(&self) -> Result<()> {
             self.block_on(self.clear_async())
-        }
-
-        fn get_distinct_branches(&self, project_id: &str) -> Result<Vec<String>> {
-            self.block_on(self.get_distinct_branches_async(project_id))
-        }
-
-        fn update_status(
-            &self,
-            filter: &SearchFilter,
-            status: MemoryStatus,
-            tombstoned_at: Option<u64>,
-        ) -> Result<usize> {
-            self.block_on(self.update_status_async(filter, status, tombstoned_at))
         }
     }
 
@@ -893,7 +758,7 @@ pub use implementation::PostgresIndexBackend;
 
 #[cfg(not(feature = "postgres"))]
 mod stub {
-    use crate::models::{Memory, MemoryId, MemoryStatus, SearchFilter};
+    use crate::models::{Memory, MemoryId, SearchFilter};
     use crate::storage::traits::IndexBackend;
     use crate::{Error, Result};
 
@@ -947,19 +812,6 @@ mod stub {
         }
 
         fn clear(&self) -> Result<()> {
-            Err(Error::FeatureNotEnabled("postgres".to_string()))
-        }
-
-        fn get_distinct_branches(&self, _project_id: &str) -> Result<Vec<String>> {
-            Err(Error::FeatureNotEnabled("postgres".to_string()))
-        }
-
-        fn update_status(
-            &self,
-            _filter: &SearchFilter,
-            _status: MemoryStatus,
-            _tombstoned_at: Option<u64>,
-        ) -> Result<usize> {
             Err(Error::FeatureNotEnabled("postgres".to_string()))
         }
     }

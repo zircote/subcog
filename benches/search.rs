@@ -112,9 +112,6 @@ fn populate_index(capture_service: &CaptureService, count: usize) {
             tags: vec!["benchmark".to_string()],
             source: None,
             skip_security_check: true,
-            project_id: None,
-            branch: None,
-            file_path: None,
         };
 
         if let Err(e) = capture_service.capture(request) {

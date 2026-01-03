@@ -6,7 +6,7 @@
 //!
 //! - [`definitions`]: Tool schema definitions (JSON Schema for input validation)
 //! - [`handlers`]: Tool execution logic
-//!   - [`handlers::core`]: Core memory operations (capture, recall, sync, gc, etc.)
+//!   - [`handlers::core`]: Core memory operations (capture, recall, sync, etc.)
 //!   - [`handlers::prompts`]: Prompt management operations (save, list, run, etc.)
 
 mod definitions;
@@ -43,7 +43,6 @@ impl ToolRegistry {
         tools.insert("subcog_enrich".to_string(), definitions::enrich_tool());
         tools.insert("subcog_sync".to_string(), definitions::sync_tool());
         tools.insert("subcog_reindex".to_string(), definitions::reindex_tool());
-        tools.insert("subcog_gc".to_string(), definitions::gc_tool());
 
         // Prompt management tools
         tools.insert("prompt_save".to_string(), definitions::prompt_save_tool());
@@ -85,7 +84,6 @@ impl ToolRegistry {
             "subcog_enrich" => handlers::execute_enrich(arguments),
             "subcog_sync" => handlers::execute_sync(arguments),
             "subcog_reindex" => handlers::execute_reindex(arguments),
-            "subcog_gc" => handlers::execute_gc(arguments),
             // Prompt management tools
             "prompt_save" => handlers::execute_prompt_save(arguments),
             "prompt_list" => handlers::execute_prompt_list(arguments),
@@ -162,7 +160,6 @@ mod tests {
         assert!(registry.get_tool("subcog_recall").is_some());
         assert!(registry.get_tool("subcog_status").is_some());
         assert!(registry.get_tool("subcog_namespaces").is_some());
-        assert!(registry.get_tool("subcog_gc").is_some());
     }
 
     #[test]
@@ -177,20 +174,6 @@ mod tests {
                 .unwrap()
                 .contains(&serde_json::json!("content"))
         );
-    }
-
-    #[test]
-    fn test_gc_tool_registered() {
-        let registry = ToolRegistry::new();
-
-        let gc = registry.get_tool("subcog_gc");
-        assert!(gc.is_some());
-
-        let gc = gc.unwrap();
-        assert!(gc.description.contains("Garbage collect"));
-        assert!(gc.input_schema["properties"]["project_id"].is_object());
-        assert!(gc.input_schema["properties"]["branch"].is_object());
-        assert!(gc.input_schema["properties"]["dry_run"].is_object());
     }
 
     #[test]

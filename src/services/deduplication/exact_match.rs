@@ -71,7 +71,7 @@ impl ExactMatchChecker {
     /// # Example
     ///
     /// ```rust,ignore
-    /// let result = checker.check("content", Namespace::Decisions, "project")?;
+    /// let result = checker.check("content", Namespace::Decisions, "global")?;
     /// match result {
     ///     Some((id, urn)) => println!("Duplicate: {}", urn),
     ///     None => println!("No duplicate found"),
@@ -180,10 +180,6 @@ mod tests {
             embedding: None,
             tags,
             source: None,
-            project_id: None,
-            branch: None,
-            file_path: None,
-            tombstoned_at: None,
         }
     }
 
@@ -223,7 +219,7 @@ mod tests {
 
         // Check for content that doesn't exist
         let result = checker
-            .check("Non-existent content", Namespace::Decisions, "project")
+            .check("Non-existent content", Namespace::Decisions, "global")
             .unwrap();
 
         assert!(result.is_none());
@@ -251,13 +247,13 @@ mod tests {
 
         // Check for the same content
         let result = checker
-            .check(content, Namespace::Decisions, "project")
+            .check(content, Namespace::Decisions, "global")
             .unwrap();
 
         assert!(result.is_some());
         let (id, urn) = result.unwrap();
         assert_eq!(id.as_str(), "test-memory-123");
-        assert_eq!(urn, "subcog://project/decisions/test-memory-123");
+        assert_eq!(urn, "subcog://global/decisions/test-memory-123");
     }
 
     #[test]
@@ -282,7 +278,7 @@ mod tests {
 
         // Check in different namespace should not find match
         let result = checker
-            .check(content, Namespace::Patterns, "project")
+            .check(content, Namespace::Patterns, "global")
             .unwrap();
 
         assert!(result.is_none());
@@ -310,7 +306,7 @@ mod tests {
 
         // Check with whitespace and case variations should still match
         let result = checker
-            .check("  USE  postgresql  ", Namespace::Decisions, "project")
+            .check("  USE  postgresql  ", Namespace::Decisions, "global")
             .unwrap();
 
         assert!(result.is_some());

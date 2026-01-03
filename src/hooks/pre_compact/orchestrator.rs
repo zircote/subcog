@@ -95,9 +95,6 @@ impl CaptureOrchestrator {
                 tags: vec!["auto-captured".to_string(), "pre-compact".to_string()],
                 source: Some("PreCompactHandler".to_string()),
                 skip_security_check: false,
-                project_id: None, // Auto-detected by CaptureService (Issue #43)
-                branch: None,     // Auto-detected by CaptureService (Issue #43)
-                file_path: None,  // Optional context (Issue #43)
             };
 
             if let Ok(result) = capture.capture(request.clone()) {

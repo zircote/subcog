@@ -566,6 +566,7 @@ mod tests {
             branch: Some(branch.to_string()),
             file_path: None,
             tombstoned_at: None,
+            classification: None,
         }
     }
 

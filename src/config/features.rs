@@ -40,7 +40,7 @@ impl FeatureFlags {
     pub const fn core() -> Self {
         Self {
             secrets_filter: true,
-            pii_filter: false,
+            pii_filter: true,
             multi_domain: false,
             audit_log: false,
             llm_features: false,

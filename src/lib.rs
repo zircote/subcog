@@ -1,6 +1,7 @@
 //! # Subcog
 //!
 //! A persistent memory system for AI coding assistants.
+//! Rust rewrite of git-notes-memory.
 //!
 //! Subcog captures decisions, learnings, and context from coding sessions
 //! and surfaces them when relevant through semantic search.
@@ -9,7 +10,7 @@
 //!
 //! - Single-binary distribution (<100MB, <10ms cold start)
 //! - Three-layer storage architecture (Persistence, Index, Vector)
-//! - Pluggable backends (SQLite+usearch, PostgreSQL+pgvector, Filesystem)
+//! - Pluggable backends (Git Notes, SQLite+usearch, PostgreSQL+pgvector)
 //! - MCP server integration for AI agent interoperability
 //! - Claude Code hooks for seamless IDE integration
 //! - Semantic search with hybrid vector + BM25 ranking
@@ -42,9 +43,7 @@ use thiserror::Error as ThisError;
 // Module declarations
 pub mod cli;
 pub mod config;
-pub mod context;
 pub mod embedding;
-pub mod gc;
 pub mod git;
 pub mod hooks;
 pub mod llm;
@@ -57,9 +56,7 @@ pub mod storage;
 
 // Re-exports for convenience
 pub use config::{FeatureFlags, SubcogConfig};
-pub use context::GitContext;
 pub use embedding::Embedder;
-pub use gc::{BranchGarbageCollector, GcResult};
 pub use llm::LlmProvider;
 pub use models::{
     CaptureRequest, CaptureResult, DetailLevel, Domain, Memory, MemoryId, MemoryStatus, Namespace,
@@ -69,10 +66,6 @@ pub use services::{
     CaptureService, ConsolidationService, ContextBuilderService, RecallService, SyncService,
 };
 pub use storage::{CompositeStorage, IndexBackend, PersistenceBackend, VectorBackend};
-
-// Feature-gated re-exports
-#[cfg(feature = "org-scope")]
-pub use config::OrgConfig;
 
 /// Error type for subcog operations.
 ///
@@ -104,7 +97,7 @@ pub enum Error {
     /// An operation failed.
     ///
     /// Raised when:
-    /// - Database read/write operations fail
+    /// - Git notes read/write operations fail
     /// - `SQLite` database operations fail
     /// - Filesystem I/O errors occur
     /// - Index backend is not configured

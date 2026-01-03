@@ -147,16 +147,13 @@ impl std::str::FromStr for Namespace {
 }
 
 /// Domain separation for memories.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Domain {
     /// Organization or team identifier.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub organization: Option<String>,
     /// Project identifier.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
     /// Repository identifier.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
 }
 
@@ -177,8 +174,8 @@ impl Domain {
     /// - If NOT in a git repository: returns a user-scoped domain
     ///
     /// This ensures memories are routed to the appropriate storage backend:
-    /// - Project domains use project-scoped `SQLite` storage
-    /// - User domains use user-scoped `SQLite` storage
+    /// - Project domains use git notes storage
+    /// - User domains use sqlite storage
     #[must_use]
     pub fn default_for_context() -> Self {
         use crate::storage::index::is_in_git_repo;
@@ -229,51 +226,6 @@ impl Domain {
 
     /// Returns the scope string for URN construction.
     ///
-    /// This method provides consistent URN scope generation across the codebase.
-    /// URN format: `subcog://{scope}/{namespace}/{id}`
-    ///
-    /// # Scope Values
-    ///
-    /// - `"project"` - Project-local domain (default, in git repo context)
-    /// - `"user"` - User-scoped domain (outside git repo or explicit user scope)
-    /// - `"{org}/{repo}"` - Repository-scoped domain
-    /// - `"org/{org}"` - Organization-scoped domain
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use subcog::models::Domain;
-    ///
-    /// // Project-local scope
-    /// let domain = Domain::new();
-    /// assert_eq!(domain.urn_scope(), "project");
-    ///
-    /// // User scope
-    /// let domain = Domain::for_user();
-    /// assert_eq!(domain.urn_scope(), "user");
-    ///
-    /// // Repository scope
-    /// let domain = Domain::for_repository("zircote", "subcog");
-    /// assert_eq!(domain.urn_scope(), "zircote/subcog");
-    /// ```
-    #[must_use]
-    pub fn urn_scope(&self) -> String {
-        // Check for user scope first (explicit check)
-        if self.is_user() {
-            return "user".to_string();
-        }
-
-        // Check for project-local scope (empty domain)
-        if self.is_global() {
-            return "project".to_string();
-        }
-
-        // For other scopes, use the display representation
-        self.to_string()
-    }
-
-    /// Returns the scope string for URN construction.
-    ///
     /// - `"project"` for project-scoped (org + repo)
     /// - `"org/{name}"` for organization-scoped
     /// - `"global"` for global domain
@@ -299,15 +251,14 @@ impl fmt::Display for Domain {
             (None, Some(proj), _) if proj == "user" => write!(f, "user"),
             (None, Some(proj), _) => write!(f, "{proj}"),
             (None, None, Some(repo)) => write!(f, "{repo}"),
-            // Project-local domain (empty domain)
-            (None, None, None) => write!(f, "project"),
+            // Global/project domain shows as "global" (legacy) or "project"
+            (None, None, None) => write!(f, "global"),
         }
     }
 }
 
 /// Status of a memory entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum MemoryStatus {
     /// Active and searchable.
     #[default]
@@ -320,8 +271,6 @@ pub enum MemoryStatus {
     Pending,
     /// Marked for deletion.
     Deleted,
-    /// Memory from deleted branch, excluded from search by default.
-    Tombstoned,
 }
 
 impl MemoryStatus {
@@ -334,21 +283,6 @@ impl MemoryStatus {
             Self::Superseded => "superseded",
             Self::Pending => "pending",
             Self::Deleted => "deleted",
-            Self::Tombstoned => "tombstoned",
-        }
-    }
-
-    /// Parses a status from a string.
-    #[must_use]
-    pub fn parse(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "active" => Some(Self::Active),
-            "archived" => Some(Self::Archived),
-            "superseded" => Some(Self::Superseded),
-            "pending" => Some(Self::Pending),
-            "deleted" => Some(Self::Deleted),
-            "tombstoned" => Some(Self::Tombstoned),
-            _ => None,
         }
     }
 }
@@ -356,170 +290,5 @@ impl MemoryStatus {
 impl fmt::Display for MemoryStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
-    }
-}
-
-impl std::str::FromStr for MemoryStatus {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s).ok_or_else(|| format!("unknown memory status: {s}"))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_memory_status_as_str() {
-        assert_eq!(MemoryStatus::Active.as_str(), "active");
-        assert_eq!(MemoryStatus::Archived.as_str(), "archived");
-        assert_eq!(MemoryStatus::Superseded.as_str(), "superseded");
-        assert_eq!(MemoryStatus::Pending.as_str(), "pending");
-        assert_eq!(MemoryStatus::Deleted.as_str(), "deleted");
-        assert_eq!(MemoryStatus::Tombstoned.as_str(), "tombstoned");
-    }
-
-    #[test]
-    fn test_memory_status_display() {
-        assert_eq!(format!("{}", MemoryStatus::Active), "active");
-        assert_eq!(format!("{}", MemoryStatus::Tombstoned), "tombstoned");
-    }
-
-    #[test]
-    fn test_memory_status_parse() {
-        assert_eq!(MemoryStatus::parse("active"), Some(MemoryStatus::Active));
-        assert_eq!(MemoryStatus::parse("ACTIVE"), Some(MemoryStatus::Active));
-        assert_eq!(
-            MemoryStatus::parse("tombstoned"),
-            Some(MemoryStatus::Tombstoned)
-        );
-        assert_eq!(
-            MemoryStatus::parse("TOMBSTONED"),
-            Some(MemoryStatus::Tombstoned)
-        );
-        assert_eq!(MemoryStatus::parse("invalid"), None);
-    }
-
-    #[test]
-    fn test_memory_status_from_str() {
-        assert_eq!("active".parse::<MemoryStatus>(), Ok(MemoryStatus::Active));
-        assert_eq!(
-            "tombstoned".parse::<MemoryStatus>(),
-            Ok(MemoryStatus::Tombstoned)
-        );
-        assert!("invalid".parse::<MemoryStatus>().is_err());
-    }
-
-    #[test]
-    fn test_memory_status_default() {
-        assert_eq!(MemoryStatus::default(), MemoryStatus::Active);
-    }
-
-    #[test]
-    fn test_memory_status_serde() {
-        // Test serialization
-        let status = MemoryStatus::Tombstoned;
-        let json = serde_json::to_string(&status).expect("serialize");
-        assert_eq!(json, "\"tombstoned\"");
-
-        // Test deserialization
-        let parsed: MemoryStatus = serde_json::from_str("\"tombstoned\"").expect("deserialize");
-        assert_eq!(parsed, MemoryStatus::Tombstoned);
-
-        // Test all variants roundtrip
-        for status in [
-            MemoryStatus::Active,
-            MemoryStatus::Archived,
-            MemoryStatus::Superseded,
-            MemoryStatus::Pending,
-            MemoryStatus::Deleted,
-            MemoryStatus::Tombstoned,
-        ] {
-            let json = serde_json::to_string(&status).expect("serialize");
-            let parsed: MemoryStatus = serde_json::from_str(&json).expect("deserialize");
-            assert_eq!(parsed, status);
-        }
-    }
-
-    #[test]
-    fn test_domain_serde() {
-        // Test empty domain
-        let domain = Domain::new();
-        let json = serde_json::to_string(&domain).expect("serialize");
-        assert_eq!(json, "{}");
-
-        let parsed: Domain = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(parsed, domain);
-
-        // Test domain with all fields
-        let domain = Domain {
-            organization: Some("org".to_string()),
-            project: Some("proj".to_string()),
-            repository: Some("repo".to_string()),
-        };
-        let json = serde_json::to_string(&domain).expect("serialize");
-        let parsed: Domain = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(parsed, domain);
-
-        // Test user domain
-        let domain = Domain::for_user();
-        let json = serde_json::to_string(&domain).expect("serialize");
-        let parsed: Domain = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(parsed, domain);
-    }
-
-    // ========================================================================
-    // URN Scope Tests (Task 3.4: Storage Simplification)
-    // ========================================================================
-
-    #[test]
-    fn test_urn_scope_project() {
-        let domain = Domain::new();
-        assert!(domain.is_global());
-        assert_eq!(domain.urn_scope(), "project");
-    }
-
-    #[test]
-    fn test_urn_scope_user() {
-        let domain = Domain::for_user();
-        assert!(domain.is_user());
-        assert_eq!(domain.urn_scope(), "user");
-    }
-
-    #[test]
-    fn test_urn_scope_repository() {
-        let domain = Domain::for_repository("zircote", "subcog");
-        assert!(!domain.is_global());
-        assert!(!domain.is_user());
-        assert_eq!(domain.urn_scope(), "zircote/subcog");
-    }
-
-    #[test]
-    fn test_urn_scope_organization_only() {
-        let domain = Domain {
-            organization: Some("acme".to_string()),
-            project: None,
-            repository: None,
-        };
-        assert_eq!(domain.urn_scope(), "acme");
-    }
-
-    #[test]
-    fn test_urn_scope_consistency() {
-        // Ensure URN patterns are consistent
-        // Project-local domain -> "project"
-        assert_eq!(Domain::new().urn_scope(), "project");
-        assert_eq!(Domain::new().to_string(), "project");
-
-        // User domain -> "user"
-        assert_eq!(Domain::for_user().urn_scope(), "user");
-        assert_eq!(Domain::for_user().to_string(), "user");
-
-        // Repository domain -> "org/repo"
-        let repo_domain = Domain::for_repository("org", "repo");
-        assert_eq!(repo_domain.urn_scope(), "org/repo");
-        assert_eq!(repo_domain.to_string(), "org/repo");
     }
 }

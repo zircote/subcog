@@ -20,4 +20,4 @@ pub use prompt::{
     ValidationResult, extract_variables, is_reserved_variable_name, substitute_variables,
     validate_prompt_content,
 };
-pub use search::{DetailLevel, SearchFilter, SearchHit, SearchMode, SearchResult, TombstoneHint};
+pub use search::{DetailLevel, SearchFilter, SearchHit, SearchMode, SearchResult};

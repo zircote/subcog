@@ -40,18 +40,14 @@ pub fn parse_search_mode(s: &str) -> SearchMode {
 }
 
 /// Capture command.
-#[allow(clippy::too_many_arguments)]
 pub fn cmd_capture(
     config: &SubcogConfig,
     content: String,
     namespace: String,
     tags: Option<String>,
     source: Option<String>,
-    project: Option<String>,
-    branch: Option<String>,
-    file_path: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Get repo path for context detection
+    // Get repo path so captures are stored to git notes
     let cwd = std::env::current_dir()?;
     let mut service_config = subcog::config::Config::from(config.clone());
     service_config = service_config.with_repo_path(&cwd);
@@ -62,7 +58,6 @@ pub fn cmd_capture(
         .unwrap_or_default();
 
     // Use context-aware domain: project if in git repo, user if not
-    // Facet fields are optional overrides - if not provided, CaptureService auto-detects from git context
     let request = CaptureRequest {
         content,
         namespace: parse_namespace(&namespace),
@@ -70,9 +65,6 @@ pub fn cmd_capture(
         tags: tag_list,
         source,
         skip_security_check: false,
-        project_id: project,
-        branch,
-        file_path,
     };
 
     let result = service.capture(request)?;
@@ -96,23 +88,12 @@ pub fn cmd_capture(
 /// * `namespace` - Optional namespace filter
 /// * `limit` - Maximum number of results
 /// * `raw` - If true, display raw (un-normalized) scores instead of normalized scores
-/// * `project` - Optional project identifier filter
-/// * `branch` - Optional branch name filter
-/// * `path` - Optional file path pattern filter (glob-style)
-/// * `include_tombstoned` - If true, include soft-deleted memories
-/// * `all_projects` - If true, search across all projects (clears project filter)
-#[allow(clippy::too_many_arguments)]
 pub fn cmd_recall(
     query: String,
     mode: String,
     namespace: Option<String>,
     limit: usize,
     raw: bool,
-    project: Option<String>,
-    branch: Option<String>,
-    path: Option<String>,
-    include_tombstoned: bool,
-    all_projects: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use subcog::services::ServiceContainer;
 
@@ -121,31 +102,8 @@ pub fn cmd_recall(
     let service = services.recall()?;
 
     let mut filter = SearchFilter::new();
-
-    // Apply namespace filter
     if let Some(ns) = namespace {
         filter = filter.with_namespace(parse_namespace(&ns));
-    }
-
-    // Apply facet filters
-    // Note: --all-projects clears any project filter, otherwise use provided or auto-detect
-    if !all_projects {
-        if let Some(project_id) = project {
-            filter = filter.with_project_id(project_id);
-        }
-        // If no project specified and not --all-projects, the index will scope by domain
-    }
-
-    if let Some(branch_name) = branch {
-        filter = filter.with_branch(branch_name);
-    }
-
-    if let Some(path_pattern) = path {
-        filter = filter.with_file_path_pattern(path_pattern);
-    }
-
-    if include_tombstoned {
-        filter = filter.with_include_tombstoned(true);
     }
 
     let result = service.search(&query, parse_search_mode(&mode), &filter, limit);
@@ -158,13 +116,11 @@ pub fn cmd_recall(
             for hit in &search_result.memories {
                 // Use raw_score if --raw flag is set, otherwise use normalized score
                 let display_score = if raw { hit.raw_score } else { hit.score };
-
-                // Use Memory::urn() for consistent URN generation (Task 3.4)
-                let urn = hit.memory.urn();
-
                 println!(
                     "  [{:.4}] {} ({})",
-                    display_score, urn, hit.memory.namespace
+                    display_score,
+                    hit.memory.id.as_str(),
+                    hit.memory.namespace
                 );
                 // Truncate content for display
                 let content = if hit.memory.content.len() > 100 {
@@ -236,10 +192,37 @@ pub fn cmd_status(config: &SubcogConfig) -> Result<(), Box<dyn std::error::Error
     };
     println!("Vector Index: {usearch_status}");
 
+    // Check git notes
+    let notes_status = check_git_notes_status(&config.repo_path);
+    println!("Git Notes: {notes_status}");
+
     println!();
     println!("Use 'subcog config --show' to view full configuration");
 
     Ok(())
+}
+
+/// Check git notes status.
+fn check_git_notes_status(repo_path: &std::path::Path) -> &'static str {
+    use std::process::Command;
+
+    let result = Command::new("git")
+        .args(["notes", "--ref=subcog/memories", "list"])
+        .current_dir(repo_path)
+        .output();
+
+    match result {
+        Ok(output) if output.status.success() => {
+            let count = String::from_utf8_lossy(&output.stdout).lines().count();
+            if count > 0 {
+                "Available (has memories)"
+            } else {
+                "Available (empty)"
+            }
+        },
+        Ok(_) => "Initialized (no memories yet)",
+        Err(_) => "Not available (git error)",
+    }
 }
 
 /// Sync command.
@@ -329,7 +312,7 @@ pub fn cmd_consolidate(config: &SubcogConfig) -> Result<(), Box<dyn std::error::
             let mut service = ConsolidationService::new(backend);
             run_consolidation(&mut service)?;
         },
-        StorageBackendType::Filesystem => {
+        StorageBackendType::Filesystem | StorageBackendType::GitNotes => {
             let backend = FilesystemBackend::new(data_dir);
             let mut service = ConsolidationService::new(backend);
             run_consolidation(&mut service)?;
@@ -377,7 +360,7 @@ pub fn cmd_reindex(repo: Option<PathBuf>) -> Result<(), Box<dyn std::error::Erro
     // Use provided repo path or current directory
     let repo_path = repo.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
 
-    println!("Reindexing memories from storage...");
+    println!("Reindexing memories from git notes...");
     println!("Repository: {}", repo_path.display());
     println!();
 

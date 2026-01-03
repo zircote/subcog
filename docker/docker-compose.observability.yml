@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # ==========================================================================
   # Database Services
@@ -76,6 +74,7 @@ services:
       - ./tempo/tempo.yml:/etc/tempo/tempo.yml:ro
     ports:
       - "3200:3200"
+      - "9095:9095"  # gRPC for Grafana streaming search
 
   loki:
     image: grafana/loki:3.3.2

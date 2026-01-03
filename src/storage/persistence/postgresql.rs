@@ -52,21 +52,6 @@ mod implementation {
                 CREATE INDEX IF NOT EXISTS idx_{table}_domain ON {table} (domain_org, domain_project, domain_repo);
             ",
         },
-        Migration {
-            version: 4,
-            description: "Add facet columns for storage simplification (Issue #43)",
-            sql: r"
-                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS project_id TEXT;
-                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS branch TEXT;
-                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS file_path TEXT;
-                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tombstoned_at BIGINT;
-                CREATE INDEX IF NOT EXISTS idx_{table}_project_id ON {table} (project_id);
-                CREATE INDEX IF NOT EXISTS idx_{table}_branch ON {table} (branch);
-                CREATE INDEX IF NOT EXISTS idx_{table}_file_path ON {table} (file_path);
-                CREATE INDEX IF NOT EXISTS idx_{table}_tombstoned_at ON {table} (tombstoned_at);
-                CREATE INDEX IF NOT EXISTS idx_{table}_project_branch ON {table} (project_id, branch);
-            ",
-        },
     ];
 
     /// PostgreSQL-based persistence backend.
@@ -141,7 +126,16 @@ mod implementation {
             s.clone()
         }
 
+        /// Maximum connections in pool.
+        const POOL_MAX_SIZE: usize = 20;
+
         /// Builds a deadpool config from tokio-postgres config.
+        ///
+        /// # Pool Configuration (HIGH-010)
+        ///
+        /// Configures connection pool with safety limits:
+        /// - Max 20 connections (prevents pool exhaustion)
+        /// - 5 second acquire timeout (prevents hanging on pool exhaustion)
         fn build_pool_config(config: &tokio_postgres::Config) -> Config {
             let mut cfg = Config::new();
             cfg.host = config.get_hosts().first().map(Self::host_to_string);
@@ -151,6 +145,23 @@ mod implementation {
                 .get_password()
                 .map(|p| String::from_utf8_lossy(p).to_string());
             cfg.dbname = config.get_dbname().map(String::from);
+
+            // Pool configuration with timeout (HIGH-010)
+            cfg.pool = Some(deadpool_postgres::PoolConfig {
+                max_size: Self::POOL_MAX_SIZE,
+                timeouts: deadpool_postgres::Timeouts {
+                    wait: Some(std::time::Duration::from_secs(5)),
+                    create: Some(std::time::Duration::from_secs(5)),
+                    recycle: Some(std::time::Duration::from_secs(5)),
+                },
+                ..Default::default()
+            });
+
+            // Configure manager with fast recycling for connection reuse
+            cfg.manager = Some(deadpool_postgres::ManagerConfig {
+                recycling_method: deadpool_postgres::RecyclingMethod::Fast,
+            });
+
             cfg
         }
 
@@ -197,9 +208,8 @@ mod implementation {
 
             let upsert = format!(
                 r"INSERT INTO {} (id, content, namespace, domain_org, domain_project, domain_repo,
-                    status, tags, source, embedding, created_at, updated_at,
-                    project_id, branch, file_path, tombstoned_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                    status, tags, source, embedding, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 ON CONFLICT (id) DO UPDATE SET
                     content = EXCLUDED.content,
                     namespace = EXCLUDED.namespace,
@@ -210,18 +220,13 @@ mod implementation {
                     tags = EXCLUDED.tags,
                     source = EXCLUDED.source,
                     embedding = EXCLUDED.embedding,
-                    updated_at = EXCLUDED.updated_at,
-                    project_id = EXCLUDED.project_id,
-                    branch = EXCLUDED.branch,
-                    file_path = EXCLUDED.file_path,
-                    tombstoned_at = EXCLUDED.tombstoned_at",
+                    updated_at = EXCLUDED.updated_at",
                 self.table_name
             );
 
             let tags: Vec<&str> = memory.tags.iter().map(String::as_str).collect();
             let embedding_json: Option<serde_json::Value> =
                 memory.embedding.as_ref().map(|e| serde_json::json!(e));
-            let tombstoned_at_i64: Option<i64> = memory.tombstoned_at.map(|t| t as i64);
 
             client
                 .execute(
@@ -239,10 +244,6 @@ mod implementation {
                         &embedding_json,
                         &(memory.created_at as i64),
                         &(memory.updated_at as i64),
-                        &memory.project_id,
-                        &memory.branch,
-                        &memory.file_path,
-                        &tombstoned_at_i64,
                     ],
                 )
                 .await
@@ -258,8 +259,7 @@ mod implementation {
 
             let query = format!(
                 r"SELECT id, content, namespace, domain_org, domain_project, domain_repo,
-                    status, tags, source, embedding, created_at, updated_at,
-                    project_id, branch, file_path, tombstoned_at
+                    status, tags, source, embedding, created_at, updated_at
                 FROM {}
                 WHERE id = $1",
                 self.table_name
@@ -288,11 +288,6 @@ mod implementation {
             let embedding_json: Option<serde_json::Value> = row.get("embedding");
             let created_at: i64 = row.get("created_at");
             let updated_at: i64 = row.get("updated_at");
-            // Facet fields for storage simplification (Issue #43)
-            let project_id: Option<String> = row.get("project_id");
-            let branch: Option<String> = row.get("branch");
-            let file_path: Option<String> = row.get("file_path");
-            let tombstoned_at: Option<i64> = row.get("tombstoned_at");
 
             let namespace = Namespace::parse(&namespace_str).unwrap_or_default();
             let status = match status_str.as_str() {
@@ -301,7 +296,6 @@ mod implementation {
                 "superseded" => MemoryStatus::Superseded,
                 "pending" => MemoryStatus::Pending,
                 "deleted" => MemoryStatus::Deleted,
-                "tombstoned" => MemoryStatus::Tombstoned,
                 _ => MemoryStatus::Active,
             };
 
@@ -323,10 +317,6 @@ mod implementation {
                 embedding,
                 created_at: created_at as u64,
                 updated_at: updated_at as u64,
-                project_id,
-                branch,
-                file_path,
-                tombstoned_at: tombstoned_at.map(|t| t as u64),
             }
         }
 
@@ -479,11 +469,6 @@ mod tests {
             embedding: None,
             tags: vec!["test".to_string(), "integration".to_string()],
             source: Some("test.rs".to_string()),
-            // Facet fields for storage simplification (Issue #43)
-            project_id: None,
-            branch: None,
-            file_path: None,
-            tombstoned_at: None,
         }
     }
 
@@ -714,10 +699,6 @@ mod stub_tests {
             embedding: None,
             tags: vec![],
             source: None,
-            project_id: None,
-            branch: None,
-            file_path: None,
-            tombstoned_at: None,
         }
     }
 

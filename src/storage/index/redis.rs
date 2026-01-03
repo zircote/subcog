@@ -193,16 +193,6 @@ mod implementation {
                 .arg("updated_at")
                 .arg("NUMERIC")
                 .arg("SORTABLE")
-                // Facet fields for storage simplification (Issue #43)
-                .arg("project_id")
-                .arg("TAG")
-                .arg("branch")
-                .arg("TAG")
-                .arg("file_path")
-                .arg("TAG")
-                .arg("tombstoned_at")
-                .arg("NUMERIC")
-                .arg("SORTABLE")
                 .query(conn);
 
             match result {
@@ -244,28 +234,6 @@ mod implementation {
                 clauses.push(format!("@status:{{{}}}", status_strs.join("|")));
             }
 
-            // Facet filters for storage simplification (Issue #43)
-            if let Some(ref project_id) = filter.project_id {
-                clauses.push(format!("@project_id:{{{project_id}}}"));
-            }
-
-            if let Some(ref branch) = filter.branch {
-                clauses.push(format!("@branch:{{{branch}}}"));
-            }
-
-            if let Some(ref pattern) = filter.file_path_pattern {
-                // RediSearch uses * for wildcards in TAG fields
-                let redis_pattern = pattern.replace('?', "*");
-                clauses.push(format!("@file_path:{{{redis_pattern}}}"));
-            }
-
-            // Exclude tombstoned by default (tombstoned_at is NULL means not tombstoned)
-            if !filter.include_tombstoned {
-                // In RediSearch, we filter for records where tombstoned_at doesn't exist
-                // or is 0 (we use 0 to indicate not tombstoned)
-                clauses.push("@tombstoned_at:[0 0]".to_string());
-            }
-
             if clauses.is_empty() {
                 String::new()
             } else {
@@ -289,10 +257,6 @@ mod implementation {
             let domain_str = memory.domain.to_string();
             let status_str = memory.status.as_str();
             let namespace_str = memory.namespace.as_str();
-            // Facet fields for storage simplification (Issue #43)
-            let project_id_str = memory.project_id.clone().unwrap_or_default();
-            let branch_str = memory.branch.clone().unwrap_or_default();
-            let file_path_str = memory.file_path.clone().unwrap_or_default();
 
             let result: redis::RedisResult<()> = conn.hset_multiple(
                 &key,
@@ -302,9 +266,6 @@ mod implementation {
                     ("domain", &domain_str),
                     ("status", status_str),
                     ("tags", &tags_str),
-                    ("project_id", &project_id_str),
-                    ("branch", &branch_str),
-                    ("file_path", &file_path_str),
                 ],
             );
 
@@ -331,18 +292,6 @@ mod implementation {
                 self.return_connection(conn);
                 return Err(Error::OperationFailed {
                     operation: "redis_index_updated".to_string(),
-                    cause: e.to_string(),
-                });
-            }
-
-            // Tombstoned_at (0 means not tombstoned)
-            let tombstoned_at_val = memory.tombstoned_at.unwrap_or(0);
-            let result: redis::RedisResult<()> =
-                conn.hset(&key, "tombstoned_at", tombstoned_at_val);
-            if let Err(e) = result {
-                self.return_connection(conn);
-                return Err(Error::OperationFailed {
-                    operation: "redis_index_tombstoned".to_string(),
                     cause: e.to_string(),
                 });
             }
@@ -469,15 +418,6 @@ mod implementation {
                         .and_then(|s| s.parse().ok())
                         .unwrap_or(created_at);
 
-                    // Facet fields for storage simplification (Issue #43)
-                    let project_id = fields.get("project_id").cloned().filter(|s| !s.is_empty());
-                    let branch = fields.get("branch").cloned().filter(|s| !s.is_empty());
-                    let file_path = fields.get("file_path").cloned().filter(|s| !s.is_empty());
-                    let tombstoned_at: Option<u64> = fields
-                        .get("tombstoned_at")
-                        .and_then(|s| s.parse().ok())
-                        .filter(|&v| v > 0);
-
                     let namespace = Namespace::parse(&namespace_str).unwrap_or_default();
                     let domain = domain_str.map_or_else(Domain::new, |_| Domain::new());
                     let status = parse_memory_status(&status_str);
@@ -494,10 +434,6 @@ mod implementation {
                         embedding: None,
                         tags,
                         source: None,
-                        project_id,
-                        branch,
-                        file_path,
-                        tombstoned_at,
                     }))
                 },
                 Err(e) => Err(Error::OperationFailed {
@@ -597,7 +533,6 @@ mod implementation {
             "superseded" => MemoryStatus::Superseded,
             "pending" => MemoryStatus::Pending,
             "deleted" => MemoryStatus::Deleted,
-            "tombstoned" => MemoryStatus::Tombstoned,
             _ => MemoryStatus::Active,
         }
     }

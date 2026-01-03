@@ -37,6 +37,7 @@ mod capture;
 mod consolidation;
 mod context;
 pub mod deduplication;
+mod enrichment;
 pub mod migration;
 mod path_manager;
 mod prompt;
@@ -54,6 +55,7 @@ pub use context::{ContextBuilderService, MemoryStatistics};
 pub use deduplication::{
     DeduplicationConfig, DeduplicationService, Deduplicator, DuplicateCheckResult, DuplicateReason,
 };
+pub use enrichment::{EnrichmentResult, EnrichmentService, EnrichmentStats};
 pub use path_manager::{INDEX_DB_NAME, PathManager, SUBCOG_DIR_NAME, VECTOR_INDEX_NAME};
 pub use prompt::{PromptFilter, PromptService, SaveOptions, SaveResult};
 pub use prompt_enrichment::{
@@ -68,6 +70,8 @@ pub use topic_index::{TopicIndexService, TopicInfo};
 
 use crate::config::SubcogConfig;
 use crate::embedding::Embedder;
+use crate::git::{NotesManager, YamlFrontMatterParser};
+use crate::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace};
 use crate::storage::index::{
     DomainIndexConfig, DomainIndexManager, DomainScope, OrgIndexConfig, SqliteBackend,
     find_repo_root, get_user_data_dir,
@@ -201,16 +205,6 @@ pub struct ServiceContainer {
     vector: Option<Arc<dyn VectorBackend + Send + Sync>>,
 }
 
-impl std::fmt::Debug for ServiceContainer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ServiceContainer")
-            .field("repo_path", &self.repo_path)
-            .field("has_embedder", &self.embedder.is_some())
-            .field("has_vector", &self.vector.is_some())
-            .finish_non_exhaustive()
-    }
-}
-
 impl ServiceContainer {
     /// Creates a new service container for a repository.
     ///
@@ -238,7 +232,7 @@ impl ServiceContainer {
 
         let index_manager = DomainIndexManager::new(config)?;
 
-        // Create CaptureService with repo_path for project-scoped storage
+        // Create CaptureService with repo_path so it stores to git notes
         let capture_config = crate::config::Config::new().with_repo_path(&repo_root);
 
         // Create storage paths using PathManager
@@ -282,7 +276,7 @@ impl ServiceContainer {
     /// Creates a service container for user-scoped storage.
     ///
     /// Used when operating outside a git repository. Stores memories in the
-    /// user's local data directory using `SQLite` persistence.
+    /// user's local data directory using `SQLite` persistence (no git notes).
     ///
     /// # Storage Paths
     ///
@@ -320,7 +314,7 @@ impl ServiceContainer {
         };
         let index_manager = DomainIndexManager::new(config)?;
 
-        // Create CaptureService WITHOUT repo_path (user-scoped storage)
+        // Create CaptureService WITHOUT repo_path (no git notes)
         let capture_config = crate::config::Config::new();
 
         // Create backends using factory (centralizes initialization logic)
@@ -347,7 +341,7 @@ impl ServiceContainer {
     /// Creates a service container from the current directory, falling back to user scope.
     ///
     /// This is the recommended factory method for CLI and MCP entry points:
-    /// - If in a git repository → uses project scope (`SQLite` + local index)
+    /// - If in a git repository → uses project scope (git notes + local index)
     /// - If NOT in a git repository → uses user scope (SQLite-only)
     ///
     /// # Examples
@@ -356,7 +350,7 @@ impl ServiceContainer {
     /// // Works in any directory
     /// let container = ServiceContainer::from_current_dir_or_user()?;
     ///
-    /// // In git repo: subcog://project/{namespace}/{id}
+    /// // In git repo: subcog://global/{namespace}/{id}
     /// // Outside git: subcog://user/{namespace}/{id}
     /// let result = container.capture().capture(request)?;
     /// ```
@@ -379,70 +373,6 @@ impl ServiceContainer {
                 Self::for_user()
             },
         }
-    }
-
-    /// Creates a service container for organization-scoped storage.
-    ///
-    /// Feature-gated behind `org-scope` feature. When enabled, provides shared
-    /// memory storage across an organization using PostgreSQL for persistence
-    /// and optionally Redis for distributed indexing.
-    ///
-    /// # Architecture
-    ///
-    /// ```text
-    /// Org-Scope Storage
-    ///   ├── PostgreSQL (persistence + index)
-    ///   │     └── memories, fts_index tables
-    ///   └── Redis (optional, distributed cache)
-    ///         └── search index, embeddings cache
-    /// ```
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Organization configuration with database URLs
-    ///
-    /// # Errors
-    ///
-    /// Returns an error because org-scope is not yet implemented.
-    /// This is a stub for future implementation.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use subcog::config::OrgConfig;
-    /// use subcog::services::ServiceContainer;
-    ///
-    /// let config = OrgConfig::new("my-org")
-    ///     .with_database_url("postgresql://localhost/subcog_org")
-    ///     .with_redis_url("redis://localhost:6379/1");
-    ///
-    /// // Currently returns error - not yet implemented
-    /// let container = ServiceContainer::for_org(&config)?;
-    /// ```
-    #[cfg(feature = "org-scope")]
-    pub fn for_org(config: &crate::config::OrgConfig) -> Result<Self> {
-        // Validate configuration first
-        config.validate().map_err(|e| Error::OperationFailed {
-            operation: "validate_org_config".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        // Stub implementation - org-scope storage not yet implemented
-        // Future implementation will:
-        // 1. Connect to PostgreSQL using config.database_url
-        // 2. Initialize org-scoped tables with config.org_id namespace
-        // 3. Optionally connect to Redis for distributed indexing
-        // 4. Create CaptureService and RecallService with PostgreSQL backends
-
-        Err(Error::OperationFailed {
-            operation: "create_org_container".to_string(),
-            cause: format!(
-                "Org-scope storage not yet implemented for org_id='{}'. \
-                 This feature is planned for a future release. \
-                 See: https://github.com/zircote/subcog/issues/43",
-                config.org_id
-            ),
-        })
     }
 
     /// Returns whether this container is using user scope (no git repository).
@@ -644,24 +574,49 @@ impl ServiceContainer {
         manager.get_index_path(scope)
     }
 
-    /// Returns the count of memories in the index for a specific scope.
-    ///
-    /// With `SQLite` as the single source of truth (Issue #43), the reindex
-    /// operation is no longer needed as there's no separate persistence layer
-    /// to sync from. This method now simply returns the count of indexed memories.
+    /// Reindexes memories from git notes into the index for a specific scope.
     ///
     /// # Arguments
     ///
-    /// * `scope` - The domain scope to query
+    /// * `scope` - The domain scope to reindex
     ///
     /// # Returns
     ///
-    /// The number of memories in the index.
+    /// The number of memories indexed.
     ///
     /// # Errors
     ///
-    /// Returns an error if the index cannot be accessed.
+    /// Returns an error if notes cannot be read or indexing fails.
     pub fn reindex_scope(&self, scope: DomainScope) -> Result<usize> {
+        let repo_path = self
+            .repo_path
+            .as_ref()
+            .ok_or_else(|| Error::InvalidInput("Repository path not configured".to_string()))?;
+
+        let notes = NotesManager::new(repo_path);
+
+        // Get all notes
+        let all_notes = notes.list()?;
+
+        if all_notes.is_empty() {
+            return Ok(0);
+        }
+
+        // Parse notes into memories
+        let mut memories = Vec::with_capacity(all_notes.len());
+        for (note_id, content) in &all_notes {
+            match parse_note_to_memory(note_id, content) {
+                Ok(memory) => memories.push(memory),
+                Err(e) => {
+                    tracing::warn!("Failed to parse note {note_id}: {e}");
+                },
+            }
+        }
+
+        if memories.is_empty() {
+            return Ok(0);
+        }
+
         // Create index backend using high-level API
         let index = {
             let manager = self
@@ -674,18 +629,10 @@ impl ServiceContainer {
             manager.create_backend(scope)?
         };
 
-        // With SQLite as single source of truth, just return the count
-        // The FTS index is maintained automatically by SQLite triggers
-        let filter = crate::models::SearchFilter::new();
-        let memories = index.list_all(&filter, usize::MAX)?;
+        // Clear and reindex
+        index.clear()?;
         let count = memories.len();
-
-        tracing::info!(
-            scope = ?scope,
-            count = count,
-            "Index contains {} memories",
-            count
-        );
+        index.reindex(&memories)?;
 
         Ok(count)
     }
@@ -726,38 +673,114 @@ impl ServiceContainer {
     }
 }
 
-// Note: parse_note_to_memory, parse_domain_string, and parse_status_string
-// were removed as part of Issue #43 (Storage Architecture Simplification).
-// SQLite is now the single source of truth for all storage.
+/// Parses a git note into a Memory object.
+///
+/// # Arguments
+///
+/// * `note_id` - The git commit OID the note is attached to (used as fallback ID)
+/// * `content` - The note content with optional YAML front matter
+///
+/// # Errors
+///
+/// Returns an error if the note cannot be parsed.
+fn parse_note_to_memory(note_id: &str, content: &str) -> Result<Memory> {
+    let (metadata, body) = YamlFrontMatterParser::parse(content)?;
 
-#[cfg(test)]
-mod tests {
-    #[cfg(feature = "org-scope")]
-    mod org_scope_tests {
-        use crate::config::OrgConfig;
-        use crate::services::ServiceContainer;
+    // Extract fields from metadata, using defaults where necessary
+    let id = metadata
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map_or_else(|| MemoryId::new(note_id), MemoryId::new);
 
-        #[test]
-        fn test_for_org_returns_not_implemented_error() {
-            let config =
-                OrgConfig::new("test-org").with_database_url("postgresql://localhost/subcog_test");
+    let namespace = metadata
+        .get("namespace")
+        .and_then(|v| v.as_str())
+        .and_then(Namespace::parse)
+        .unwrap_or_default();
 
-            let result = ServiceContainer::for_org(&config);
+    let domain = metadata
+        .get("domain")
+        .and_then(|v| v.as_str())
+        .map_or_else(Domain::new, parse_domain_string);
 
-            assert!(result.is_err());
-            let error = result.unwrap_err().to_string();
-            assert!(error.contains("not yet implemented"));
-            assert!(error.contains("test-org"));
-        }
+    let status = metadata
+        .get("status")
+        .and_then(|v| v.as_str())
+        .map_or(MemoryStatus::Active, parse_status_string);
 
-        #[test]
-        fn test_for_org_validates_config() {
-            // Missing org_id
-            let config = OrgConfig::default();
-            let result = ServiceContainer::for_org(&config);
-            assert!(result.is_err());
-            let error = result.unwrap_err().to_string();
-            assert!(error.contains("org_id"));
-        }
+    let created_at = metadata
+        .get("created_at")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+
+    let updated_at = metadata
+        .get("updated_at")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(created_at);
+
+    let tags = metadata
+        .get("tags")
+        .and_then(|v| v.as_array())
+        .map_or_else(Vec::new, |arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        });
+
+    let source = metadata
+        .get("source")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    Ok(Memory {
+        id,
+        content: body,
+        namespace,
+        domain,
+        status,
+        created_at,
+        updated_at,
+        embedding: None,
+        tags,
+        source,
+    })
+}
+
+/// Parses a domain string (e.g., "org/repo") into a Domain.
+fn parse_domain_string(s: &str) -> Domain {
+    if s == "global" || s.is_empty() {
+        return Domain::new();
+    }
+
+    let parts: Vec<&str> = s.split('/').collect();
+    match parts.len() {
+        1 => Domain {
+            organization: Some(parts[0].to_string()),
+            project: None,
+            repository: None,
+        },
+        2 => Domain {
+            organization: Some(parts[0].to_string()),
+            project: None,
+            repository: Some(parts[1].to_string()),
+        },
+        3 => Domain {
+            organization: Some(parts[0].to_string()),
+            project: Some(parts[1].to_string()),
+            repository: Some(parts[2].to_string()),
+        },
+        _ => Domain::new(),
+    }
+}
+
+/// Parses a status string into a `MemoryStatus`.
+fn parse_status_string(s: &str) -> MemoryStatus {
+    match s.to_lowercase().as_str() {
+        "archived" => MemoryStatus::Archived,
+        "superseded" => MemoryStatus::Superseded,
+        "pending" => MemoryStatus::Pending,
+        "deleted" => MemoryStatus::Deleted,
+        // Default to Active for "active" and any unknown status
+        _ => MemoryStatus::Active,
     }
 }

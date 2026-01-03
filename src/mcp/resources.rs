@@ -37,7 +37,7 @@
 //! - `subcog://_` - All memories across all domains
 //! - `subcog://_/{namespace}` - All memories in a namespace (e.g., `subcog://_/learnings`)
 //! - `subcog://memory/{id}` - Get a specific memory by its unique ID
-//! - `subcog://project/decisions/{id}` - Fully-qualified memory URN
+//! - `subcog://global/decisions/{id}` - Fully-qualified memory URN
 //!
 //! ## Search & Topic Resources
 //! - `subcog://search/{query}` - Search memories with a query (URL-encoded)
@@ -48,14 +48,14 @@
 //! ## Domain-Scoped Resources
 //! - `subcog://project/_` - Project-scoped memories only
 //! - `subcog://org/{org}/_` - Organization-scoped memories
-//! - `subcog://project/_` - Project-local memories
+//! - `subcog://global/_` - Global memories
 //!
 //! # Examples
 //!
 //! ```text
 //! subcog://help/capture          # Get capture help
 //! subcog://_/decisions           # All decisions across domains
-//! subcog://project/learnings     # Project learnings only
+//! subcog://global/learnings      # Global learnings only
 //! subcog://memory/abc123         # Specific memory by ID
 //! subcog://search/postgres       # Search for "postgres"
 //! subcog://topics/authentication # Memories about authentication
@@ -1097,10 +1097,6 @@ mod tests {
             embedding: None,
             tags: vec!["alpha".to_string()],
             source: None,
-            project_id: None,
-            branch: None,
-            file_path: None,
-            tombstoned_at: None,
         };
         let other = Memory {
             id: MemoryId::new("patterns-1"),
@@ -1113,10 +1109,6 @@ mod tests {
             embedding: None,
             tags: vec!["beta".to_string()],
             source: None,
-            project_id: None,
-            branch: None,
-            file_path: None,
-            tombstoned_at: None,
         };
 
         index.index(&memory).expect("index memory");

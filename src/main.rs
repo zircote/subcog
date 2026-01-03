@@ -67,18 +67,6 @@ enum Commands {
         /// Source file or context.
         #[arg(short, long)]
         source: Option<String>,
-
-        /// Project identifier (auto-detected from git remote if not provided).
-        #[arg(long)]
-        project: Option<String>,
-
-        /// Branch name (auto-detected from git HEAD if not provided).
-        #[arg(short, long)]
-        branch: Option<String>,
-
-        /// File path context for the memory.
-        #[arg(short = 'f', long)]
-        file_path: Option<String>,
     },
 
     /// Search for memories.
@@ -101,26 +89,6 @@ enum Commands {
         /// Display raw (un-normalized) scores instead of normalized scores.
         #[arg(long)]
         raw: bool,
-
-        /// Filter by project identifier (e.g., 'github.com/org/repo').
-        #[arg(long)]
-        project: Option<String>,
-
-        /// Filter by git branch name (e.g., 'main', 'feature/xyz').
-        #[arg(short, long)]
-        branch: Option<String>,
-
-        /// Filter by file path pattern (glob-style, e.g., 'src/**/*.rs').
-        #[arg(long)]
-        path: Option<String>,
-
-        /// Include soft-deleted (tombstoned) memories in results.
-        #[arg(long)]
-        include_tombstoned: bool,
-
-        /// Search across all projects (clears auto-detected project filter).
-        #[arg(long)]
-        all_projects: bool,
     },
 
     /// Show status.
@@ -140,11 +108,30 @@ enum Commands {
     /// Run consolidation.
     Consolidate,
 
-    /// Rebuild search index from stored memories.
+    /// Rebuild search index from git notes.
     Reindex {
         /// Path to the git repository (default: current directory).
         #[arg(short, long)]
         repo: Option<PathBuf>,
+    },
+
+    /// Enrich memories with LLM-generated tags.
+    Enrich {
+        /// Enrich all memories (those without tags).
+        #[arg(long)]
+        all: bool,
+
+        /// Update all memories, even those with existing tags.
+        #[arg(long)]
+        update_all: bool,
+
+        /// Enrich a specific memory by ID.
+        #[arg(long)]
+        id: Option<String>,
+
+        /// Show what would be changed without applying.
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// Manage configuration.
@@ -199,28 +186,6 @@ enum Commands {
         /// Migration subcommand.
         #[command(subcommand)]
         action: MigrateAction,
-    },
-
-    /// Garbage collect stale branch memories.
-    ///
-    /// Identifies memories associated with deleted git branches and marks
-    /// them as tombstoned. This helps keep the memory index clean.
-    Gc {
-        /// Specific branch to check (default: all branches).
-        #[arg(short, long)]
-        branch: Option<String>,
-
-        /// Show what would be cleaned up without making changes.
-        #[arg(long)]
-        dry_run: bool,
-
-        /// Permanently delete instead of tombstoning (future feature).
-        #[arg(long)]
-        purge: bool,
-
-        /// For purge mode, only delete memories older than this duration (e.g., "30d").
-        #[arg(long)]
-        older_than: Option<String>,
     },
 
     /// Generate shell completion scripts.
@@ -287,12 +252,7 @@ fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::error:
             namespace,
             tags,
             source,
-            project,
-            branch,
-            file_path,
-        } => commands::cmd_capture(
-            &config, content, namespace, tags, source, project, branch, file_path,
-        ),
+        } => commands::cmd_capture(&config, content, namespace, tags, source),
 
         Commands::Recall {
             query,
@@ -300,23 +260,7 @@ fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::error:
             namespace,
             limit,
             raw,
-            project,
-            branch,
-            path,
-            include_tombstoned,
-            all_projects,
-        } => commands::cmd_recall(
-            query,
-            mode,
-            namespace,
-            limit,
-            raw,
-            project,
-            branch,
-            path,
-            include_tombstoned,
-            all_projects,
-        ),
+        } => commands::cmd_recall(query, mode, namespace, limit, raw),
 
         Commands::Status => commands::cmd_status(&config),
 
@@ -325,6 +269,13 @@ fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::error:
         Commands::Consolidate => commands::cmd_consolidate(&config),
 
         Commands::Reindex { repo } => commands::cmd_reindex(repo),
+
+        Commands::Enrich {
+            all,
+            update_all,
+            id,
+            dry_run,
+        } => commands::cmd_enrich(&config, all, update_all, id, dry_run),
 
         Commands::Config { show, set } => commands::cmd_config(config, show, set),
 
@@ -348,13 +299,6 @@ fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::error:
                 force,
             } => commands::cmd_migrate_embeddings(repo, dry_run, force),
         },
-
-        Commands::Gc {
-            branch,
-            dry_run,
-            purge,
-            older_than,
-        } => commands::cmd_gc(branch, dry_run, purge, older_than),
 
         Commands::Completions { shell } => {
             use clap::CommandFactory;

@@ -110,26 +110,6 @@ pub struct SearchFilter {
     pub created_before: Option<u64>,
     /// Minimum similarity score (0.0 to 1.0).
     pub min_score: Option<f32>,
-    /// Filter by project identifier.
-    ///
-    /// When set, only memories associated with this project are returned.
-    /// Projects provide logical grouping across repositories.
-    pub project_id: Option<String>,
-    /// Filter by git branch name.
-    ///
-    /// When set, only memories captured on this branch are returned.
-    /// Useful for feature-branch-specific context.
-    pub branch: Option<String>,
-    /// Filter by file path pattern (glob-style).
-    ///
-    /// Matches against the file path metadata of memories.
-    /// Supports glob patterns like `src/**/*.rs` or `tests/*.rs`.
-    pub file_path_pattern: Option<String>,
-    /// Include tombstoned (soft-deleted) memories in results.
-    ///
-    /// Defaults to `false`. When `true`, tombstoned memories are
-    /// included in search results for audit or recovery purposes.
-    pub include_tombstoned: bool,
 }
 
 impl SearchFilter {
@@ -147,10 +127,6 @@ impl SearchFilter {
             created_after: None,
             created_before: None,
             min_score: None,
-            project_id: None,
-            branch: None,
-            file_path_pattern: None,
-            include_tombstoned: false,
         }
     }
 
@@ -224,43 +200,6 @@ impl SearchFilter {
         self
     }
 
-    /// Sets the project identifier filter.
-    ///
-    /// Only memories associated with the specified project will be returned.
-    #[must_use]
-    pub fn with_project_id(mut self, project_id: impl Into<String>) -> Self {
-        self.project_id = Some(project_id.into());
-        self
-    }
-
-    /// Sets the git branch filter.
-    ///
-    /// Only memories captured on the specified branch will be returned.
-    #[must_use]
-    pub fn with_branch(mut self, branch: impl Into<String>) -> Self {
-        self.branch = Some(branch.into());
-        self
-    }
-
-    /// Sets the file path pattern filter (glob-style).
-    ///
-    /// Matches against the file path metadata of memories.
-    /// Supports glob patterns like `src/**/*.rs` or `tests/*.rs`.
-    #[must_use]
-    pub fn with_file_path_pattern(mut self, pattern: impl Into<String>) -> Self {
-        self.file_path_pattern = Some(pattern.into());
-        self
-    }
-
-    /// Sets whether to include tombstoned memories in results.
-    ///
-    /// When `true`, soft-deleted memories are included for audit or recovery.
-    #[must_use]
-    pub const fn with_include_tombstoned(mut self, include: bool) -> Self {
-        self.include_tombstoned = include;
-        self
-    }
-
     /// Returns true if the filter is empty (matches all).
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -274,65 +213,11 @@ impl SearchFilter {
             && self.created_after.is_none()
             && self.created_before.is_none()
             && self.min_score.is_none()
-            && self.project_id.is_none()
-            && self.branch.is_none()
-            && self.file_path_pattern.is_none()
-            && !self.include_tombstoned
-    }
-}
-
-/// Hint about tombstoned memories that may be relevant to a search.
-///
-/// When search results are sparse (< 3 active results), the system checks
-/// if there are tombstoned memories that match the query. This hint provides
-/// visibility into potentially relevant deleted content.
-#[derive(Debug, Clone, Default)]
-pub struct TombstoneHint {
-    /// Total count of tombstoned memories matching the query.
-    pub count: usize,
-    /// Branch names where tombstoned memories were found.
-    /// Limited to first 5 branches for display purposes.
-    pub branches: Vec<String>,
-}
-
-impl TombstoneHint {
-    /// Creates a new tombstone hint.
-    #[must_use]
-    pub fn new(count: usize, branches: Vec<String>) -> Self {
-        // Vec::len() call prevents clippy::missing_const_for_fn false positive
-        let _ = branches.len();
-        Self { count, branches }
-    }
-
-    /// Returns true if there are tombstoned memories.
-    #[must_use]
-    pub const fn has_tombstones(&self) -> bool {
-        self.count > 0
-    }
-
-    /// Formats the hint as a human-readable message.
-    #[must_use]
-    pub fn message(&self) -> Option<String> {
-        if self.count == 0 {
-            return None;
-        }
-
-        let branch_info = if self.branches.is_empty() {
-            String::new()
-        } else {
-            let branch_list = self.branches.join(", ");
-            format!(" in branches: {branch_list}")
-        };
-
-        Some(format!(
-            "{} additional memories found in deleted/merged branches{}",
-            self.count, branch_info
-        ))
     }
 }
 
 /// Result of a memory search.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SearchResult {
     /// The matching memories.
     pub memories: Vec<SearchHit>,
@@ -342,13 +227,6 @@ pub struct SearchResult {
     pub mode: SearchMode,
     /// Search execution time in milliseconds.
     pub execution_time_ms: u64,
-    /// Hint about tombstoned memories when active results are sparse.
-    ///
-    /// Populated when:
-    /// - Active results < 3
-    /// - `include_tombstoned` was false (default)
-    /// - Tombstoned memories exist that match the query
-    pub tombstone_hint: Option<TombstoneHint>,
 }
 
 /// A single search hit with scoring.

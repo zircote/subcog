@@ -7,7 +7,7 @@
 //!
 //! | Backend | Use Case | Trade-offs |
 //! |---------|----------|------------|
-//! | `SqliteBackend` | Primary; embedded, ACID | Default for all scopes |
+//! | `GitNotesBackend` | Primary; portable, versioned | Requires git repo |
 //! | `PostgresBackend` | Multi-user, ACID | Requires PostgreSQL server |
 //! | `FilesystemBackend` | Fallback; simple | No transactional guarantees |
 //!
@@ -19,7 +19,7 @@
 //!
 //! | Backend | Atomicity | Isolation | Durability |
 //! |---------|-----------|-----------|------------|
-//! | `SQLite` | Full ACID | Serializable | On commit |
+//! | `GitNotes` | Single-op | None | On flush |
 //! | PostgreSQL | Full ACID | Serializable | On commit |
 //! | Filesystem | None | None | On fsync |
 //!
@@ -35,8 +35,8 @@
 //! ## Consistency Guarantees
 //!
 //! - **Read-after-write**: Guaranteed for all backends
-//! - **Concurrent writes**: `SQLite` uses WAL mode; PostgreSQL uses transactions
-//! - **Partial failures**: `SQLite` and PostgreSQL roll back on error
+//! - **Concurrent writes**: `GitNotes` uses file locking; `PostgreSQL` uses transactions
+//! - **Partial failures**: `GitNotes` may leave `.lock` files; `PostgreSQL` rolls back
 
 use crate::Result;
 use crate::models::{Memory, MemoryId};
