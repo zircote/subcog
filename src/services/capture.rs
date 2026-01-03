@@ -398,6 +398,29 @@ impl CaptureService {
             warnings,
         })
     }
+
+    /// Captures a memory with authorization check (CRIT-006).
+    ///
+    /// This method requires [`Permission::Write`] to be present in the auth context.
+    /// Use this for MCP/HTTP endpoints where authorization is required.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - The capture request
+    /// * `auth` - Authorization context with permissions
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Unauthorized`] if write permission is not granted.
+    /// Returns other errors as per [`capture`](Self::capture).
+    pub fn capture_authorized(
+        &self,
+        request: CaptureRequest,
+        auth: &super::auth::AuthContext,
+    ) -> Result<CaptureResult> {
+        auth.require(super::auth::Permission::Write)?;
+        self.capture(request)
+    }
 }
 
 impl Default for CaptureService {

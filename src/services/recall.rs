@@ -598,6 +598,51 @@ impl RecallService {
         // Would need persistence backend to implement
         Ok(Vec::new())
     }
+
+    /// Searches for memories with authorization check (CRIT-006).
+    ///
+    /// This method requires [`Permission::Read`] to be present in the auth context.
+    /// Use this for MCP/HTTP endpoints where authorization is required.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The search query
+    /// * `mode` - Search mode (text, vector, or hybrid)
+    /// * `filter` - Optional filters for namespace, domain, etc.
+    /// * `limit` - Maximum number of results to return
+    /// * `auth` - Authorization context with permissions
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Unauthorized`] if read permission is not granted.
+    /// Returns other errors as per [`search`](Self::search).
+    pub fn search_authorized(
+        &self,
+        query: &str,
+        mode: SearchMode,
+        filter: &SearchFilter,
+        limit: usize,
+        auth: &super::auth::AuthContext,
+    ) -> Result<SearchResult> {
+        auth.require(super::auth::Permission::Read)?;
+        self.search(query, mode, filter, limit)
+    }
+
+    /// Retrieves a memory by ID with authorization check (CRIT-006).
+    ///
+    /// This method requires [`Permission::Read`] to be present in the auth context.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Unauthorized`] if read permission is not granted.
+    pub fn get_by_id_authorized(
+        &self,
+        id: &MemoryId,
+        auth: &super::auth::AuthContext,
+    ) -> Result<Option<Memory>> {
+        auth.require(super::auth::Permission::Read)?;
+        self.get_by_id(id)
+    }
 }
 
 /// Returns a domain label for metrics, avoiding allocations for common cases.

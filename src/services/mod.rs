@@ -32,6 +32,7 @@
 // Drop timing not critical for correctness in service code
 #![allow(clippy::significant_drop_tightening)]
 
+pub mod auth;
 mod backend_factory;
 mod capture;
 mod consolidation;
@@ -48,6 +49,7 @@ mod recall;
 mod sync;
 mod topic_index;
 
+pub use auth::{AuthContext, AuthContextBuilder, Permission};
 pub use backend_factory::{BackendFactory, BackendSet};
 pub use capture::CaptureService;
 pub use consolidation::ConsolidationService;

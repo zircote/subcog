@@ -38,9 +38,14 @@
   - Backwards compatible: reads unencrypted files when encryption enabled
   - Added 11 unit tests for encryption roundtrip, tampering detection, key validation
 
-- [ ] **CRIT-006**: Add service-layer authorization
-  - File: `src/services/mod.rs:156-234`
-  - Action: Pass `AuthContext` to service methods, check permissions
+- [x] **CRIT-006**: Add service-layer authorization ✓ completed 2026-01-03
+  - File: `src/services/auth.rs`, `src/services/capture.rs`, `src/services/recall.rs`
+  - Action: Added `AuthContext` and `Permission` types for service-layer auth
+  - `AuthContext::local()` for CLI (implicit trust), `from_scopes()` for MCP/HTTP
+  - Added `capture_authorized()`, `search_authorized()`, `get_by_id_authorized()` methods
+  - Permissions: Read (recall/status), Write (capture/enrich), Admin (sync/reindex)
+  - Builder pattern for flexible auth context construction
+  - Added 15 unit tests for authorization logic
 
 - [ ] **CRIT-007**: Add timeouts to git operations
   - File: `src/git/notes.rs:34-89`, `src/git/remote.rs:23-67`
@@ -369,11 +374,11 @@
 
 | Phase | Status | Findings | Fixed |
 |-------|--------|----------|-------|
-| Critical | In Progress | 7 | 5 |
+| Critical | In Progress | 7 | 6 |
 | High | Pending | 44 | 0 |
 | Medium | Pending | 63 | 0 |
 | Low | Pending | 62 | 0 |
-| **Total** | | **176** | **5** |
+| **Total** | | **176** | **6** |
 
 ---
 
