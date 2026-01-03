@@ -5,8 +5,8 @@
 
 use crate::Result;
 use crate::embedding::Embedder;
-use crate::models::{MemoryId, Namespace, SearchFilter};
-use crate::storage::traits::VectorBackend;
+use crate::models::{MemoryId, Namespace};
+use crate::storage::traits::{VectorBackend, VectorFilter};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::instrument;
@@ -141,11 +141,12 @@ impl<E: Embedder + Send + Sync, V: VectorBackend + Send + Sync> SemanticSimilari
         let embedding = self.embedder.embed(content)?;
 
         // Build filter for namespace
-        let filter = SearchFilter::new().with_namespace(namespace);
+        let filter = VectorFilter::new().with_namespace(namespace);
 
         // Search for similar vectors
-        // We request more results than needed to find one above threshold
-        let results = self.vector.search(&embedding, &filter, 10)?;
+        // Request only 3 results - we only need to find one above threshold (PERF-H2)
+        // Reducing from 10 to 3 improves performance while maintaining effectiveness
+        let results = self.vector.search(&embedding, &filter, 3)?;
 
         // Record metrics
         let duration_ms = start.elapsed().as_millis();
@@ -314,7 +315,7 @@ mod tests {
         fn search(
             &self,
             query_embedding: &[f32],
-            filter: &SearchFilter,
+            filter: &VectorFilter,
             limit: usize,
         ) -> Result<Vec<(MemoryId, f32)>> {
             self.inner

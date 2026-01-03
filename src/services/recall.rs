@@ -109,7 +109,12 @@ impl RecallService {
     ///
     /// # Errors
     ///
-    /// Returns an error if the search fails.
+    /// Returns [`Error::InvalidInput`] if:
+    /// - The query is empty or contains only whitespace
+    ///
+    /// Returns [`Error::OperationFailed`] if:
+    /// - No index backend is configured (for `Text` and `Hybrid` modes)
+    /// - The index backend search operation fails
     #[allow(clippy::cast_possible_truncation)]
     #[instrument(
         skip(self, query, filter),
@@ -155,16 +160,13 @@ impl RecallService {
             let execution_time_ms = start.elapsed().as_millis() as u64;
             let total_count = memories.len();
             let timestamp = current_timestamp();
-            // Performance note: query_value.clone() creates a new String for each event.
-            // Changing to Arc<str> would require modifying MemoryEvent::Retrieved
-            // which is a breaking change. The current overhead is acceptable for
-            // typical search result sizes (<100 hits). Future optimization would
-            // batch events or use Arc<str> in MemoryEvent.
-            let query_value = query.to_string();
+            // Use Arc<str> for zero-copy sharing across events (PERF-C1).
+            // Arc::clone() is O(1) atomic increment vs O(n) String::clone().
+            let query_arc: std::sync::Arc<str> = query.into();
             for hit in &memories {
                 record_event(MemoryEvent::Retrieved {
                     memory_id: hit.memory.id.clone(),
-                    query: query_value.clone(),
+                    query: std::sync::Arc::clone(&query_arc),
                     score: hit.score,
                     timestamp,
                 });
@@ -203,7 +205,10 @@ impl RecallService {
     ///
     /// # Errors
     ///
-    /// Returns an error if the index is not available.
+    /// Returns [`Error::OperationFailed`] if:
+    /// - No index backend is configured
+    /// - The index backend list operation fails
+    /// - Batch memory retrieval fails
     #[allow(clippy::cast_possible_truncation)]
     #[instrument(skip(self, filter), fields(operation = "list_all", limit = limit))]
     pub fn list_all(&self, filter: &SearchFilter, limit: usize) -> Result<SearchResult> {
@@ -244,10 +249,12 @@ impl RecallService {
             let execution_time_ms = start.elapsed().as_millis() as u64;
             let total_count = memories.len();
             let timestamp = current_timestamp();
+            // Use Arc<str> for zero-copy sharing (PERF-C1). Static pattern for list_all.
+            let query_arc: std::sync::Arc<str> = "*".into();
             for hit in &memories {
                 record_event(MemoryEvent::Retrieved {
                     memory_id: hit.memory.id.clone(),
-                    query: "*".to_string(),
+                    query: std::sync::Arc::clone(&query_arc),
                     score: hit.score,
                     timestamp,
                 });
@@ -359,8 +366,9 @@ impl RecallService {
             },
         };
 
-        // Search vector backend
-        let results = match vector.search(&query_embedding, filter, limit) {
+        // Search vector backend (convert SearchFilter to VectorFilter)
+        let vector_filter = crate::storage::traits::VectorFilter::from(filter);
+        let results = match vector.search(&query_embedding, &vector_filter, limit) {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!("Vector search failed: {e}");
@@ -494,7 +502,11 @@ impl RecallService {
     ) -> Vec<SearchHit> {
         const K: f32 = 60.0; // Standard RRF constant
 
-        let mut scores: HashMap<String, (f32, Option<SearchHit>)> = HashMap::new();
+        // Pre-allocate HashMap with expected capacity (PERF-M1)
+        // Max unique results = text_results + vector_results (when no overlap)
+        let capacity = text_results.len() + vector_results.len();
+        let mut scores: HashMap<String, (f32, Option<SearchHit>)> =
+            HashMap::with_capacity(capacity);
 
         // Add text results
         for (rank, hit) in text_results.iter().enumerate() {
@@ -549,7 +561,9 @@ impl RecallService {
     ///
     /// # Errors
     ///
-    /// Returns an error if the index is not available.
+    /// Returns [`Error::OperationFailed`] if:
+    /// - No index backend is configured
+    /// - The index backend get operation fails
     pub fn get_by_id(&self, id: &MemoryId) -> Result<Option<Memory>> {
         let index = self.index.as_ref().ok_or_else(|| Error::OperationFailed {
             operation: "get_by_id".to_string(),
@@ -563,7 +577,13 @@ impl RecallService {
     ///
     /// # Errors
     ///
-    /// Returns an error if retrieval fails.
+    /// Returns [`Error::OperationFailed`] if:
+    /// - No persistence backend is configured
+    /// - The persistence backend retrieval fails
+    ///
+    /// # Note
+    ///
+    /// Currently returns empty results as persistence backend integration is pending.
     pub const fn recent(&self, _limit: usize, _filter: &SearchFilter) -> Result<Vec<Memory>> {
         // Would need persistence backend to implement
         Ok(Vec::new())

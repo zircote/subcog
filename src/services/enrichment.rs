@@ -36,7 +36,9 @@ impl<P: LlmProvider> EnrichmentService<P> {
     ///
     /// # Errors
     ///
-    /// Returns an error if enrichment fails.
+    /// Returns [`Error::OperationFailed`] if:
+    /// - Git notes listing fails (repository access error)
+    /// - Note parsing fails for all memories (malformed YAML front matter)
     #[instrument(skip(self), fields(operation = "enrich_all", dry_run = dry_run, update_all = update_all))]
     pub fn enrich_all(&self, dry_run: bool, update_all: bool) -> Result<EnrichmentStats> {
         let start = Instant::now();
@@ -156,7 +158,11 @@ impl<P: LlmProvider> EnrichmentService<P> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the memory is not found or enrichment fails.
+    /// Returns [`Error::OperationFailed`] if:
+    /// - The memory with the given ID is not found
+    /// - Git notes listing fails (repository access error)
+    /// - LLM tag generation fails (provider error or invalid response)
+    /// - Note update fails (write permission or git error)
     #[instrument(skip(self), fields(operation = "enrich_one", dry_run = dry_run, memory_id = memory_id))]
     pub fn enrich_one(&self, memory_id: &str, dry_run: bool) -> Result<EnrichmentResult> {
         let start = Instant::now();

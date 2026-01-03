@@ -460,7 +460,7 @@ mod tests {
         fn search(
             &self,
             query_embedding: &[f32],
-            filter: &crate::models::SearchFilter,
+            filter: &crate::storage::traits::VectorFilter,
             limit: usize,
         ) -> Result<Vec<(MemoryId, f32)>> {
             self.inner

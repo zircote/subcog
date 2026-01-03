@@ -594,4 +594,74 @@ mod tests {
         let content = manager.get(&head).unwrap();
         assert_eq!(content, Some(unicode.to_string()));
     }
+
+    // ============================================================================
+    // Repository State Tests (TEST-GIT-1)
+    // ============================================================================
+
+    #[test]
+    fn test_detached_head_state() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+
+        // Create initial commit
+        let sig = Signature::now("test", "test@test.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let commit_oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+            .unwrap();
+
+        // Detach HEAD by pointing directly to the commit
+        repo.set_head_detached(commit_oid).unwrap();
+        assert!(repo.head_detached().unwrap());
+
+        let manager = NotesManager::new(dir.path());
+
+        // Should still be able to add notes in detached HEAD state
+        let result = manager.add_to_head("Note in detached HEAD");
+        assert!(result.is_ok(), "Should add note in detached HEAD state");
+
+        // Should be able to read it back
+        let content = manager.get_from_head().unwrap();
+        assert_eq!(content, Some("Note in detached HEAD".to_string()));
+    }
+
+    #[test]
+    fn test_empty_repo_no_commits() {
+        let dir = TempDir::new().unwrap();
+        let _repo = Repository::init(dir.path()).unwrap();
+
+        let manager = NotesManager::new(dir.path());
+
+        // Empty repo has no HEAD target - add_to_head should fail gracefully
+        let result = manager.add_to_head("Note on empty repo");
+        assert!(
+            result.is_err(),
+            "Empty repo with no commits should fail to add note to HEAD"
+        );
+
+        // get_from_head should also fail gracefully
+        let result = manager.get_from_head();
+        assert!(
+            result.is_err(),
+            "Empty repo with no commits should fail to get note from HEAD"
+        );
+
+        // list should return empty, not error
+        let notes = manager.list().unwrap();
+        assert!(notes.is_empty());
+    }
+
+    #[test]
+    fn test_notes_ref_exists_on_empty_repo() {
+        let dir = TempDir::new().unwrap();
+        let _repo = Repository::init(dir.path()).unwrap();
+
+        let manager = NotesManager::new(dir.path());
+
+        // Notes ref should not exist on fresh repo
+        let exists = manager.notes_ref_exists().unwrap();
+        assert!(!exists, "Notes ref should not exist on fresh repo");
+    }
 }
