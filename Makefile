@@ -1,7 +1,7 @@
 # Subcog Makefile
 # Common build, test, and development tasks
 
-.PHONY: all build release test test-verbose test-lib lint lint-strict format format-check deny doc-check check check-strict dev quick install clean doc bench ci help
+.PHONY: all build release test test-verbose test-lib lint lint-strict format format-check deny doc-check check check-strict dev quick install clean doc bench ci msrv help
 
 # Default target
 all: check
@@ -78,8 +78,14 @@ doc:
 bench:
 	cargo bench
 
+# MSRV check - verify builds with minimum supported Rust version
+msrv:
+	@MSRV=$$(grep '^rust-version' Cargo.toml | cut -d'"' -f2); \
+	echo "Checking MSRV: $$MSRV"; \
+	rustup run $$MSRV cargo check --all-features
+
 # CI-style full check (all gates must pass)
-ci: format-check lint-strict test deny
+ci: format-check lint-strict test deny msrv
 
 # Show help
 help:
@@ -104,6 +110,7 @@ help:
 	@echo "    format-check   Check formatting"
 	@echo "    deny           Run supply chain security audit"
 	@echo "    doc-check      Build documentation"
+	@echo "    msrv           Check MSRV (minimum supported Rust version)"
 	@echo "    check          Full check (format + lint + test)"
 	@echo "    check-strict   Strict check (format + lint-strict + test + doc + deny)"
 	@echo "    ci             CI-style full check (all gates must pass)"
@@ -118,3 +125,4 @@ help:
 	@echo "    2. cargo clippy --all-targets --all-features -- -D warnings"
 	@echo "    3. cargo test --all-features"
 	@echo "    4. cargo deny check"
+	@echo "    5. rustup run \$$MSRV cargo check --all-features (MSRV from Cargo.toml)"
