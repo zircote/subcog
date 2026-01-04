@@ -5,7 +5,6 @@
 
 use super::types::{DetectionSource, SearchIntent, SearchIntentType};
 use crate::hooks::search_patterns::{SEARCH_SIGNALS, STOP_WORDS, SearchSignal};
-use std::collections::HashSet;
 
 /// Detects search intent from a user prompt using keyword pattern matching.
 ///
@@ -46,11 +45,11 @@ pub fn detect_search_intent(prompt: &str) -> Option<SearchIntent> {
     // Determine primary intent type by counting matches
     let intent_type = determine_primary_intent(&matched_signals);
 
-    // Extract keywords that triggered detection
-    let keywords: Vec<String> = matched_signals.iter().map(|(_, m)| m.clone()).collect();
-
-    // Calculate confidence
+    // Calculate confidence before consuming matched_signals
     let confidence = calculate_confidence(&matched_signals, prompt);
+
+    // Extract keywords that triggered detection - consume matched_signals to avoid clones
+    let keywords: Vec<String> = matched_signals.into_iter().map(|(_, m)| m).collect();
 
     // Extract topics from the prompt
     let topics = extract_topics(prompt);
@@ -120,17 +119,21 @@ fn calculate_confidence(matched_signals: &[(&SearchSignal, String)], prompt: &st
 /// Extracts topics from a prompt.
 ///
 /// Topics are significant words that might map to memory tags or namespaces.
+///
+/// # Performance
+///
+/// Uses linear deduplication via `Vec::contains()` instead of `HashSet` since
+/// we limit to 5 topics. This avoids allocating a separate `HashSet` and cloning
+/// strings for both collections.
 pub fn extract_topics(prompt: &str) -> Vec<String> {
-    let mut topics = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
+    let mut topics = Vec::with_capacity(5);
 
-    // Simple word tokenization and filtering
-    let words: Vec<&str> = prompt
-        .split(|c: char| c.is_whitespace() || c == ',' || c == ';' || c == ':')
-        .filter(|w| !w.is_empty())
-        .collect();
+    // Simple word tokenization and filtering - iterate directly without collecting
+    for word in prompt.split(|c: char| c.is_whitespace() || c == ',' || c == ';' || c == ':') {
+        if word.is_empty() {
+            continue;
+        }
 
-    for word in words {
         // Clean up the word
         let cleaned = word
             .trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
@@ -143,20 +146,23 @@ pub fn extract_topics(prompt: &str) -> Vec<String> {
         if STOP_WORDS.contains(cleaned.as_str()) {
             continue;
         }
-        if seen.contains(&cleaned) {
-            continue;
-        }
         // Skip pure numbers
         if cleaned.chars().all(char::is_numeric) {
             continue;
         }
+        // Deduplicate using linear search (O(n) but n <= 5)
+        if topics.contains(&cleaned) {
+            continue;
+        }
 
-        seen.insert(cleaned.clone());
         topics.push(cleaned);
+
+        // Early exit once we have 5 topics
+        if topics.len() >= 5 {
+            break;
+        }
     }
 
-    // Limit to 5 topics
-    topics.truncate(5);
     topics
 }
 

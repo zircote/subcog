@@ -14,10 +14,40 @@ use serde_json::Value;
 
 use super::super::{ToolContent, ToolResult};
 
+/// Maximum allowed input length for content fields (SEC-M5).
+///
+/// Prevents `DoS` attacks via extremely large inputs that could exhaust memory
+/// or cause excessive processing time. Set to 1MB which is generous for
+/// any reasonable memory content while preventing abuse.
+const MAX_CONTENT_LENGTH: usize = 1_048_576; // 1 MB
+
+/// Maximum allowed input length for query fields (SEC-M5).
+///
+/// Queries should be concise - 10KB is more than enough for any search query.
+const MAX_QUERY_LENGTH: usize = 10_240; // 10 KB
+
+/// Validates that a string input does not exceed the maximum allowed length.
+///
+/// # Errors
+///
+/// Returns `Error::InvalidInput` if the input exceeds `max_length`.
+fn validate_input_length(input: &str, field_name: &str, max_length: usize) -> Result<()> {
+    if input.len() > max_length {
+        return Err(Error::InvalidInput(format!(
+            "{field_name} exceeds maximum length ({} > {max_length} bytes)",
+            input.len()
+        )));
+    }
+    Ok(())
+}
+
 /// Executes the capture tool.
 pub fn execute_capture(arguments: Value) -> Result<ToolResult> {
     let args: CaptureArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+    // SEC-M5: Validate input length before processing
+    validate_input_length(&args.content, "content", MAX_CONTENT_LENGTH)?;
 
     let namespace = parse_namespace(&args.namespace);
 
@@ -49,6 +79,9 @@ pub fn execute_capture(arguments: Value) -> Result<ToolResult> {
 pub fn execute_recall(arguments: Value) -> Result<ToolResult> {
     let args: RecallArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+    // SEC-M5: Validate query length before processing
+    validate_input_length(&args.query, "query", MAX_QUERY_LENGTH)?;
 
     let mode = args
         .mode
@@ -198,6 +231,11 @@ pub fn execute_namespaces(_arguments: Value) -> Result<ToolResult> {
 pub fn execute_consolidate(arguments: Value) -> Result<ToolResult> {
     let args: ConsolidateArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+    // SEC-M5: Validate query length if provided
+    if let Some(ref query) = args.query {
+        validate_input_length(query, "query", MAX_QUERY_LENGTH)?;
+    }
 
     let namespace = parse_namespace(&args.namespace);
     let strategy = args.strategy.as_deref().unwrap_or("merge");
@@ -398,5 +436,79 @@ pub fn execute_reindex(arguments: Value) -> Result<ToolResult> {
             }],
             is_error: true,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_input_length_within_limit() {
+        let input = "a".repeat(100);
+        assert!(validate_input_length(&input, "test", 1000).is_ok());
+    }
+
+    #[test]
+    fn test_validate_input_length_at_limit() {
+        let input = "a".repeat(1000);
+        assert!(validate_input_length(&input, "test", 1000).is_ok());
+    }
+
+    #[test]
+    fn test_validate_input_length_exceeds_limit() {
+        let input = "a".repeat(1001);
+        let result = validate_input_length(&input, "test", 1000);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, Error::InvalidInput(_)));
+        assert!(err.to_string().contains("exceeds maximum length"));
+        assert!(err.to_string().contains("1001 > 1000"));
+    }
+
+    #[test]
+    fn test_validate_input_length_empty() {
+        assert!(validate_input_length("", "test", 1000).is_ok());
+    }
+
+    #[test]
+    fn test_max_content_length_constant() {
+        // Verify constant is 1 MB
+        assert_eq!(MAX_CONTENT_LENGTH, 1_048_576);
+    }
+
+    #[test]
+    fn test_max_query_length_constant() {
+        // Verify constant is 10 KB
+        assert_eq!(MAX_QUERY_LENGTH, 10_240);
+    }
+
+    #[test]
+    fn test_capture_rejects_oversized_content() {
+        let oversized_content = "x".repeat(MAX_CONTENT_LENGTH + 1);
+        let args = serde_json::json!({
+            "content": oversized_content,
+            "namespace": "decisions"
+        });
+
+        let result = execute_capture(args);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, Error::InvalidInput(_)));
+        assert!(err.to_string().contains("content"));
+    }
+
+    #[test]
+    fn test_recall_rejects_oversized_query() {
+        let oversized_query = "x".repeat(MAX_QUERY_LENGTH + 1);
+        let args = serde_json::json!({
+            "query": oversized_query
+        });
+
+        let result = execute_recall(args);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, Error::InvalidInput(_)));
+        assert!(err.to_string().contains("query"));
     }
 }

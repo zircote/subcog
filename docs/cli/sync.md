@@ -10,7 +10,7 @@ subcog sync [OPTIONS] [DIRECTION]
 
 ## Description
 
-The `sync` command synchronizes memories stored in Git Notes with a remote repository. This enables team collaboration and backup of memories across machines.
+The `sync` command synchronizes memories with a remote repository. Since memories are stored in SQLite with project/branch facets, sync exports memories to git and pushes/fetches from the remote.
 
 ## Arguments
 
@@ -25,13 +25,14 @@ The `sync` command synchronizes memories stored in Git Notes with a remote repos
 | `--remote` | `-r` | Remote name | `origin` |
 | `--force` | `-f` | Force push/fetch | `false` |
 | `--dry-run` | | Show what would be synced | `false` |
+| `--project` | `-p` | Project ID to sync | current project |
 
 ## Sync Directions
 
 | Direction | Description |
 |-----------|-------------|
-| `push` | Push local notes to remote |
-| `fetch` | Fetch remote notes to local |
+| `push` | Export local memories and push to remote |
+| `fetch` | Fetch remote and import memories |
 | `full` | Fetch then push (default) |
 
 ## Examples
@@ -45,10 +46,10 @@ subcog sync
 Output:
 ```
 Syncing with origin...
-  Fetching refs/notes/subcog...
-  ← 3 new memories fetched
-  Pushing refs/notes/subcog...
-  → 5 memories pushed
+  Fetching from remote...
+  ← 3 new memories imported
+  Exporting to remote...
+  → 5 memories exported
 Sync complete: 3 fetched, 5 pushed
 ```
 
@@ -85,30 +86,22 @@ subcog sync --dry-run
 Output:
 ```
 Would sync with origin:
-  Fetch: 3 memories would be fetched
-  Push: 5 memories would be pushed
+  Fetch: 3 memories would be imported
+  Push: 5 memories would be exported
 ```
 
-## Git Notes Reference
+## How Sync Works
 
-Subcog stores memories in Git Notes under:
-- `refs/notes/subcog` - Main memory storage
-- `refs/notes/_prompts` - Prompt templates
+1. **Export**: Memories are exported from SQLite to a portable format
+2. **Git operations**: Standard git push/fetch to remote
+3. **Import**: Fetched memories are imported into SQLite with facets preserved
 
-The sync command handles both references automatically.
+### Facet Preservation
 
-## Conflict Resolution
-
-When the same memory is modified locally and remotely:
-
-1. **Fetch-only**: Remote version overwrites local
-2. **Push-only**: Local version overwrites remote
-3. **Full sync**: Remote is fetched first, then local is pushed
-
-For true conflict resolution, use:
-```bash
-git notes --ref=subcog merge origin/refs/notes/subcog
-```
+During sync, memory facets are preserved:
+- `project_id`: Project identifier (git remote URL)
+- `branch`: Git branch name
+- `file_path`: Source file path (if captured)
 
 ## Authentication
 
@@ -141,32 +134,29 @@ git remote -v
 
 ## Troubleshooting
 
-### Notes Not Syncing
+### Memories Not Syncing
 
-Ensure the notes ref exists:
+Check local memory count:
 ```bash
-git notes --ref=subcog list
+subcog status
 ```
 
 ### Permission Denied
 
 Check remote access:
 ```bash
-git ls-remote origin refs/notes/subcog
+git ls-remote origin
 ```
 
-### Merge Conflicts
+### Conflict Resolution
 
-If conflicts occur during fetch:
-```bash
-# View conflicting notes
-git notes --ref=subcog merge --abort
-
-# Manual merge
-git notes --ref=subcog merge origin/refs/notes/subcog
-```
+If conflicts occur during sync:
+1. Fetch first to get remote changes
+2. Review imported memories with `subcog recall`
+3. Push your local changes
 
 ## See Also
 
 - [status](./status.md) - Check sync status
+- [gc](./gc.md) - Clean up stale branch memories
 - [MCP subcog_sync](../mcp/tools.md#subcog_sync) - MCP equivalent

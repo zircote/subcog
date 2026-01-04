@@ -39,6 +39,15 @@ struct CacheEntry {
 /// Uses `RwLock` for interior mutability, allowing concurrent reads
 /// and exclusive writes. Safe for use across async tasks.
 ///
+/// # Lock Poisoning
+///
+/// Lock poisoning is handled with fail-open semantics: if the lock is
+/// poisoned (due to a panic in another thread), operations return `None`
+/// (for checks) or silently skip (for records). This is intentional:
+/// - Deduplication is a performance optimization, not a correctness requirement
+/// - Failing to detect a duplicate just means we capture twice (safe)
+/// - Blocking all captures due to a transient panic would be worse
+///
 /// # Example
 ///
 /// ```rust,ignore

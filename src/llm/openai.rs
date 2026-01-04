@@ -2,6 +2,7 @@
 
 use super::{CaptureAnalysis, LlmHttpConfig, LlmProvider, build_http_client};
 use crate::{Error, Result};
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
 /// Escapes XML special characters to prevent prompt injection (SEC-M3).
@@ -24,9 +25,12 @@ fn escape_xml(s: &str) -> String {
 }
 
 /// `OpenAI` LLM client.
+///
+/// API keys are stored using `SecretString` which zeroizes memory on drop,
+/// preventing sensitive credentials from lingering in memory after use.
 pub struct OpenAiClient {
-    /// API key.
-    api_key: Option<String>,
+    /// API key (zeroized on drop for security).
+    api_key: Option<SecretString>,
     /// API endpoint.
     endpoint: String,
     /// Model to use.
@@ -45,7 +49,7 @@ impl OpenAiClient {
     /// Creates a new `OpenAI` client.
     #[must_use]
     pub fn new() -> Self {
-        let api_key = std::env::var("OPENAI_API_KEY").ok();
+        let api_key = std::env::var("OPENAI_API_KEY").ok().map(SecretString::from);
         Self {
             api_key,
             endpoint: Self::DEFAULT_ENDPOINT.to_string(),
@@ -57,7 +61,7 @@ impl OpenAiClient {
     /// Sets the API key.
     #[must_use]
     pub fn with_api_key(mut self, key: impl Into<String>) -> Self {
-        self.api_key = Some(key.into());
+        self.api_key = Some(SecretString::from(key.into()));
         self
     }
 
@@ -93,7 +97,7 @@ impl OpenAiClient {
                     cause: "OPENAI_API_KEY not set".to_string(),
                 });
             },
-            Some(key) if !Self::is_valid_api_key_format(key) => {
+            Some(key) if !Self::is_valid_api_key_format(key.expose_secret()) => {
                 tracing::warn!(
                     provider = "openai",
                     "Invalid API key format detected - possible injection attempt"
@@ -171,7 +175,10 @@ impl OpenAiClient {
         let response = self
             .client
             .post(format!("{}/chat/completions", self.endpoint))
-            .header("Authorization", format!("Bearer {api_key}"))
+            .header(
+                "Authorization",
+                format!("Bearer {}", api_key.expose_secret()),
+            )
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
@@ -376,7 +383,12 @@ mod tests {
             .with_endpoint("https://custom.endpoint")
             .with_model("gpt-4");
 
-        assert_eq!(client.api_key, Some("test-key".to_string()));
+        // SecretString doesn't implement PartialEq for security - use expose_secret()
+        assert!(client.api_key.is_some());
+        assert_eq!(
+            client.api_key.as_ref().map(ExposeSecret::expose_secret),
+            Some("test-key")
+        );
         assert_eq!(client.endpoint, "https://custom.endpoint");
         assert_eq!(client.model, "gpt-4");
     }

@@ -5,6 +5,7 @@
 use crate::Result;
 use crate::models::{Memory, Namespace, SearchFilter, SearchMode};
 use crate::services::RecallService;
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 // Context building limits - tunable parameters for memory selection
@@ -277,11 +278,16 @@ fn format_section(title: &str, memories: &[Memory]) -> String {
 }
 
 /// Truncates content to a maximum length.
-fn truncate_content(content: &str, max_len: usize) -> String {
+///
+/// # Performance
+///
+/// Returns `Cow::Borrowed` when no truncation is needed (zero allocation).
+/// Only allocates when truncation is required.
+fn truncate_content(content: &str, max_len: usize) -> Cow<'_, str> {
     if content.len() <= max_len {
-        content.to_string()
+        Cow::Borrowed(content)
     } else {
-        format!("{}...", &content[..max_len - 3])
+        Cow::Owned(format!("{}...", &content[..max_len - 3]))
     }
 }
 

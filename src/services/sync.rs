@@ -1,17 +1,21 @@
 //! Memory synchronization service.
 //!
-//! Handles syncing memories with git remotes.
+//! **Note**: With the migration to `SQLite` as authoritative storage, remote sync
+//! is no longer supported. This service now returns no-op results for all
+//! operations. Git context detection (branch, remote info) remains available
+//! via `RemoteManager` for faceting purposes.
 
 use crate::Result;
 use crate::config::Config;
-use crate::current_timestamp;
 use crate::git::RemoteManager;
-use crate::models::MemoryEvent;
-use crate::security::record_event;
 use std::time::Instant;
 use tracing::instrument;
 
 /// Service for synchronizing memories with remote storage.
+///
+/// **Deprecated**: With `SQLite` as authoritative storage, remote sync is no longer
+/// supported. All sync operations return empty stats. Use this service only for
+/// remote context detection.
 pub struct SyncService {
     /// Configuration.
     config: Config,
@@ -27,8 +31,7 @@ impl SyncService {
     /// Creates a no-op sync service for user-scoped storage.
     ///
     /// This service does nothing when sync operations are called,
-    /// returning empty stats. Used for user-scope where there's no
-    /// git remote to sync with.
+    /// returning empty stats.
     #[must_use]
     pub fn no_op() -> Self {
         Self {
@@ -38,182 +41,108 @@ impl SyncService {
 
     /// Returns whether this service can perform sync operations.
     ///
-    /// Returns `false` if no repository path is configured (user-scope).
+    /// **Note**: Always returns `false` since remote sync is no longer supported.
     #[must_use]
     pub const fn is_enabled(&self) -> bool {
-        self.config.repo_path.is_some()
+        false // Remote sync no longer supported
     }
 
     /// Fetches memories from remote.
     ///
+    /// **Note**: Returns empty stats since remote sync is no longer supported.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the fetch fails.
+    /// This function does not return errors (always succeeds with empty stats).
     #[instrument(skip(self), fields(operation = "sync.fetch"))]
     pub fn fetch(&self) -> Result<SyncStats> {
         let start = Instant::now();
-        let result =
-            (|| {
-                let repo_path = self.config.repo_path.as_ref().ok_or_else(|| {
-                    crate::Error::OperationFailed {
-                        operation: "fetch".to_string(),
-                        cause: "No repository path configured".to_string(),
-                    }
-                })?;
 
-                let remote = RemoteManager::new(repo_path);
+        // Remote sync no longer supported - return empty stats
+        let stats = SyncStats::default();
 
-                // Get default remote
-                let remote_name =
-                    remote
-                        .default_remote()?
-                        .ok_or_else(|| crate::Error::OperationFailed {
-                            operation: "fetch".to_string(),
-                            cause: "No remote configured".to_string(),
-                        })?;
-
-                // Fetch from remote
-                let pulled = remote.fetch(&remote_name)?;
-
-                let stats = SyncStats {
-                    pushed: 0,
-                    pulled,
-                    conflicts: 0,
-                };
-                record_event(MemoryEvent::Synced {
-                    pushed: stats.pushed,
-                    pulled: stats.pulled,
-                    conflicts: stats.conflicts,
-                    timestamp: current_timestamp(),
-                });
-                Ok(stats)
-            })();
-
-        let status = if result.is_ok() { "success" } else { "error" };
         metrics::counter!(
             "memory_sync_total",
             "direction" => "fetch",
             "domain" => "project",
-            "status" => status
+            "status" => "noop"
         )
         .increment(1);
         metrics::histogram!("memory_sync_duration_ms", "direction" => "fetch")
             .record(start.elapsed().as_secs_f64() * 1000.0);
 
-        result
+        Ok(stats)
     }
 
     /// Pushes memories to remote.
     ///
+    /// **Note**: Returns empty stats since remote sync is no longer supported.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the push fails.
+    /// This function does not return errors (always succeeds with empty stats).
     #[instrument(skip(self), fields(operation = "sync.push"))]
     pub fn push(&self) -> Result<SyncStats> {
         let start = Instant::now();
-        let result =
-            (|| {
-                let repo_path = self.config.repo_path.as_ref().ok_or_else(|| {
-                    crate::Error::OperationFailed {
-                        operation: "push".to_string(),
-                        cause: "No repository path configured".to_string(),
-                    }
-                })?;
 
-                let remote = RemoteManager::new(repo_path);
+        // Remote sync no longer supported - return empty stats
+        let stats = SyncStats::default();
 
-                // Get default remote
-                let remote_name =
-                    remote
-                        .default_remote()?
-                        .ok_or_else(|| crate::Error::OperationFailed {
-                            operation: "push".to_string(),
-                            cause: "No remote configured".to_string(),
-                        })?;
-
-                // Push to remote
-                let pushed = remote.push(&remote_name)?;
-
-                let stats = SyncStats {
-                    pushed,
-                    pulled: 0,
-                    conflicts: 0,
-                };
-                record_event(MemoryEvent::Synced {
-                    pushed: stats.pushed,
-                    pulled: stats.pulled,
-                    conflicts: stats.conflicts,
-                    timestamp: current_timestamp(),
-                });
-                Ok(stats)
-            })();
-
-        let status = if result.is_ok() { "success" } else { "error" };
         metrics::counter!(
             "memory_sync_total",
             "direction" => "push",
             "domain" => "project",
-            "status" => status
+            "status" => "noop"
         )
         .increment(1);
         metrics::histogram!("memory_sync_duration_ms", "direction" => "push")
             .record(start.elapsed().as_secs_f64() * 1000.0);
 
-        result
+        Ok(stats)
     }
 
     /// Performs a full sync (fetch + push).
     ///
+    /// **Note**: Returns empty stats since remote sync is no longer supported.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the sync fails.
+    /// This function does not return errors (always succeeds with empty stats).
     #[instrument(skip(self), fields(operation = "sync.full"))]
     pub fn sync(&self) -> Result<SyncStats> {
         let start = Instant::now();
-        let result = (|| {
-            // Fetch first
-            let fetch_stats = self.fetch()?;
 
-            // Then push
-            let push_stats = self.push()?;
+        // Remote sync no longer supported - return empty stats
+        let stats = SyncStats::default();
 
-            Ok(SyncStats {
-                pushed: push_stats.pushed,
-                pulled: fetch_stats.pulled,
-                conflicts: 0, // TODO: Implement conflict detection
-            })
-        })();
-
-        let status = if result.is_ok() { "success" } else { "error" };
         metrics::counter!(
             "memory_sync_total",
             "direction" => "full",
             "domain" => "project",
-            "status" => status
+            "status" => "noop"
         )
         .increment(1);
         metrics::histogram!("memory_sync_duration_ms", "direction" => "full")
             .record(start.elapsed().as_secs_f64() * 1000.0);
 
-        result
+        Ok(stats)
     }
 
     /// Checks if sync is available (remote exists and is reachable).
     ///
+    /// **Note**: Always returns `false` since remote sync is no longer supported.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the check fails.
-    pub fn is_available(&self) -> Result<bool> {
-        let repo_path = match &self.config.repo_path {
-            Some(p) => p,
-            None => return Ok(false),
-        };
-
-        let remote = RemoteManager::new(repo_path);
-        Ok(remote.default_remote()?.is_some())
+    /// This function does not return errors (always succeeds with `false`).
+    #[allow(clippy::unused_self)]
+    pub const fn is_available(&self) -> Result<bool> {
+        Ok(false) // Remote sync no longer supported
     }
 
     /// Returns the configured remote name.
+    ///
+    /// Can still be used for git context detection.
     ///
     /// # Errors
     ///
@@ -229,6 +158,8 @@ impl SyncService {
     }
 
     /// Returns the remote URL.
+    ///
+    /// Can still be used for git context detection.
     ///
     /// # Errors
     ///
@@ -315,14 +246,18 @@ mod tests {
     fn test_sync_service_no_repo() {
         let service = SyncService::default();
 
+        // All sync operations return Ok with empty stats (no-op)
         let result = service.fetch();
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
 
         let result = service.push();
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
 
         let result = service.sync();
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
     }
 
     #[test]

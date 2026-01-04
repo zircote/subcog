@@ -1,53 +1,24 @@
 //! Git remote operations.
 //!
-//! Handles fetching and pushing notes to/from remote repositories.
+//! Provides git context detection for repository, branch, and remote information.
 
 use crate::{Error, Result};
-use git2::{FetchOptions, PushOptions, RemoteCallbacks, Repository};
+use git2::Repository;
 use std::path::Path;
-use std::sync::mpsc;
-use std::thread;
-use std::time::Duration;
 
-/// Default timeout for git remote operations (30 seconds).
-const DEFAULT_REMOTE_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Manages git remote operations for notes.
+/// Manages git remote operations for context detection.
 pub struct RemoteManager {
     /// Path to the repository.
     repo_path: std::path::PathBuf,
-    /// The notes ref to sync.
-    notes_ref: String,
-    /// Timeout for remote operations.
-    timeout: Duration,
 }
 
 impl RemoteManager {
-    /// Default notes ref for subcog.
-    pub const DEFAULT_NOTES_REF: &'static str = "refs/notes/subcog";
-
     /// Creates a new remote manager.
     #[must_use]
     pub fn new(repo_path: impl AsRef<Path>) -> Self {
         Self {
             repo_path: repo_path.as_ref().to_path_buf(),
-            notes_ref: Self::DEFAULT_NOTES_REF.to_string(),
-            timeout: DEFAULT_REMOTE_TIMEOUT,
         }
-    }
-
-    /// Sets a custom notes ref.
-    #[must_use]
-    pub fn with_notes_ref(mut self, notes_ref: impl Into<String>) -> Self {
-        self.notes_ref = notes_ref.into();
-        self
-    }
-
-    /// Sets a custom timeout for remote operations.
-    #[must_use]
-    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
-        self
     }
 
     /// Opens the git repository.
@@ -56,194 +27,6 @@ impl RemoteManager {
             operation: "open_repository".to_string(),
             cause: e.to_string(),
         })
-    }
-
-    /// Creates default remote callbacks for credential handling.
-    fn create_callbacks<'a>() -> RemoteCallbacks<'a> {
-        let mut callbacks = RemoteCallbacks::new();
-
-        // Try to use SSH agent for authentication
-        callbacks.credentials(Self::handle_credentials);
-
-        callbacks
-    }
-
-    /// Handles credential requests for git operations.
-    fn handle_credentials(
-        _url: &str,
-        username_from_url: Option<&str>,
-        allowed_types: git2::CredentialType,
-    ) -> std::result::Result<git2::Cred, git2::Error> {
-        // Try SSH agent with username if available
-        if allowed_types.contains(git2::CredentialType::SSH_KEY) {
-            if let Some(username) = username_from_url {
-                return git2::Cred::ssh_key_from_agent(username);
-            }
-        }
-
-        if allowed_types.contains(git2::CredentialType::DEFAULT) {
-            return git2::Cred::default();
-        }
-
-        Err(git2::Error::from_str("No suitable credentials found"))
-    }
-
-    /// Fetches notes from a remote with timeout protection.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the fetch fails or times out.
-    pub fn fetch(&self, remote_name: &str) -> Result<usize> {
-        let repo_path = self.repo_path.clone();
-        let notes_ref = self.notes_ref.clone();
-        let remote_name = remote_name.to_string();
-        let timeout = self.timeout;
-
-        // Run fetch in a separate thread with timeout
-        let (tx, rx) = mpsc::channel();
-
-        let handle = thread::spawn(move || {
-            let result = Self::fetch_inner(&repo_path, &remote_name, &notes_ref);
-            let _ = tx.send(result);
-        });
-
-        match rx.recv_timeout(timeout) {
-            Ok(result) => {
-                // Wait for thread to finish (should be immediate)
-                let _ = handle.join();
-                result
-            },
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                // Thread is still running but we timed out
-                // Note: We can't forcibly kill the thread, but we return an error
-                tracing::warn!(
-                    "Git fetch timed out after {:?}, operation may still be running",
-                    timeout
-                );
-                Err(Error::OperationFailed {
-                    operation: "fetch_notes".to_string(),
-                    cause: format!("Operation timed out after {timeout:?}"),
-                })
-            },
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(Error::OperationFailed {
-                operation: "fetch_notes".to_string(),
-                cause: "Fetch thread panicked".to_string(),
-            }),
-        }
-    }
-
-    /// Inner fetch implementation (runs in separate thread).
-    fn fetch_inner(
-        repo_path: &std::path::Path,
-        remote_name: &str,
-        notes_ref: &str,
-    ) -> Result<usize> {
-        let repo = Repository::open(repo_path).map_err(|e| Error::OperationFailed {
-            operation: "open_repository".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        let mut remote = repo
-            .find_remote(remote_name)
-            .map_err(|e| Error::OperationFailed {
-                operation: "find_remote".to_string(),
-                cause: e.to_string(),
-            })?;
-
-        let callbacks = Self::create_callbacks();
-        let mut fetch_options = FetchOptions::new();
-        fetch_options.remote_callbacks(callbacks);
-
-        // Fetch the notes ref
-        let refspec = format!("+{notes_ref}:{notes_ref}");
-        remote
-            .fetch(&[&refspec], Some(&mut fetch_options), None)
-            .map_err(|e| Error::OperationFailed {
-                operation: "fetch_notes".to_string(),
-                cause: e.to_string(),
-            })?;
-
-        // Get fetch stats
-        let stats = remote.stats();
-        Ok(stats.received_objects())
-    }
-
-    /// Pushes notes to a remote with timeout protection.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the push fails or times out.
-    pub fn push(&self, remote_name: &str) -> Result<usize> {
-        let repo_path = self.repo_path.clone();
-        let notes_ref = self.notes_ref.clone();
-        let remote_name = remote_name.to_string();
-        let timeout = self.timeout;
-
-        // Run push in a separate thread with timeout
-        let (tx, rx) = mpsc::channel();
-
-        let handle = thread::spawn(move || {
-            let result = Self::push_inner(&repo_path, &remote_name, &notes_ref);
-            let _ = tx.send(result);
-        });
-
-        match rx.recv_timeout(timeout) {
-            Ok(result) => {
-                // Wait for thread to finish (should be immediate)
-                let _ = handle.join();
-                result
-            },
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                // Thread is still running but we timed out
-                tracing::warn!(
-                    "Git push timed out after {:?}, operation may still be running",
-                    timeout
-                );
-                Err(Error::OperationFailed {
-                    operation: "push_notes".to_string(),
-                    cause: format!("Operation timed out after {timeout:?}"),
-                })
-            },
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(Error::OperationFailed {
-                operation: "push_notes".to_string(),
-                cause: "Push thread panicked".to_string(),
-            }),
-        }
-    }
-
-    /// Inner push implementation (runs in separate thread).
-    fn push_inner(
-        repo_path: &std::path::Path,
-        remote_name: &str,
-        notes_ref: &str,
-    ) -> Result<usize> {
-        let repo = Repository::open(repo_path).map_err(|e| Error::OperationFailed {
-            operation: "open_repository".to_string(),
-            cause: e.to_string(),
-        })?;
-
-        let mut remote = repo
-            .find_remote(remote_name)
-            .map_err(|e| Error::OperationFailed {
-                operation: "find_remote".to_string(),
-                cause: e.to_string(),
-            })?;
-
-        let callbacks = Self::create_callbacks();
-        let mut push_options = PushOptions::new();
-        push_options.remote_callbacks(callbacks);
-
-        // Push the notes ref
-        let refspec = format!("{notes_ref}:{notes_ref}");
-        remote
-            .push(&[&refspec], Some(&mut push_options))
-            .map_err(|e| Error::OperationFailed {
-                operation: "push_notes".to_string(),
-                cause: e.to_string(),
-            })?;
-
-        // Return approximate count (we can't easily get exact push stats)
-        Ok(1)
     }
 
     /// Lists available remotes.
@@ -305,6 +88,47 @@ impl RemoteManager {
         // Otherwise return the first remote
         Ok(remotes.into_iter().next())
     }
+
+    /// Gets the current branch name.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the branch cannot be determined.
+    pub fn current_branch(&self) -> Result<Option<String>> {
+        let repo = self.open_repo()?;
+
+        let head = match repo.head() {
+            Ok(h) => h,
+            Err(e) if e.code() == git2::ErrorCode::UnbornBranch => return Ok(None),
+            Err(e) => {
+                return Err(Error::OperationFailed {
+                    operation: "get_head".to_string(),
+                    cause: e.to_string(),
+                });
+            },
+        };
+
+        if head.is_branch() {
+            Ok(head.shorthand().map(String::from))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Gets the repository root path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repository cannot be opened.
+    pub fn repo_root(&self) -> Result<std::path::PathBuf> {
+        let repo = self.open_repo()?;
+        repo.workdir()
+            .map(std::path::Path::to_path_buf)
+            .ok_or_else(|| Error::OperationFailed {
+                operation: "get_workdir".to_string(),
+                cause: "Repository has no working directory (bare repo)".to_string(),
+            })
+    }
 }
 
 #[cfg(test)]
@@ -331,11 +155,8 @@ mod tests {
 
     #[test]
     fn test_remote_manager_creation() {
-        let manager = RemoteManager::new("/tmp/test");
-        assert_eq!(manager.notes_ref, RemoteManager::DEFAULT_NOTES_REF);
-
-        let custom = RemoteManager::new("/tmp/test").with_notes_ref("refs/notes/custom");
-        assert_eq!(custom.notes_ref, "refs/notes/custom");
+        let _manager = RemoteManager::new("/tmp/test");
+        // Just verifies creation works
     }
 
     #[test]
@@ -432,5 +253,27 @@ mod tests {
             manager.default_remote().unwrap(),
             Some("origin".to_string())
         );
+    }
+
+    #[test]
+    fn test_current_branch() {
+        let (dir, _repo) = create_test_repo();
+        let manager = RemoteManager::new(dir.path());
+
+        // Default branch after init is usually "master" or "main"
+        let branch = manager.current_branch().unwrap();
+        assert!(branch.is_some());
+    }
+
+    #[test]
+    fn test_repo_root() {
+        let (dir, _repo) = create_test_repo();
+        let manager = RemoteManager::new(dir.path());
+
+        let root = manager.repo_root().unwrap();
+        // Canonicalize both paths to handle symlinks (e.g., /var -> /private/var on macOS)
+        let expected = dir.path().canonicalize().unwrap();
+        let actual = root.canonicalize().unwrap();
+        assert_eq!(actual, expected);
     }
 }

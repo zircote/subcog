@@ -75,10 +75,11 @@ Output:
 Subcog Memory System
 ────────────────────
 Repository: /path/to/project
-Domain: project (zircote/subcog)
+Project: github.com/zircote/subcog
+Branch: main
 
 Storage:
-  Persistence: Git Notes (refs/notes/subcog)
+  Persistence: SQLite (~/.local/share/subcog/subcog.db)
   Index: SQLite + FTS5
   Vector: usearch (HNSW)
 
@@ -210,6 +211,21 @@ subcog sync fetch
 subcog sync
 ```
 
+## Branch Garbage Collection
+
+Clean up memories from deleted branches:
+
+```bash
+# Preview what would be cleaned
+subcog gc --dry-run
+
+# Run garbage collection
+subcog gc
+
+# Purge old tombstoned memories
+subcog gc --purge --older-than 30d
+```
+
 ## Filter Syntax
 
 | Filter | Description | Example |
@@ -234,7 +250,7 @@ subcog recall --filter "ns:learnings tag:rust since:7d -tag:test" "error"
 | `SUBCOG_LOG_LEVEL` | Log level (trace, debug, info, warn, error) | `info` |
 | `SUBCOG_CONFIG_PATH` | Custom config file path | Auto-detected |
 | `SUBCOG_DOMAIN` | Override domain scope | Auto-detected |
-| `SUBCOG_GIT_DIR` | Git directory path | `.git` |
+| `SUBCOG_DATA_DIR` | Data directory path | `~/.local/share/subcog` |
 
 ## Next Steps
 

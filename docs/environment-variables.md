@@ -17,7 +17,7 @@ These variables can also be set in the `[subcog]` section of `config.toml`.
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `SUBCOG_REPO_PATH` | path | `.` | Path to the git repository |
-| `SUBCOG_DATA_DIR` | path | `.subcog` | Path to the data directory |
+| `SUBCOG_DATA_DIR` | path | `~/.local/share/subcog` | Path to the data directory |
 | `SUBCOG_MAX_RESULTS` | integer | `10` | Maximum number of search results |
 | `SUBCOG_DEFAULT_SEARCH_MODE` | string | `hybrid` | Default search mode: `hybrid`, `text`, or `vector` |
 
@@ -160,19 +160,41 @@ consolidation = false    # Memory consolidation
 
 ## Storage Backend Configuration
 
-Configure storage backends per domain scope (project, user, org) via config file.
+Configure storage backends via config file. SQLite is the default and recommended backend.
 
 ```toml
-[storage.project]
-backend = "git_notes"    # git_notes, sqlite, filesystem, postgresql, redis
+[storage]
+# Persistence layer (SQLite is default)
+persistence = "sqlite"  # sqlite, postgresql, filesystem
 
-[storage.user]
-backend = "sqlite"
-path = "~/.config/subcog/user.db"
+# Index layer
+index = "sqlite"  # sqlite, postgresql, redis
 
-[storage.org]
-backend = "postgresql"
-connection_string = "${DATABASE_URL}"
+# Vector layer
+vector = "usearch"  # usearch, pgvector, redis
+
+# Data directory
+data_dir = "~/.local/share/subcog"
+```
+
+### PostgreSQL Configuration
+
+For high-performance deployments:
+
+```toml
+[postgresql]
+host = "localhost"
+port = 5432
+database = "subcog"
+user = "subcog"
+password = "${SUBCOG_PG_PASSWORD}"
+ssl_mode = "prefer"
+```
+
+Or via connection URL:
+
+```bash
+export DATABASE_URL="postgres://subcog:pass@localhost:5432/subcog"
 ```
 
 ## API Key Configuration Examples
@@ -229,9 +251,15 @@ model = "local-model"
 # ~/.config/subcog/config.toml
 
 repo_path = "."
-data_dir = "~/.config/subcog"
+data_dir = "~/.local/share/subcog"
 max_results = 10
 default_search_mode = "hybrid"
+
+[storage]
+persistence = "sqlite"
+index = "sqlite"
+vector = "usearch"
+data_dir = "~/.local/share/subcog"
 
 [features]
 secrets_filter = true
@@ -284,11 +312,4 @@ port = 9090
 [prompt]
 identity_addendum = "You are assisting with the Acme Corp codebase."
 additional_guidance = "Always consider security implications."
-
-[storage.project]
-backend = "git_notes"
-
-[storage.user]
-backend = "sqlite"
-path = "~/.config/subcog/user.db"
 ```

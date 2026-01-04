@@ -214,13 +214,15 @@ impl<P: PersistenceBackend> SyncService<P> {
     }
 
     async fn push(&self) -> Result<PushResult> {
-        self.git.push_notes("refs/notes/subcog").await?;
-        self.git.push_notes("refs/notes/_prompts").await
+        // Export memories from SQLite and push to remote
+        let memories = self.persistence.export_for_sync().await?;
+        self.git.push_export(&memories).await
     }
 
     async fn fetch(&self) -> Result<FetchResult> {
-        self.git.fetch_notes("refs/notes/subcog").await?;
-        self.git.fetch_notes("refs/notes/_prompts").await
+        // Fetch from remote and import into SQLite
+        let remote_data = self.git.fetch_from_remote().await?;
+        self.persistence.import_from_sync(&remote_data).await
     }
 }
 ```

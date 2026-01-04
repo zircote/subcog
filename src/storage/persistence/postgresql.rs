@@ -85,9 +85,28 @@ mod implementation {
         ///
         /// Returns an error if the connection pool fails to initialize.
         pub fn new(connection_url: &str, table_name: impl Into<String>) -> Result<Self> {
+            Self::with_pool_size(connection_url, table_name, None)
+        }
+
+        /// Creates a new PostgreSQL backend with configurable pool size.
+        ///
+        /// # Arguments
+        ///
+        /// * `connection_url` - PostgreSQL connection URL
+        /// * `table_name` - Name of the table for storing memories
+        /// * `pool_max_size` - Maximum connections in pool (defaults to 20)
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the connection pool fails to initialize.
+        pub fn with_pool_size(
+            connection_url: &str,
+            table_name: impl Into<String>,
+            pool_max_size: Option<usize>,
+        ) -> Result<Self> {
             let table_name = table_name.into();
             let config = Self::parse_connection_url(connection_url)?;
-            let cfg = Self::build_pool_config(&config);
+            let cfg = Self::build_pool_config(&config, pool_max_size);
 
             let pool = cfg.create_pool(Some(Runtime::Tokio1), NoTls).map_err(|e| {
                 Error::OperationFailed {
@@ -126,8 +145,22 @@ mod implementation {
             s.clone()
         }
 
+        /// Default maximum connections in pool.
+        const DEFAULT_POOL_MAX_SIZE: usize = 20;
+
         /// Builds a deadpool config from tokio-postgres config.
-        fn build_pool_config(config: &tokio_postgres::Config) -> Config {
+        ///
+        /// # Pool Configuration (HIGH-010, DB-M2)
+        ///
+        /// Configures connection pool with safety limits:
+        /// - Configurable max connections (defaults to 20, prevents pool exhaustion)
+        /// - 5 second acquire timeout (prevents hanging on pool exhaustion)
+        ///
+        /// Pool size can be configured via `StorageBackendConfig.pool_max_size`.
+        fn build_pool_config(
+            config: &tokio_postgres::Config,
+            pool_max_size: Option<usize>,
+        ) -> Config {
             let mut cfg = Config::new();
             cfg.host = config.get_hosts().first().map(Self::host_to_string);
             cfg.port = config.get_ports().first().copied();
@@ -136,6 +169,24 @@ mod implementation {
                 .get_password()
                 .map(|p| String::from_utf8_lossy(p).to_string());
             cfg.dbname = config.get_dbname().map(String::from);
+
+            // Pool configuration with timeout (HIGH-010, DB-M2)
+            let max_size = pool_max_size.unwrap_or(Self::DEFAULT_POOL_MAX_SIZE);
+            cfg.pool = Some(deadpool_postgres::PoolConfig {
+                max_size,
+                timeouts: deadpool_postgres::Timeouts {
+                    wait: Some(std::time::Duration::from_secs(5)),
+                    create: Some(std::time::Duration::from_secs(5)),
+                    recycle: Some(std::time::Duration::from_secs(5)),
+                },
+                ..Default::default()
+            });
+
+            // Configure manager with fast recycling for connection reuse
+            cfg.manager = Some(deadpool_postgres::ManagerConfig {
+                recycling_method: deadpool_postgres::RecyclingMethod::Fast,
+            });
+
             cfg
         }
 
@@ -327,6 +378,40 @@ mod implementation {
                 })
                 .collect())
         }
+
+        /// Async implementation of `get_batch` operation using single IN query.
+        ///
+        /// Avoids N+1 queries by fetching all IDs in a single round-trip.
+        #[allow(clippy::cast_sign_loss)]
+        async fn get_batch_async(&self, ids: &[MemoryId]) -> Result<Vec<Memory>> {
+            if ids.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let client = self.pool.get().await.map_err(pool_error)?;
+
+            // Build parameterized IN clause: $1, $2, $3, ...
+            let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("${i}")).collect();
+            let query = format!(
+                r"SELECT id, content, namespace, domain_org, domain_project, domain_repo,
+                    status, tags, source, embedding, created_at, updated_at
+                FROM {} WHERE id IN ({})",
+                self.table_name,
+                placeholders.join(", ")
+            );
+
+            // Build params array
+            let id_strs: Vec<&str> = ids.iter().map(MemoryId::as_str).collect();
+            let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
+                id_strs.iter().map(|s| s as _).collect();
+
+            let rows = client
+                .query(&query, &params)
+                .await
+                .map_err(|e| query_error("postgres_persistence_get_batch", e))?;
+
+            Ok(rows.iter().map(Self::row_to_memory).collect())
+        }
     }
 
     impl PersistenceBackend for PostgresBackend {
@@ -344,6 +429,11 @@ mod implementation {
 
         fn list_ids(&self) -> Result<Vec<MemoryId>> {
             self.block_on(self.list_ids_async())
+        }
+
+        /// Optimized batch retrieval using a single IN query (HIGH-PERF-002).
+        fn get_batch(&self, ids: &[MemoryId]) -> Result<Vec<Memory>> {
+            self.block_on(self.get_batch_async(ids))
         }
     }
 }
@@ -371,6 +461,18 @@ mod stub {
                 connection_url: connection_url.into(),
                 table_name: table_name.into(),
             }
+        }
+
+        /// Creates a new PostgreSQL backend with configurable pool size (stub).
+        ///
+        /// The pool size is ignored in the stub - requires `postgres` feature.
+        #[must_use]
+        pub fn with_pool_size(
+            connection_url: impl Into<String>,
+            table_name: impl Into<String>,
+            _pool_max_size: Option<usize>,
+        ) -> Self {
+            Self::new(connection_url, table_name)
         }
 
         /// Creates a backend with default settings (stub).

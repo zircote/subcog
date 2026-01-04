@@ -1,11 +1,9 @@
 //! Git operations.
 //!
-//! Low-level git operations for notes management.
+//! Git context detection for repository, branch, and path information.
 
-mod notes;
 mod parser;
 mod remote;
 
-pub use notes::NotesManager;
 pub use parser::YamlFrontMatterParser;
 pub use remote::RemoteManager;

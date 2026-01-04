@@ -1,0 +1,84 @@
+{
+  "resources": [
+    {
+      "uri": "subcog://help/setup",
+      "name": "Getting Started with Subcog",
+      "mime_type": "text/markdown"
+    },
+    {
+      "uri": "subcog://help/concepts",
+      "name": "Core Concepts",
+      "mime_type": "text/markdown"
+    },
+    {
+      "uri": "subcog://help/capture",
+      "name": "Capturing Memories",
+      "mime_type": "text/markdown"
+    },
+    {
+      "uri": "subcog://help/search",
+      "name": "Searching Memories",
+      "mime_type": "text/markdown"
+    },
+    {
+      "uri": "subcog://help/workflows",
+      "name": "Integration Workflows",
+      "mime_type": "text/markdown"
+    },
+    {
+      "uri": "subcog://help/troubleshooting",
+      "name": "Troubleshooting",
+      "mime_type": "text/markdown"
+    },
+    {
+      "uri": "subcog://help/advanced",
+      "name": "Advanced Features",
+      "mime_type": "text/markdown"
+    },
+    {
+      "uri": "subcog://help/prompts",
+      "name": "User-Defined Prompts",
+      "mime_type": "text/markdown"
+    },
+    {
+      "uri": "subcog://_",
+      "name": "All Memories",
+      "mime_type": "application/json"
+    },
+    {
+      "uri": "subcog://search/{query}",
+      "name": "Search Memories",
+      "mime_type": "application/json"
+    },
+    {
+      "uri": "subcog://topics",
+      "name": "All Topics",
+      "mime_type": "application/json"
+    },
+    {
+      "uri": "subcog://topics/{topic}",
+      "name": "Topic Memories",
+      "mime_type": "application/json"
+    },
+    {
+      "uri": "subcog://namespaces",
+      "name": "All Namespaces",
+      "mime_type": "application/json"
+    },
+    {
+      "uri": "subcog://_prompts",
+      "name": "All Prompts",
+      "mime_type": "application/json"
+    },
+    {
+      "uri": "subcog://project/_prompts",
+      "name": "Project Prompts",
+      "mime_type": "application/json"
+    },
+    {
+      "uri": "subcog://user/_prompts",
+      "name": "User Prompts",
+      "mime_type": "application/json"
+    }
+  ]
+}

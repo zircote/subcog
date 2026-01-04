@@ -113,6 +113,41 @@ static ANTHROPIC_API_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"sk-ant-api[A-Za-z0-9_-]{90,}").expect("static regex: Anthropic API key pattern")
 });
 
+// HIGH-SEC-012: GCP/Azure/Twilio credentials
+static GCP_SERVICE_ACCOUNT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)"type"\s*:\s*"service_account""#)
+        .expect("static regex: GCP service account pattern")
+});
+
+static AZURE_STORAGE_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(?:AccountKey|SharedAccessSignature)\s*=\s*[A-Za-z0-9+/=]{44,}")
+        .expect("static regex: Azure storage key pattern")
+});
+
+static AZURE_AD_CLIENT_SECRET_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?i)(?:client_secret|azure_client_secret)\s*[=:]\s*['"]?([A-Za-z0-9~._-]{34,})['"]?"#,
+    )
+    .expect("static regex: Azure AD client secret pattern")
+});
+
+static TWILIO_API_KEY_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"SK[a-f0-9]{32}").expect("static regex: Twilio API key pattern"));
+
+static TWILIO_AUTH_TOKEN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)(?:twilio_auth_token|auth_token)\s*[=:]\s*['"]?([a-f0-9]{32})['"]?"#)
+        .expect("static regex: Twilio auth token pattern")
+});
+
+static SENDGRID_API_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}")
+        .expect("static regex: SendGrid API key pattern")
+});
+
+static MAILGUN_API_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"key-[a-f0-9]{32}").expect("static regex: Mailgun API key pattern")
+});
+
 /// Returns the list of secret patterns to check.
 fn secret_patterns() -> Vec<SecretPattern> {
     vec![
@@ -179,6 +214,35 @@ fn secret_patterns() -> Vec<SecretPattern> {
         SecretPattern {
             name: "Anthropic API Key",
             regex: &ANTHROPIC_API_KEY_REGEX,
+        },
+        // HIGH-SEC-012: Cloud provider credentials
+        SecretPattern {
+            name: "GCP Service Account",
+            regex: &GCP_SERVICE_ACCOUNT_REGEX,
+        },
+        SecretPattern {
+            name: "Azure Storage Key",
+            regex: &AZURE_STORAGE_KEY_REGEX,
+        },
+        SecretPattern {
+            name: "Azure AD Client Secret",
+            regex: &AZURE_AD_CLIENT_SECRET_REGEX,
+        },
+        SecretPattern {
+            name: "Twilio API Key",
+            regex: &TWILIO_API_KEY_REGEX,
+        },
+        SecretPattern {
+            name: "Twilio Auth Token",
+            regex: &TWILIO_AUTH_TOKEN_REGEX,
+        },
+        SecretPattern {
+            name: "SendGrid API Key",
+            regex: &SENDGRID_API_KEY_REGEX,
+        },
+        SecretPattern {
+            name: "Mailgun API Key",
+            regex: &MAILGUN_API_KEY_REGEX,
         },
     ]
 }
@@ -735,6 +799,119 @@ mod tests {
         let content2 = r"-----BEGIN PRIVATE KEY-----
 MIIEvQIBADANBgkqhkiG9w0BAQEFAASC
 -----END PRIVATE KEY-----";
+        assert!(detector.contains_secrets(content2));
+    }
+
+    // ============================================================================
+    // Cloud Provider Credential Tests (HIGH-SEC-012)
+    // ============================================================================
+
+    #[test]
+    fn test_detect_gcp_service_account() {
+        let detector = SecretDetector::new();
+        let content = r#"{"type": "service_account", "project_id": "my-project"}"#;
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(
+            matches
+                .iter()
+                .any(|m| m.secret_type == "GCP Service Account")
+        );
+    }
+
+    #[test]
+    fn test_detect_azure_storage_key() {
+        let detector = SecretDetector::new();
+        // Azure storage key format: AccountKey=base64string (44+ chars)
+        let content = "AccountKey=dGhpc2lzYXRlc3RrZXl0aGF0aXNsb25nZW5vdWdodG9tYXRjaA==";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|m| m.secret_type == "Azure Storage Key"));
+    }
+
+    #[test]
+    fn test_detect_azure_sas_token() {
+        let detector = SecretDetector::new();
+        // SAS signature is base64-encoded, 44+ chars
+        let content = "SharedAccessSignature=dGhpc2lzYXRlc3RzaWduYXR1cmV0aGF0aXNsb25nZW5vdWdo";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|m| m.secret_type == "Azure Storage Key"));
+    }
+
+    #[test]
+    fn test_detect_azure_ad_client_secret() {
+        let detector = SecretDetector::new();
+        // Azure AD client secrets are typically 34+ character strings
+        let content = "client_secret = 'abcdefghijklmnopqrstuvwxyz12345678'";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(
+            matches
+                .iter()
+                .any(|m| m.secret_type == "Azure AD Client Secret")
+        );
+    }
+
+    #[test]
+    fn test_detect_twilio_api_key() {
+        let detector = SecretDetector::new();
+        // Twilio API keys start with SK followed by 32 hex chars
+        // Use test pattern that matches format but is obviously fake
+        let content = "TWILIO_SID=SK00000000000000000000000000000000";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|m| m.secret_type == "Twilio API Key"));
+    }
+
+    #[test]
+    fn test_detect_twilio_auth_token() {
+        let detector = SecretDetector::new();
+        let content = "twilio_auth_token = 'abcdef0123456789abcdef0123456789'";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|m| m.secret_type == "Twilio Auth Token"));
+    }
+
+    #[test]
+    fn test_detect_sendgrid_api_key() {
+        let detector = SecretDetector::new();
+        // SendGrid API keys: SG.<22 chars>.<43 chars>
+        let content = "SENDGRID_API_KEY=SG.abcdefghijklmnopqrstuv.abcdefghijklmnopqrstuvwxyz0123456789abcdefg";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|m| m.secret_type == "SendGrid API Key"));
+    }
+
+    #[test]
+    fn test_detect_mailgun_api_key() {
+        let detector = SecretDetector::new();
+        // Mailgun API keys: key-<32 hex chars>
+        // Use standalone key to avoid overlap with Generic API Key pattern
+        let content = "MAILGUN_TOKEN=key-abcdef0123456789abcdef0123456789";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|m| m.secret_type == "Mailgun API Key"));
+    }
+
+    #[test]
+    fn test_cloud_credentials_case_insensitive() {
+        let detector = SecretDetector::new();
+
+        // GCP service account with different casing
+        let content = r#"{"TYPE": "SERVICE_ACCOUNT"}"#;
+        assert!(detector.contains_secrets(content));
+
+        // Azure with different casing
+        let content2 = "accountkey=dGhpc2lzYXRlc3RrZXl0aGF0aXNsb25nZW5vdWdodG9tYXRjaA==";
         assert!(detector.contains_secrets(content2));
     }
 }

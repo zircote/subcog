@@ -1,0 +1,15 @@
+{
+  "description": "Session start hook response format (Claude Code compliant)",
+  "schema": {
+    "hookSpecificOutput": {
+      "hookEventName": "SessionStart",
+      "additionalContext": "string (markdown formatted context)"
+    }
+  },
+  "example": {
+    "hookSpecificOutput": {
+      "hookEventName": "SessionStart",
+      "additionalContext": "**Subcog Memory System Active**\n\nRelevant memories for this session:\n\n- [Decision] Use PostgreSQL for primary storage\n- [Pattern] Error handling with Result types\n\nTotal memories: 42 | Last sync: 2 hours ago"
+    }
+  }
+}

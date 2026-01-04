@@ -136,10 +136,10 @@ fn parse_duration_to_timestamp(duration: &str) -> Option<u64> {
     let num: u64 = num_str.parse().ok()?;
 
     let seconds = match unit {
-        "h" => num * 3600,
-        "w" => num * 604_800,
+        "h" => num.checked_mul(3600)?,
+        "w" => num.checked_mul(604_800)?,
         // Default to days for "d" and unknown units
-        _ => num * 86400,
+        _ => num.checked_mul(86400)?,
     };
 
     // Get current time and subtract duration

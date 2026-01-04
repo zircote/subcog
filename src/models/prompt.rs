@@ -417,6 +417,95 @@ pub fn extract_variables(content: &str) -> Vec<ExtractedVariable> {
     extract_variables_with_exclusions(content, &code_blocks)
 }
 
+/// Maximum length for variable values (64KB).
+///
+/// Values exceeding this limit are truncated to prevent denial-of-service attacks
+/// via memory exhaustion.
+pub const MAX_VARIABLE_VALUE_LENGTH: usize = 65_536;
+
+/// Sanitizes a variable value to prevent template injection attacks.
+///
+/// Performs three safety transformations:
+/// 1. **Escape nested patterns**: Converts `{{` to `{ {` to prevent recursive substitution
+/// 2. **Remove control characters**: Strips ASCII control chars (0x00-0x1F) except:
+///    - Tab (0x09)
+///    - Newline (0x0A)
+///    - Carriage return (0x0D)
+/// 3. **Length limiting**: Truncates values exceeding [`MAX_VARIABLE_VALUE_LENGTH`]
+///
+/// # Arguments
+///
+/// * `value` - The raw user-provided variable value.
+///
+/// # Returns
+///
+/// A sanitized string safe for template substitution.
+///
+/// # Examples
+///
+/// ```rust
+/// use subcog::models::sanitize_variable_value;
+///
+/// // Nested patterns are escaped
+/// assert_eq!(
+///     sanitize_variable_value("prefix {{nested}} suffix"),
+///     "prefix { {nested} } suffix"
+/// );
+///
+/// // Control characters are removed
+/// assert_eq!(
+///     sanitize_variable_value("hello\x00world"),
+///     "helloworld"
+/// );
+///
+/// // Allowed whitespace is preserved
+/// assert_eq!(
+///     sanitize_variable_value("line1\nline2\ttabbed"),
+///     "line1\nline2\ttabbed"
+/// );
+/// ```
+#[must_use]
+pub fn sanitize_variable_value(value: &str) -> String {
+    // Step 1: Truncate to maximum length
+    let truncated = if value.len() > MAX_VARIABLE_VALUE_LENGTH {
+        // Find a valid UTF-8 boundary near the limit
+        let mut end = MAX_VARIABLE_VALUE_LENGTH;
+        while end > 0 && !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        &value[..end]
+    } else {
+        value
+    };
+
+    // Step 2: Escape nested patterns and remove control characters
+    let mut result = String::with_capacity(truncated.len());
+    let mut chars = truncated.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            // Escape opening braces that could form nested patterns
+            '{' if chars.peek() == Some(&'{') => {
+                result.push_str("{ {");
+                chars.next(); // consume the second '{'
+            },
+            // Escape closing braces that could form nested patterns
+            '}' if chars.peek() == Some(&'}') => {
+                result.push_str("} }");
+                chars.next(); // consume the second '}'
+            },
+            // Remove control characters except tab, newline, carriage return
+            c if c.is_ascii_control() && c != '\t' && c != '\n' && c != '\r' => {
+                // Skip this character
+            },
+            // Pass through all other characters
+            _ => result.push(c),
+        }
+    }
+
+    result
+}
+
 /// Substitutes variables in prompt content.
 ///
 /// # Arguments
@@ -424,6 +513,14 @@ pub fn extract_variables(content: &str) -> Vec<ExtractedVariable> {
 /// * `content` - The template content with `{{variable}}` placeholders.
 /// * `values` - A map of variable names to their values.
 /// * `variables` - Variable definitions for defaults and required checks.
+///
+/// # Security
+///
+/// All user-provided variable values are sanitized via [`sanitize_variable_value`]
+/// to prevent template injection attacks:
+/// - Nested `{{...}}` patterns in values are escaped
+/// - Control characters are removed
+/// - Excessively long values are truncated
 ///
 /// # Errors
 ///
@@ -433,19 +530,19 @@ pub fn substitute_variables<S: BuildHasher>(
     values: &HashMap<String, String, S>,
     variables: &[PromptVariable],
 ) -> Result<String> {
-    // Build effective values map with defaults
+    // Build effective values map with defaults, sanitizing all values
     let mut effective_values: HashMap<String, String> = HashMap::new();
 
-    // Add provided values
+    // Add provided values (sanitized)
     for (k, v) in values {
-        effective_values.insert(k.clone(), v.clone());
+        effective_values.insert(k.clone(), sanitize_variable_value(v));
     }
 
-    // Apply defaults and check required
+    // Apply defaults and check required (sanitize defaults for defense-in-depth)
     for var in variables {
         if !effective_values.contains_key(&var.name) {
             if let Some(default) = &var.default {
-                effective_values.insert(var.name.clone(), default.clone());
+                effective_values.insert(var.name.clone(), sanitize_variable_value(default));
             } else if var.required {
                 return Err(Error::InvalidInput(format!(
                     "Missing required variable '{}'. Provide it with: --var {}=VALUE",
@@ -1236,5 +1333,132 @@ mod tests {
         // Only outside variable should be extracted
         assert_eq!(vars.len(), 1);
         assert_eq!(vars[0].name, "outside");
+    }
+
+    // ============================================================
+    // Variable Value Sanitization Tests (Template Injection Prevention)
+    // ============================================================
+
+    #[test]
+    fn test_sanitize_variable_value_passthrough_normal() {
+        // Normal values should pass through unchanged
+        assert_eq!(sanitize_variable_value("hello world"), "hello world");
+        assert_eq!(
+            sanitize_variable_value("user@example.com"),
+            "user@example.com"
+        );
+        assert_eq!(
+            sanitize_variable_value("path/to/file.rs"),
+            "path/to/file.rs"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_variable_value_escapes_nested_patterns() {
+        // Nested {{...}} patterns should be escaped to prevent recursive substitution
+        assert_eq!(
+            sanitize_variable_value("prefix {{nested}} suffix"),
+            "prefix { {nested} } suffix"
+        );
+        assert_eq!(
+            sanitize_variable_value("{{start}} middle {{end}}"),
+            "{ {start} } middle { {end} }"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_variable_value_escapes_only_double_braces() {
+        // Single braces should pass through
+        assert_eq!(sanitize_variable_value("{single}"), "{single}");
+        assert_eq!(sanitize_variable_value("a { b } c"), "a { b } c");
+    }
+
+    #[test]
+    fn test_sanitize_variable_value_removes_control_chars() {
+        // Control characters (except tab, newline, CR) should be removed
+        assert_eq!(sanitize_variable_value("hello\x00world"), "helloworld");
+        assert_eq!(sanitize_variable_value("a\x01b\x02c"), "abc");
+        assert_eq!(sanitize_variable_value("\x1Fstart"), "start");
+    }
+
+    #[test]
+    fn test_sanitize_variable_value_preserves_allowed_whitespace() {
+        // Tab, newline, and carriage return should be preserved
+        assert_eq!(sanitize_variable_value("line1\nline2"), "line1\nline2");
+        assert_eq!(sanitize_variable_value("col1\tcol2"), "col1\tcol2");
+        assert_eq!(sanitize_variable_value("line1\r\nline2"), "line1\r\nline2");
+    }
+
+    #[test]
+    fn test_sanitize_variable_value_truncates_long_values() {
+        // Values exceeding MAX_VARIABLE_VALUE_LENGTH should be truncated
+        let long_value = "x".repeat(MAX_VARIABLE_VALUE_LENGTH + 1000);
+        let sanitized = sanitize_variable_value(&long_value);
+        assert!(sanitized.len() <= MAX_VARIABLE_VALUE_LENGTH);
+    }
+
+    #[test]
+    fn test_sanitize_variable_value_truncates_at_utf8_boundary() {
+        // Truncation should not break UTF-8 characters
+        // U+1F600 (😀) is 4 bytes
+        let emoji = "😀";
+        let value = format!("{}{}", "a".repeat(MAX_VARIABLE_VALUE_LENGTH - 2), emoji);
+        let sanitized = sanitize_variable_value(&value);
+        // Should truncate before the emoji rather than in the middle
+        assert!(sanitized.is_char_boundary(sanitized.len()));
+    }
+
+    #[test]
+    fn test_sanitize_variable_value_empty() {
+        assert_eq!(sanitize_variable_value(""), "");
+    }
+
+    #[test]
+    fn test_sanitize_variable_value_combined() {
+        // Test multiple sanitization rules together
+        let input = "{{injection}}\x00with\tcontrol\nchars";
+        let expected = "{ {injection} }with\tcontrol\nchars";
+        assert_eq!(sanitize_variable_value(input), expected);
+    }
+
+    #[test]
+    fn test_substitute_variables_sanitizes_user_input() {
+        // User-provided values with injection attempts should be sanitized
+        let content = "Hello {{name}}, your code: {{code}}";
+        let mut values = HashMap::new();
+        values.insert("name".to_string(), "{{malicious}}".to_string());
+        values.insert("code".to_string(), "normal\x00value".to_string());
+
+        let result = substitute_variables(content, &values, &[]).unwrap();
+
+        // Nested patterns escaped, control chars removed
+        assert_eq!(result, "Hello { {malicious} }, your code: normalvalue");
+    }
+
+    #[test]
+    fn test_substitute_variables_sanitizes_defaults() {
+        // Even default values should be sanitized (defense-in-depth)
+        let content = "Status: {{status}}";
+        let values: HashMap<String, String> = HashMap::new();
+
+        let variables = vec![PromptVariable::optional("status", "{{default_injection}}")];
+
+        let result = substitute_variables(content, &values, &variables).unwrap();
+        assert_eq!(result, "Status: { {default_injection} }");
+    }
+
+    #[test]
+    fn test_sanitize_prevents_recursive_substitution() {
+        // Ensure that a value containing variable syntax doesn't get substituted again
+        let content = "Result: {{output}}";
+        let mut values = HashMap::new();
+        // Attacker tries to inject another variable reference
+        values.insert("output".to_string(), "{{secret}}".to_string());
+
+        let result = substitute_variables(content, &values, &[]).unwrap();
+
+        // The injected pattern should be escaped, not substituted
+        assert_eq!(result, "Result: { {secret} }");
+        assert!(!result.contains("{{secret}}"));
     }
 }

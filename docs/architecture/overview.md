@@ -19,6 +19,7 @@ Command-line interface for direct user interaction:
 - `recall` - Search memories
 - `status` - System status
 - `sync` - Git synchronization
+- `gc` - Garbage collection for stale branches
 - `prompt` - Template management
 - `serve` - MCP server
 - `hook` - Claude Code hooks
@@ -59,6 +60,7 @@ where
     recall: RecallService<I, V>,
     prompt: PromptService<P>,
     sync: SyncService<P>,
+    gc: GarbageCollector<I>,
     consolidation: ConsolidationService<P, I, V>,
     context: ContextBuilderService<I, V>,
 }
@@ -78,17 +80,18 @@ pub struct ServiceContainer {
 
 | Service | Responsibility |
 |---------|----------------|
-| `CaptureService` | Memory capture with validation |
-| `RecallService` | Search with RRF fusion |
+| `CaptureService` | Memory capture with validation and facet detection |
+| `RecallService` | Search with RRF fusion and facet filtering |
 | `PromptService` | Template CRUD and execution |
 | `SyncService` | Git remote synchronization |
+| `GarbageCollector` | Branch-based memory cleanup |
 | `ConsolidationService` | LLM-powered memory merging |
 | `ContextBuilderService` | Adaptive context building |
 | `TopicIndexService` | Topic → memory mapping |
 
 ### 3. Storage Layer
 
-Three-tier storage architecture.
+Three-tier storage architecture with SQLite as the default persistence layer.
 
 #### CompositeStorage
 
@@ -133,6 +136,8 @@ pub trait IndexBackend {
     fn index(&mut self, memory: &Memory) -> Result<()>;
     fn search(&self, filter: &SearchFilter) -> Result<Vec<MemoryResult>>;
     fn reindex(&mut self, memories: &[Memory]) -> Result<()>;
+    fn get_distinct_branches(&self) -> Result<Vec<String>>;
+    fn update_status(&mut self, id: &MemoryId, status: MemoryStatus) -> Result<()>;
 }
 
 pub trait VectorBackend {
@@ -146,11 +151,6 @@ pub trait VectorBackend {
 
 ### Capture Flow
 
-**Target Design (Spec):**
-```
-User Input → Security → Embedding → Persistence → Index + Vector (parallel)
-```
-
 **Current Implementation:**
 ```
 User Input
@@ -163,22 +163,25 @@ User Input
          │
          ▼
 ┌─────────────────┐
-│ Create Memory   │ ─── Generate MemoryId, add metadata
+│ Context Detect  │ ─── Auto-detect project/branch from git
+│  (GitContext)   │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Create Memory   │ ─── Generate MemoryId, add metadata + facets
 │    Object       │
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│   Git Notes     │ ─── Store to refs/notes/subcog
+│     SQLite      │ ─── Store to ~/.local/share/subcog/subcog.db
 │     Store       │
 └────────┬────────┘
          │
          ▼
     Return URN
 ```
-
-> **Note**: Embedding generation and index/vector updates are deferred to a separate
-> `reindex` operation in the current implementation.
 
 ### Search Flow
 
@@ -189,7 +192,9 @@ Query
     ▼                        ▼                    ▼
 ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
 │  Embedding  │      │  BM25 Text  │      │   Filter    │
-│   Search    │      │   Search    │      │  (ns, tag)  │
+│   Search    │      │   Search    │      │  (ns, tag,  │
+│             │      │             │      │  project,   │
+│             │      │             │      │  branch)    │
 └──────┬──────┘      └──────┬──────┘      └──────┬──────┘
        │                    │                    │
        ▼                    ▼                    ▼
@@ -205,6 +210,33 @@ Query
                              │
                              ▼
                     Ranked Results
+```
+
+### Garbage Collection Flow
+
+```
+subcog gc
+    │
+    ▼
+┌─────────────────┐
+│ Get Distinct    │ ─── Query unique branches from index
+│   Branches      │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Check Branch    │ ─── Verify each branch exists in git
+│   Existence     │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Tombstone Stale │ ─── Mark memories from deleted branches
+│   Memories      │
+└────────┬────────┘
+         │
+         ▼
+    Report Results
 ```
 
 ### Hook Flow
