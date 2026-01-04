@@ -43,6 +43,6 @@ All notable changes to this specification will be documented in this file.
 
 ### Research Conducted
 - Analyzed existing MCP server implementation in `src/mcp/server.rs`
-- Confirmed no rmcp crate dependency (custom JSON-RPC implementation)
+- Confirmed rmcp was not yet adopted at the time
 - Identified exact locations for notification detection and response suppression
 - Reviewed JSON-RPC 2.0 specification for compliance requirements

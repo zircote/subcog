@@ -391,7 +391,7 @@ org_scope_enabled = true
 - [x] Create new ADR file: adr_0059.md ✓
 - [x] Add YAML frontmatter ✓
 - [x] Document that this supersedes ADR-0009 ✓
-- [x] Explain why custom JSON-RPC was chosen ✓
+- [x] Explain why a bespoke MCP server was chosen ✓
 - [x] Reference ADRs 0054-0058 for notification compliance ✓
 - [x] Document benefits of custom implementation ✓
 - [x] Update README.md to show ADR-0009 as superseded ✓
@@ -404,7 +404,7 @@ org_scope_enabled = true
 
 - [x] Add "Implementation Update" section after audit section ✓
 - [x] Explain deviation from original decision ✓
-- [x] Document rationale for custom JSON-RPC implementation ✓
+- [x] Document rationale for bespoke MCP server implementation ✓
 - [x] Reference ADRs 0054-0058 ✓
 - [x] Note this is a beneficial deviation ✓
 - [x] Update README.md compliance stats ✓
