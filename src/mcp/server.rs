@@ -379,6 +379,7 @@ impl McpServer {
     }
 
     /// Runs the server over stdio with rate limiting and graceful shutdown (RES-M4).
+    #[allow(clippy::excessive_nesting)] // Event loop with rate limiting inherently has nested conditionals
     fn run_stdio(&mut self) -> Result<()> {
         let stdin = std::io::stdin();
         let mut stdout = std::io::stdout();
@@ -418,11 +419,17 @@ impl McpServer {
                 tracing::warn!("Rate limit exceeded: {request_count} requests in {window:?}",);
                 metrics::counter!("mcp_rate_limit_exceeded_total").increment(1);
 
-                // Return rate limit error
+                // Extract request id for error response (JSON-RPC 2.0 compliance)
+                // If this is a notification (no id), silently drop per JSON-RPC 2.0 spec
+                let Some(request_id) = extract_request_id(&line) else {
+                    continue;
+                };
+
+                // Return rate limit error with the request's id
                 let error_response = self.format_error(
-                    None,
+                    Some(request_id),
                     -32000,
-                    &format!("Rate limit exceeded: max {max_requests} requests per {window:?}",),
+                    &format!("Rate limit exceeded: max {max_requests} requests per {window:?}"),
                 );
                 writeln!(stdout, "{error_response}").map_err(|e| Error::OperationFailed {
                     operation: "write_stdout".to_string(),
@@ -1035,6 +1042,33 @@ impl JsonRpcRequest {
     }
 }
 
+/// Extracts the `id` field from a raw JSON-RPC request string.
+///
+/// This is a lightweight extraction used for error responses when full parsing
+/// hasn't occurred yet (e.g., rate limiting). Per JSON-RPC 2.0, error responses
+/// MUST include the `id` from the request (or `null` only if the `id` couldn't
+/// be determined, such as parse errors).
+///
+/// # Arguments
+///
+/// * `json` - The raw JSON-RPC request string.
+///
+/// # Returns
+///
+/// The extracted `id` value, or `None` if parsing failed or `id` was absent.
+fn extract_request_id(json: &str) -> Option<Value> {
+    // Use serde_json::from_str to parse just the id field
+    // This is more robust than regex and handles all JSON value types
+    #[derive(Deserialize)]
+    struct IdOnly {
+        id: Option<Value>,
+    }
+
+    serde_json::from_str::<IdOnly>(json)
+        .ok()
+        .and_then(|req| req.id)
+}
+
 /// JSON-RPC response.
 #[derive(Debug, Serialize)]
 struct JsonRpcResponse {
@@ -1066,6 +1100,7 @@ struct JsonRpcError {
 mod http_transport {
     use super::{
         DispatchResult, JsonRpcRequest, PromptRegistry, ResourceHandler, ToolRegistry, Value,
+        extract_request_id,
     };
     use crate::mcp::auth::{Claims, JwtAuthenticator, ToolAuthorization};
     use axum::{
@@ -1236,10 +1271,20 @@ mod http_transport {
                 "client" => client_id.clone()
             )
             .increment(1);
+
+            // Extract request id for JSON-RPC 2.0 compliant error response
+            let request_id = extract_request_id(&body);
+
+            // If this is a notification (no id), return 204 No Content per JSON-RPC 2.0 spec
+            if request_id.is_none() {
+                return (StatusCode::NO_CONTENT, Json(serde_json::json!(null)));
+            }
+
             return (
                 StatusCode::TOO_MANY_REQUESTS,
                 Json(serde_json::json!({
                     "jsonrpc": "2.0",
+                    "id": request_id,
                     "error": {
                         "code": -32000,
                         "message": format!(
@@ -1801,6 +1846,49 @@ mod tests {
             response.contains("\"id\":123"),
             "format_error(Some(123)) should produce id: 123, got: {response}"
         );
+    }
+
+    #[test]
+    fn test_extract_request_id_with_integer() {
+        let json = r#"{"jsonrpc":"2.0","id":42,"method":"test"}"#;
+        let id = extract_request_id(json);
+        assert_eq!(id, Some(serde_json::json!(42)));
+    }
+
+    #[test]
+    fn test_extract_request_id_with_string() {
+        let json = r#"{"jsonrpc":"2.0","id":"req-abc-123","method":"test"}"#;
+        let id = extract_request_id(json);
+        assert_eq!(id, Some(serde_json::json!("req-abc-123")));
+    }
+
+    #[test]
+    fn test_extract_request_id_notification_no_id() {
+        // Notifications don't have an id field
+        let json = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
+        let id = extract_request_id(json);
+        assert_eq!(id, None, "Notifications should return None");
+    }
+
+    #[test]
+    fn test_extract_request_id_with_null_id() {
+        // "id": null is technically valid but treated as notification
+        let json = r#"{"jsonrpc":"2.0","id":null,"method":"test"}"#;
+        let id = extract_request_id(json);
+        assert_eq!(id, None, "id: null should be treated as notification");
+    }
+
+    #[test]
+    fn test_extract_request_id_invalid_json() {
+        let json = "not valid json at all";
+        let id = extract_request_id(json);
+        assert_eq!(id, None, "Invalid JSON should return None");
+    }
+
+    #[test]
+    fn test_extract_request_id_empty_string() {
+        let id = extract_request_id("");
+        assert_eq!(id, None, "Empty string should return None");
     }
 }
 
