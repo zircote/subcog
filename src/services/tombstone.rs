@@ -38,21 +38,20 @@ impl TombstoneService {
             })?;
 
         // Set tombstone status and timestamp
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+
         memory.status = MemoryStatus::Tombstoned;
-        memory.tombstoned_at = Some(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0),
-        );
-        memory.updated_at = memory.tombstoned_at.unwrap();
+        memory.tombstoned_at = Some(now);
+        memory.updated_at = now;
 
         // Update in persistence
         self.persistence.store(&memory)?;
 
         tracing::info!(
             memory_id = %id.as_str(),
-            tombstoned_at = memory.tombstoned_at.unwrap(),
+            tombstoned_at = now,
             "Tombstoned memory"
         );
 
@@ -83,8 +82,7 @@ impl TombstoneService {
         memory.tombstoned_at = None;
         memory.updated_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(memory.updated_at);
+            .map_or(memory.updated_at, |d| d.as_secs());
 
         // Update in persistence
         self.persistence.store(&memory)?;
@@ -111,8 +109,7 @@ impl TombstoneService {
         let threshold = SystemTime::now()
             .checked_sub(older_than)
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_secs());
 
         // List all memory IDs and check each
         let all_ids = self.persistence.list_ids()?;
