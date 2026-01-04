@@ -35,6 +35,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
 toml = "0.9"
+rmcp = { version = "0.12.0", features = ["transport-io", "transport-streamable-http-server"] }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }

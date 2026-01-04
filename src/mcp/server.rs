@@ -1,6 +1,6 @@
 //! MCP server setup and lifecycle.
 //!
-//! Implements a JSON-RPC based MCP server over stdio or HTTP transport.
+//! Implements an rmcp-based MCP server over stdio or HTTP transport.
 //!
 //! ## Transport Authentication
 //!
@@ -8,16 +8,32 @@
 //! - **HTTP**: JWT bearer token authentication required (SEC-H1).
 //!   Requires `http` feature and `SUBCOG_MCP_JWT_SECRET` environment variable.
 
-use crate::mcp::{PromptRegistry, ResourceHandler, ToolRegistry};
+use crate::mcp::{
+    PromptContent as SubcogPromptContent, PromptDefinition, PromptMessage as SubcogPromptMessage,
+    PromptRegistry, ResourceContent, ResourceDefinition, ResourceHandler, ToolContent,
+    ToolDefinition, ToolRegistry, ToolResult,
+};
 use crate::observability::flush_metrics;
 use crate::services::ServiceContainer;
 use crate::{Error, Result};
+use rmcp::model::{
+    AnnotateAble, CallToolRequestParam, CallToolResult, Content, GetPromptRequestParam,
+    GetPromptResult, Implementation, ListPromptsResult, ListResourceTemplatesResult,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParam, Prompt, PromptArgument,
+    PromptMessage, PromptMessageContent, PromptMessageRole, RawResource, Resource,
+    ResourceContents, ServerCapabilities, ServerInfo, Tool,
+};
+use rmcp::service::RequestContext;
+use rmcp::transport::stdio;
+use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::io::{BufRead, BufReader, Write};
+use serde_json::{Map, Value};
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::info_span;
+use tokio::sync::Mutex;
 
 /// Global shutdown flag for graceful termination (RES-M4).
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -63,16 +79,13 @@ pub fn setup_signal_handler() -> Result<()> {
 }
 
 #[cfg(feature = "http")]
-use crate::mcp::auth::{JwtAuthenticator, JwtConfig, ToolAuthorization};
+use crate::mcp::auth::{Claims, JwtAuthenticator, JwtConfig, ToolAuthorization};
 
 /// Default maximum requests per rate limit window.
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS: usize = 1000;
 
 /// Default rate limit window duration (1 minute).
 const DEFAULT_RATE_LIMIT_WINDOW_SECS: u64 = 60;
-
-/// Maximum request body size (1MB) to prevent `DoS` via large payloads (SEC-H4).
-const MAX_REQUEST_BODY_SIZE: usize = 1024 * 1024;
 
 /// Default allowed CORS origin (none by default for security).
 #[cfg(feature = "http")]
@@ -118,13 +131,13 @@ impl CorsConfig {
             .collect();
 
         let allow_credentials = std::env::var("SUBCOG_MCP_CORS_ALLOW_CREDENTIALS")
-            .ok()
-            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|_| "false".to_string())
+            .parse::<bool>()
             .unwrap_or(false);
 
         let max_age_secs = std::env::var("SUBCOG_MCP_CORS_MAX_AGE_SECS")
-            .ok()
-            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|_| "3600".to_string())
+            .parse::<u64>()
             .unwrap_or(3600);
 
         Self {
@@ -134,14 +147,14 @@ impl CorsConfig {
         }
     }
 
-    /// Sets allowed origins.
+    /// Sets the allowed origins.
     #[must_use]
     pub fn with_origins(mut self, origins: Vec<String>) -> Self {
         self.allowed_origins = origins;
         self
     }
 
-    /// Allows credentials.
+    /// Sets whether to allow credentials.
     #[must_use]
     pub const fn with_credentials(mut self, allow: bool) -> Self {
         self.allow_credentials = allow;
@@ -149,8 +162,8 @@ impl CorsConfig {
     }
 }
 
-/// MCP rate limit configuration (ARCH-H1).
-#[derive(Debug, Clone)]
+/// Rate limit configuration (ARCH-H1).
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RateLimitConfig {
     /// Maximum requests per window.
     pub max_requests: usize,
@@ -169,19 +182,16 @@ impl Default for RateLimitConfig {
 
 impl RateLimitConfig {
     /// Creates config from environment variables.
-    ///
-    /// Reads `SUBCOG_MCP_RATE_LIMIT_MAX_REQUESTS` and
-    /// `SUBCOG_MCP_RATE_LIMIT_WINDOW_SECS` from the environment.
     #[must_use]
     pub fn from_env() -> Self {
         let max_requests = std::env::var("SUBCOG_MCP_RATE_LIMIT_MAX_REQUESTS")
             .ok()
-            .and_then(|s| s.parse().ok())
+            .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_RATE_LIMIT_MAX_REQUESTS);
 
         let window_secs = std::env::var("SUBCOG_MCP_RATE_LIMIT_WINDOW_SECS")
             .ok()
-            .and_then(|s| s.parse().ok())
+            .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_RATE_LIMIT_WINDOW_SECS);
 
         Self {
@@ -190,10 +200,10 @@ impl RateLimitConfig {
         }
     }
 
-    /// Sets maximum requests per window.
+    /// Sets max requests.
     #[must_use]
-    pub const fn with_max_requests(mut self, max: usize) -> Self {
-        self.max_requests = max;
+    pub const fn with_max_requests(mut self, max_requests: usize) -> Self {
+        self.max_requests = max_requests;
         self
     }
 
@@ -205,12 +215,6 @@ impl RateLimitConfig {
     }
 }
 
-/// MCP protocol version.
-const PROTOCOL_VERSION: &str = "2024-11-05";
-
-/// Server name.
-const SERVER_NAME: &str = "subcog";
-
 /// Transport type for the MCP server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Transport {
@@ -219,6 +223,325 @@ pub enum Transport {
     Stdio,
     /// HTTP transport.
     Http,
+}
+
+struct McpState {
+    tools: ToolRegistry,
+    prompts: PromptRegistry,
+    resources: Mutex<ResourceHandler>,
+    #[cfg(feature = "http")]
+    tool_auth: ToolAuthorization,
+}
+
+#[derive(Clone)]
+struct McpHandler {
+    state: Arc<McpState>,
+}
+
+impl McpHandler {
+    fn new(tools: ToolRegistry, resources: ResourceHandler, prompts: PromptRegistry) -> Self {
+        Self {
+            state: Arc::new(McpState {
+                tools,
+                prompts,
+                resources: Mutex::new(resources),
+                #[cfg(feature = "http")]
+                tool_auth: ToolAuthorization::default(),
+            }),
+        }
+    }
+}
+
+impl ServerHandler for McpHandler {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo {
+            protocol_version: rmcp::model::ProtocolVersion::default(),
+            capabilities: ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .enable_prompts()
+                .build(),
+            server_info: Implementation::from_build_env(),
+            instructions: Some("Subcog MCP server".to_string()),
+        }
+    }
+
+    fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParam>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<ListToolsResult, McpError>> + Send + '_ {
+        let tools = self
+            .state
+            .tools
+            .list_tools()
+            .into_iter()
+            .map(tool_definition_to_rmcp)
+            .collect();
+        std::future::ready(Ok(ListToolsResult::with_all_items(tools)))
+    }
+
+    fn call_tool(
+        &self,
+        request: CallToolRequestParam,
+        context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<CallToolResult, McpError>> + Send + '_ {
+        let state = self.state.clone();
+        async move {
+            #[cfg(feature = "http")]
+            if let Some(claims) = context.extensions.get::<Claims>() {
+                if !state.tool_auth.is_authorized(claims, &request.name) {
+                    let required_scope = state.tool_auth.required_scope(&request.name);
+                    let scope_str = required_scope.unwrap_or("unknown");
+                    return Err(McpError::invalid_params(
+                        format!(
+                            "Forbidden: tool '{}' requires '{}' scope",
+                            request.name, scope_str
+                        ),
+                        None,
+                    ));
+                }
+            }
+
+            let arguments = match request.arguments {
+                Some(args) => Value::Object(args),
+                None => Value::Object(Map::new()),
+            };
+
+            let result = state
+                .tools
+                .execute(&request.name, arguments)
+                .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+
+            Ok(tool_result_to_rmcp(result))
+        }
+    }
+
+    fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParam>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<ListResourcesResult, McpError>> + Send + '_ {
+        let state = self.state.clone();
+        async move {
+            let resources = state
+                .resources
+                .lock()
+                .await
+                .list_resources()
+                .into_iter()
+                .map(resource_definition_to_rmcp)
+                .collect();
+            Ok(ListResourcesResult::with_all_items(resources))
+        }
+    }
+
+    fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParam>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<ListResourceTemplatesResult, McpError>> + Send + '_ {
+        std::future::ready(Ok(ListResourceTemplatesResult::with_all_items(
+            Vec::new(),
+        )))
+    }
+
+    fn read_resource(
+        &self,
+        request: rmcp::model::ReadResourceRequestParam,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<rmcp::model::ReadResourceResult, McpError>> + Send + '_
+    {
+        let state = self.state.clone();
+        async move {
+            let content = state
+                .resources
+                .lock()
+                .await
+                .get_resource(&request.uri)
+                .map_err(|e| McpError::resource_not_found(e.to_string(), None))?;
+
+            let contents = vec![resource_content_to_rmcp(content)];
+            Ok(rmcp::model::ReadResourceResult { contents })
+        }
+    }
+
+    fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParam>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<ListPromptsResult, McpError>> + Send + '_ {
+        let prompts: Vec<Prompt> = self
+            .state
+            .prompts
+            .list_prompts()
+            .into_iter()
+            .map(prompt_definition_to_rmcp)
+            .collect();
+        std::future::ready(Ok(ListPromptsResult::with_all_items(prompts)))
+    }
+
+    fn get_prompt(
+        &self,
+        request: GetPromptRequestParam,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<GetPromptResult, McpError>> + Send + '_ {
+        let messages = match request.arguments {
+            Some(args) => Value::Object(args),
+            None => Value::Object(Map::new()),
+        };
+
+        let result = self
+            .state
+            .prompts
+            .get_prompt_messages(&request.name, &messages)
+            .ok_or_else(|| McpError::invalid_params("Unknown prompt".to_string(), None))
+            .map(|msgs| {
+                let mapped = msgs
+                    .into_iter()
+                    .map(prompt_message_to_rmcp)
+                    .collect::<Vec<_>>();
+                GetPromptResult { messages: mapped }
+            });
+
+        std::future::ready(result)
+    }
+}
+
+fn tool_definition_to_rmcp(def: &ToolDefinition) -> Tool {
+    let schema = def
+        .input_schema
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+
+    Tool {
+        name: Cow::Owned(def.name.clone()),
+        title: None,
+        description: Some(Cow::Owned(def.description.clone())),
+        input_schema: Arc::new(schema),
+        output_schema: None,
+        annotations: None,
+        icons: None,
+        meta: None,
+    }
+}
+
+fn tool_content_to_rmcp(content: ToolContent) -> Content {
+    match content {
+        ToolContent::Text { text } => Content::text(text),
+        ToolContent::Image { data, mime_type } => Content::image(data, mime_type),
+    }
+}
+
+fn tool_result_to_rmcp(result: ToolResult) -> CallToolResult {
+    let contents = result
+        .content
+        .into_iter()
+        .map(tool_content_to_rmcp)
+        .collect();
+    if result.is_error {
+        CallToolResult::error(contents)
+    } else {
+        CallToolResult::success(contents)
+    }
+}
+
+fn resource_definition_to_rmcp(def: ResourceDefinition) -> Resource {
+    RawResource {
+        uri: def.uri,
+        name: def.name,
+        title: None,
+        description: def.description,
+        mime_type: def.mime_type,
+        size: None,
+        icons: None,
+        meta: None,
+    }
+    .no_annotation()
+}
+
+fn resource_content_to_rmcp(content: ResourceContent) -> ResourceContents {
+    if let Some(text) = content.text {
+        ResourceContents::TextResourceContents {
+            uri: content.uri,
+            mime_type: content.mime_type,
+            text,
+            meta: None,
+        }
+    } else {
+        ResourceContents::BlobResourceContents {
+            uri: content.uri,
+            mime_type: content.mime_type,
+            blob: content.blob.unwrap_or_default(),
+            meta: None,
+        }
+    }
+}
+
+fn prompt_definition_to_rmcp(def: &PromptDefinition) -> Prompt {
+    let arguments = if def.arguments.is_empty() {
+        None
+    } else {
+        Some(
+            def.arguments
+                .iter()
+                .map(|arg| PromptArgument {
+                    name: arg.name.clone(),
+                    title: None,
+                    description: arg.description.clone(),
+                    required: Some(arg.required),
+                })
+                .collect(),
+        )
+    };
+
+    Prompt {
+        name: def.name.clone(),
+        title: None,
+        description: def.description.clone(),
+        arguments,
+        icons: None,
+        meta: None,
+    }
+}
+
+fn prompt_message_to_rmcp(message: SubcogPromptMessage) -> PromptMessage {
+    let role = match message.role.as_str() {
+        "user" => PromptMessageRole::User,
+        _ => PromptMessageRole::Assistant,
+    };
+
+    let content = match message.content {
+        SubcogPromptContent::Text { text } => PromptMessageContent::Text { text },
+        SubcogPromptContent::Image { data, mime_type } => {
+            PromptMessageContent::Image {
+                image: rmcp::model::RawImageContent {
+                    data,
+                    mime_type,
+                    meta: None,
+                }
+                .no_annotation(),
+            }
+        }
+        SubcogPromptContent::Resource { uri } => {
+            PromptMessageContent::ResourceLink {
+                link: RawResource {
+                    uri: uri.clone(),
+                    name: uri,
+                    title: None,
+                    description: None,
+                    mime_type: None,
+                    size: None,
+                    icons: None,
+                    meta: None,
+                }
+                .no_annotation(),
+            }
+        }
+    };
+
+    PromptMessage { role, content }
 }
 
 /// MCP server for subcog.
@@ -378,99 +701,54 @@ impl McpServer {
         }
     }
 
-    /// Runs the server over stdio with rate limiting and graceful shutdown (RES-M4).
-    #[allow(clippy::excessive_nesting)] // Event loop with rate limiting inherently has nested conditionals
+    fn build_handler(&mut self) -> McpHandler {
+        let tools = std::mem::take(&mut self.tools);
+        let resources = std::mem::take(&mut self.resources);
+        let prompts = std::mem::take(&mut self.prompts);
+        McpHandler::new(tools, resources, prompts)
+    }
+
+    /// Runs the server over stdio with graceful shutdown (RES-M4).
     fn run_stdio(&mut self) -> Result<()> {
-        let stdin = std::io::stdin();
-        let mut stdout = std::io::stdout();
-        let reader = BufReader::new(stdin.lock());
+        let handler = self.build_handler();
+        let rt = tokio::runtime::Runtime::new().map_err(|e| Error::OperationFailed {
+            operation: "create_runtime".to_string(),
+            cause: e.to_string(),
+        })?;
 
-        // Rate limiting state
-        let mut request_count: usize = 0;
-        let mut window_start = Instant::now();
-
-        for line in reader.lines() {
-            // Check for graceful shutdown signal (RES-M4)
-            if is_shutdown_requested() {
-                tracing::info!("Graceful shutdown in progress, stopping stdio server");
-                self.graceful_shutdown();
-                return Ok(());
-            }
-
-            let line = line.map_err(|e| Error::OperationFailed {
-                operation: "read_stdin".to_string(),
-                cause: e.to_string(),
-            })?;
-
-            if line.is_empty() {
-                continue;
-            }
-
-            // Rate limiting: reset window if expired (ARCH-H1: configurable)
-            if window_start.elapsed() > self.rate_limit.window {
-                request_count = 0;
-                window_start = Instant::now();
-            }
-
-            // Check rate limit
-            if request_count >= self.rate_limit.max_requests {
-                let max_requests = self.rate_limit.max_requests;
-                let window = self.rate_limit.window;
-                tracing::warn!("Rate limit exceeded: {request_count} requests in {window:?}",);
-                metrics::counter!("mcp_rate_limit_exceeded_total").increment(1);
-
-                // Extract request id for error response (JSON-RPC 2.0 compliance)
-                // If this is a notification (no id), silently drop per JSON-RPC 2.0 spec
-                let Some(request_id) = extract_request_id(&line) else {
-                    continue;
-                };
-
-                // Return rate limit error with the request's id
-                let error_response = self.format_error(
-                    Some(request_id),
-                    -32000,
-                    &format!("Rate limit exceeded: max {max_requests} requests per {window:?}"),
-                );
-                writeln!(stdout, "{error_response}").map_err(|e| Error::OperationFailed {
-                    operation: "write_stdout".to_string(),
-                    cause: e.to_string(),
-                })?;
-                stdout.flush().map_err(|e| Error::OperationFailed {
-                    operation: "flush_stdout".to_string(),
-                    cause: e.to_string(),
-                })?;
-                continue;
-            }
-
-            request_count += 1;
-            let response = self.handle_request(&line);
-
-            // JSON-RPC 2.0: Skip writing response for notifications (empty string)
-            if !response.is_empty() {
-                writeln!(stdout, "{response}").map_err(|e| Error::OperationFailed {
-                    operation: "write_stdout".to_string(),
+        rt.block_on(async {
+            let service = handler
+                .serve(stdio())
+                .await
+                .map_err(|e| Error::OperationFailed {
+                    operation: "serve_stdio".to_string(),
                     cause: e.to_string(),
                 })?;
 
-                stdout.flush().map_err(|e| Error::OperationFailed {
-                    operation: "flush_stdout".to_string(),
+            let cancel_token = service.cancellation_token();
+            tokio::spawn(async move {
+                loop {
+                    if is_shutdown_requested() {
+                        cancel_token.cancel();
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+            });
+
+            service
+                .waiting()
+                .await
+                .map_err(|e| Error::OperationFailed {
+                    operation: "wait_stdio".to_string(),
                     cause: e.to_string(),
                 })?;
-            }
 
-            // Flush metrics to push gateway after each request
-            // This ensures metrics are captured even if process is killed
-            flush_metrics();
-        }
-
-        Ok(())
+            Ok(())
+        })
     }
 
     /// Performs graceful shutdown cleanup (RES-M4).
-    ///
-    /// Called when a shutdown signal is received. Performs:
-    /// 1. Final metrics flush
-    /// 2. Logs shutdown completion
     fn graceful_shutdown(&self) {
         let start = Instant::now();
         tracing::info!("Starting graceful shutdown sequence");
@@ -494,12 +772,118 @@ impl McpServer {
     /// Requires the `http` feature and `SUBCOG_MCP_JWT_SECRET` environment variable.
     #[cfg(feature = "http")]
     fn run_http(&mut self) -> Result<()> {
-        use axum::http::{Method, header};
-        use axum::{Router, routing::post};
-        use std::sync::{Arc, Mutex};
+        use axum::extract::State;
+        use axum::http::{Method, StatusCode, header};
+        use axum::middleware::Next;
+        use axum::response::{IntoResponse, Response};
+        use axum::routing::any_service;
+        use axum::{Json, Router};
+        use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+        use rmcp::transport::streamable_http_server::tower::{
+            StreamableHttpServerConfig, StreamableHttpService,
+        };
+        use std::sync::Arc;
         use tower_http::cors::CorsLayer;
         use tower_http::set_header::SetResponseHeaderLayer;
         use tower_http::trace::TraceLayer;
+
+        #[derive(Clone)]
+        struct RateLimitEntry {
+            count: usize,
+            window_start: Instant,
+        }
+
+        #[derive(Clone)]
+        struct HttpAuthState {
+            authenticator: JwtAuthenticator,
+            rate_limit: RateLimitConfig,
+            rate_limits: Arc<Mutex<HashMap<String, RateLimitEntry>>>,
+        }
+
+        async fn auth_middleware<B>(
+            State(state): State<HttpAuthState>,
+            mut req: axum::http::Request<B>,
+            next: Next<B>,
+        ) -> Response {
+            let auth_header = req
+                .headers()
+                .get(header::AUTHORIZATION)
+                .and_then(|h| h.to_str().ok());
+
+            let claims = match auth_header {
+                Some(header_value) => match state.authenticator.validate_header(header_value) {
+                    Ok(claims) => claims,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "JWT authentication failed");
+                        return (
+                            StatusCode::UNAUTHORIZED,
+                            Json(serde_json::json!({
+                                "error": {
+                                    "code": -32000,
+                                    "message": format!("Authentication failed: {e}")
+                                }
+                            })),
+                        )
+                            .into_response();
+                    }
+                },
+                None => {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        Json(serde_json::json!({
+                            "error": {
+                                "code": -32000,
+                                "message": "Authentication required"
+                            }
+                        })),
+                    )
+                        .into_response();
+                }
+            };
+
+            let client_id = claims.sub.clone();
+            let mut rate_limits = state.rate_limits.lock().await;
+            let entry = rate_limits
+                .entry(client_id.clone())
+                .or_insert_with(|| RateLimitEntry {
+                    count: 0,
+                    window_start: Instant::now(),
+                });
+
+            if entry.window_start.elapsed() > state.rate_limit.window {
+                entry.count = 0;
+                entry.window_start = Instant::now();
+            }
+
+            if entry.count >= state.rate_limit.max_requests {
+                tracing::warn!(
+                    client = %client_id,
+                    requests = entry.count,
+                    "Per-client rate limit exceeded"
+                );
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    Json(serde_json::json!({
+                        "error": {
+                            "code": -32000,
+                            "message": format!(
+                                "Rate limit exceeded: max {} requests per {:?}",
+                                state.rate_limit.max_requests,
+                                state.rate_limit.window
+                            )
+                        }
+                    })),
+                )
+                    .into_response();
+            }
+
+            entry.count += 1;
+            drop(rate_limits);
+
+            req.extensions_mut().insert(claims);
+
+            next.run(req).await
+        }
 
         // Ensure JWT authenticator is configured
         let authenticator = self.jwt_authenticator.clone().ok_or_else(|| {
@@ -509,56 +893,42 @@ impl McpServer {
             }
         })?;
 
-        // Create shared state for the server with per-client rate limiting
-        let server = Arc::new(Mutex::new(McpHttpState {
-            tools: std::mem::take(&mut self.tools),
-            resources: std::mem::take(&mut self.resources),
-            prompts: std::mem::take(&mut self.prompts),
+        let handler = self.build_handler();
+        let session_manager = Arc::new(LocalSessionManager::default());
+        let streamable = StreamableHttpService::new(
+            move || Ok(handler.clone()),
+            session_manager,
+            StreamableHttpServerConfig::default(),
+        );
+
+        let auth_state = HttpAuthState {
             authenticator,
-            tool_auth: ToolAuthorization::default(),
-            rate_limit_config: self.rate_limit.clone(),
-            rate_limits: std::collections::HashMap::new(),
-        }));
-
-        // Build CORS layer from configuration (HIGH-SEC-006)
-        // By default, no origins are allowed (deny all CORS requests)
-        let cors_layer = if self.cors_config.allowed_origins.is_empty() {
-            // No origins configured - CORS preflight will fail (secure default)
-            tracing::info!("CORS: No origins configured, all cross-origin requests denied");
-            CorsLayer::new()
-        } else {
-            // Parse allowed origins into HeaderValues
-            let origins: Vec<_> = self
-                .cors_config
-                .allowed_origins
-                .iter()
-                .filter_map(|o| o.parse().ok())
-                .collect();
-
-            tracing::info!(
-                origins = ?self.cors_config.allowed_origins,
-                allow_credentials = self.cors_config.allow_credentials,
-                "CORS: Configured with explicit origins"
-            );
-
-            let mut layer = CorsLayer::new()
-                .allow_origin(origins)
-                .allow_methods([Method::POST, Method::OPTIONS])
-                .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
-                .max_age(std::time::Duration::from_secs(
-                    self.cors_config.max_age_secs,
-                ));
-
-            if self.cors_config.allow_credentials {
-                layer = layer.allow_credentials(true);
-            }
-
-            layer
+            rate_limit: self.rate_limit.clone(),
+            rate_limits: Arc::new(Mutex::new(HashMap::new())),
         };
 
-        // Build the router with security headers
+        // Build CORS layer
+        let cors_layer = if self.cors_config.allowed_origins.is_empty() {
+            CorsLayer::new()
+        } else {
+            let mut cors = CorsLayer::new()
+                .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS]);
+
+            for origin in &self.cors_config.allowed_origins {
+                cors = cors.allow_origin(origin.parse::<header::HeaderValue>().unwrap());
+            }
+
+            if self.cors_config.allow_credentials {
+                cors = cors.allow_credentials(true);
+            }
+
+            cors.max_age(Duration::from_secs(self.cors_config.max_age_secs))
+        };
+
         let app = Router::new()
-            .route("/mcp", post(handle_http_request))
+            .route_service("/mcp", any_service(streamable))
+            .with_state(auth_state)
+            .layer(axum::middleware::from_fn(auth_middleware))
             // CORS layer (HIGH-SEC-006) - must be before other layers
             .layer(cors_layer)
             // Security headers (OWASP recommendations)
@@ -582,10 +952,8 @@ impl McpServer {
                 header::HeaderName::from_static("x-permitted-cross-domain-policies"),
                 header::HeaderValue::from_static("none"),
             ))
-            .layer(TraceLayer::new_for_http())
-            .with_state(server);
+            .layer(TraceLayer::new_for_http());
 
-        // Create tokio runtime for the server
         let rt = tokio::runtime::Runtime::new().map_err(|e| Error::OperationFailed {
             operation: "create_runtime".to_string(),
             cause: e.to_string(),
@@ -617,398 +985,6 @@ impl McpServer {
     fn run_http(&self) -> Result<()> {
         Err(Error::FeatureNotEnabled("http".to_string()))
     }
-
-    /// Handles a JSON-RPC request.
-    ///
-    /// Returns an empty string for notifications (requests without `id`),
-    /// per JSON-RPC 2.0 specification which states notifications MUST NOT
-    /// receive any response.
-    fn handle_request(&mut self, request: &str) -> String {
-        // SEC-H4: Check request size before processing to prevent DoS
-        if request.len() > MAX_REQUEST_BODY_SIZE {
-            tracing::warn!(
-                request_size = request.len(),
-                max_size = MAX_REQUEST_BODY_SIZE,
-                "Request exceeds maximum size limit"
-            );
-            return self.format_error(
-                None,
-                -32600,
-                &format!(
-                    "Request too large: {} bytes (max: {} bytes)",
-                    request.len(),
-                    MAX_REQUEST_BODY_SIZE
-                ),
-            );
-        }
-
-        let start = Instant::now();
-        let transport_label = match self.transport {
-            Transport::Stdio => "stdio",
-            Transport::Http => "http",
-        };
-
-        let span = info_span!(
-            "mcp.request",
-            transport = transport_label,
-            rpc.method = tracing::field::Empty,
-            rpc.id = tracing::field::Empty,
-            status = tracing::field::Empty
-        );
-        let _guard = span.enter();
-
-        let parsed: std::result::Result<JsonRpcRequest, _> = serde_json::from_str(request);
-        let mut method_label = "parse_error".to_string();
-        let mut status_label = "error";
-
-        let response = match parsed {
-            Ok(req) => {
-                method_label.clone_from(&req.method);
-                span.record("rpc.method", method_label.as_str());
-                if let Some(id) = &req.id {
-                    let id_str = id.to_string();
-                    span.record("rpc.id", id_str.as_str());
-                }
-
-                // JSON-RPC 2.0: Notifications (requests without id) MUST NOT receive any response
-                if req.is_notification() {
-                    tracing::debug!(
-                        method = %method_label,
-                        transport = transport_label,
-                        "Received notification, no response will be sent"
-                    );
-                    metrics::counter!(
-                        "mcp_notifications_total",
-                        "method" => method_label.clone(),
-                        "transport" => transport_label
-                    )
-                    .increment(1);
-                    span.record("status", "notification");
-
-                    // Still dispatch the method for side effects (e.g., notifications/initialized)
-                    let _ = self.dispatch_method(&req.method, req.params);
-
-                    // Return empty string to signal no response should be sent
-                    return String::new();
-                }
-
-                tracing::info!(method = %method_label, transport = transport_label, "Processing MCP request");
-
-                let result = self.dispatch_method(&req.method, req.params);
-                status_label = if result.is_ok() { "success" } else { "error" };
-                span.record("status", status_label);
-                self.format_response(req.id, result)
-            },
-            Err(e) => {
-                span.record("status", "parse_error");
-                self.format_error(None, -32700, &format!("Parse error: {e}"))
-            },
-        };
-
-        metrics::counter!(
-            "mcp_requests_total",
-            "method" => method_label.clone(),
-            "transport" => transport_label,
-            "status" => status_label
-        )
-        .increment(1);
-        metrics::histogram!(
-            "mcp_request_duration_ms",
-            "method" => method_label,
-            "transport" => transport_label
-        )
-        .record(start.elapsed().as_secs_f64() * 1000.0);
-
-        response
-    }
-
-    /// Dispatches a method call using the command pattern.
-    ///
-    /// Uses [`McpMethod`] enum for type-safe method dispatch instead of
-    /// string matching, following the Open/Closed Principle.
-    fn dispatch_method(&mut self, method: &str, params: Option<Value>) -> DispatchResult {
-        use super::dispatch::McpMethod;
-
-        match McpMethod::from(method) {
-            McpMethod::Initialize => self.handle_initialize(params),
-            McpMethod::ListTools => self.handle_list_tools(),
-            McpMethod::CallTool => self.handle_call_tool(params),
-            McpMethod::ListResources => self.handle_list_resources(),
-            McpMethod::ReadResource => self.handle_read_resource(params),
-            McpMethod::ListPrompts => self.handle_list_prompts(),
-            McpMethod::GetPrompt => self.handle_get_prompt(params),
-            McpMethod::Ping => Ok(serde_json::json!({})),
-            McpMethod::Unknown(name) => Err((-32601, format!("Method not found: {name}"))),
-        }
-    }
-
-    /// Handles the initialize method.
-    fn handle_initialize(&self, _params: Option<Value>) -> DispatchResult {
-        Ok(serde_json::json!({
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {
-                "tools": {},
-                "resources": {},
-                "prompts": {},
-                "sampling": {}
-            },
-            "serverInfo": {
-                "name": SERVER_NAME,
-                "version": env!("CARGO_PKG_VERSION")
-            }
-        }))
-    }
-
-    /// Handles tools/list.
-    fn handle_list_tools(&self) -> DispatchResult {
-        let tools: Vec<Value> = self
-            .tools
-            .list_tools()
-            .iter()
-            .map(|t| {
-                serde_json::json!({
-                    "name": t.name,
-                    "description": t.description,
-                    "inputSchema": t.input_schema
-                })
-            })
-            .collect();
-
-        Ok(serde_json::json!({ "tools": tools }))
-    }
-
-    /// Handles tools/call.
-    fn handle_call_tool(&self, params: Option<Value>) -> DispatchResult {
-        let params = params.ok_or((-32602, "Missing params".to_string()))?;
-
-        let name = params
-            .get("name")
-            .and_then(|v| v.as_str())
-            .ok_or((-32602, "Missing tool name".to_string()))?;
-        let tool_name = name.to_string();
-        let span = info_span!("mcp.tool.call", tool.name = tool_name.as_str());
-        let _guard = span.enter();
-        let start = Instant::now();
-
-        let arguments = params
-            .get("arguments")
-            .cloned()
-            .unwrap_or(serde_json::json!({}));
-
-        let (result, status_label) = match self.tools.execute(name, arguments) {
-            Ok(result) => {
-                let status_label = if result.is_error { "error" } else { "success" };
-                (
-                    Ok(serde_json::json!({
-                        "content": result.content,
-                        "isError": result.is_error
-                    })),
-                    status_label,
-                )
-            },
-            Err(e) => (
-                Ok(serde_json::json!({
-                    "content": [{ "type": "text", "text": e.to_string() }],
-                    "isError": true
-                })),
-                "error",
-            ),
-        };
-        metrics::counter!(
-            "mcp_tool_calls_total",
-            "tool" => tool_name.clone(),
-            "status" => status_label
-        )
-        .increment(1);
-        if status_label == "error" {
-            metrics::counter!(
-                "mcp_tool_errors_total",
-                "tool" => tool_name.clone()
-            )
-            .increment(1);
-        }
-        metrics::histogram!(
-            "mcp_tool_duration_ms",
-            "tool" => tool_name,
-            "status" => status_label
-        )
-        .record(start.elapsed().as_secs_f64() * 1000.0);
-
-        result
-    }
-
-    /// Handles resources/list.
-    fn handle_list_resources(&self) -> DispatchResult {
-        let resources: Vec<Value> = self
-            .resources
-            .list_resources()
-            .iter()
-            .map(|r| {
-                serde_json::json!({
-                    "uri": r.uri,
-                    "name": r.name,
-                    "description": r.description,
-                    "mimeType": r.mime_type
-                })
-            })
-            .collect();
-
-        Ok(serde_json::json!({ "resources": resources }))
-    }
-
-    /// Handles resources/read.
-    fn handle_read_resource(&mut self, params: Option<Value>) -> DispatchResult {
-        let params = params.ok_or((-32602, "Missing params".to_string()))?;
-
-        let uri = params
-            .get("uri")
-            .and_then(|v| v.as_str())
-            .ok_or((-32602, "Missing resource URI".to_string()))?;
-
-        let resource_kind = classify_resource_kind(uri);
-        let span = info_span!(
-            "mcp.resource.read",
-            resource.uri = uri,
-            resource.kind = resource_kind,
-            status = tracing::field::Empty
-        );
-        let _guard = span.enter();
-        let start = Instant::now();
-
-        let result = match self.resources.get_resource(uri) {
-            Ok(content) => Ok(serde_json::json!({
-                "contents": [{
-                    "uri": content.uri,
-                    "mimeType": content.mime_type,
-                    "text": content.text
-                }]
-            })),
-            Err(e) => Err((-32603, e.to_string())),
-        };
-
-        let status_label = if result.is_ok() { "success" } else { "error" };
-        span.record("status", status_label);
-        metrics::counter!(
-            "mcp_resource_reads_total",
-            "resource_kind" => resource_kind,
-            "status" => status_label
-        )
-        .increment(1);
-        metrics::histogram!(
-            "mcp_resource_read_duration_ms",
-            "resource_kind" => resource_kind,
-            "status" => status_label
-        )
-        .record(start.elapsed().as_secs_f64() * 1000.0);
-
-        result
-    }
-
-    /// Handles prompts/list.
-    fn handle_list_prompts(&self) -> DispatchResult {
-        let prompts: Vec<Value> = self
-            .prompts
-            .list_prompts()
-            .iter()
-            .map(|p| {
-                serde_json::json!({
-                    "name": p.name,
-                    "description": p.description,
-                    "arguments": p.arguments.iter().map(|a| {
-                        serde_json::json!({
-                            "name": a.name,
-                            "description": a.description,
-                            "required": a.required
-                        })
-                    }).collect::<Vec<Value>>()
-                })
-            })
-            .collect();
-
-        Ok(serde_json::json!({ "prompts": prompts }))
-    }
-
-    /// Handles prompts/get.
-    fn handle_get_prompt(&self, params: Option<Value>) -> DispatchResult {
-        let params = params.ok_or((-32602, "Missing params".to_string()))?;
-
-        let name = params
-            .get("name")
-            .and_then(|v| v.as_str())
-            .ok_or((-32602, "Missing prompt name".to_string()))?;
-        let span = info_span!("mcp.prompt.get", prompt.name = name);
-        let _guard = span.enter();
-
-        let arguments = params
-            .get("arguments")
-            .cloned()
-            .unwrap_or(serde_json::json!({}));
-
-        match self.prompts.get_prompt_messages(name, &arguments) {
-            Some(messages) => {
-                let msgs: Vec<Value> = messages
-                    .iter()
-                    .map(|m| {
-                        serde_json::json!({
-                            "role": m.role,
-                            "content": m.content
-                        })
-                    })
-                    .collect();
-
-                Ok(serde_json::json!({ "messages": msgs }))
-            },
-            None => Err((-32602, format!("Unknown prompt: {name}"))),
-        }
-    }
-
-    /// Formats a successful response.
-    fn format_response(&self, id: Option<Value>, result: DispatchResult) -> String {
-        match result {
-            Ok(value) => {
-                let response = JsonRpcResponse {
-                    jsonrpc: "2.0".to_string(),
-                    id,
-                    result: Some(value),
-                    error: None,
-                };
-                serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string())
-            },
-            Err((code, message)) => self.format_error(id, code, &message),
-        }
-    }
-
-    /// Formats an error response.
-    ///
-    /// Per JSON-RPC 2.0 specification, error responses MUST include the `id` field.
-    /// If the original request's id could not be determined (e.g., parse error),
-    /// `id` MUST be `null`.
-    fn format_error(&self, id: Option<Value>, code: i32, message: &str) -> String {
-        let response = JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            // JSON-RPC 2.0: Error responses MUST include id (use null if unknown)
-            id: Some(id.unwrap_or(Value::Null)),
-            result: None,
-            error: Some(JsonRpcError {
-                code,
-                message: message.to_string(),
-                data: None,
-            }),
-        };
-        serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string())
-    }
-}
-
-fn classify_resource_kind(uri: &str) -> &'static str {
-    if uri.starts_with("subcog://memory/") {
-        "memory"
-    } else if uri.starts_with("subcog://project/") {
-        "project"
-    } else if uri.starts_with("subcog://help") {
-        "help"
-    } else {
-        "other"
-    }
 }
 
 impl Default for McpServer {
@@ -1016,552 +992,6 @@ impl Default for McpServer {
         Self::new()
     }
 }
-
-/// Result type for method dispatch.
-type DispatchResult = std::result::Result<Value, (i32, String)>;
-
-/// JSON-RPC request.
-#[derive(Debug, Deserialize)]
-struct JsonRpcRequest {
-    /// JSON-RPC version (required by protocol but not used in code).
-    #[serde(rename = "jsonrpc")]
-    _jsonrpc: String,
-    id: Option<Value>,
-    method: String,
-    params: Option<Value>,
-}
-
-impl JsonRpcRequest {
-    /// Returns `true` if this request is a notification (no `id` field).
-    ///
-    /// Per JSON-RPC 2.0 specification, notifications are requests without an `id` member.
-    /// They MUST NOT receive any response, not even an error.
-    #[must_use]
-    const fn is_notification(&self) -> bool {
-        self.id.is_none()
-    }
-}
-
-/// Extracts the `id` field from a raw JSON-RPC request string.
-///
-/// This is a lightweight extraction used for error responses when full parsing
-/// hasn't occurred yet (e.g., rate limiting). Per JSON-RPC 2.0, error responses
-/// MUST include the `id` from the request (or `null` only if the `id` couldn't
-/// be determined, such as parse errors).
-///
-/// # Arguments
-///
-/// * `json` - The raw JSON-RPC request string.
-///
-/// # Returns
-///
-/// The extracted `id` value, or `None` if parsing failed or `id` was absent.
-fn extract_request_id(json: &str) -> Option<Value> {
-    // Use serde_json::from_str to parse just the id field
-    // This is more robust than regex and handles all JSON value types
-    #[derive(Deserialize)]
-    struct IdOnly {
-        id: Option<Value>,
-    }
-
-    serde_json::from_str::<IdOnly>(json)
-        .ok()
-        .and_then(|req| req.id)
-}
-
-/// JSON-RPC response.
-#[derive(Debug, Serialize)]
-struct JsonRpcResponse {
-    jsonrpc: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<JsonRpcError>,
-}
-
-/// JSON-RPC error.
-#[derive(Debug, Serialize)]
-struct JsonRpcError {
-    code: i32,
-    message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<Value>,
-}
-
-// HTTP transport implementation (SEC-H1)
-#[cfg(feature = "http")]
-#[allow(
-    clippy::too_many_lines,
-    clippy::excessive_nesting,
-    clippy::significant_drop_tightening
-)]
-mod http_transport {
-    use super::{
-        DispatchResult, JsonRpcRequest, PromptRegistry, ResourceHandler, ToolRegistry, Value,
-        extract_request_id,
-    };
-    use crate::mcp::auth::{Claims, JwtAuthenticator, ToolAuthorization};
-    use axum::{
-        Json,
-        extract::State,
-        http::{HeaderMap, StatusCode},
-        response::IntoResponse,
-    };
-    use std::sync::{Arc, Mutex};
-
-    /// Per-client rate limit state.
-    #[derive(Debug, Clone)]
-    pub struct ClientRateLimit {
-        /// Number of requests in the current window.
-        pub request_count: usize,
-        /// Start of the current rate limit window.
-        pub window_start: std::time::Instant,
-    }
-
-    impl Default for ClientRateLimit {
-        fn default() -> Self {
-            Self {
-                request_count: 0,
-                window_start: std::time::Instant::now(),
-            }
-        }
-    }
-
-    /// Shared state for HTTP transport.
-    pub struct McpHttpState {
-        pub tools: ToolRegistry,
-        pub resources: ResourceHandler,
-        pub prompts: PromptRegistry,
-        pub authenticator: JwtAuthenticator,
-        /// Tool authorization for scope-based access control (CRIT-003).
-        pub tool_auth: ToolAuthorization,
-        /// Rate limit configuration (ARCH-H1).
-        pub rate_limit_config: super::RateLimitConfig,
-        /// Per-client rate limits keyed by JWT subject/issuer.
-        pub rate_limits: std::collections::HashMap<String, ClientRateLimit>,
-    }
-
-    /// HTTP request handler with JWT authentication.
-    pub async fn handle_http_request(
-        State(state): State<Arc<Mutex<McpHttpState>>>,
-        headers: HeaderMap,
-        body: String,
-    ) -> impl IntoResponse {
-        // SEC-H4: Check request body size before processing to prevent DoS
-        if body.len() > super::MAX_REQUEST_BODY_SIZE {
-            tracing::warn!(
-                body_size = body.len(),
-                max_size = super::MAX_REQUEST_BODY_SIZE,
-                "Request body exceeds maximum size limit"
-            );
-            return (
-                StatusCode::PAYLOAD_TOO_LARGE,
-                Json(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32600,
-                        "message": format!(
-                            "Request body too large: {} bytes (max: {} bytes)",
-                            body.len(),
-                            super::MAX_REQUEST_BODY_SIZE
-                        )
-                    }
-                })),
-            );
-        }
-
-        // Extract and validate Authorization header
-        let auth_header = match headers.get("authorization") {
-            Some(h) => match h.to_str() {
-                Ok(s) => s,
-                Err(_) => {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "error": {
-                                "code": -32600,
-                                "message": "Invalid Authorization header encoding"
-                            }
-                        })),
-                    );
-                },
-            },
-            None => {
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "error": {
-                            "code": -32000,
-                            "message": "Missing Authorization header"
-                        }
-                    })),
-                );
-            },
-        };
-
-        // Validate JWT token and extract client identifier
-        let Ok(mut state_guard) = state.lock() else {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32603,
-                        "message": "Internal server error"
-                    }
-                })),
-            );
-        };
-
-        let claims = match state_guard.authenticator.validate_header(auth_header) {
-            Ok(claims) => claims,
-            Err(e) => {
-                tracing::warn!(error = %e, "JWT authentication failed");
-                metrics::counter!("mcp_auth_failures_total", "transport" => "http").increment(1);
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "error": {
-                            "code": -32000,
-                            "message": format!("Authentication failed: {e}")
-                        }
-                    })),
-                );
-            },
-        };
-
-        metrics::counter!("mcp_auth_success_total", "transport" => "http").increment(1);
-
-        // Per-client rate limiting using JWT subject as client identifier
-        #[allow(clippy::redundant_clone)] // claims.sub used after entry() via client_id reference
-        let client_id = claims.sub.clone();
-
-        // Extract rate limit config before mutable borrow of rate_limits
-        let rate_limit_window = state_guard.rate_limit_config.window;
-        let rate_limit_max = state_guard.rate_limit_config.max_requests;
-
-        let rate_limit = state_guard
-            .rate_limits
-            .entry(client_id.clone())
-            .or_default();
-
-        // Reset window if expired
-        if rate_limit.window_start.elapsed() > rate_limit_window {
-            rate_limit.request_count = 0;
-            rate_limit.window_start = std::time::Instant::now();
-        }
-
-        // Check rate limit
-        if rate_limit.request_count >= rate_limit_max {
-            tracing::warn!(
-                client = %client_id,
-                requests = rate_limit.request_count,
-                "Per-client rate limit exceeded"
-            );
-            #[allow(clippy::redundant_clone)]
-            // metrics macro requires owned String for label value
-            metrics::counter!(
-                "mcp_rate_limit_exceeded_total",
-                "transport" => "http",
-                "client" => client_id.clone()
-            )
-            .increment(1);
-
-            // Extract request id for JSON-RPC 2.0 compliant error response
-            let request_id = extract_request_id(&body);
-
-            // If this is a notification (no id), return 204 No Content per JSON-RPC 2.0 spec
-            if request_id.is_none() {
-                return (StatusCode::NO_CONTENT, Json(serde_json::json!(null)));
-            }
-
-            return (
-                StatusCode::TOO_MANY_REQUESTS,
-                Json(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "error": {
-                        "code": -32000,
-                        "message": format!(
-                            "Rate limit exceeded: max {} requests per {:?}",
-                            rate_limit_max,
-                            rate_limit_window
-                        )
-                    }
-                })),
-            );
-        }
-
-        rate_limit.request_count += 1;
-
-        // Parse JSON-RPC request
-        let parsed: std::result::Result<JsonRpcRequest, _> = serde_json::from_str(&body);
-        drop(state_guard);
-
-        match parsed {
-            Ok(req) => {
-                // JSON-RPC 2.0: Notifications (requests without id) MUST NOT receive any response
-                if req.is_notification() {
-                    tracing::debug!(
-                        method = %req.method,
-                        "HTTP: Received notification, returning 204 No Content"
-                    );
-                    metrics::counter!(
-                        "mcp_notifications_total",
-                        "method" => req.method.clone(),
-                        "transport" => "http"
-                    )
-                    .increment(1);
-
-                    // Still dispatch the method for side effects
-                    if let Ok(mut state_guard) = state.lock() {
-                        let _ = dispatch_http_method(
-                            &mut state_guard,
-                            &req.method,
-                            req.params,
-                            &claims,
-                        );
-                    }
-
-                    // Return 204 No Content for notifications (ADR-004)
-                    return (StatusCode::NO_CONTENT, Json(serde_json::json!(null)));
-                }
-
-                let Ok(mut state_guard) = state.lock() else {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": null,
-                            "error": {
-                                "code": -32603,
-                                "message": "Internal server error"
-                            }
-                        })),
-                    );
-                };
-
-                let result =
-                    dispatch_http_method(&mut state_guard, &req.method, req.params, &claims);
-
-                let response = match result {
-                    Ok(value) => serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": req.id,
-                        "result": value
-                    }),
-                    Err((code, message)) => serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": req.id,
-                        "error": {
-                            "code": code,
-                            "message": message
-                        }
-                    }),
-                };
-
-                (StatusCode::OK, Json(response))
-            },
-            // Parse errors: id is null per JSON-RPC 2.0 spec (couldn't determine original id)
-            Err(e) => (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": null,
-                    "error": {
-                        "code": -32700,
-                        "message": format!("Parse error: {e}")
-                    }
-                })),
-            ),
-        }
-    }
-
-    /// Dispatches a method call for HTTP transport.
-    ///
-    /// # Authorization (CRIT-003)
-    ///
-    /// Tool calls are authorized based on JWT scopes:
-    /// - `read`: `subcog_recall`, `subcog_status`, `subcog_namespaces`, `prompt_list`, `prompt_get`, `prompt_run`
-    /// - `write`: `subcog_capture`, `subcog_enrich`, `subcog_consolidate`, `prompt_save`, `prompt_delete`
-    /// - `admin`: `subcog_sync`, `subcog_reindex`
-    /// - `*`: Wildcard scope grants all permissions
-    fn dispatch_http_method(
-        state: &mut McpHttpState,
-        method: &str,
-        params: Option<Value>,
-        claims: &Claims,
-    ) -> DispatchResult {
-        match method {
-            "initialize" => Ok(serde_json::json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "tools": {},
-                    "resources": {},
-                    "prompts": {},
-                    "sampling": {}
-                },
-                "serverInfo": {
-                    "name": "subcog",
-                    "version": env!("CARGO_PKG_VERSION")
-                }
-            })),
-            "tools/list" => {
-                let tools: Vec<Value> = state
-                    .tools
-                    .list_tools()
-                    .iter()
-                    .map(|t| {
-                        serde_json::json!({
-                            "name": t.name,
-                            "description": t.description,
-                            "inputSchema": t.input_schema
-                        })
-                    })
-                    .collect();
-                Ok(serde_json::json!({ "tools": tools }))
-            },
-            "tools/call" => {
-                let params = params.ok_or((-32602, "Missing params".to_string()))?;
-                let name = params
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .ok_or((-32602, "Missing tool name".to_string()))?;
-
-                // CRIT-003: Check authorization before executing tool
-                if !state.tool_auth.is_authorized(claims, name) {
-                    let required_scope = state.tool_auth.required_scope(name);
-                    tracing::warn!(
-                        tool = name,
-                        required_scope = required_scope,
-                        user_scopes = ?claims.scopes,
-                        sub = %claims.sub,
-                        "Tool authorization denied"
-                    );
-                    let scope_str = required_scope.unwrap_or("unknown");
-                    metrics::counter!(
-                        "mcp_tool_auth_denied_total",
-                        "tool" => name.to_string(),
-                        "required_scope" => scope_str.to_string()
-                    )
-                    .increment(1);
-                    return Err((
-                        -32000,
-                        format!("Forbidden: tool '{name}' requires '{scope_str}' scope"),
-                    ));
-                }
-
-                let arguments = params
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or(serde_json::json!({}));
-
-                match state.tools.execute(name, arguments) {
-                    Ok(result) => Ok(serde_json::json!({
-                        "content": result.content,
-                        "isError": result.is_error
-                    })),
-                    Err(e) => Ok(serde_json::json!({
-                        "content": [{ "type": "text", "text": e.to_string() }],
-                        "isError": true
-                    })),
-                }
-            },
-            "resources/list" => {
-                let resources: Vec<Value> = state
-                    .resources
-                    .list_resources()
-                    .iter()
-                    .map(|r| {
-                        serde_json::json!({
-                            "uri": r.uri,
-                            "name": r.name,
-                            "description": r.description,
-                            "mimeType": r.mime_type
-                        })
-                    })
-                    .collect();
-                Ok(serde_json::json!({ "resources": resources }))
-            },
-            "resources/read" => {
-                let params = params.ok_or((-32602, "Missing params".to_string()))?;
-                let uri = params
-                    .get("uri")
-                    .and_then(|v| v.as_str())
-                    .ok_or((-32602, "Missing resource URI".to_string()))?;
-
-                match state.resources.get_resource(uri) {
-                    Ok(content) => Ok(serde_json::json!({
-                        "contents": [{
-                            "uri": content.uri,
-                            "mimeType": content.mime_type,
-                            "text": content.text
-                        }]
-                    })),
-                    Err(e) => Err((-32603, e.to_string())),
-                }
-            },
-            "prompts/list" => {
-                let prompts: Vec<Value> = state
-                    .prompts
-                    .list_prompts()
-                    .iter()
-                    .map(|p| {
-                        serde_json::json!({
-                            "name": p.name,
-                            "description": p.description,
-                            "arguments": p.arguments.iter().map(|a| {
-                                serde_json::json!({
-                                    "name": a.name,
-                                    "description": a.description,
-                                    "required": a.required
-                                })
-                            }).collect::<Vec<Value>>()
-                        })
-                    })
-                    .collect();
-                Ok(serde_json::json!({ "prompts": prompts }))
-            },
-            "prompts/get" => {
-                let params = params.ok_or((-32602, "Missing params".to_string()))?;
-                let name = params
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .ok_or((-32602, "Missing prompt name".to_string()))?;
-                let arguments = params
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or(serde_json::json!({}));
-
-                match state.prompts.get_prompt_messages(name, &arguments) {
-                    Some(messages) => {
-                        let msgs: Vec<Value> = messages
-                            .iter()
-                            .map(|m| {
-                                serde_json::json!({
-                                    "role": m.role,
-                                    "content": m.content
-                                })
-                            })
-                            .collect();
-                        Ok(serde_json::json!({ "messages": msgs }))
-                    },
-                    None => Err((-32602, format!("Unknown prompt: {name}"))),
-                }
-            },
-            "ping" => Ok(serde_json::json!({})),
-            _ => Err((-32601, format!("Method not found: {method}"))),
-        }
-    }
-}
-
-#[cfg(feature = "http")]
-pub use http_transport::{McpHttpState, handle_http_request};
 
 #[cfg(test)]
 mod tests {
@@ -1583,312 +1013,19 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_initialize() {
-        let mut server = McpServer::new();
-        let request = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#;
-        let response = server.handle_request(request);
-
-        assert!(response.contains("protocolVersion"));
-        assert!(response.contains(PROTOCOL_VERSION));
-        assert!(response.contains(SERVER_NAME));
+    fn test_tool_definition_mapping() {
+        let registry = ToolRegistry::new();
+        let tool = registry.get_tool("subcog_status").unwrap();
+        let rmcp_tool = tool_definition_to_rmcp(tool);
+        assert_eq!(rmcp_tool.name, "subcog_status");
     }
 
     #[test]
-    fn test_handle_list_tools() {
-        let mut server = McpServer::new();
-        let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
-        let response = server.handle_request(request);
-
-        assert!(response.contains("tools"));
-        assert!(response.contains("subcog_capture"));
-        assert!(response.contains("subcog_recall"));
-    }
-
-    #[test]
-    fn test_handle_list_resources() {
-        let mut server = McpServer::new();
-        let request = r#"{"jsonrpc":"2.0","id":1,"method":"resources/list"}"#;
-        let response = server.handle_request(request);
-
-        assert!(response.contains("resources"));
-        assert!(response.contains("subcog://help"));
-    }
-
-    #[test]
-    fn test_handle_list_prompts() {
-        let mut server = McpServer::new();
-        let request = r#"{"jsonrpc":"2.0","id":1,"method":"prompts/list"}"#;
-        let response = server.handle_request(request);
-
-        assert!(response.contains("prompts"));
-        assert!(response.contains("subcog_tutorial"));
-    }
-
-    #[test]
-    fn test_handle_call_tool() {
-        let mut server = McpServer::new();
-        let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"subcog_status","arguments":{}}}"#;
-        let response = server.handle_request(request);
-
-        assert!(response.contains("content"));
-        assert!(response.contains("version"));
-    }
-
-    #[test]
-    fn test_handle_read_resource() {
-        let mut server = McpServer::new();
-        let request = r#"{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"subcog://help"}}"#;
-        let response = server.handle_request(request);
-
-        assert!(response.contains("contents"));
-        assert!(response.contains("Subcog Help"));
-    }
-
-    #[test]
-    fn test_handle_get_prompt() {
-        let mut server = McpServer::new();
-        let request = r#"{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"subcog_tutorial","arguments":{"familiarity":"beginner"}}}"#;
-        let response = server.handle_request(request);
-
-        assert!(response.contains("messages"));
-    }
-
-    #[test]
-    fn test_handle_ping() {
-        let mut server = McpServer::new();
-        let request = r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#;
-        let response = server.handle_request(request);
-
-        assert!(response.contains("result"));
-    }
-
-    #[test]
-    fn test_handle_unknown_method() {
-        let mut server = McpServer::new();
-        let request = r#"{"jsonrpc":"2.0","id":1,"method":"unknown/method"}"#;
-        let response = server.handle_request(request);
-
-        assert!(response.contains("error"));
-        assert!(response.contains("-32601"));
-    }
-
-    #[test]
-    fn test_handle_parse_error() {
-        let mut server = McpServer::new();
-        let request = "not valid json";
-        let response = server.handle_request(request);
-
-        assert!(response.contains("error"));
-        assert!(response.contains("-32700"));
-    }
-
-    #[test]
-    fn test_handle_missing_params() {
-        let mut server = McpServer::new();
-        let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call"}"#;
-        let response = server.handle_request(request);
-
-        assert!(response.contains("error"));
-    }
-
-    // =========================================================================
-    // JSON-RPC 2.0 Notification Compliance Tests (Issue #46)
-    // =========================================================================
-
-    #[test]
-    fn test_is_notification_without_id() {
-        // A request without id is a notification
-        let request: JsonRpcRequest =
-            serde_json::from_str(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
-                .expect("Failed to parse notification");
-        assert!(request.is_notification());
-    }
-
-    #[test]
-    fn test_is_notification_with_id() {
-        // A request with id is NOT a notification
-        let request: JsonRpcRequest =
-            serde_json::from_str(r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#)
-                .expect("Failed to parse request");
-        assert!(!request.is_notification());
-    }
-
-    #[test]
-    fn test_is_notification_with_null_id() {
-        // Per JSON-RPC 2.0, "id": null in a request is ambiguous. The spec says
-        // notifications are requests "by the omission of the id member."
-        //
-        // In practice, serde deserializes "id": null as None for Option<Value>,
-        // treating it the same as absent. This means we treat "id": null as a
-        // notification, which is consistent with how Python MCP clients behave.
-        //
-        // This is the safer interpretation: if a client sends "id": null,
-        // we won't send back an error response that could cause parsing issues.
-        let request: JsonRpcRequest =
-            serde_json::from_str(r#"{"jsonrpc":"2.0","id":null,"method":"initialize"}"#)
-                .expect("Failed to parse request");
-        // serde treats "id": null as None, so this IS a notification
-        assert!(
-            request.is_notification(),
-            "Request with 'id': null is treated as notification (serde deserializes as None)"
-        );
-    }
-
-    #[test]
-    fn test_is_notification_with_string_id() {
-        // A request with string id is NOT a notification
-        let request: JsonRpcRequest =
-            serde_json::from_str(r#"{"jsonrpc":"2.0","id":"abc-123","method":"initialize"}"#)
-                .expect("Failed to parse request");
-        assert!(!request.is_notification());
-    }
-
-    #[test]
-    fn test_notification_returns_empty_response() {
-        // Notifications MUST NOT receive any response (returns empty string)
-        let mut server = McpServer::new();
-        let request = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
-        let response = server.handle_request(request);
-
-        assert!(
-            response.is_empty(),
-            "Notification should return empty string, got: {response}"
-        );
-    }
-
-    #[test]
-    fn test_notification_with_params_returns_empty() {
-        // Notifications with params should also return empty
-        let mut server = McpServer::new();
-        let request =
-            r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{"foo":"bar"}}"#;
-        let response = server.handle_request(request);
-
-        assert!(
-            response.is_empty(),
-            "Notification with params should return empty string, got: {response}"
-        );
-    }
-
-    #[test]
-    fn test_request_with_id_returns_response() {
-        // Regular requests (with id) should return a response
-        let mut server = McpServer::new();
-        let request = r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#;
-        let response = server.handle_request(request);
-
-        assert!(
-            !response.is_empty(),
-            "Request with id should return a response"
-        );
-        assert!(response.contains("\"id\":1"), "Response should include id");
-    }
-
-    #[test]
-    fn test_error_response_includes_id_null_for_parse_error() {
-        // Parse errors should have id: null (per JSON-RPC 2.0 spec)
-        let mut server = McpServer::new();
-        let request = "not valid json at all";
-        let response = server.handle_request(request);
-
-        assert!(response.contains("error"), "Should contain error");
-        assert!(response.contains("-32700"), "Should be parse error code");
-        assert!(
-            response.contains("\"id\":null"),
-            "Parse error response should have id: null, got: {response}"
-        );
-    }
-
-    #[test]
-    fn test_error_response_includes_original_id() {
-        // Error responses should include the original request id
-        let mut server = McpServer::new();
-        let request = r#"{"jsonrpc":"2.0","id":42,"method":"unknown/method"}"#;
-        let response = server.handle_request(request);
-
-        assert!(response.contains("error"), "Should contain error");
-        assert!(response.contains("-32601"), "Should be method not found");
-        assert!(
-            response.contains("\"id\":42"),
-            "Error response should include original id, got: {response}"
-        );
-    }
-
-    #[test]
-    fn test_error_response_includes_string_id() {
-        // Error responses should preserve string ids
-        let mut server = McpServer::new();
-        let request = r#"{"jsonrpc":"2.0","id":"req-abc","method":"unknown/method"}"#;
-        let response = server.handle_request(request);
-
-        assert!(response.contains("error"), "Should contain error");
-        assert!(
-            response.contains("\"id\":\"req-abc\""),
-            "Error response should include string id, got: {response}"
-        );
-    }
-
-    #[test]
-    fn test_format_error_always_includes_id() {
-        // format_error should always include id field
-        let server = McpServer::new();
-
-        // With None id (parse error case)
-        let response = server.format_error(None, -32700, "Parse error");
-        assert!(
-            response.contains("\"id\":null"),
-            "format_error(None) should produce id: null, got: {response}"
-        );
-
-        // With Some id
-        let response = server.format_error(Some(serde_json::json!(123)), -32600, "Invalid");
-        assert!(
-            response.contains("\"id\":123"),
-            "format_error(Some(123)) should produce id: 123, got: {response}"
-        );
-    }
-
-    #[test]
-    fn test_extract_request_id_with_integer() {
-        let json = r#"{"jsonrpc":"2.0","id":42,"method":"test"}"#;
-        let id = extract_request_id(json);
-        assert_eq!(id, Some(serde_json::json!(42)));
-    }
-
-    #[test]
-    fn test_extract_request_id_with_string() {
-        let json = r#"{"jsonrpc":"2.0","id":"req-abc-123","method":"test"}"#;
-        let id = extract_request_id(json);
-        assert_eq!(id, Some(serde_json::json!("req-abc-123")));
-    }
-
-    #[test]
-    fn test_extract_request_id_notification_no_id() {
-        // Notifications don't have an id field
-        let json = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
-        let id = extract_request_id(json);
-        assert_eq!(id, None, "Notifications should return None");
-    }
-
-    #[test]
-    fn test_extract_request_id_with_null_id() {
-        // "id": null is technically valid but treated as notification
-        let json = r#"{"jsonrpc":"2.0","id":null,"method":"test"}"#;
-        let id = extract_request_id(json);
-        assert_eq!(id, None, "id: null should be treated as notification");
-    }
-
-    #[test]
-    fn test_extract_request_id_invalid_json() {
-        let json = "not valid json at all";
-        let id = extract_request_id(json);
-        assert_eq!(id, None, "Invalid JSON should return None");
-    }
-
-    #[test]
-    fn test_extract_request_id_empty_string() {
-        let id = extract_request_id("");
-        assert_eq!(id, None, "Empty string should return None");
+    fn test_prompt_mapping() {
+        let registry = PromptRegistry::new();
+        let prompt = registry.get_prompt("subcog_tutorial").unwrap();
+        let rmcp_prompt = prompt_definition_to_rmcp(prompt);
+        assert_eq!(rmcp_prompt.name, "subcog_tutorial");
     }
 }
 

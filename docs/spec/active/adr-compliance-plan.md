@@ -30,7 +30,7 @@ Tasks:
 
 Tasks:
 - [x] Audit current MCP server entry points and notification handling behavior. ✓
-- [ ] Add rmcp dependency and implement server wiring to replace custom JSON-RPC.
+- [x] Add rmcp dependency and implement server wiring to replace custom JSON-RPC. ✓
 - [ ] Map existing MCP handlers to rmcp interfaces; ensure notification responses are suppressed.
 - [ ] Update error handling to rmcp error model.
 - [ ] Update tests/fixtures for MCP protocol compatibility.
