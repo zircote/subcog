@@ -21,7 +21,7 @@ This directory contains all Architecture Decision Records for the Subcog project
 
 | Category | Total | Compliant | Issues |
 |----------|-------|-----------|--------|
-| Architecture | 22 | 19 | 3 |
+| Architecture | 22 | 22 | 0 |
 | Storage | 12 | 11 | 1 |
 | Search | 7 | 7 | 0 |
 | AI/ML | 3 | 3 | 0 |
@@ -39,7 +39,7 @@ This directory contains all Architecture Decision Records for the Subcog project
 
 ## Complete ADR Inventory
 
-### ✅ Compliant ADRs (49)
+### ✅ Compliant ADRs (52)
 
 | # | Title | Category | Status | Health |
 |---|-------|----------|--------|--------|
@@ -88,27 +88,27 @@ This directory contains all Architecture Decision Records for the Subcog project
 | 0048 | Consolidate to User-Level Storage with Faceting | storage | published | ✅ COMPLIANT |
 | 0049 | Inline Facet Columns (Denormalized) | storage | published | ✅ COMPLIANT |
 | 0050 | Fresh Start - No Migration of Legacy Data | migration | published | ✅ COMPLIANT |
+| 0051 | Feature-Gate Org-Scope Implementation | architecture | published | ✅ COMPLIANT |
+| 0052 | Lazy Branch Garbage Collection | architecture | published | ✅ COMPLIANT |
+| 0053 | Tombstone Pattern for Soft Deletes | architecture | published | ✅ COMPLIANT |
 | 0054 | Notification Detection via id Field Absence | integration | published | ✅ COMPLIANT |
 | 0055 | Empty String Return for Notification Responses | integration | published | ✅ COMPLIANT |
 | 0056 | Always Include id in Error Responses | integration | published | ✅ COMPLIANT |
 | 0057 | HTTP Transport Returns 204 for Notifications | integration | published | ✅ COMPLIANT |
 | 0058 | Debug-Level Logging for Notifications | observability | published | ✅ COMPLIANT |
 
-### ⚠️ Partial/Superseded ADRs (3)
+### ⚠️ Partial/Superseded ADRs (2)
 
 | # | Title | Category | Status | Health | Notes |
 |---|-------|----------|--------|--------|-------|
 | 0034 | Three-Layer Storage Synchronization Strategy | storage | published | ⚠️ PARTIAL | Superseded by ADR-0047 (Remove Git-Notes). Historical reference only. |
 | 0039 | Backward Compatibility with Existing Memories | storage | published | ⚠️ PARTIAL | Superseded by ADR-0050 (Fresh Start). No migration needed. |
-| 0052 | Lazy Branch Garbage Collection | architecture | published | ⚠️ PARTIAL | Implemented but depends on ADR-0053 which has gaps. |
 
-### ❌ Non-Compliant ADRs (3)
+### ❌ Non-Compliant ADRs (1)
 
 | # | Title | Category | Status | Health | Severity | Issue |
 |---|-------|----------|--------|--------|----------|-------|
 | 0009 | rmcp for MCP Server Implementation | integration | published | ❌ NON-COMPLIANT | MEDIUM | Custom JSON-RPC 2.0 implementation used instead of rmcp crate. Deliberate architectural choice for better spec compliance. |
-| 0051 | Feature-Gate Org-Scope Implementation | architecture | published | ❌ NON-COMPLIANT | HIGH | `org_scope_enabled` flag missing from FeatureFlags struct. Org-scope cannot be toggled. |
-| 0053 | Tombstone Pattern for Soft Deletes | architecture | published | ❌ CRITICAL | CRITICAL | `Tombstoned` variant missing from MemoryStatus enum. `tombstoned_at` field missing from Memory struct. Code references these extensively but they don't exist. |
 
 ### 🔄 Deprecated ADRs (1)
 
@@ -126,47 +126,7 @@ This directory contains all Architecture Decision Records for the Subcog project
 
 ## Critical Issues Requiring Immediate Attention
 
-### 1. **CRITICAL: Tombstone Pattern (ADR-0053) - Data Model Gap**
-
-**Severity:** 🔴 CRITICAL
-**Impact:** Soft-delete functionality broken, lazy GC (ADR-0052) blocked
-
-**Issue:**
-- Code extensively references `MemoryStatus::Tombstoned` variant and `memory.tombstoned_at` field
-- Neither exists in actual data model definitions
-- Located in:
-  - `src/models/domain.rs`: MemoryStatus enum only has Active, Archived, Superseded, Pending, Deleted
-  - `src/models/memory.rs`: Memory struct lacks `tombstoned_at: Option<DateTime<Utc>>` field
-- Referenced in:
-  - `src/gc/branch.rs` lines 469, 553-571 (sets tombstoned_at, checks status)
-
-**Remediation:**
-1. Add `Tombstoned` variant to MemoryStatus enum in `src/models/domain.rs`
-2. Add `pub tombstoned_at: Option<DateTime<Utc>>` to Memory struct in `src/models/memory.rs`
-3. Update SQLite schema migration to add `tombstoned_at` column
-4. Verify lazy GC tests pass after fix
-
----
-
-### 2. **HIGH: Org-Scope Feature Gate Missing (ADR-0051)**
-
-**Severity:** 🟠 HIGH
-**Impact:** Cannot toggle org-scope at runtime per architecture design
-
-**Issue:**
-- ADR specifies `pub org_scope_enabled: bool` in FeatureFlags
-- Field never added to `src/config/features.rs`
-- Org-scope architecture included but cannot be disabled
-
-**Remediation:**
-1. Add `pub org_scope_enabled: bool` to FeatureFlags struct
-2. Default to `false` per ADR specification
-3. Wire up to org-scope initialization logic
-4. Add environment variable `SUBCOG_ORG_SCOPE_ENABLED` support
-
----
-
-### 3. **MEDIUM: MCP Server Implementation Deviation (ADR-0009)**
+### 1. **MEDIUM: MCP Server Implementation Deviation (ADR-0009)**
 
 **Severity:** 🟡 MEDIUM
 **Impact:** None (working as intended with better spec compliance)
