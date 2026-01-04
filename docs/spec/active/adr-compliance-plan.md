@@ -29,7 +29,7 @@ Tasks:
 **Outcome:** MCP server uses rmcp and conforms to the ADR.
 
 Tasks:
-- [ ] Audit current MCP server entry points and notification handling behavior.
+- [x] Audit current MCP server entry points and notification handling behavior. ✓
 - [ ] Add rmcp dependency and implement server wiring to replace custom JSON-RPC.
 - [ ] Map existing MCP handlers to rmcp interfaces; ensure notification responses are suppressed.
 - [ ] Update error handling to rmcp error model.
