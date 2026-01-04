@@ -1,10 +1,29 @@
 //! Session start hook handler.
+//!
+//! # Security
+//!
+//! This module validates session IDs for sufficient entropy to prevent:
+//! - Predictable session attacks
+//! - Session enumeration attacks
+//! - Weak identifier exploitation
 
 use super::HookHandler;
 use crate::Result;
 use crate::services::{ContextBuilderService, MemoryStatistics};
 use std::time::Instant;
 use tracing::instrument;
+
+/// Minimum length for session IDs (security requirement).
+const MIN_SESSION_ID_LENGTH: usize = 16;
+
+/// Maximum length for session IDs (denial of service prevention).
+const MAX_SESSION_ID_LENGTH: usize = 256;
+
+/// Minimum number of unique characters required for entropy.
+const MIN_UNIQUE_CHARS: usize = 4;
+
+/// Minimum consecutive sequential characters to flag as low entropy.
+const MIN_SEQUENTIAL_RUN: usize = 8;
 
 /// Handles `SessionStart` hook events.
 ///
@@ -28,6 +47,159 @@ pub enum GuidanceLevel {
     Standard,
     /// Detailed context - full context with examples.
     Detailed,
+}
+
+/// Result of session ID validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionIdValidation {
+    /// Session ID is valid with sufficient entropy.
+    Valid,
+    /// Session ID is too short (< 16 characters).
+    TooShort,
+    /// Session ID is too long (> 256 characters).
+    TooLong,
+    /// Session ID has low entropy (predictable patterns).
+    LowEntropy,
+    /// Session ID is missing or empty.
+    Missing,
+}
+
+impl SessionIdValidation {
+    /// Returns a human-readable description of the validation result.
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::Valid => "valid",
+            Self::TooShort => "too short (minimum 16 characters)",
+            Self::TooLong => "too long (maximum 256 characters)",
+            Self::LowEntropy => "low entropy (predictable pattern detected)",
+            Self::Missing => "missing or empty",
+        }
+    }
+}
+
+/// Validates a session ID for sufficient entropy.
+///
+/// # Security
+///
+/// This function checks session IDs for:
+/// - Minimum length (16 characters) to prevent enumeration
+/// - Maximum length (256 characters) to prevent `DoS`
+/// - Sufficient unique characters to prevent predictable patterns
+/// - Detection of repeating/sequential patterns
+///
+/// # Returns
+///
+/// A `SessionIdValidation` enum indicating the validation result.
+pub fn validate_session_id(session_id: &str) -> SessionIdValidation {
+    // Check for missing/empty
+    if session_id.is_empty() || session_id == "unknown" {
+        return SessionIdValidation::Missing;
+    }
+
+    // Check minimum length
+    if session_id.len() < MIN_SESSION_ID_LENGTH {
+        return SessionIdValidation::TooShort;
+    }
+
+    // Check maximum length (DoS prevention)
+    if session_id.len() > MAX_SESSION_ID_LENGTH {
+        return SessionIdValidation::TooLong;
+    }
+
+    // Check for low entropy
+    if has_low_entropy(session_id) {
+        return SessionIdValidation::LowEntropy;
+    }
+
+    SessionIdValidation::Valid
+}
+
+/// Checks if a session ID has low entropy (predictable patterns).
+fn has_low_entropy(session_id: &str) -> bool {
+    // Count unique characters
+    let unique_chars: std::collections::HashSet<char> = session_id.chars().collect();
+    if unique_chars.len() < MIN_UNIQUE_CHARS {
+        return true;
+    }
+
+    // Check for repeating patterns (e.g., "abcabcabc" or "111111111")
+    let chars: Vec<char> = session_id.chars().collect();
+
+    // Check for all same character
+    if chars.iter().all(|&c| c == chars[0]) {
+        return true;
+    }
+
+    // Check for simple repeating pattern (pattern length 1-4)
+    for pattern_len in 1..=4 {
+        if chars.len() >= pattern_len * 3 {
+            let pattern = &chars[..pattern_len];
+            let is_repeating = chars
+                .chunks(pattern_len)
+                .all(|chunk| chunk == pattern || chunk.len() < pattern_len);
+            if is_repeating {
+                return true;
+            }
+        }
+    }
+
+    // Check for long sequential patterns (e.g., "12345678" or "abcdefgh")
+    // Only flag if there's a consecutive run of MIN_SEQUENTIAL_RUN or more
+    if has_long_sequential_run(session_id) {
+        return true;
+    }
+
+    false
+}
+
+/// Checks if a string contains a long consecutive sequential run.
+///
+/// This detects patterns like "12345678" or "abcdefgh" by looking for
+/// consecutive runs of characters where each differs from the previous by +1 or -1.
+/// Random-looking IDs (like UUIDs) may have scattered sequential pairs but not long runs.
+fn has_long_sequential_run(s: &str) -> bool {
+    if s.len() < MIN_SEQUENTIAL_RUN {
+        return false;
+    }
+
+    // Only check alphanumeric characters for sequences
+    let chars: Vec<i32> = s
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c as i32)
+        .collect();
+
+    if chars.len() < MIN_SEQUENTIAL_RUN {
+        return false;
+    }
+
+    // Check for consecutive ascending runs
+    let mut ascending_run = 1;
+    for window in chars.windows(2) {
+        if window[1] == window[0] + 1 {
+            ascending_run += 1;
+            if ascending_run >= MIN_SEQUENTIAL_RUN {
+                return true;
+            }
+        } else {
+            ascending_run = 1;
+        }
+    }
+
+    // Check for consecutive descending runs
+    let mut descending_run = 1;
+    for window in chars.windows(2) {
+        if window[0] == window[1] + 1 {
+            descending_run += 1;
+            if descending_run >= MIN_SEQUENTIAL_RUN {
+                return true;
+            }
+        } else {
+            descending_run = 1;
+        }
+    }
+
+    false
 }
 
 /// Context prepared for a session.
@@ -178,7 +350,7 @@ impl SessionStartHandler {
 
     /// Returns standard guidance text.
     fn standard_guidance() -> String {
-        r#"## ⚠️ MANDATORY SUBCOG PROTOCOL - EXECUTE IMMEDIATELY ⚠️
+        r#"## MANDATORY SUBCOG PROTOCOL - EXECUTE IMMEDIATELY
 
 **THIS IS NOT OPTIONAL. FAILURE TO COMPLY BREAKS THE USER'S WORKFLOW.**
 
@@ -186,7 +358,7 @@ You MUST use subcog memory tools. They are available with prefix `mcp__plugin_su
 
 ---
 
-## 🔴 RULE 1: RECALL FIRST - EVERY SINGLE TIME
+## RULE 1: RECALL FIRST - EVERY SINGLE TIME
 
 **BEFORE you write ANY response, you MUST call:**
 ```
@@ -195,16 +367,16 @@ mcp__plugin_subcog_subcog__subcog_recall
 
 **NO EXCEPTIONS.** Search for context related to the user's question FIRST.
 
-- Starting a task? → RECALL FIRST
-- Answering a question? → RECALL FIRST
-- Making a recommendation? → RECALL FIRST
-- Debugging an issue? → RECALL FIRST
+- Starting a task? -> RECALL FIRST
+- Answering a question? -> RECALL FIRST
+- Making a recommendation? -> RECALL FIRST
+- Debugging an issue? -> RECALL FIRST
 
 **DO NOT SKIP THIS STEP. DO NOT ASK PERMISSION. JUST DO IT.**
 
 ---
 
-## 🔴 RULE 2: CAPTURE IMMEDIATELY - NO HESITATION
+## RULE 2: CAPTURE IMMEDIATELY - NO HESITATION
 
 **The INSTANT you detect any of these signals, CALL `mcp__plugin_subcog_subcog__subcog_capture`:**
 
@@ -216,16 +388,16 @@ mcp__plugin_subcog_subcog__subcog_recall
 | Bug fixed | `blockers` | "Fixed by", "The issue was", workarounds |
 | Tech debt noted | `tech-debt` | "TODO", "FIXME", "We should refactor" |
 
-**⚠️ DO NOT ASK "Should I save this?" - THE ANSWER IS ALWAYS YES.**
-**⚠️ DO NOT WAIT - CAPTURE THE MOMENT YOU DETECT THE SIGNAL.**
+**DO NOT ASK "Should I save this?" - THE ANSWER IS ALWAYS YES.**
+**DO NOT WAIT - CAPTURE THE MOMENT YOU DETECT THE SIGNAL.**
 
 ---
 
-## 🔴 RULE 3: CONFIRM EVERY CAPTURE
+## RULE 3: CONFIRM EVERY CAPTURE
 
 After EVERY capture, print this confirmation:
 ```
-📝 Memory captured: subcog://{domain}/{namespace}/{id}
+Memory captured: subcog://{domain}/{namespace}/{id}
    Namespace: {namespace}
    Content: "{preview}"
    [To remove: subcog_delete {id} | To edit: subcog_enrich {id}]
@@ -244,13 +416,13 @@ After EVERY capture, print this confirmation:
 
 ---
 
-**🚨 REMEMBER: You are REQUIRED to use these tools. This is not a suggestion. The user depends on this memory system to maintain context across sessions. Your compliance is mandatory.**"#
+**REMEMBER: You are REQUIRED to use these tools. This is not a suggestion. The user depends on this memory system to maintain context across sessions. Your compliance is mandatory.**"#
             .to_string()
     }
 
     /// Returns detailed guidance text.
     fn detailed_guidance() -> String {
-        r#"# 🚨 CRITICAL: SUBCOG MEMORY PROTOCOL 🚨
+        r#"# CRITICAL: SUBCOG MEMORY PROTOCOL
 
 **STOP. READ THIS ENTIRE SECTION. YOUR COMPLIANCE IS MANDATORY.**
 
@@ -258,7 +430,7 @@ The user's productivity depends on you following these rules. Failure to comply 
 
 ---
 
-## ⛔ NON-NEGOTIABLE RULES ⛔
+## NON-NEGOTIABLE RULES
 
 ### RULE 1: RECALL BEFORE EVERY RESPONSE
 
@@ -267,8 +439,8 @@ The user's productivity depends on you following these rules. Failure to comply 
 This is not optional. This is not a suggestion. This is a requirement.
 
 ```
-CORRECT: User asks question → Call subcog_recall → Read results → Respond
-WRONG:   User asks question → Respond immediately without checking memory
+CORRECT: User asks question -> Call subcog_recall -> Read results -> Respond
+WRONG:   User asks question -> Respond immediately without checking memory
 ```
 
 **WHY**: You have no memory between sessions. The user told you things yesterday that you've forgotten. Subcog remembers. CHECK IT.
@@ -277,8 +449,8 @@ WRONG:   User asks question → Respond immediately without checking memory
 
 **The INSTANT you detect ANY of these signals, you MUST call `mcp__plugin_subcog_subcog__subcog_capture`:**
 
-| 🎯 Signal Detected | 📁 Namespace | ⚡ Action |
-|-------------------|--------------|----------|
+| Signal Detected | Namespace | Action |
+|-----------------|-----------|--------|
 | "We'll use...", "Let's go with...", "I decided..." | `decisions` | CAPTURE NOW |
 | "The pattern is...", "Always do...", "Convention..." | `patterns` | CAPTURE NOW |
 | "TIL...", "Turns out...", "I discovered...", "Gotcha..." | `learnings` | CAPTURE NOW |
@@ -288,13 +460,13 @@ WRONG:   User asks question → Respond immediately without checking memory
 | Security vulnerabilities, auth patterns, fixes | `security` | CAPTURE NOW |
 | Performance insights, optimizations, benchmarks | `performance` | CAPTURE NOW |
 
-**⚠️ NEVER ask "Should I save this?" - Asking is a FAILURE. Just capture it.**
+**NEVER ask "Should I save this?" - Asking is a FAILURE. Just capture it.**
 
 ### RULE 3: CONFIRM EVERY CAPTURE TO THE USER
 
 After EVERY successful capture, you MUST display:
 ```
-📝 Memory captured: subcog://{domain}/{namespace}/{id}
+Memory captured: subcog://{domain}/{namespace}/{id}
    Namespace: {namespace}
    Content: "{first 100 chars of content}..."
    [To remove: subcog_delete {id} | To edit: subcog_enrich {id}]
@@ -304,7 +476,7 @@ This lets the user verify, correct, or remove incorrect captures.
 
 ---
 
-## 🔧 TOOL REFERENCE
+## TOOL REFERENCE
 
 | Tool | When to Use |
 |------|-------------|
@@ -318,7 +490,7 @@ This lets the user verify, correct, or remove incorrect captures.
 
 ---
 
-## 📋 NAMESPACE DEFINITIONS
+## NAMESPACE DEFINITIONS
 
 | Namespace | Use For |
 |-----------|---------|
@@ -336,7 +508,7 @@ This lets the user verify, correct, or remove incorrect captures.
 
 ---
 
-## 🔄 SEARCH MODES
+## SEARCH MODES
 
 | Mode | Description |
 |------|-------------|
@@ -346,7 +518,7 @@ This lets the user verify, correct, or remove incorrect captures.
 
 ---
 
-## ❌ WHAT NOT TO DO
+## WHAT NOT TO DO
 
 1. **DON'T** respond to questions without first calling `subcog_recall`
 2. **DON'T** ask "Should I save this?" - Just save it
@@ -356,7 +528,7 @@ This lets the user verify, correct, or remove incorrect captures.
 
 ---
 
-## ✅ CORRECT WORKFLOW EXAMPLE
+## CORRECT WORKFLOW EXAMPLE
 
 ```
 User: "How should we implement authentication?"
@@ -370,7 +542,7 @@ Your response:
 
 ---
 
-**🚨 FINAL WARNING: This protocol is MANDATORY. The user trusts you to maintain their knowledge base. Every time you skip a recall, you risk giving advice that contradicts prior decisions. Every time you skip a capture, you lose valuable knowledge forever.**"#
+**FINAL WARNING: This protocol is MANDATORY. The user trusts you to maintain their knowledge base. Every time you skip a recall, you risk giving advice that contradicts prior decisions. Every time you skip a capture, you lose valuable knowledge forever.**"#
             .to_string()
     }
 
@@ -425,6 +597,21 @@ impl HookHandler for SessionStartHandler {
             let span = tracing::Span::current();
             span.record("session_id", session_id);
             span.record("cwd", cwd);
+
+            // MED-SEC-003: Validate session ID entropy
+            let validation = validate_session_id(session_id);
+            if validation != SessionIdValidation::Valid {
+                tracing::warn!(
+                    session_id = session_id,
+                    validation = validation.description(),
+                    "Session ID validation warning"
+                );
+                metrics::counter!(
+                    "session_id_validation_warnings_total",
+                    "reason" => validation.description()
+                )
+                .increment(1);
+            }
 
             // Build session context
             let session_context = self.build_session_context(session_id, cwd)?;
@@ -534,7 +721,7 @@ mod tests {
     fn test_handle_basic() {
         let handler = SessionStartHandler::default();
 
-        let input = r#"{"session_id": "test-session-123", "cwd": "/path/to/project"}"#;
+        let input = r#"{"session_id": "test-session-abc123def456", "cwd": "/path/to/project"}"#;
 
         let result = handler.handle(input);
         assert!(result.is_ok());
@@ -553,7 +740,7 @@ mod tests {
             .as_str()
             .unwrap();
         assert!(context.contains("Subcog Memory Context"));
-        assert!(context.contains("test-session-123"));
+        assert!(context.contains("test-session-abc123def456"));
         assert!(context.contains("subcog-metadata"));
     }
 
@@ -610,5 +797,138 @@ mod tests {
         assert!(result.is_ok());
         let context = result.unwrap();
         assert!(context.content.contains("test-session"));
+    }
+
+    // ==========================================================================
+    // MED-SEC-003: Session ID Entropy Validation Tests
+    // ==========================================================================
+
+    #[test]
+    fn test_session_id_validation_valid() {
+        // Valid session IDs with good entropy
+        assert_eq!(
+            validate_session_id("abc123def456ghi789"),
+            SessionIdValidation::Valid
+        );
+        // UUID format - should be valid (scattered pairs, no long runs)
+        assert_eq!(
+            validate_session_id("f0504ebb-ca72-4d1a-8b7c-53fc85a1a8ba"),
+            SessionIdValidation::Valid
+        );
+        assert_eq!(
+            validate_session_id("session_2024_01_03_xyz"),
+            SessionIdValidation::Valid
+        );
+    }
+
+    #[test]
+    fn test_session_id_validation_missing() {
+        assert_eq!(validate_session_id(""), SessionIdValidation::Missing);
+        assert_eq!(validate_session_id("unknown"), SessionIdValidation::Missing);
+    }
+
+    #[test]
+    fn test_session_id_validation_too_short() {
+        assert_eq!(validate_session_id("short"), SessionIdValidation::TooShort);
+        assert_eq!(
+            validate_session_id("123456789012345"),
+            SessionIdValidation::TooShort
+        );
+    }
+
+    #[test]
+    fn test_session_id_validation_too_long() {
+        let long_id = "x".repeat(257);
+        assert_eq!(validate_session_id(&long_id), SessionIdValidation::TooLong);
+    }
+
+    #[test]
+    fn test_session_id_validation_low_entropy() {
+        // All same character
+        assert_eq!(
+            validate_session_id("aaaaaaaaaaaaaaaaaaaaaaaaa"),
+            SessionIdValidation::LowEntropy
+        );
+
+        // Simple repeating pattern
+        assert_eq!(
+            validate_session_id("abababababababababab"),
+            SessionIdValidation::LowEntropy
+        );
+
+        // Long sequential pattern (8+ consecutive ascending)
+        assert_eq!(
+            validate_session_id("abcdefghijklmnop"),
+            SessionIdValidation::LowEntropy
+        );
+    }
+
+    #[test]
+    fn test_session_id_validation_description() {
+        assert_eq!(SessionIdValidation::Valid.description(), "valid");
+        assert!(
+            SessionIdValidation::TooShort
+                .description()
+                .contains("minimum")
+        );
+        assert!(
+            SessionIdValidation::TooLong
+                .description()
+                .contains("maximum")
+        );
+        assert!(
+            SessionIdValidation::LowEntropy
+                .description()
+                .contains("entropy")
+        );
+        assert!(
+            SessionIdValidation::Missing
+                .description()
+                .contains("missing")
+        );
+    }
+
+    #[test]
+    fn test_has_low_entropy_few_unique_chars() {
+        assert!(has_low_entropy("aaa")); // Only 1 unique char
+        assert!(has_low_entropy("aabb")); // Only 2 unique chars
+        assert!(has_low_entropy("aaabbbccc")); // Only 3 unique chars
+    }
+
+    #[test]
+    fn test_has_long_sequential_run_ascending() {
+        // 8+ consecutive ascending is flagged
+        assert!(has_long_sequential_run("abcdefgh"));
+        assert!(has_long_sequential_run("12345678"));
+        assert!(has_long_sequential_run("abcdefghijklmnop"));
+    }
+
+    #[test]
+    fn test_has_long_sequential_run_descending() {
+        // 8+ consecutive descending is flagged
+        assert!(has_long_sequential_run("hgfedcba"));
+        assert!(has_long_sequential_run("87654321"));
+    }
+
+    #[test]
+    fn test_has_long_sequential_run_non_sequential() {
+        // Random-looking IDs should NOT be flagged
+        assert!(!has_long_sequential_run("axbyczdwev"));
+        assert!(!has_long_sequential_run("8372619450"));
+        // UUIDs should NOT be flagged (scattered sequential pairs, no long runs)
+        assert!(!has_long_sequential_run(
+            "f0504ebb-ca72-4d1a-8b7c-53fc85a1a8ba"
+        ));
+        assert!(!has_long_sequential_run(
+            "550e8400-e29b-41d4-a716-446655440000"
+        ));
+    }
+
+    #[test]
+    fn test_has_long_sequential_run_short_sequences_ok() {
+        // Short sequential runs (< 8) are acceptable
+        assert!(!has_long_sequential_run("abc123xyz")); // "abc" is only 3
+        assert!(!has_long_sequential_run("1234abc5678")); // "1234" is only 4, "5678" is only 4
+        assert!(!has_long_sequential_run("abcdefg")); // Only 7, needs 8+
     }
 }

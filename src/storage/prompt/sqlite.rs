@@ -106,12 +106,20 @@ impl SqlitePromptStorage {
         &self.db_path
     }
 
-    /// Initializes the database schema.
+    /// Initializes the database schema and configures pragmas.
     fn initialize(&self) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
             operation: "lock_prompt_db".to_string(),
             cause: e.to_string(),
         })?;
+
+        // Configure SQLite pragmas for performance and reliability
+        // WAL mode: better concurrent read performance
+        // synchronous=NORMAL: good balance of safety vs performance
+        // busy_timeout: wait up to 5 seconds if database is locked
+        let _ = conn.pragma_update(None, "journal_mode", "WAL");
+        let _ = conn.pragma_update(None, "synchronous", "NORMAL");
+        let _ = conn.pragma_update(None, "busy_timeout", "5000");
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS prompts (
@@ -152,6 +160,76 @@ impl SqlitePromptStorage {
             cause: e.to_string(),
         })
     }
+
+    /// Runs database maintenance (VACUUM and ANALYZE).
+    ///
+    /// Call this periodically (e.g., on status command or admin trigger) to:
+    /// - VACUUM: Reclaim space from deleted rows and defragment
+    /// - ANALYZE: Update query planner statistics for optimal performance
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if maintenance commands fail.
+    pub fn vacuum_and_analyze(&self) -> Result<()> {
+        let conn = self.lock_conn()?;
+
+        // VACUUM must run outside a transaction
+        conn.execute("VACUUM", [])
+            .map_err(|e| Error::OperationFailed {
+                operation: "prompt_db_vacuum".to_string(),
+                cause: e.to_string(),
+            })?;
+
+        conn.execute("ANALYZE", [])
+            .map_err(|e| Error::OperationFailed {
+                operation: "prompt_db_analyze".to_string(),
+                cause: e.to_string(),
+            })?;
+
+        Ok(())
+    }
+
+    /// Returns database statistics for monitoring.
+    ///
+    /// Useful for admin/status commands to show database health.
+    #[must_use]
+    pub fn stats(&self) -> Option<PromptDbStats> {
+        let conn = self.lock_conn().ok()?;
+
+        let prompt_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM prompts", [], |row| row.get(0))
+            .unwrap_or(0);
+
+        let page_count: i64 = conn
+            .pragma_query_value(None, "page_count", |row| row.get(0))
+            .unwrap_or(0);
+
+        let page_size: i64 = conn
+            .pragma_query_value(None, "page_size", |row| row.get(0))
+            .unwrap_or(4096);
+
+        let freelist_count: i64 = conn
+            .pragma_query_value(None, "freelist_count", |row| row.get(0))
+            .unwrap_or(0);
+
+        // Safe casts: counts and sizes are always non-negative from SQLite
+        Some(PromptDbStats {
+            prompt_count: u64::try_from(prompt_count).unwrap_or(0),
+            db_size_bytes: u64::try_from(page_count.saturating_mul(page_size)).unwrap_or(0),
+            freelist_pages: u64::try_from(freelist_count).unwrap_or(0),
+        })
+    }
+}
+
+/// Database statistics for prompt storage.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PromptDbStats {
+    /// Number of prompts stored.
+    pub prompt_count: u64,
+    /// Total database size in bytes.
+    pub db_size_bytes: u64,
+    /// Number of freelist pages (reclaimable with VACUUM).
+    pub freelist_pages: u64,
 }
 
 impl PromptStorage for SqlitePromptStorage {
@@ -523,5 +601,44 @@ mod tests {
             assert!(p.to_string_lossy().contains("subcog"));
             assert!(p.to_string_lossy().ends_with("memories.db"));
         }
+    }
+
+    #[test]
+    fn test_vacuum_and_analyze() {
+        let storage = SqlitePromptStorage::in_memory().unwrap();
+
+        // Add and delete some prompts to create fragmentation
+        for i in 0..10 {
+            storage
+                .save(&PromptTemplate::new(format!("temp-{i}"), "Content"))
+                .unwrap();
+        }
+        for i in 0..10 {
+            storage.delete(&format!("temp-{i}")).unwrap();
+        }
+
+        // VACUUM and ANALYZE should succeed
+        assert!(storage.vacuum_and_analyze().is_ok());
+    }
+
+    #[test]
+    fn test_stats() {
+        let storage = SqlitePromptStorage::in_memory().unwrap();
+
+        // Initially empty
+        let stats = storage.stats().unwrap();
+        assert_eq!(stats.prompt_count, 0);
+
+        // Add some prompts
+        storage
+            .save(&PromptTemplate::new("stats-test-1", "Content 1"))
+            .unwrap();
+        storage
+            .save(&PromptTemplate::new("stats-test-2", "Content 2"))
+            .unwrap();
+
+        let stats = storage.stats().unwrap();
+        assert_eq!(stats.prompt_count, 2);
+        assert!(stats.db_size_bytes > 0);
     }
 }

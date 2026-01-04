@@ -66,7 +66,7 @@ mod implementation {
         ///
         /// Returns an error if a migration fails.
         pub async fn run(&self, migrations: &[Migration]) -> Result<()> {
-            let client = self.pool.get().await.map_err(|e| Error::OperationFailed {
+            let mut client = self.pool.get().await.map_err(|e| Error::OperationFailed {
                 operation: "migration_get_connection".to_string(),
                 cause: e.to_string(),
             })?;
@@ -80,7 +80,7 @@ mod implementation {
             // Apply pending migrations
             for migration in migrations {
                 if migration.version > current_version {
-                    self.apply_migration(&client, migration).await?;
+                    self.apply_migration(&mut client, migration).await?;
                 }
             }
 
@@ -175,10 +175,17 @@ mod implementation {
             Ok(version)
         }
 
-        /// Applies a single migration.
+        /// Applies a single migration within a transaction.
+        ///
+        /// # Transaction Safety (CRIT-001)
+        ///
+        /// All migration statements and the version record are executed within
+        /// a single transaction. If any statement fails, the entire migration
+        /// is rolled back, preventing partial schema updates that could leave
+        /// the database in an inconsistent state.
         async fn apply_migration(
             &self,
-            client: &deadpool_postgres::Object,
+            client: &mut deadpool_postgres::Object,
             migration: &Migration,
         ) -> Result<()> {
             let migrations_table = self.migrations_table_name();
@@ -186,15 +193,23 @@ mod implementation {
             // Replace {table} placeholder with actual table name
             let sql = migration.sql.replace("{table}", &self.table_name);
 
-            // Split by semicolons and execute each statement
+            // Start transaction for atomic migration application
+            let tx = client
+                .transaction()
+                .await
+                .map_err(|e| Error::OperationFailed {
+                    operation: format!("migration_v{}_begin_tx", migration.version),
+                    cause: e.to_string(),
+                })?;
+
+            // Execute all statements within the transaction
             for statement in sql.split(';') {
                 let statement = statement.trim();
                 if statement.is_empty() {
                     continue;
                 }
 
-                client
-                    .execute(statement, &[])
+                tx.execute(statement, &[])
                     .await
                     .map_err(|e| Error::OperationFailed {
                         operation: format!(
@@ -205,17 +220,22 @@ mod implementation {
                     })?;
             }
 
-            // Record the migration
+            // Record the migration within the same transaction
             let record_sql =
                 format!("INSERT INTO {migrations_table} (version, description) VALUES ($1, $2)");
 
-            client
-                .execute(&record_sql, &[&migration.version, &migration.description])
+            tx.execute(&record_sql, &[&migration.version, &migration.description])
                 .await
                 .map_err(|e| Error::OperationFailed {
                     operation: "record_migration".to_string(),
                     cause: e.to_string(),
                 })?;
+
+            // Commit the transaction - all statements succeed or none do
+            tx.commit().await.map_err(|e| Error::OperationFailed {
+                operation: format!("migration_v{}_commit", migration.version),
+                cause: e.to_string(),
+            })?;
 
             tracing::info!(
                 version = migration.version,

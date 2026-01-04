@@ -35,7 +35,7 @@ Security training and awareness for subcog users.
 - Set up alerts for failures
 
 #### Backup
-- Regular backups of git notes
+- Regular backups of SQLite database
 - Test recovery procedures
 - Document restore process
 

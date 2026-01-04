@@ -21,8 +21,9 @@ subcog delete --id <memory_id>
 ```
 
 Technical implementation:
-- `PersistenceBackend::delete()` - removes from git notes
+- `PersistenceBackend::delete()` - removes from SQLite database
 - `IndexBackend::remove()` - removes from search index
+- `VectorBackend::delete()` - removes from vector index
 - Audit log entry created for compliance
 
 ### Right to Access (Article 15)
@@ -33,8 +34,24 @@ subcog recall --namespace all --limit 1000 --format json
 
 ## Implementation Notes
 - Audit log rotation: configure in `AuditConfig`
-- Git notes: consider periodic gc for orphaned notes
-- Search index: rebuilds from git notes (source of truth)
+- SQLite database: use `subcog gc --purge` for permanent deletion
+- Search index: rebuilds from SQLite (source of truth)
+- Tombstoned memories: retained for sync, purged after retention period
+
+## Garbage Collection
+
+Memories from deleted branches are tombstoned (soft deleted):
+
+```bash
+# Preview stale branch cleanup
+subcog gc --dry-run
+
+# Tombstone memories from deleted branches
+subcog gc
+
+# Permanently delete old tombstoned memories
+subcog gc --purge --older-than 30d
+```
 
 ## Exceptions
 - Legal hold: preserve data under litigation

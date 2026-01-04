@@ -69,9 +69,57 @@ impl FilesystemPromptStorage {
         &self.base_path
     }
 
+    /// Validates a prompt name to prevent path traversal attacks.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the name contains dangerous characters.
+    fn validate_prompt_name(name: &str) -> Result<()> {
+        if name.is_empty() {
+            return Err(Error::InvalidInput(
+                "Prompt name cannot be empty".to_string(),
+            ));
+        }
+
+        // Reject path separators
+        if name.contains('/') || name.contains('\\') {
+            return Err(Error::InvalidInput(
+                "Prompt name cannot contain path separators".to_string(),
+            ));
+        }
+
+        // Reject parent directory references
+        if name.contains("..") {
+            return Err(Error::InvalidInput(
+                "Prompt name cannot contain parent directory references".to_string(),
+            ));
+        }
+
+        // Reject null bytes
+        if name.contains('\0') {
+            return Err(Error::InvalidInput(
+                "Prompt name cannot contain null bytes".to_string(),
+            ));
+        }
+
+        // Reject hidden files (starting with .)
+        if name.starts_with('.') {
+            return Err(Error::InvalidInput(
+                "Prompt name cannot start with a dot".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
     /// Gets the file path for a prompt.
-    fn prompt_path(&self, name: &str) -> PathBuf {
-        self.base_path.join(format!("{name}.json"))
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the name fails validation.
+    fn prompt_path(&self, name: &str) -> Result<PathBuf> {
+        Self::validate_prompt_name(name)?;
+        Ok(self.base_path.join(format!("{name}.json")))
     }
 
     /// Reads a prompt from a file.
@@ -143,7 +191,7 @@ fn matches_glob(pattern: &str, text: &str) -> bool {
 
 impl PromptStorage for FilesystemPromptStorage {
     fn save(&self, template: &PromptTemplate) -> Result<String> {
-        let path = self.prompt_path(&template.name);
+        let path = self.prompt_path(&template.name)?;
 
         // Create mutable copy with updated timestamp
         let mut template = template.clone();
@@ -159,7 +207,7 @@ impl PromptStorage for FilesystemPromptStorage {
     }
 
     fn get(&self, name: &str) -> Result<Option<PromptTemplate>> {
-        let path = self.prompt_path(name);
+        let path = self.prompt_path(name)?;
 
         if !path.exists() {
             return Ok(None);
@@ -224,7 +272,7 @@ impl PromptStorage for FilesystemPromptStorage {
     }
 
     fn delete(&self, name: &str) -> Result<bool> {
-        let path = self.prompt_path(name);
+        let path = self.prompt_path(name)?;
 
         if !path.exists() {
             return Ok(false);
@@ -239,7 +287,7 @@ impl PromptStorage for FilesystemPromptStorage {
     }
 
     fn increment_usage(&self, name: &str) -> Result<u64> {
-        let path = self.prompt_path(name);
+        let path = self.prompt_path(name)?;
 
         if !path.exists() {
             return Err(Error::OperationFailed {
@@ -384,5 +432,117 @@ mod tests {
 
         assert!(matches_glob("*-prompt", "test-prompt"));
         assert!(matches_glob("*test*", "my-test-prompt"));
+    }
+
+    // Path traversal prevention tests
+    #[test]
+    fn test_path_traversal_parent_directory() {
+        let dir = TempDir::new().unwrap();
+        let storage = FilesystemPromptStorage::new(dir.path()).unwrap();
+
+        // Attempt to use ".." without slashes (caught by parent dir check)
+        let result = storage.get("foo..bar");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("parent directory"));
+
+        // Attempt with slashes is caught by path separator check
+        let result2 = storage.get("../../../etc/passwd");
+        assert!(result2.is_err());
+    }
+
+    #[test]
+    fn test_path_traversal_forward_slash() {
+        let dir = TempDir::new().unwrap();
+        let storage = FilesystemPromptStorage::new(dir.path()).unwrap();
+
+        // Attempt to use forward slash
+        let result = storage.get("foo/bar");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("path separators"));
+    }
+
+    #[test]
+    fn test_path_traversal_backslash() {
+        let dir = TempDir::new().unwrap();
+        let storage = FilesystemPromptStorage::new(dir.path()).unwrap();
+
+        // Attempt to use backslash
+        let result = storage.get("foo\\bar");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("path separators"));
+    }
+
+    #[test]
+    fn test_path_traversal_null_byte() {
+        let dir = TempDir::new().unwrap();
+        let storage = FilesystemPromptStorage::new(dir.path()).unwrap();
+
+        // Attempt to use null byte
+        let result = storage.get("foo\0bar");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("null bytes"));
+    }
+
+    #[test]
+    fn test_path_traversal_hidden_file() {
+        let dir = TempDir::new().unwrap();
+        let storage = FilesystemPromptStorage::new(dir.path()).unwrap();
+
+        // Attempt to create hidden file
+        let result = storage.get(".hidden");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("start with a dot"));
+    }
+
+    #[test]
+    fn test_path_traversal_empty_name() {
+        let dir = TempDir::new().unwrap();
+        let storage = FilesystemPromptStorage::new(dir.path()).unwrap();
+
+        // Attempt to use empty name
+        let result = storage.get("");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("cannot be empty"));
+    }
+
+    #[test]
+    fn test_path_traversal_save_blocked() {
+        let dir = TempDir::new().unwrap();
+        let storage = FilesystemPromptStorage::new(dir.path()).unwrap();
+
+        // Attempt to save with path traversal
+        let template = PromptTemplate::new("../evil", "Malicious content");
+        let result = storage.save(&template);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_path_traversal_delete_blocked() {
+        let dir = TempDir::new().unwrap();
+        let storage = FilesystemPromptStorage::new(dir.path()).unwrap();
+
+        // Attempt to delete with path traversal
+        let result = storage.delete("../../../etc/passwd");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_valid_prompt_name_works() {
+        let dir = TempDir::new().unwrap();
+        let storage = FilesystemPromptStorage::new(dir.path()).unwrap();
+
+        // Valid names should work
+        let template = PromptTemplate::new("valid-prompt-name", "Content");
+        let result = storage.save(&template);
+        assert!(result.is_ok());
+
+        let retrieved = storage.get("valid-prompt-name").unwrap();
+        assert!(retrieved.is_some());
     }
 }

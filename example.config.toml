@@ -6,12 +6,15 @@ max_results = 10
 default_search_mode = "hybrid" # text, vector, hybrid
 
 # Storage configuration for each domain scope.
-# Available backends: sqlite, filesystem, git_notes, postgresql, redis
+# Available backends: sqlite, filesystem, postgresql, redis
+# Note: All scopes now use SQLite by default with domain faceting (repo/branch/path).
 [storage]
 
 [storage.project]
-backend = "git_notes"
-# path = "."  # optional, defaults to current directory
+backend = "sqlite"
+# Uses the same SQLite database as user scope, with project-specific facets
+# (repo URL, branch name, working directory) for isolation.
+# path = "~/.config/subcog/memories.db"  # defaults to user's SQLite database
 
 [storage.user]
 backend = "sqlite"

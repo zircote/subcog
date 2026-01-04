@@ -12,7 +12,22 @@ use crate::{Error, Result};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
+
+/// Helper to recover from mutex poisoning (CRIT-002).
+///
+/// If a thread panics while holding the lock, the mutex becomes "poisoned".
+/// Rather than failing permanently, we recover the inner data and continue.
+/// This is safe because our inner state is consistent even if the operation
+/// that caused the panic was incomplete.
+fn recover_lock<'a, T>(
+    result: std::result::Result<MutexGuard<'a, T>, PoisonError<MutexGuard<'a, T>>>,
+) -> MutexGuard<'a, T> {
+    result.unwrap_or_else(|poisoned| {
+        tracing::warn!("Recovered from poisoned mutex lock");
+        poisoned.into_inner()
+    })
+}
 
 /// Default embedding dimensions for all-MiniLM-L6-v2.
 pub const DEFAULT_USEARCH_DIMENSIONS: usize = 384;
@@ -41,7 +56,7 @@ mod native {
     use super::{
         DEFAULT_USEARCH_DIMENSIONS, Error, HNSW_CONNECTIVITY, HNSW_EXPANSION_ADD,
         HNSW_EXPANSION_SEARCH, HashMap, MemoryId, Mutex, PathBuf, Result, VectorBackend,
-        VectorFilter, fs,
+        VectorFilter, fs, recover_lock,
     };
     use usearch::{Index, IndexOptions, MetricKind, ScalarKind};
 
@@ -159,10 +174,7 @@ mod native {
                 return Ok(());
             }
 
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             // Load the usearch index
             state
@@ -211,10 +223,7 @@ mod native {
                 return Ok(());
             }
 
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             if !state.dirty {
                 return Ok(());
@@ -306,10 +315,7 @@ mod native {
         fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
             self.validate_embedding(embedding)?;
 
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             let key = Self::get_or_create_key(&mut state, id.as_str());
 
@@ -331,10 +337,7 @@ mod native {
         }
 
         fn remove(&self, id: &MemoryId) -> Result<bool> {
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             let Some(&key) = state.id_to_key.get(id.as_str()) else {
                 return Ok(false);
@@ -366,10 +369,7 @@ mod native {
         ) -> Result<Vec<(MemoryId, f32)>> {
             self.validate_embedding(query_embedding)?;
 
-            let state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let state = recover_lock(self.state.lock());
 
             if state.index.size() == 0 {
                 return Ok(Vec::new());
@@ -401,18 +401,12 @@ mod native {
         }
 
         fn count(&self) -> Result<usize> {
-            let state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let state = recover_lock(self.state.lock());
             Ok(state.index.size())
         }
 
         fn clear(&self) -> Result<()> {
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             state.index.reset().map_err(|e| Error::OperationFailed {
                 operation: "usearch_reset".to_string(),
@@ -450,7 +444,7 @@ mod native {
 mod fallback {
     use super::{
         DEFAULT_USEARCH_DIMENSIONS, Error, HashMap, MemoryId, Mutex, PathBuf, Result,
-        VectorBackend, VectorFilter, fs,
+        VectorBackend, VectorFilter, fs, recover_lock,
     };
 
     /// Inner mutable state protected by a Mutex.
@@ -551,10 +545,7 @@ mod fallback {
                 )));
             }
 
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             state.vectors = data.vectors;
             state.dirty = false;
@@ -572,10 +563,7 @@ mod fallback {
                 return Ok(());
             }
 
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             if !state.dirty {
                 return Ok(());
@@ -654,10 +642,7 @@ mod fallback {
         fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
             self.validate_embedding(embedding)?;
 
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             state
                 .vectors
@@ -668,10 +653,7 @@ mod fallback {
         }
 
         fn remove(&self, id: &MemoryId) -> Result<bool> {
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             let removed = state.vectors.remove(id.as_str()).is_some();
             if removed {
@@ -688,10 +670,7 @@ mod fallback {
         ) -> Result<Vec<(MemoryId, f32)>> {
             self.validate_embedding(query_embedding)?;
 
-            let state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let state = recover_lock(self.state.lock());
 
             // Compute similarity for all vectors (brute-force O(n))
             let mut scores: Vec<(String, f32)> = state
@@ -717,18 +696,12 @@ mod fallback {
         }
 
         fn count(&self) -> Result<usize> {
-            let state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let state = recover_lock(self.state.lock());
             Ok(state.vectors.len())
         }
 
         fn clear(&self) -> Result<()> {
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
             state.vectors.clear();
             state.dirty = true;
             Ok(())

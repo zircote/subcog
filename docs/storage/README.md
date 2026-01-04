@@ -6,25 +6,25 @@ Subcog uses a three-layer storage architecture to provide flexible, performant, 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      Application Layer                       │
-│                   (Services, MCP, CLI)                       │
+│                      Application Layer                      │
+│                   (Services, MCP, CLI)                      │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    CompositeStorage<P, I, V>                 │
-│                                                              │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │ Persistence │  │    Index    │  │   Vector    │         │
-│  │   Layer     │  │    Layer    │  │    Layer    │         │
-│  │  (Source    │  │ (Searchable │  │ (Embeddings)│         │
-│  │   of Truth) │  │    Cache)   │  │             │         │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘         │
+│                    CompositeStorage<P, I, V>                │
+│                                                             │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
+│  │ Persistence │  │    Index    │  │   Vector    │          │
+│  │   Layer     │  │    Layer    │  │    Layer    │          │
+│  │  (Source    │  │ (Searchable │  │ (Embeddings)│          │
+│  │   of Truth) │  │    Cache)   │  │             │          │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘          │
 └─────────┼────────────────┼────────────────┼─────────────────┘
           │                │                │
           ▼                ▼                ▼
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│  Git Notes  │    │   SQLite    │    │   usearch   │
+│   SQLite    │    │   SQLite    │    │   usearch   │
 │ PostgreSQL  │    │  PostgreSQL │    │  pgvector   │
 │ Filesystem  │    │    Redis    │    │    Redis    │
 └─────────────┘    └─────────────┘    └─────────────┘
@@ -34,7 +34,7 @@ Subcog uses a three-layer storage architecture to provide flexible, performant, 
 
 | Layer | Purpose | Backends |
 |-------|---------|----------|
-| [Persistence](persistence.md) | Authoritative storage | Git Notes, PostgreSQL, Filesystem |
+| [Persistence](persistence.md) | Authoritative storage | SQLite, PostgreSQL, Filesystem |
 | [Index](index.md) | Full-text search | SQLite + FTS5, PostgreSQL, Redis |
 | [Vector](vector.md) | Semantic search | usearch, pgvector, Redis |
 
@@ -43,21 +43,21 @@ Subcog uses a three-layer storage architecture to provide flexible, performant, 
 ### Persistence Layer (Source of Truth)
 
 - Authoritative storage for all memories
-- Durable, replicated storage
-- Git-based sync and versioning
-- Recovery source if other layers fail
+- ACID-compliant transactions
+- Faceted storage with project, branch, and file path
+- Tombstone support for soft deletes
 
 ### Index Layer (Searchable Cache)
 
 - Full-text search with BM25 ranking
-- Metadata filtering (namespace, tags, date)
+- Metadata filtering (namespace, tags, date, facets)
 - Can be rebuilt from persistence layer
 - Optimized for query performance
 
 ### Vector Layer (Embeddings)
 
 - Semantic similarity search
-- High-dimensional vector storage
+- High-dimensional vector storage (384 dimensions)
 - HNSW index for approximate nearest neighbor
 - Can be rebuilt from persistence layer
 
@@ -65,13 +65,13 @@ Subcog uses a three-layer storage architecture to provide flexible, performant, 
 
 ```yaml
 storage:
-  persistence: git_notes
+  persistence: sqlite
   index: sqlite
   vector: usearch
 ```
 
 This configuration:
-- Uses Git Notes for persistence (works with any Git repo)
+- Uses SQLite for persistence (single file, ACID-compliant)
 - Uses SQLite + FTS5 for full-text search (local, no setup)
 - Uses usearch for vector search (embedded, fast)
 
@@ -81,30 +81,13 @@ This configuration:
 
 ```yaml
 storage:
-  persistence: git_notes
+  persistence: sqlite
   index: sqlite
   vector: usearch
 ```
 
-**Pros:** No external dependencies, works offline
+**Pros:** No external dependencies, works offline, ACID transactions
 **Cons:** Single-machine only
-
-### Team Collaboration
-
-```yaml
-storage:
-  persistence: git_notes
-  index: sqlite
-  vector: usearch
-```
-
-With git remote for sync:
-```bash
-subcog sync
-```
-
-**Pros:** Distributed via Git, simple setup
-**Cons:** Eventual consistency
 
 ### High-Performance
 
@@ -130,13 +113,54 @@ storage:
 **Pros:** Horizontally scalable, real-time
 **Cons:** Complex setup, operational overhead
 
-## Domain Scoping
+## Faceted Storage
 
-See [Domains](domains.md) for details on:
-- Project scope
-- User scope
-- Organization scope
-- Cross-domain queries
+Memories are stored with optional facet fields for filtering:
+
+| Field | Description | Auto-detected |
+|-------|-------------|---------------|
+| `project_id` | Git remote URL (sanitized) | Yes |
+| `branch` | Current git branch | Yes |
+| `file_path` | Source file path | Optional |
+| `tombstoned_at` | Soft delete timestamp | System |
+
+### Capture with Facets
+
+```bash
+# Auto-detect from git context
+subcog capture --namespace decisions "Use PostgreSQL"
+
+# Explicit facets
+subcog capture --namespace decisions --project my-project --branch feature/auth "Added JWT support"
+```
+
+### Search with Facets
+
+```bash
+# Search within a project
+subcog recall "authentication" --project my-project
+
+# Search within a branch
+subcog recall "bug fix" --branch feature/auth
+
+# Include tombstoned memories
+subcog recall "old decision" --include-tombstoned
+```
+
+## Branch Garbage Collection
+
+Clean up memories from deleted branches:
+
+```bash
+# GC current project (dry-run)
+subcog gc --dry-run
+
+# GC specific branch
+subcog gc --branch feature/old-branch
+
+# Purge tombstoned memories older than 30 days
+subcog gc --purge --older-than 30d
+```
 
 ## Data Flow
 
@@ -146,7 +170,7 @@ See [Domains](domains.md) for details on:
 Content → Security Check → Embedding → Persistence → Index → Vector
                                            │            │        │
                                            ▼            ▼        ▼
-                                       Git Notes    SQLite    usearch
+                                        SQLite      SQLite    usearch
 ```
 
 ### Search
@@ -176,13 +200,15 @@ Persistence → Read All → Re-embed → Index → Vector
 ## Best Practices
 
 1. **Always use persistence layer as source of truth**
-2. **Backup persistence layer regularly** (git push)
+2. **Backup persistence layer regularly** (database backups)
 3. **Index and vector can be rebuilt** if needed
 4. **Choose backends based on scale and team size**
+5. **Use facets** to organize memories by project and branch
+6. **Run GC periodically** to clean up stale branch memories
 
 ## See Also
 
-- [Persistence Layer](persistence.md) - Git Notes, PostgreSQL, Filesystem
+- [Persistence Layer](persistence.md) - SQLite, PostgreSQL, Filesystem
 - [Index Layer](index.md) - SQLite, PostgreSQL, Redis
 - [Vector Layer](vector.md) - usearch, pgvector, Redis
 - [Domains](domains.md) - Scoping and multi-domain

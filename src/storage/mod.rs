@@ -28,8 +28,8 @@ pub mod vector;
 
 pub use index::get_user_data_dir;
 pub use prompt::{
-    FilesystemPromptStorage, GitNotesPromptStorage, PostgresPromptStorage, PromptBackendType,
-    PromptStorage, PromptStorageFactory, RedisPromptStorage, SqlitePromptStorage,
+    FilesystemPromptStorage, PostgresPromptStorage, PromptBackendType, PromptStorage,
+    PromptStorageFactory, RedisPromptStorage, SqlitePromptStorage,
 };
 pub use traits::{IndexBackend, PersistenceBackend, VectorBackend};
 

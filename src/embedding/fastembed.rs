@@ -57,8 +57,19 @@ mod native {
 
         /// Gets or initializes the embedding model (thread-safe).
         ///
+        /// # Performance Note
+        ///
         /// The model is loaded lazily on first use to preserve cold start time.
         /// Subsequent calls return the cached instance.
+        ///
+        /// The first call blocks synchronously (~100-500ms) while loading the ONNX model.
+        /// This is an intentional design decision:
+        /// - One-time cost amortized over all subsequent calls (instant)
+        /// - Sync API is simpler and doesn't require async runtime everywhere
+        /// - Alternative (`tokio::spawn_blocking`) would require async `Embedder` trait
+        ///
+        /// For applications sensitive to first-call latency, consider warming up the
+        /// embedder during startup: `FastEmbedEmbedder::new().embed("warmup").ok();`
         fn get_model() -> Result<&'static fastembed::TextEmbedding> {
             // Check if already initialized
             if let Some(model) = EMBEDDING_MODEL.get() {

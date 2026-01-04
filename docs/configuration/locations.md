@@ -30,34 +30,25 @@ Always in the project root:
 
 ## Data Files
 
-### SQLite Index
+### SQLite Database (Primary Storage)
 
 | Platform | Default Path |
 |----------|--------------|
-| macOS | `~/.subcog/index.db` |
-| Linux | `~/.subcog/index.db` or `$XDG_DATA_HOME/subcog/index.db` |
-| Windows | `%USERPROFILE%\.subcog\index.db` |
+| macOS | `~/.local/share/subcog/subcog.db` |
+| Linux | `~/.local/share/subcog/subcog.db` or `$XDG_DATA_HOME/subcog/subcog.db` |
+| Windows | `%USERPROFILE%\.subcog\subcog.db` |
 
-Override: `SUBCOG_STORAGE_SQLITE_PATH`
+Override: `SUBCOG_DATA_DIR`
 
 ### Vector Index
 
 | Platform | Default Path |
 |----------|--------------|
-| macOS | `~/.subcog/vectors.usearch` |
-| Linux | `~/.subcog/vectors.usearch` or `$XDG_DATA_HOME/subcog/vectors.usearch` |
+| macOS | `~/.local/share/subcog/vectors.usearch` |
+| Linux | `~/.local/share/subcog/vectors.usearch` or `$XDG_DATA_HOME/subcog/vectors.usearch` |
 | Windows | `%USERPROFILE%\.subcog\vectors.usearch` |
 
 Override: `SUBCOG_STORAGE_VECTOR_PATH`
-
-### Git Notes
-
-Stored in the git repository:
-
-```
-<project>/.git/refs/notes/subcog
-<project>/.git/refs/notes/_prompts
-```
 
 ## Cache Files
 
@@ -117,11 +108,7 @@ Typical project with Subcog:
 
 ```
 project/
-├── .git/
-│   └── refs/
-│       └── notes/
-│           ├── subcog        # Memory storage
-│           └── _prompts      # Prompt templates
+├── .git/                     # Git repository (for context detection)
 ├── .subcog/
 │   └── config.toml           # Project configuration
 ├── hooks/
@@ -132,14 +119,16 @@ project/
 ## User Directory Structure
 
 ```
+~/.local/share/subcog/        # Primary data directory
+├── subcog.db                 # SQLite database (memories, prompts)
+├── vectors.usearch           # Vector index
+└── logs/                     # Log files
+
 ~/.config/subcog/
 ├── config.toml               # User configuration
+
 ~/Library/Application Support/subcog/
 ├── config.toml               # macOS user configuration
-~/.subcog/
-├── index.db                  # SQLite index
-├── vectors.usearch           # Vector index
-└── prompts/                  # User prompt templates
 
 ~/Library/Caches/subcog/      # macOS
 ~/.cache/subcog/              # Linux
@@ -154,9 +143,8 @@ project/
 | File Type | Variable |
 |-----------|----------|
 | Config file | `SUBCOG_CONFIG_PATH` |
-| SQLite index | `SUBCOG_STORAGE_SQLITE_PATH` |
+| Data directory | `SUBCOG_DATA_DIR` |
 | Vector index | `SUBCOG_STORAGE_VECTOR_PATH` |
-| Git directory | `SUBCOG_GIT_DIR` |
 
 ## XDG Base Directory Support (Linux)
 
@@ -191,8 +179,7 @@ Typical disk usage per 1000 memories:
 
 | Component | Size |
 |-----------|------|
-| Git notes | ~500KB |
-| SQLite index | ~2MB |
+| SQLite database | ~2MB |
 | Vector index | ~5MB |
 | Embedding cache | ~50MB |
 

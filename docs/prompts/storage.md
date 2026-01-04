@@ -6,8 +6,7 @@ Prompt templates are stored in domain-scoped locations using the same storage ba
 
 | Backend | Location | Use Case |
 |---------|----------|----------|
-| Git Notes | `refs/notes/_prompts` | Default, distributed |
-| SQLite | `~/.subcog/prompts.db` | Local, fast |
+| SQLite | `~/.local/share/subcog/subcog.db` | Default, local, fast |
 | Filesystem | `~/.subcog/prompts/` | Simple, debuggable |
 | PostgreSQL | `prompts` table | Enterprise |
 
@@ -31,70 +30,14 @@ Project → User → Org
 
 First match wins.
 
-## Git Notes Storage
-
-Default storage using Git notes.
-
-### Reference
-
-```
-refs/notes/_prompts
-```
-
-### Structure
-
-```
-refs/notes/_prompts/
-├── project/
-│   └── zircote-subcog/
-│       ├── code-review
-│       └── security-audit
-├── user/
-│   └── my-template
-└── org/
-    └── zircote/
-        └── team-review
-```
-
-### Note Format
-
-```yaml
----
-name: code-review
-description: Code review template
-domain: project
-tags: [review, quality]
-created_at: 2024-01-15T10:30:00Z
-updated_at: 2024-01-15T10:30:00Z
----
-content: |
-  Review {{file}} for {{issue_type}} issues
-variables:
-  - name: file
-    required: true
-  - name: issue_type
-    default: general
-```
-
-### Sync
-
-Prompt templates sync with memories:
-
-```bash
-subcog sync
-# Syncs refs/notes/subcog AND refs/notes/_prompts
-```
-
 ## SQLite Storage
 
-Embedded database for local access.
+Default storage using embedded SQLite database.
 
-### Configuration
+### Location
 
-```yaml
-storage:
-  prompts: sqlite
-  prompts_sqlite_path: ~/.subcog/prompts.db
+```
+~/.local/share/subcog/subcog.db
 ```
 
 ### Schema
@@ -114,6 +57,15 @@ CREATE TABLE prompts (
 
 CREATE INDEX idx_prompts_domain ON prompts(domain);
 CREATE INDEX idx_prompts_tags ON prompts(tags);
+```
+
+### Sync
+
+Prompt templates sync with memories:
+
+```bash
+subcog sync
+# Exports prompts as part of SQLite sync
 ```
 
 ## Filesystem Storage
@@ -145,7 +97,23 @@ storage:
 
 ### File Format
 
-Same YAML format as Git notes content.
+```yaml
+---
+name: code-review
+description: Code review template
+domain: project
+tags: [review, quality]
+created_at: 2024-01-15T10:30:00Z
+updated_at: 2024-01-15T10:30:00Z
+---
+content: |
+  Review {{file}} for {{issue_type}} issues
+variables:
+  - name: file
+    required: true
+  - name: issue_type
+    default: general
+```
 
 ## PostgreSQL Storage
 

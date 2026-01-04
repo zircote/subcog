@@ -1,0 +1,15 @@
+{
+  "description": "Pre-compact hook response format (Claude Code compliant)",
+  "schema": {
+    "hookSpecificOutput": {
+      "hookEventName": "PreCompact",
+      "additionalContext": "string (markdown formatted auto-capture summary)"
+    }
+  },
+  "example": {
+    "hookSpecificOutput": {
+      "hookEventName": "PreCompact",
+      "additionalContext": "**Subcog Pre-Compact Auto-Capture**\n\nCaptured 3 memories before context compaction:\n\n- `decisions`: Use async/await for I/O operations (subcog://global/decisions/abc123)\n- `patterns`: Builder pattern for configuration (subcog://global/patterns/def456)\n- `learnings`: RwLock needed for shared state (subcog://global/learnings/ghi789)\n\nSkipped 1 duplicate:\n- `decisions`: subcog://global/decisions/existing (exact_match)"
+    }
+  }
+}

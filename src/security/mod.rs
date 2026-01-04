@@ -114,6 +114,7 @@
 #![allow(clippy::unused_self)]
 
 mod audit;
+pub mod encryption;
 mod pii;
 mod redactor;
 mod secrets;
@@ -121,6 +122,7 @@ mod secrets;
 pub use audit::{
     AuditConfig, AuditEntry, AuditLogger, AuditOutcome, global_logger, init_global, record_event,
 };
+pub use encryption::{EncryptionConfig, Encryptor, is_encrypted};
 pub use pii::{PiiDetector, PiiMatch};
 pub use redactor::{ContentRedactor, RedactionConfig, RedactionMode};
 pub use secrets::{SecretDetector, SecretMatch};

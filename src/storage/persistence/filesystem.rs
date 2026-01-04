@@ -8,8 +8,25 @@
 //! This module includes protections against filesystem-based attacks:
 //! - **Path traversal**: Memory IDs are validated to prevent directory escape
 //! - **File size limits**: Maximum file size enforced to prevent memory exhaustion
+//! - **Encryption at rest**: Optional AES-256-GCM encryption (CRIT-005)
+//!
+//! # Encryption
+//!
+//! When the `encryption` feature is enabled and `SUBCOG_ENCRYPTION_KEY` is set,
+//! all memory files are encrypted with AES-256-GCM before writing to disk.
+//!
+//! ```bash
+//! # Generate a key
+//! openssl rand -base64 32
+//!
+//! # Enable encryption
+//! export SUBCOG_ENCRYPTION_KEY="your-base64-encoded-key"
+//! ```
 
 use crate::models::{Memory, MemoryId};
+use crate::security::encryption::is_encrypted;
+#[cfg(feature = "encryption")]
+use crate::security::encryption::{EncryptionConfig, Encryptor};
 use crate::storage::traits::PersistenceBackend;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -106,10 +123,16 @@ impl StoredMemory {
 pub struct FilesystemBackend {
     /// Base directory for storage.
     base_path: PathBuf,
+    /// Optional encryptor for encryption at rest.
+    #[cfg(feature = "encryption")]
+    encryptor: Option<Encryptor>,
 }
 
 impl FilesystemBackend {
     /// Creates a new filesystem backend.
+    ///
+    /// If the `encryption` feature is enabled and `SUBCOG_ENCRYPTION_KEY` is set,
+    /// encryption at rest is automatically enabled.
     ///
     /// # Errors
     ///
@@ -120,7 +143,14 @@ impl FilesystemBackend {
         // Try to create directory, ignore errors for now
         let _ = fs::create_dir_all(&path);
 
-        Self { base_path: path }
+        #[cfg(feature = "encryption")]
+        let encryptor = Self::try_create_encryptor();
+
+        Self {
+            base_path: path,
+            #[cfg(feature = "encryption")]
+            encryptor,
+        }
     }
 
     /// Creates a new filesystem backend with checked directory creation.
@@ -137,7 +167,82 @@ impl FilesystemBackend {
             cause: e.to_string(),
         })?;
 
-        Ok(Self { base_path })
+        #[cfg(feature = "encryption")]
+        let encryptor = Self::try_create_encryptor();
+
+        Ok(Self {
+            base_path,
+            #[cfg(feature = "encryption")]
+            encryptor,
+        })
+    }
+
+    /// Tries to create an encryptor from environment configuration.
+    #[cfg(feature = "encryption")]
+    fn try_create_encryptor() -> Option<Encryptor> {
+        EncryptionConfig::try_from_env().map_or_else(
+            || {
+                tracing::debug!("Encryption key not configured, storing files unencrypted");
+                None
+            },
+            |config| match Encryptor::new(config) {
+                Ok(enc) => {
+                    tracing::info!("Encryption at rest enabled for filesystem backend");
+                    Some(enc)
+                },
+                Err(e) => {
+                    tracing::warn!("Failed to create encryptor: {e}");
+                    None
+                },
+            },
+        )
+    }
+
+    /// Decrypts data if it's encrypted, returns as-is otherwise.
+    ///
+    /// This helper reduces nesting in the `get` method (`clippy::excessive_nesting` fix).
+    #[cfg(feature = "encryption")]
+    fn decrypt_if_needed(&self, raw_data: Vec<u8>) -> Result<Vec<u8>> {
+        if !is_encrypted(&raw_data) {
+            return Ok(raw_data);
+        }
+        self.encryptor.as_ref().map_or_else(
+            || {
+                Err(Error::OperationFailed {
+                    operation: "decrypt_memory".to_string(),
+                    cause: "File is encrypted but no encryption key configured".to_string(),
+                })
+            },
+            |encryptor| encryptor.decrypt(&raw_data),
+        )
+    }
+
+    /// Decrypts data if it's encrypted, returns as-is otherwise.
+    ///
+    /// Non-encryption version - returns error if data is encrypted.
+    #[cfg(not(feature = "encryption"))]
+    fn decrypt_if_needed(&self, raw_data: Vec<u8>) -> Result<Vec<u8>> {
+        if is_encrypted(&raw_data) {
+            return Err(Error::OperationFailed {
+                operation: "decrypt_memory".to_string(),
+                cause: "File is encrypted but encryption feature not enabled".to_string(),
+            });
+        }
+        Ok(raw_data)
+    }
+
+    /// Returns whether encryption is enabled.
+    #[cfg(feature = "encryption")]
+    #[must_use]
+    pub const fn encryption_enabled(&self) -> bool {
+        self.encryptor.is_some()
+    }
+
+    /// Returns whether encryption is enabled.
+    #[cfg(not(feature = "encryption"))]
+    #[must_use]
+    pub const fn encryption_enabled(&self) -> bool {
+        false
     }
 
     /// Returns the path for a memory file.
@@ -204,7 +309,18 @@ impl PersistenceBackend for FilesystemBackend {
             cause: e.to_string(),
         })?;
 
-        fs::write(&path, json).map_err(|e| Error::OperationFailed {
+        // CRIT-005: Encrypt if encryption is enabled
+        #[cfg(feature = "encryption")]
+        let data = if let Some(ref encryptor) = self.encryptor {
+            encryptor.encrypt(json.as_bytes())?
+        } else {
+            json.into_bytes()
+        };
+
+        #[cfg(not(feature = "encryption"))]
+        let data = json.into_bytes();
+
+        fs::write(&path, data).map_err(|e| Error::OperationFailed {
             operation: "write_memory_file".to_string(),
             cause: e.to_string(),
         })?;
@@ -235,8 +351,17 @@ impl PersistenceBackend for FilesystemBackend {
             )));
         }
 
-        let json = fs::read_to_string(&path).map_err(|e| Error::OperationFailed {
+        // Read raw bytes first to detect encryption
+        let raw_data = fs::read(&path).map_err(|e| Error::OperationFailed {
             operation: "read_memory_file".to_string(),
+            cause: e.to_string(),
+        })?;
+
+        // CRIT-005: Decrypt if file is encrypted (uses helper to reduce nesting)
+        let json_bytes = self.decrypt_if_needed(raw_data)?;
+
+        let json = String::from_utf8(json_bytes).map_err(|e| Error::OperationFailed {
+            operation: "decode_memory_file".to_string(),
             cause: e.to_string(),
         })?;
 

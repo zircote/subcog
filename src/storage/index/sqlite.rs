@@ -96,9 +96,60 @@ fn escape_like_wildcards(s: &str) -> String {
     result
 }
 
-/// SQLite-based index backend with FTS5.
+/// Converts a glob pattern to a SQL LIKE pattern safely (HIGH-SEC-005).
+///
+/// First escapes existing SQL LIKE wildcards (`%`, `_`, `\`), then converts
+/// glob wildcards (`*` → `%`, `?` → `_`). This prevents SQL injection via
+/// patterns like `foo%bar` where `%` would otherwise be a SQL wildcard.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Glob wildcards are converted
+/// assert_eq!(glob_to_like_pattern("src/*.rs"), "src/%\\.rs");
+/// // Literal % is escaped
+/// assert_eq!(glob_to_like_pattern("100%"), "100\\%");
+/// // Combined: literal % escaped, glob * converted
+/// assert_eq!(glob_to_like_pattern("foo%*bar"), "foo\\%%bar");
+/// ```
+fn glob_to_like_pattern(pattern: &str) -> String {
+    let mut result = String::with_capacity(pattern.len() * 2);
+    for c in pattern.chars() {
+        match c {
+            // Escape existing SQL LIKE wildcards (they're meant to be literal)
+            '%' | '_' | '\\' => {
+                result.push('\\');
+                result.push(c);
+            },
+            // Convert glob wildcards to SQL LIKE wildcards
+            '*' => result.push('%'),
+            '?' => result.push('_'),
+            _ => result.push(c),
+        }
+    }
+    result
+}
+
+/// `SQLite`-based index backend with FTS5.
+///
+/// # Concurrency Model
+///
+/// Uses a `Mutex<Connection>` for thread-safe access. While this serializes
+/// database operations, `SQLite`'s WAL mode and `busy_timeout` pragma mitigate
+/// contention:
+///
+/// - **WAL mode**: Allows concurrent readers with a single writer
+/// - **`busy_timeout`**: Waits up to 5 seconds for locks instead of failing immediately
+/// - **NORMAL synchronous**: Balances durability with performance
+///
+/// For high-throughput scenarios requiring true connection pooling, consider
+/// using `r2d2-rusqlite` or `deadpool-sqlite`. This would require refactoring
+/// to use `Pool<SqliteConnectionManager>` instead of `Mutex<Connection>`.
 pub struct SqliteBackend {
     /// Connection to the `SQLite` database.
+    ///
+    /// Protected by Mutex because `rusqlite::Connection` is not `Sync`.
+    /// WAL mode and `busy_timeout` handle concurrent access gracefully.
     conn: Mutex<Connection>,
     /// Path to the `SQLite` database (None for in-memory).
     db_path: Option<PathBuf>,
@@ -171,6 +222,9 @@ impl SqliteBackend {
         // a string like "wal" which would cause execute_batch to fail
         let _ = conn.pragma_update(None, "journal_mode", "WAL");
         let _ = conn.pragma_update(None, "synchronous", "NORMAL");
+        // Set busy timeout to 5 seconds to handle lock contention gracefully
+        // This prevents SQLITE_BUSY errors during high concurrent access
+        let _ = conn.pragma_update(None, "busy_timeout", "5000");
 
         // Create the main table for memory metadata
         conn.execute(
@@ -246,6 +300,18 @@ impl SqliteBackend {
         // Composite index for common filter patterns
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_namespace_status ON memories(namespace, status)",
+            [],
+        );
+
+        // Compound index for time-filtered namespace queries (Phase 15 fix)
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_namespace_created ON memories(namespace, created_at DESC)",
+            [],
+        );
+
+        // Compound index for source filtering with status (Phase 15 fix)
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_source_status ON memories(source, status)",
             [],
         );
     }
@@ -330,12 +396,11 @@ impl SqliteBackend {
         }
 
         // Source pattern (glob-style converted to SQL LIKE)
+        // HIGH-SEC-005: Use glob_to_like_pattern to escape SQL wildcards before conversion
         if let Some(ref pattern) = filter.source_pattern {
-            // Convert glob pattern to SQL LIKE pattern: * -> %, ? -> _
-            let sql_pattern = pattern.replace('*', "%").replace('?', "_");
-            conditions.push(format!("m.source LIKE ?{param_idx}"));
+            conditions.push(format!("m.source LIKE ?{param_idx} ESCAPE '\\'"));
             param_idx += 1;
-            params.push(sql_pattern);
+            params.push(glob_to_like_pattern(pattern));
         }
 
         if let Some(after) = filter.created_after {
@@ -1466,6 +1531,71 @@ mod tests {
 
         // Empty string
         assert_eq!(escape_like_wildcards(""), "");
+    }
+
+    #[test]
+    fn test_glob_to_like_pattern() {
+        // Glob wildcards are converted
+        assert_eq!(glob_to_like_pattern("*"), "%");
+        assert_eq!(glob_to_like_pattern("?"), "_");
+        assert_eq!(glob_to_like_pattern("src/*.rs"), "src/%.rs");
+        assert_eq!(glob_to_like_pattern("test?.txt"), "test_.txt");
+
+        // Literal SQL LIKE wildcards are escaped
+        assert_eq!(glob_to_like_pattern("100%"), "100\\%");
+        assert_eq!(glob_to_like_pattern("user_name"), "user\\_name");
+
+        // Combined: literal % escaped, glob * converted
+        assert_eq!(glob_to_like_pattern("foo%*bar"), "foo\\%%bar");
+        assert_eq!(glob_to_like_pattern("*_test%?"), "%\\_test\\%_");
+
+        // Backslash is escaped
+        assert_eq!(glob_to_like_pattern("path\\file*"), "path\\\\file%");
+
+        // Complex pattern (** becomes %%, each * is a separate wildcard)
+        assert_eq!(
+            glob_to_like_pattern("src/**/test_*.rs"),
+            "src/%%/test\\_%.rs"
+        );
+
+        // Empty string
+        assert_eq!(glob_to_like_pattern(""), "");
+
+        // No special characters
+        assert_eq!(glob_to_like_pattern("normal"), "normal");
+    }
+
+    #[test]
+    fn test_source_pattern_with_sql_wildcards() {
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        // Create memories with various source paths
+        let mut memory1 = create_test_memory("id1", "Test 100% pass", Namespace::Decisions);
+        memory1.source = Some("src/100%_file.rs".to_string());
+        backend.index(&memory1).unwrap();
+
+        let mut memory2 = create_test_memory("id2", "Test content", Namespace::Decisions);
+        memory2.source = Some("src/other_file.rs".to_string());
+        backend.index(&memory2).unwrap();
+
+        // Search with source pattern containing literal % (should be escaped)
+        let filter = SearchFilter::new().with_source_pattern("src/100%*");
+        let results = backend.search("Test", &filter, 10).unwrap();
+        assert_eq!(
+            results.len(),
+            1,
+            "Should find only file with literal 100% in name"
+        );
+        assert_eq!(results[0].0.as_str(), "id1");
+
+        // Search with glob wildcard only (should match both)
+        let filter2 = SearchFilter::new().with_source_pattern("src/*");
+        let results2 = backend.search("Test", &filter2, 10).unwrap();
+        assert_eq!(
+            results2.len(),
+            2,
+            "Should find both files with glob wildcard"
+        );
     }
 
     #[test]

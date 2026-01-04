@@ -1,0 +1,70 @@
+{
+  "count": 13,
+  "namespaces": [
+    {
+      "namespace": "decisions",
+      "description": "Architectural choices, technology selections, trade-off analyses",
+      "signal_words": ["decided", "chose", "selected", "prefer", "went with", "option"]
+    },
+    {
+      "namespace": "patterns",
+      "description": "Reusable solutions, coding patterns, best practices",
+      "signal_words": ["pattern", "approach", "technique", "method", "way to", "how to"]
+    },
+    {
+      "namespace": "learnings",
+      "description": "Insights gained, mistakes made, knowledge acquired",
+      "signal_words": ["learned", "realized", "discovered", "found out", "figured out", "insight"]
+    },
+    {
+      "namespace": "context",
+      "description": "Project context, background information, domain knowledge",
+      "signal_words": ["context", "background", "note that", "keep in mind", "important"]
+    },
+    {
+      "namespace": "tech-debt",
+      "description": "Known issues, shortcuts taken, future improvements needed",
+      "signal_words": ["TODO", "FIXME", "hack", "workaround", "temporary", "tech debt", "refactor"]
+    },
+    {
+      "namespace": "blockers",
+      "description": "Obstacles encountered, issues blocking progress",
+      "signal_words": ["blocked", "stuck", "cannot", "issue", "problem", "error", "failed"]
+    },
+    {
+      "namespace": "progress",
+      "description": "Milestones reached, tasks completed, progress updates",
+      "signal_words": ["completed", "finished", "done", "milestone", "shipped", "released"]
+    },
+    {
+      "namespace": "apis",
+      "description": "API contracts, endpoints, integration points",
+      "signal_words": ["endpoint", "API", "request", "response", "contract", "schema"]
+    },
+    {
+      "namespace": "config",
+      "description": "Configuration settings, environment variables, feature flags",
+      "signal_words": ["config", "setting", "environment", "variable", "flag", "option"]
+    },
+    {
+      "namespace": "security",
+      "description": "Security considerations, vulnerabilities, access control",
+      "signal_words": ["security", "auth", "permission", "vulnerability", "access", "token"]
+    },
+    {
+      "namespace": "performance",
+      "description": "Performance optimizations, benchmarks, bottlenecks",
+      "signal_words": ["performance", "slow", "fast", "optimize", "benchmark", "latency"]
+    },
+    {
+      "namespace": "testing",
+      "description": "Testing strategies, edge cases, test coverage",
+      "signal_words": ["test", "testing", "coverage", "edge case", "assertion", "mock"]
+    },
+    {
+      "namespace": "prompts",
+      "description": "Reusable prompt templates with variable substitution",
+      "signal_words": ["prompt", "template", "variable", "substitution", "reusable"]
+    }
+  ]
+}

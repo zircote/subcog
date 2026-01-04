@@ -9,7 +9,9 @@ use crate::models::{
 };
 use crate::security::record_event;
 use crate::storage::traits::PersistenceBackend;
+use lru::LruCache;
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::time::Instant;
 use tracing::instrument;
 
@@ -22,15 +24,26 @@ const RECENCY_DECAY_DAYS: f32 = 30.0;
 const DEFAULT_IMPORTANCE: f32 = 0.5;
 /// Minimum memories in namespace before flagging contradictions.
 const CONTRADICTION_THRESHOLD: usize = 10;
+/// Maximum entries in access tracking caches (HIGH-PERF-001).
+/// Using `NonZeroUsize` directly to avoid runtime `expect()` calls.
+// SAFETY: 10_000 is a non-zero constant, verified at compile time
+#[allow(clippy::expect_used)]
+const ACCESS_CACHE_CAPACITY: NonZeroUsize = {
+    // This unwrap is safe: 10_000 is non-zero
+    match NonZeroUsize::new(10_000) {
+        Some(n) => n,
+        None => panic!("ACCESS_CACHE_CAPACITY must be non-zero"),
+    }
+};
 
 /// Service for consolidating and managing memory lifecycle.
 pub struct ConsolidationService<P: PersistenceBackend> {
     /// Persistence backend for memory storage.
     persistence: P,
-    /// Access counts for memories (`memory_id` -> count).
-    access_counts: HashMap<String, u32>,
-    /// Last access times (`memory_id` -> timestamp).
-    last_access: HashMap<String, u64>,
+    /// Access counts for memories (`memory_id` -> count), bounded LRU (HIGH-PERF-001).
+    access_counts: LruCache<String, u32>,
+    /// Last access times (`memory_id` -> timestamp), bounded LRU (HIGH-PERF-001).
+    last_access: LruCache<String, u64>,
 }
 
 impl<P: PersistenceBackend> ConsolidationService<P> {
@@ -39,16 +52,18 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     pub fn new(persistence: P) -> Self {
         Self {
             persistence,
-            access_counts: HashMap::new(),
-            last_access: HashMap::new(),
+            access_counts: LruCache::new(ACCESS_CACHE_CAPACITY),
+            last_access: LruCache::new(ACCESS_CACHE_CAPACITY),
         }
     }
 
     /// Records an access to a memory.
     pub fn record_access(&mut self, memory_id: &str) {
         let now = current_timestamp();
-        *self.access_counts.entry(memory_id.to_string()).or_insert(0) += 1;
-        self.last_access.insert(memory_id.to_string(), now);
+        let key = memory_id.to_string();
+        let count = self.access_counts.get(&key).copied().unwrap_or(0) + 1;
+        self.access_counts.put(key.clone(), count);
+        self.last_access.put(key, now);
     }
 
     /// Runs consolidation on all memories.
@@ -129,18 +144,19 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     #[allow(clippy::cast_precision_loss)]
     fn calculate_retention_score(&self, memory_id: &str, now: u64) -> RetentionScore {
         // Access frequency: normalized by max observed accesses
-        let access_count = self.access_counts.get(memory_id).copied().unwrap_or(0);
+        // Use peek() to avoid modifying LRU order during read-only operation
+        let access_count = self.access_counts.peek(memory_id).copied().unwrap_or(0);
         let max_accesses = self
             .access_counts
-            .values()
+            .iter()
+            .map(|(_, v)| *v)
             .max()
-            .copied()
             .unwrap_or(1)
             .max(1);
         let access_frequency = (access_count as f32) / (max_accesses as f32);
 
         // Recency: decay over time (RECENCY_DECAY_DAYS days = 0.5 score)
-        let last_access = self.last_access.get(memory_id).copied().unwrap_or(0);
+        let last_access = self.last_access.peek(memory_id).copied().unwrap_or(0);
         let age_days = (now.saturating_sub(last_access)) as f32 / SECONDS_PER_DAY;
         let recency = (-age_days / RECENCY_DECAY_DAYS).exp().clamp(0.0, 1.0);
 
@@ -358,8 +374,9 @@ mod tests {
         service.record_access("memory_1");
         service.record_access("memory_2");
 
-        assert_eq!(service.access_counts.get("memory_1"), Some(&2));
-        assert_eq!(service.access_counts.get("memory_2"), Some(&1));
+        // Use peek() to avoid modifying LRU order during assertions
+        assert_eq!(service.access_counts.peek("memory_1"), Some(&2));
+        assert_eq!(service.access_counts.peek("memory_2"), Some(&1));
     }
 
     #[test]
