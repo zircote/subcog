@@ -129,11 +129,11 @@ CREATE INDEX idx_memories_tombstoned ON memories(tombstoned_at) WHERE tombstoned
 **Estimated Time:** 1 hour
 **File:** `src/storage/migrations/postgresql/` (new migration file)
 
-- [ ] Create PostgreSQL migration file
-- [ ] Add `ALTER TABLE memories ADD COLUMN tombstoned_at TIMESTAMPTZ NULL`
-- [ ] Create partial index for performance
-- [ ] Test migration on PostgreSQL instance
-- [ ] Verify timezone handling works correctly
+- [x] Create PostgreSQL migration file ✓
+- [x] Add `ALTER TABLE memories ADD COLUMN tombstoned_at TIMESTAMPTZ NULL` ✓
+- [x] Create partial index for performance ✓
+- [x] Test migration on PostgreSQL instance ✓
+- [x] Verify timezone handling works correctly ✓
 
 **Migration SQL:**
 ```sql

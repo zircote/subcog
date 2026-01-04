@@ -52,6 +52,14 @@ mod implementation {
                 CREATE INDEX IF NOT EXISTS idx_{table}_domain ON {table} (domain_org, domain_project, domain_repo);
             ",
         },
+        Migration {
+            version: 4,
+            description: "Add tombstoned_at column (ADR-0053)",
+            sql: r"
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tombstoned_at BIGINT;
+                CREATE INDEX IF NOT EXISTS idx_{table}_tombstoned ON {table} (tombstoned_at) WHERE tombstoned_at IS NOT NULL;
+            ",
+        },
     ];
 
     /// PostgreSQL-based persistence backend.
@@ -772,6 +780,7 @@ mod stub_tests {
             status: MemoryStatus::Active,
             created_at: 1_700_000_000,
             updated_at: 1_700_000_000,
+            tombstoned_at: None,
             embedding: None,
             tags: vec![],
             source: None,
