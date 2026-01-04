@@ -312,7 +312,7 @@ pub fn cmd_consolidate(config: &SubcogConfig) -> Result<(), Box<dyn std::error::
             let mut service = ConsolidationService::new(backend);
             run_consolidation(&mut service)?;
         },
-        StorageBackendType::Filesystem | StorageBackendType::GitNotes => {
+        StorageBackendType::Filesystem => {
             let backend = FilesystemBackend::new(data_dir);
             let mut service = ConsolidationService::new(backend);
             run_consolidation(&mut service)?;

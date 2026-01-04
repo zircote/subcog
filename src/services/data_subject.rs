@@ -31,13 +31,11 @@
 //! ```
 
 use crate::Result;
-use crate::git::NotesManager;
 use crate::models::{Memory, MemoryId, SearchFilter};
 use crate::security::{AuditEntry, AuditOutcome, global_logger};
 use crate::storage::index::SqliteBackend;
 use crate::storage::traits::{IndexBackend, VectorBackend};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::instrument;
@@ -173,8 +171,6 @@ pub struct DataSubjectService {
     index: SqliteBackend,
     /// Optional vector backend for deleting embeddings.
     vector: Option<Arc<dyn VectorBackend + Send + Sync>>,
-    /// Optional repository path for git notes operations.
-    repo_path: Option<PathBuf>,
 }
 
 impl DataSubjectService {
@@ -188,7 +184,6 @@ impl DataSubjectService {
         Self {
             index,
             vector: None,
-            repo_path: None,
         }
     }
 
@@ -196,13 +191,6 @@ impl DataSubjectService {
     #[must_use]
     pub fn with_vector(mut self, vector: Arc<dyn VectorBackend + Send + Sync>) -> Self {
         self.vector = Some(vector);
-        self
-    }
-
-    /// Adds a repository path for git notes deletion.
-    #[must_use]
-    pub fn with_repo_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.repo_path = Some(path.into());
         self
     }
 
@@ -319,8 +307,7 @@ impl DataSubjectService {
     ///
     /// ```rust,ignore
     /// let service = DataSubjectService::new(index)
-    ///     .with_vector(vector_backend)
-    ///     .with_repo_path("/path/to/repo");
+    ///     .with_vector(vector_backend);
     ///
     /// let result = service.delete_user_data()?;
     ///
@@ -407,10 +394,7 @@ impl DataSubjectService {
     /// # Deletion Order
     ///
     /// 1. Vector backend (if configured) - Delete embedding
-    /// 2. Git Notes (if configured) - Delete from persistence
-    /// 3. SQLite Index - Delete from search index
-    ///
-    /// The index is deleted last to maintain referential integrity.
+    /// 2. SQLite Index - Delete from search index (authoritative)
     fn delete_memory_from_all_layers(&self, id: &MemoryId) -> Result<()> {
         // 1. Delete from vector backend (best-effort)
         if let Some(ref vector) = self.vector {
@@ -420,17 +404,7 @@ impl DataSubjectService {
             }
         }
 
-        // 2. Delete from git notes (if repo configured)
-        if let Some(ref repo_path) = self.repo_path {
-            let notes = NotesManager::new(repo_path);
-            // Git notes use the memory ID as the commit ID reference
-            if let Err(e) = notes.remove(id.as_str()) {
-                tracing::debug!(memory_id = %id, error = %e, "Git notes deletion failed (continuing)");
-                // Continue - we still need to clean the index
-            }
-        }
-
-        // 3. Delete from index (authoritative for this service)
+        // 2. Delete from index (authoritative storage)
         self.index.remove(id)?;
 
         Ok(())
@@ -696,7 +670,7 @@ mod tests {
         let index = SqliteBackend::in_memory().expect("Failed to create index");
 
         // Test builder pattern compiles and works
-        let service = DataSubjectService::new(index).with_repo_path("/tmp/test");
+        let service = DataSubjectService::new(index);
 
         // Service should work without vector backend
         let export = service.export_user_data();

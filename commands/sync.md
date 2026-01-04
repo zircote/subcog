@@ -1,59 +1,58 @@
 ---
-description: Sync memories with git remote (push, fetch, or full sync)
+description: Sync memories with git remote (deprecated - SQLite is now authoritative)
 allowed-tools: Bash
 argument-hint: "[--push | --fetch | --full]"
 ---
 
 # /subcog:sync
 
-Synchronize memories with the configured git remote repository.
+> **Deprecated**: With the migration to SQLite as authoritative storage, remote sync
+> is no longer supported. This command returns no-op results for all operations.
+> Memories are now stored locally in SQLite with project/branch/path faceting.
 
 ## Usage
 
 ```
-/subcog:sync              # Full sync (fetch + push)
-/subcog:sync --push       # Push local changes to remote
-/subcog:sync --fetch      # Fetch remote changes to local
-/subcog:sync --full       # Explicit full sync
+/subcog:sync              # No-op (returns empty stats)
+/subcog:sync --push       # No-op (returns empty stats)
+/subcog:sync --fetch      # No-op (returns empty stats)
+/subcog:sync --full       # No-op (returns empty stats)
 ```
 
 ## Arguments
 
 <arguments>
-1. **--push**: Push local memories to remote (upload only)
-2. **--fetch**: Fetch remote memories to local (download only)
-3. **--full** (default): Bidirectional sync (fetch then push)
+1. **--push**: Previously pushed local memories to remote (now no-op)
+2. **--fetch**: Previously fetched remote memories to local (now no-op)
+3. **--full** (default): Previously did bidirectional sync (now no-op)
 </arguments>
 
-## Execution Strategy
+## Current Architecture
 
 <strategy>
-**CLI Execution:**
-Uses the `subcog sync` CLI command:
-```bash
-subcog sync          # Full sync
-subcog sync --push   # Push only
-subcog sync --fetch  # Fetch only
-```
+**Storage Model:**
+- Memories are stored in SQLite at `~/.config/subcog/memories.db`
+- Project isolation via facets (repo URL, branch name, working directory)
+- No remote synchronization - SQLite is the authoritative store
 
-**Note:** Sync operates on git notes, which are stored in `refs/notes/subcog`.
+**For Team Sharing:**
+If you need to share memories across team members, consider:
+- Using PostgreSQL backend with shared connection string
+- Exporting/importing memories via `subcog export` / `subcog import`
 </strategy>
 
 ## Examples
 
 <examples>
-**Full sync (recommended):**
+**Check sync status (will show no-op):**
 ```
 /subcog:sync
 ```
+Output: `Sync completed: 0 pushed, 0 pulled, 0 conflicts`
 
-**Push only (after capturing new memories):**
+**Alternative - Check database status:**
 ```
-/subcog:sync --push
+subcog status
 ```
-
-**Fetch only (get team's memories):**
-```
-/subcog:sync --fetch
-```
+Shows SQLite database path and memory count.
 </examples>

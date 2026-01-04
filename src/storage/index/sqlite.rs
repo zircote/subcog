@@ -130,9 +130,26 @@ fn glob_to_like_pattern(pattern: &str) -> String {
     result
 }
 
-/// SQLite-based index backend with FTS5.
+/// `SQLite`-based index backend with FTS5.
+///
+/// # Concurrency Model
+///
+/// Uses a `Mutex<Connection>` for thread-safe access. While this serializes
+/// database operations, `SQLite`'s WAL mode and `busy_timeout` pragma mitigate
+/// contention:
+///
+/// - **WAL mode**: Allows concurrent readers with a single writer
+/// - **`busy_timeout`**: Waits up to 5 seconds for locks instead of failing immediately
+/// - **NORMAL synchronous**: Balances durability with performance
+///
+/// For high-throughput scenarios requiring true connection pooling, consider
+/// using `r2d2-rusqlite` or `deadpool-sqlite`. This would require refactoring
+/// to use `Pool<SqliteConnectionManager>` instead of `Mutex<Connection>`.
 pub struct SqliteBackend {
     /// Connection to the `SQLite` database.
+    ///
+    /// Protected by Mutex because `rusqlite::Connection` is not `Sync`.
+    /// WAL mode and `busy_timeout` handle concurrent access gracefully.
     conn: Mutex<Connection>,
     /// Path to the `SQLite` database (None for in-memory).
     db_path: Option<PathBuf>,
@@ -205,6 +222,9 @@ impl SqliteBackend {
         // a string like "wal" which would cause execute_batch to fail
         let _ = conn.pragma_update(None, "journal_mode", "WAL");
         let _ = conn.pragma_update(None, "synchronous", "NORMAL");
+        // Set busy timeout to 5 seconds to handle lock contention gracefully
+        // This prevents SQLITE_BUSY errors during high concurrent access
+        let _ = conn.pragma_update(None, "busy_timeout", "5000");
 
         // Create the main table for memory metadata
         conn.execute(
@@ -280,6 +300,18 @@ impl SqliteBackend {
         // Composite index for common filter patterns
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_namespace_status ON memories(namespace, status)",
+            [],
+        );
+
+        // Compound index for time-filtered namespace queries (Phase 15 fix)
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_namespace_created ON memories(namespace, created_at DESC)",
+            [],
+        );
+
+        // Compound index for source filtering with status (Phase 15 fix)
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_source_status ON memories(source, status)",
             [],
         );
     }

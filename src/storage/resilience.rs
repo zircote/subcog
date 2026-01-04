@@ -21,11 +21,11 @@
 //!
 //! ```rust,ignore
 //! use subcog::storage::resilience::{StorageResilienceConfig, ResilientPersistenceBackend};
-//! use subcog::storage::persistence::GitNotesBackend;
+//! use subcog::storage::index::SqliteBackend;
 //!
-//! let backend = GitNotesBackend::new(repo_path)?;
+//! let backend = SqliteBackend::new(db_path)?;
 //! let config = StorageResilienceConfig::default();
-//! let resilient = ResilientPersistenceBackend::new(backend, config, "git_notes");
+//! let resilient = ResilientPersistenceBackend::new(backend, config, "sqlite");
 //!
 //! // Operations are now protected by circuit breaker
 //! resilient.store(&memory)?;

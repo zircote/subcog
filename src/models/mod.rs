@@ -16,8 +16,8 @@ pub use domain::{Domain, MemoryStatus, Namespace};
 pub use events::MemoryEvent;
 pub use memory::{Memory, MemoryId, MemoryResult};
 pub use prompt::{
-    ExtractedVariable, IssueSeverity, PromptTemplate, PromptVariable, ValidationIssue,
-    ValidationResult, extract_variables, is_reserved_variable_name, substitute_variables,
-    validate_prompt_content,
+    ExtractedVariable, IssueSeverity, MAX_VARIABLE_VALUE_LENGTH, PromptTemplate, PromptVariable,
+    ValidationIssue, ValidationResult, extract_variables, is_reserved_variable_name,
+    sanitize_variable_value, substitute_variables, validate_prompt_content,
 };
 pub use search::{DetailLevel, SearchFilter, SearchHit, SearchMode, SearchResult};

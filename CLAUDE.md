@@ -10,7 +10,7 @@ Subcog is a persistent memory system for AI coding assistants, written in Rust. 
 
 - **Single-binary distribution** (<100MB, <10ms cold start)
 - **Three-layer storage architecture** (Persistence, Index, Vector)
-- **Pluggable backends** (Git Notes, SQLite+usearch, PostgreSQL+pgvector)
+- **Pluggable backends** (`SQLite`+usearch, PostgreSQL+pgvector)
 - **MCP server integration** for AI agent interoperability
 - **Claude Code hooks** for seamless IDE integration
 - **Semantic search** with hybrid vector + BM25 ranking (RRF fusion)
@@ -39,7 +39,7 @@ src/
 │   │   ├── index.rs         # IndexBackend trait
 │   │   └── vector.rs        # VectorBackend trait
 │   ├── persistence/
-│   │   ├── git_notes.rs     # Git notes implementation (primary)
+│   │   ├── sqlite.rs        # SQLite implementation (primary)
 │   │   ├── postgresql.rs    # PostgreSQL implementation
 │   │   └── filesystem.rs    # Fallback filesystem storage
 │   ├── index/
@@ -73,8 +73,7 @@ src/
 │       └── service.rs       # DeduplicationService orchestrator
 │
 ├── git/                      # Git operations
-│   ├── notes.rs             # Git notes CRUD
-│   ├── remote.rs            # Fetch/push operations
+│   ├── remote.rs            # Git context detection (branch, remote, repo root)
 │   └── parser.rs            # YAML front matter parsing
 │
 ├── embedding/                # Embedding generation
@@ -747,7 +746,7 @@ This project uses `cargo-deny` to audit dependencies:
 
 ### Three-Layer Storage
 
-1. **Persistence Layer** (Authoritative): Git Notes (primary), PostgreSQL, Filesystem
+1. **Persistence Layer** (Authoritative): `SQLite` (primary), PostgreSQL, Filesystem
 2. **Index Layer** (Searchable): SQLite + FTS5, PostgreSQL full-text, RediSearch
 3. **Vector Layer** (Embeddings): usearch HNSW, pgvector, Redis vector
 
@@ -755,7 +754,7 @@ This project uses `cargo-deny` to audit dependencies:
 
 | Tier | Features | Requirements |
 |------|----------|--------------|
-| **Core** | Capture, search, git notes, CLI | None |
+| **Core** | Capture, search, `SQLite`, CLI | None |
 | **Enhanced** | Secrets filtering, multi-domain, audit | Configuration |
 | **LLM-Powered** | Auto-capture, consolidation, temporal | LLM provider |
 
@@ -841,14 +840,9 @@ The following hooks run automatically on file save:
 
 ### Active Specifications
 
-**Subcog Rust Rewrite** - `docs/spec/active/2025-12-28-subcog-rust-rewrite/`:
-
-- [REQUIREMENTS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/REQUIREMENTS.md) - Product requirements
-- [ARCHITECTURE.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/ARCHITECTURE.md) - Technical architecture
-- [IMPLEMENTATION_PLAN.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/IMPLEMENTATION_PLAN.md) - Phased implementation
-- [DECISIONS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/DECISIONS.md) - Architecture decision records
-- [PROGRESS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/PROGRESS.md) - Implementation progress
-- always run `make ci` before commiting or declaring success ensuring all gates pass
+**Issue #45: Storage Config Fix** - `docs/spec/active/2026-01-03-issue-45-storage-config/`:
+- Active remediation for GitNotes removal and SQLite consolidation
+- always run `make ci` before committing or declaring success ensuring all gates pass
 
 ### Completed Specifications
 

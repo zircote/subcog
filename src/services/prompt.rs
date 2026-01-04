@@ -6,16 +6,16 @@
 //! # Domain Hierarchy
 //!
 //! Prompts are searched in priority order:
-//! 1. **Project** - Repository-specific prompts (git notes at `refs/notes/_prompts`)
-//! 2. **User** - User-wide prompts (`~/.config/subcog/_prompts/`)
+//! 1. **Project** - Repository-specific prompts (faceted by repo/branch)
+//! 2. **User** - User-wide prompts (`~/.config/subcog/prompts.db`)
 //! 3. **Org** - Organization-wide prompts (deferred)
 //!
 //! # Storage Backends
 //!
 //! | Domain | Backend | Location |
 //! |--------|---------|----------|
-//! | Project | Git Notes | `.git/refs/notes/_prompts` |
-//! | User | SQLite | `~/.config/subcog/_prompts/prompts.db` |
+//! | Project | `SQLite` | `~/.config/subcog/prompts.db` (with repo/branch facets) |
+//! | User | `SQLite` | `~/.config/subcog/prompts.db` |
 //! | User | Filesystem | `~/.config/subcog/_prompts/` (fallback) |
 //! | Org | Deferred | Not yet implemented |
 

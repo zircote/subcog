@@ -143,47 +143,74 @@ impl Claims {
 /// Tool authorization configuration (CRIT-003).
 ///
 /// Maps tool names to required scopes for fine-grained access control.
+/// Unknown tools are explicitly denied by returning `None` from `required_scope`.
 #[cfg(feature = "http")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ToolAuthorization {
-    /// Default required scope if tool not explicitly mapped.
-    pub default_scope: String,
-}
-
-#[cfg(feature = "http")]
-impl Default for ToolAuthorization {
-    fn default() -> Self {
-        Self {
-            default_scope: "tools".to_string(),
-        }
-    }
+    /// Whether to allow unknown tools with admin scope (default: false, deny unknown).
+    pub allow_unknown_with_admin: bool,
 }
 
 #[cfg(feature = "http")]
 impl ToolAuthorization {
-    /// Returns the required scope for a tool.
+    /// Known tools and their scopes (compile-time constant for security).
+    const KNOWN_TOOLS: &'static [(&'static str, &'static str)] = &[
+        // Write operations
+        ("subcog_capture", "write"),
+        ("subcog_enrich", "write"),
+        ("subcog_consolidate", "write"),
+        ("prompt_save", "write"),
+        ("prompt_delete", "write"),
+        // Read operations
+        ("subcog_recall", "read"),
+        ("subcog_status", "read"),
+        ("subcog_namespaces", "read"),
+        ("prompt_list", "read"),
+        ("prompt_get", "read"),
+        ("prompt_run", "read"),
+        // Admin operations
+        ("subcog_sync", "admin"),
+        ("subcog_reindex", "admin"),
+    ];
+
+    /// Returns the required scope for a tool, or `None` if the tool is unknown.
+    ///
+    /// # Security
+    ///
+    /// Unknown tools return `None` to enforce explicit denial by default.
+    /// This prevents authorization bypass via unrecognized tool names.
     ///
     /// Tool scope mapping:
     /// - `subcog_capture`, `subcog_enrich`, `subcog_consolidate`: "write"
     /// - `subcog_recall`, `subcog_status`, `subcog_namespaces`: "read"
-    /// - `subcog_sync`: "admin"
+    /// - `subcog_sync`, `subcog_reindex`: "admin"
     /// - `prompt_save`, `prompt_delete`: "write"
     /// - `prompt_list`, `prompt_get`, `prompt_run`: "read"
-    /// - All others: default "tools" scope
+    /// - Unknown tools: `None` (explicit deny) or "admin" if `allow_unknown_with_admin`
     #[must_use]
-    pub fn required_scope(&self, tool_name: &str) -> &str {
-        match tool_name {
-            // Write operations
-            "subcog_capture" | "subcog_enrich" | "subcog_consolidate" => "write",
-            "prompt_save" | "prompt_delete" => "write",
-            // Read operations
-            "subcog_recall" | "subcog_status" | "subcog_namespaces" => "read",
-            "prompt_list" | "prompt_get" | "prompt_run" => "read",
-            // Admin operations
-            "subcog_sync" | "subcog_reindex" => "admin",
-            // Default
-            _ => &self.default_scope,
+    pub fn required_scope(&self, tool_name: &str) -> Option<&'static str> {
+        for (name, scope) in Self::KNOWN_TOOLS {
+            if *name == tool_name {
+                return Some(scope);
+            }
         }
+
+        // Unknown tools: deny by default, require admin if explicitly allowed
+        if self.allow_unknown_with_admin {
+            Some("admin")
+        } else {
+            None
+        }
+    }
+
+    /// Checks if a tool name is known to the authorization system.
+    ///
+    /// This is part of the public API for callers to verify tool names
+    /// before making authorization requests.
+    #[must_use]
+    #[allow(dead_code)] // Public API - may be used by external callers
+    pub fn is_known_tool(tool_name: &str) -> bool {
+        Self::KNOWN_TOOLS.iter().any(|(name, _)| *name == tool_name)
     }
 
     /// Checks if claims authorize access to a tool.
@@ -195,11 +222,14 @@ impl ToolAuthorization {
     ///
     /// # Returns
     ///
-    /// `true` if the claims include the required scope for the tool.
+    /// `true` if the tool is known and claims include the required scope.
+    /// Returns `false` for unknown tools (explicit deny).
     #[must_use]
     pub fn is_authorized(&self, claims: &Claims, tool_name: &str) -> bool {
-        let required = self.required_scope(tool_name);
-        claims.has_scope(required)
+        match self.required_scope(tool_name) {
+            Some(required) => claims.has_scope(required),
+            None => false, // Unknown tools are explicitly denied
+        }
     }
 }
 
@@ -557,26 +587,26 @@ mod tests {
         let auth = ToolAuthorization::default();
 
         // Write operations
-        assert_eq!(auth.required_scope("subcog_capture"), "write");
-        assert_eq!(auth.required_scope("subcog_enrich"), "write");
-        assert_eq!(auth.required_scope("subcog_consolidate"), "write");
-        assert_eq!(auth.required_scope("prompt_save"), "write");
-        assert_eq!(auth.required_scope("prompt_delete"), "write");
+        assert_eq!(auth.required_scope("subcog_capture"), Some("write"));
+        assert_eq!(auth.required_scope("subcog_enrich"), Some("write"));
+        assert_eq!(auth.required_scope("subcog_consolidate"), Some("write"));
+        assert_eq!(auth.required_scope("prompt_save"), Some("write"));
+        assert_eq!(auth.required_scope("prompt_delete"), Some("write"));
 
         // Read operations
-        assert_eq!(auth.required_scope("subcog_recall"), "read");
-        assert_eq!(auth.required_scope("subcog_status"), "read");
-        assert_eq!(auth.required_scope("subcog_namespaces"), "read");
-        assert_eq!(auth.required_scope("prompt_list"), "read");
-        assert_eq!(auth.required_scope("prompt_get"), "read");
-        assert_eq!(auth.required_scope("prompt_run"), "read");
+        assert_eq!(auth.required_scope("subcog_recall"), Some("read"));
+        assert_eq!(auth.required_scope("subcog_status"), Some("read"));
+        assert_eq!(auth.required_scope("subcog_namespaces"), Some("read"));
+        assert_eq!(auth.required_scope("prompt_list"), Some("read"));
+        assert_eq!(auth.required_scope("prompt_get"), Some("read"));
+        assert_eq!(auth.required_scope("prompt_run"), Some("read"));
 
         // Admin operations
-        assert_eq!(auth.required_scope("subcog_sync"), "admin");
-        assert_eq!(auth.required_scope("subcog_reindex"), "admin");
+        assert_eq!(auth.required_scope("subcog_sync"), Some("admin"));
+        assert_eq!(auth.required_scope("subcog_reindex"), Some("admin"));
 
-        // Unknown tool uses default
-        assert_eq!(auth.required_scope("unknown_tool"), "tools");
+        // Unknown tools return None (explicitly denied by default)
+        assert_eq!(auth.required_scope("unknown_tool"), None);
     }
 
     #[cfg(feature = "http")]
@@ -644,11 +674,12 @@ mod tests {
             scopes: vec!["*".to_string()],
         };
 
-        // Wildcard should authorize all tools
+        // Wildcard should authorize all known tools
         assert!(auth.is_authorized(&superuser, "subcog_recall"));
         assert!(auth.is_authorized(&superuser, "subcog_capture"));
         assert!(auth.is_authorized(&superuser, "subcog_sync"));
-        assert!(auth.is_authorized(&superuser, "unknown_tool"));
+        // Unknown tools are explicitly denied regardless of scope
+        assert!(!auth.is_authorized(&superuser, "unknown_tool"));
     }
 
     #[cfg(feature = "http")]

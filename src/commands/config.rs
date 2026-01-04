@@ -246,9 +246,6 @@ fn display_storage_config(config: &SubcogConfig) {
                 print!(" (connection: {display})");
             }
         },
-        StorageBackendType::GitNotes => {
-            print!(" (project-local git notes)");
-        },
     }
     println!();
 

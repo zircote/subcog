@@ -1243,15 +1243,16 @@ mod http_transport {
                         sub = %claims.sub,
                         "Tool authorization denied"
                     );
+                    let scope_str = required_scope.unwrap_or("unknown");
                     metrics::counter!(
                         "mcp_tool_auth_denied_total",
                         "tool" => name.to_string(),
-                        "required_scope" => required_scope.to_string()
+                        "required_scope" => scope_str.to_string()
                     )
                     .increment(1);
                     return Err((
                         -32000,
-                        format!("Forbidden: tool '{name}' requires '{required_scope}' scope"),
+                        format!("Forbidden: tool '{name}' requires '{scope_str}' scope"),
                     ));
                 }
 

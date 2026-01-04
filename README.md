@@ -415,7 +415,7 @@ src/
 ├── lib.rs              # Library entry point
 ├── main.rs             # CLI entry point
 ├── models/             # Data structures (Memory, Domain, Namespace)
-├── storage/            # Storage backends (Git Notes, SQLite, usearch)
+├── storage/            # Storage backends (SQLite, PostgreSQL, usearch)
 │   └── traits/         # Backend trait definitions (see mod.rs for docs)
 ├── services/           # Business logic (Capture, Recall, Sync)
 ├── mcp/                # MCP server implementation
@@ -517,12 +517,18 @@ For performance tuning, see [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ## Specification
 
-Full specification documents are in [`docs/spec/active/2026-01-03-storage-simplification/`](docs/spec/active/2026-01-03-storage-simplification/):
+### Active Work
 
-- [REQUIREMENTS.md](docs/spec/active/2026-01-03-storage-simplification/REQUIREMENTS.md) - Product requirements
-- [ARCHITECTURE.md](docs/spec/active/2026-01-03-storage-simplification/ARCHITECTURE.md) - Technical architecture
-- [IMPLEMENTATION_PLAN.md](docs/spec/active/2026-01-03-storage-simplification/IMPLEMENTATION_PLAN.md) - Phased implementation
-- [DECISIONS.md](docs/spec/active/2026-01-03-storage-simplification/DECISIONS.md) - Architecture decision records
+- [TASK_PLAN.md](docs/spec/active/TASK_PLAN.md) - Current remediation tasks (Issue #45)
+
+### Completed Specifications
+
+Full specification documents for the storage architecture are in [`docs/spec/completed/2026-01-03-storage-simplification/`](docs/spec/completed/2026-01-03-storage-simplification/):
+
+- [REQUIREMENTS.md](docs/spec/completed/2026-01-03-storage-simplification/REQUIREMENTS.md) - Product requirements
+- [ARCHITECTURE.md](docs/spec/completed/2026-01-03-storage-simplification/ARCHITECTURE.md) - Technical architecture
+- [IMPLEMENTATION_PLAN.md](docs/spec/completed/2026-01-03-storage-simplification/IMPLEMENTATION_PLAN.md) - Phased implementation
+- [DECISIONS.md](docs/spec/completed/2026-01-03-storage-simplification/DECISIONS.md) - Architecture decision records
 
 ## License
 

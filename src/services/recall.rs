@@ -17,6 +17,9 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::instrument;
 
+/// RRF fusion entry storing indices instead of cloning [`SearchHit`].
+type RrfEntry = (f32, Option<usize>, Option<usize>, Option<f32>);
+
 /// Service for searching and retrieving memories.
 ///
 /// Supports three search modes:
@@ -512,46 +515,59 @@ impl RecallService {
     ) -> Vec<SearchHit> {
         const K: f32 = 60.0; // Standard RRF constant
 
-        // Pre-allocate HashMap with expected capacity (PERF-M1)
-        // Max unique results = text_results + vector_results (when no overlap)
+        // Use indices instead of cloning SearchHits (PERF-C2)
+        // Store: (rrf_score, text_index, vector_index, vector_score)
+        // - text_index: Some if hit came from text search
+        // - vector_index: Some if hit also/only came from vector search
+        // - vector_score: Optional vector score to merge
         let capacity = text_results.len() + vector_results.len();
-        let mut scores: HashMap<String, (f32, Option<SearchHit>)> =
-            HashMap::with_capacity(capacity);
+        let mut scores: HashMap<String, RrfEntry> = HashMap::with_capacity(capacity);
 
-        // Add text results
+        // Add text results - store indices instead of cloning (PERF-C2)
         for (rank, hit) in text_results.iter().enumerate() {
             let id = hit.memory.id.to_string();
             let rrf_score = 1.0 / (K + rank as f32 + 1.0);
 
             scores
                 .entry(id)
-                .and_modify(|(s, _)| *s += rrf_score)
-                .or_insert((rrf_score, Some(hit.clone())));
+                .and_modify(|(s, _, _, _)| *s += rrf_score)
+                .or_insert((rrf_score, Some(rank), None, None));
         }
 
-        // Add vector results
+        // Add vector results - merge with existing or insert index (PERF-C2)
         for (rank, hit) in vector_results.iter().enumerate() {
             let id = hit.memory.id.to_string();
             let rrf_score = 1.0 / (K + rank as f32 + 1.0);
 
             scores
                 .entry(id)
-                .and_modify(|(s, existing)| {
+                .and_modify(|(s, _, vec_idx, vec_score)| {
                     *s += rrf_score;
-                    // Merge vector score into existing hit
-                    merge_vector_score(existing, hit.vector_score);
+                    // Store vector index and score for merging later
+                    *vec_idx = Some(rank);
+                    *vec_score = hit.vector_score;
                 })
-                .or_insert((rrf_score, Some(hit.clone())));
+                .or_insert((rrf_score, None, Some(rank), hit.vector_score));
         }
 
-        // Sort by combined score
+        // Reconstruct results from indices - only clone at final step (PERF-C2)
         let mut results: Vec<_> = scores
             .into_iter()
-            .filter_map(|(_, (score, hit))| {
-                hit.map(|mut h| {
-                    h.score = score;
-                    h
-                })
+            .filter_map(|(_, (score, text_idx, vec_idx, vec_score))| {
+                // Prefer text hit (has BM25 score), fall back to vector hit
+                let mut hit = if let Some(idx) = text_idx {
+                    text_results.get(idx).cloned()
+                } else {
+                    vec_idx.and_then(|idx| vector_results.get(idx).cloned())
+                }?;
+
+                // Merge vector score if we have one from vector search
+                if vec_score.is_some() {
+                    hit.vector_score = vec_score;
+                }
+
+                hit.score = score;
+                Some(hit)
             })
             .collect();
 
@@ -651,13 +667,6 @@ fn domain_label(filter: &SearchFilter) -> Cow<'static, str> {
         0 => Cow::Borrowed("all"),
         1 => Cow::Owned(filter.domains[0].to_string()),
         _ => Cow::Borrowed("multi"),
-    }
-}
-
-/// Merges a vector score into an existing search hit.
-const fn merge_vector_score(existing: &mut Option<SearchHit>, vector_score: Option<f32>) {
-    if let Some(e) = existing {
-        e.vector_score = vector_score;
     }
 }
 
