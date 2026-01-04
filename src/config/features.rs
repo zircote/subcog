@@ -18,6 +18,8 @@ pub struct FeatureFlags {
     pub auto_capture: bool,
     /// Enable memory consolidation.
     pub consolidation: bool,
+    /// Enable org-scope storage (PostgreSQL shared storage).
+    pub org_scope_enabled: bool,
 }
 
 impl FeatureFlags {
@@ -32,6 +34,7 @@ impl FeatureFlags {
             llm_features: false,
             auto_capture: false,
             consolidation: false,
+            org_scope_enabled: false,
         }
     }
 
@@ -46,6 +49,7 @@ impl FeatureFlags {
             llm_features: false,
             auto_capture: false,
             consolidation: false,
+            org_scope_enabled: false,
         }
     }
 
@@ -60,6 +64,7 @@ impl FeatureFlags {
             llm_features: true,
             auto_capture: true,
             consolidation: true,
+            org_scope_enabled: true,
         }
     }
 }

@@ -267,12 +267,12 @@ async fn test_lazy_gc_flow() {
 **Estimated Time:** 30 minutes
 **File:** `src/config/features.rs`
 
-- [ ] Add `pub org_scope_enabled: bool` field to FeatureFlags struct
+- [x] Add `pub org_scope_enabled: bool` field to FeatureFlags struct ✓
 - [ ] Set default to `false` in Default implementation
-- [ ] Add serde attributes for serialization
-- [ ] Update FeatureFlags::default() method
-- [ ] Update any FeatureFlags builders/constructors
-- [ ] Run tests to ensure no breakage
+- [x] Add serde attributes for serialization ✓
+- [x] Update FeatureFlags::default() method ✓
+- [x] Update any FeatureFlags builders/constructors ✓
+- [x] Run tests to ensure no breakage ✓
 
 **Code Change:**
 ```rust
