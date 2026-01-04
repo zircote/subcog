@@ -33,7 +33,7 @@ Tasks:
 - [x] Add rmcp dependency and implement server wiring to replace custom JSON-RPC. ✓
 - [x] Map existing MCP handlers to rmcp interfaces; ensure notification responses are suppressed. ✓
 - [x] Update error handling to rmcp error model. ✓
-- [ ] Update tests/fixtures for MCP protocol compatibility.
+- [x] Update tests/fixtures for MCP protocol compatibility. ✓
 - [ ] Update docs and remove references to custom JSON-RPC implementation.
 
 ### 3) ADR-0034/0041 Git Notes Removal

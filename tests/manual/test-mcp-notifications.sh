@@ -41,16 +41,14 @@ fi
 echo ""
 
 # Test 3: Verify HTTP transport (if implemented)
-echo "${WAIT} Test 3: HTTP transport returns 204 for notifications"
+echo "${WAIT} Test 3: HTTP transport notification behavior"
 echo "  If HTTP transport is implemented:"
-echo "  curl -X POST http://localhost:PORT/mcp \\"
-echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}'"
-echo ""
-echo "  Expected: HTTP 204 No Content (no body)"
-read -p "Did HTTP return 204 No Content? (y/skip): " http_ok
+echo "  - Use an MCP client that supports streamable HTTP (SSE)"
+echo "  - Send notifications/initialized"
+echo "  - Verify no response messages are emitted for notifications"
+read -p "Did HTTP notifications suppress responses? (y/skip): " http_ok
 if [ "$http_ok" = "y" ]; then
-    echo "  ${PASS} HTTP 204 for notifications"
+    echo "  ${PASS} HTTP notifications suppressed"
 elif [ "$http_ok" = "skip" ]; then
     echo "  ${WAIT} HTTP transport not tested"
 fi
@@ -90,7 +88,7 @@ echo "MCP Notification Compliance:"
 echo "- ADR-0054: Notification detection via id field absence"
 echo "- ADR-0055: Empty string return for notifications"
 echo "- ADR-0056: Always include id in error responses"
-echo "- ADR-0057: HTTP 204 for notifications"
+echo "- ADR-0057: HTTP notifications do not emit responses"
 echo "- ADR-0058: Debug-level logging"
 echo ""
 echo "All features implemented in src/mcp/server.rs"
