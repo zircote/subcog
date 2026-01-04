@@ -486,8 +486,8 @@ org_scope_enabled = true
 - [x] Update README.md overall compliance statistics ✓
 - [x] Change ADR-0053 from ❌ CRITICAL to ✅ COMPLIANT ✓
 - [x] Change ADR-0052 from ⚠️ PARTIAL to ✅ COMPLIANT ✓
-- [ ] Change ADR-0051 from ❌ NON-COMPLIANT to ✅ COMPLIANT
-- [ ] Add "Remediation Completed: 2026-MM-DD" to each audit section
+- [x] Change ADR-0051 from ❌ NON-COMPLIANT to ✅ COMPLIANT ✓
+- [x] Add "Remediation Completed: 2026-MM-DD" to each audit section ✓
 - [ ] Update critical issues section in README
 - [ ] Recalculate compliance percentages
 - [ ] Update "Next Scheduled Audit" date
