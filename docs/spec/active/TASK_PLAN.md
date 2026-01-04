@@ -77,7 +77,7 @@
 - [x] `subcog recall` reads ONLY from SQLite ✓
 - [x] `subcog status` shows SQLite database info ✓
 - [x] No `refs/notes/subcog` created on new captures ✓
-- [ ] Close Issue #45 with PR reference
+- [x] Close Issue #45 with PR reference ✓
 
 ---
 <!-- BEGIN deep-clean findings -->
@@ -262,8 +262,8 @@
 **Total: 42 original + 123 deep-clean = 165 tasks across 30 phases**
 
 **Started**: 2026-01-03
-**Status**: In Progress - 126 of 165 completed (76%)
-**Remaining Tasks**: 39 (1 close issue + 38 enhancements/deferred)
+**Status**: Core Complete - 127 of 165 completed (77%)
+**Remaining Tasks**: 38 (enhancements deferred to future sprints)
 **Deep-Clean Date**: 2026-01-03
 **Agents**: Security Analyst, Performance Engineer, Architecture Reviewer, Code Quality Analyst, Test Coverage Analyst, Documentation Reviewer, Database Expert, Penetration Tester, Compliance Auditor, Chaos Engineer, Rust Idioms Expert, Dependency Auditor
 
