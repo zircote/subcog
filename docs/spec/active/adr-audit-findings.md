@@ -190,15 +190,15 @@ CREATE INDEX idx_memories_tombstoned ON memories(tombstoned_at) WHERE tombstoned
 **Estimated Time:** 1-2 hours
 **File:** `src/services/recall.rs`
 
-- [ ] Add `WHERE status != 'Tombstoned'` to default SQL queries
-- [ ] Add `include_tombstoned: bool` parameter to search methods
-- [ ] Update RecallService API to support include_tombstoned flag
-- [ ] Update CLI to support `--include-tombstoned` flag
-- [ ] Update MCP tools to support tombstone filtering
-- [ ] Verify existing search tests still pass
-- [ ] Add new tests for tombstone filtering
-- [ ] Test that tombstoned memories are hidden by default
-- [ ] Test that --include-tombstoned shows tombstoned memories
+- [x] Add `WHERE status != 'Tombstoned'` to default SQL queries ✓
+- [x] Add `include_tombstoned: bool` parameter to search methods ✓
+- [x] Update RecallService API to support include_tombstoned flag ✓
+- [x] Update CLI to support `--include-tombstoned` flag ✓
+- [x] Update MCP tools to support tombstone filtering ✓
+- [x] Verify existing search tests still pass ✓
+- [x] Add new tests for tombstone filtering ✓
+- [x] Test that tombstoned memories are hidden by default ✓
+- [x] Test that --include-tombstoned shows tombstoned memories ✓
 
 ---
 
