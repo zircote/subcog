@@ -12,7 +12,22 @@ use crate::{Error, Result};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
+
+/// Helper to recover from mutex poisoning (CRIT-002).
+///
+/// If a thread panics while holding the lock, the mutex becomes "poisoned".
+/// Rather than failing permanently, we recover the inner data and continue.
+/// This is safe because our inner state is consistent even if the operation
+/// that caused the panic was incomplete.
+fn recover_lock<'a, T>(
+    result: std::result::Result<MutexGuard<'a, T>, PoisonError<MutexGuard<'a, T>>>,
+) -> MutexGuard<'a, T> {
+    result.unwrap_or_else(|poisoned| {
+        tracing::warn!("Recovered from poisoned mutex lock");
+        poisoned.into_inner()
+    })
+}
 
 /// Default embedding dimensions for all-MiniLM-L6-v2.
 pub const DEFAULT_USEARCH_DIMENSIONS: usize = 384;
@@ -41,7 +56,7 @@ mod native {
     use super::{
         DEFAULT_USEARCH_DIMENSIONS, Error, HNSW_CONNECTIVITY, HNSW_EXPANSION_ADD,
         HNSW_EXPANSION_SEARCH, HashMap, MemoryId, Mutex, PathBuf, Result, VectorBackend,
-        VectorFilter, fs,
+        VectorFilter, fs, recover_lock,
     };
     use usearch::{Index, IndexOptions, MetricKind, ScalarKind};
 
@@ -57,6 +72,8 @@ mod native {
         next_key: u64,
         /// Whether the index has been modified since last save.
         dirty: bool,
+        /// Whether the index was loaded via memory mapping (PERF-M2).
+        mmap_loaded: bool,
     }
 
     /// Native usearch-based vector backend using HNSW.
@@ -109,6 +126,7 @@ mod native {
                 key_to_id: HashMap::new(),
                 next_key: 1,
                 dirty: false,
+                mmap_loaded: false,
             };
 
             Ok(Self {
@@ -142,12 +160,40 @@ mod native {
             &self.index_path
         }
 
-        /// Loads the index from disk.
+        /// Loads the index from disk (copies entire index into RAM).
+        ///
+        /// For large datasets (>100K vectors), consider using [`Self::load_mmap`] instead
+        /// which memory-maps the index file for reduced memory usage.
         ///
         /// # Errors
         ///
         /// Returns an error if the file cannot be read or parsed.
         pub fn load(&self) -> Result<()> {
+            self.load_internal(false)
+        }
+
+        /// Loads the index using memory mapping (PERF-M2).
+        ///
+        /// Memory-mapped loading keeps the index on disk and only loads pages
+        /// into RAM as they are accessed. This is beneficial for:
+        /// - Large datasets (>100K vectors)
+        /// - Systems with limited RAM
+        /// - Read-heavy workloads with good OS page cache
+        ///
+        /// **Trade-offs:**
+        /// - First queries may be slower due to page faults
+        /// - Write operations may trigger copy-on-write
+        /// - Index file must remain accessible during operation
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the file cannot be memory-mapped.
+        pub fn load_mmap(&self) -> Result<()> {
+            self.load_internal(true)
+        }
+
+        /// Internal load implementation supporting both modes.
+        fn load_internal(&self, use_mmap: bool) -> Result<()> {
             if self.index_path.as_os_str().is_empty() {
                 return Ok(());
             }
@@ -159,19 +205,32 @@ mod native {
                 return Ok(());
             }
 
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
-            // Load the usearch index
-            state
-                .index
-                .load(index_file.to_string_lossy().as_ref())
-                .map_err(|e| Error::OperationFailed {
-                    operation: "load_usearch_index".to_string(),
-                    cause: e.to_string(),
-                })?;
+            // Load the usearch index (mmap or regular)
+            if use_mmap {
+                state
+                    .index
+                    .view(index_file.to_string_lossy().as_ref())
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "mmap_usearch_index".to_string(),
+                        cause: e.to_string(),
+                    })?;
+                state.mmap_loaded = true;
+                tracing::debug!(
+                    path = %index_file.display(),
+                    "Loaded usearch index via memory mapping"
+                );
+            } else {
+                state
+                    .index
+                    .load(index_file.to_string_lossy().as_ref())
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "load_usearch_index".to_string(),
+                        cause: e.to_string(),
+                    })?;
+                state.mmap_loaded = false;
+            }
 
             // Load the metadata (id mappings)
             let meta_content =
@@ -201,6 +260,12 @@ mod native {
             Ok(())
         }
 
+        /// Returns whether the index was loaded via memory mapping.
+        #[must_use]
+        pub fn is_mmap_loaded(&self) -> bool {
+            recover_lock(self.state.lock()).mmap_loaded
+        }
+
         /// Saves the index to disk.
         ///
         /// # Errors
@@ -211,10 +276,7 @@ mod native {
                 return Ok(());
             }
 
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             if !state.dirty {
                 return Ok(());
@@ -306,10 +368,7 @@ mod native {
         fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
             self.validate_embedding(embedding)?;
 
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             let key = Self::get_or_create_key(&mut state, id.as_str());
 
@@ -331,10 +390,7 @@ mod native {
         }
 
         fn remove(&self, id: &MemoryId) -> Result<bool> {
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             let Some(&key) = state.id_to_key.get(id.as_str()) else {
                 return Ok(false);
@@ -366,10 +422,7 @@ mod native {
         ) -> Result<Vec<(MemoryId, f32)>> {
             self.validate_embedding(query_embedding)?;
 
-            let state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let state = recover_lock(self.state.lock());
 
             if state.index.size() == 0 {
                 return Ok(Vec::new());
@@ -401,18 +454,12 @@ mod native {
         }
 
         fn count(&self) -> Result<usize> {
-            let state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let state = recover_lock(self.state.lock());
             Ok(state.index.size())
         }
 
         fn clear(&self) -> Result<()> {
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             state.index.reset().map_err(|e| Error::OperationFailed {
                 operation: "usearch_reset".to_string(),
@@ -450,7 +497,7 @@ mod native {
 mod fallback {
     use super::{
         DEFAULT_USEARCH_DIMENSIONS, Error, HashMap, MemoryId, Mutex, PathBuf, Result,
-        VectorBackend, VectorFilter, fs,
+        VectorBackend, VectorFilter, fs, recover_lock,
     };
 
     /// Inner mutable state protected by a Mutex.
@@ -551,15 +598,35 @@ mod fallback {
                 )));
             }
 
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             state.vectors = data.vectors;
             state.dirty = false;
 
             Ok(())
+        }
+
+        /// Loads the index using memory mapping (PERF-M2).
+        ///
+        /// Note: The fallback implementation does not support true memory mapping.
+        /// This method is provided for API compatibility and delegates to `load()`.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the file cannot be read or parsed.
+        pub fn load_mmap(&self) -> Result<()> {
+            // Fallback implementation doesn't support true mmap,
+            // just delegate to regular load
+            self.load()
+        }
+
+        /// Returns whether the index was loaded via memory mapping.
+        ///
+        /// Always returns `false` for the fallback implementation.
+        #[must_use]
+        pub const fn is_mmap_loaded(&self) -> bool {
+            // Fallback implementation doesn't support mmap
+            false
         }
 
         /// Saves the index to disk.
@@ -572,10 +639,7 @@ mod fallback {
                 return Ok(());
             }
 
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             if !state.dirty {
                 return Ok(());
@@ -654,10 +718,7 @@ mod fallback {
         fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
             self.validate_embedding(embedding)?;
 
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             state
                 .vectors
@@ -668,10 +729,7 @@ mod fallback {
         }
 
         fn remove(&self, id: &MemoryId) -> Result<bool> {
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
 
             let removed = state.vectors.remove(id.as_str()).is_some();
             if removed {
@@ -688,10 +746,7 @@ mod fallback {
         ) -> Result<Vec<(MemoryId, f32)>> {
             self.validate_embedding(query_embedding)?;
 
-            let state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let state = recover_lock(self.state.lock());
 
             // Compute similarity for all vectors (brute-force O(n))
             let mut scores: Vec<(String, f32)> = state
@@ -717,18 +772,12 @@ mod fallback {
         }
 
         fn count(&self) -> Result<usize> {
-            let state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let state = recover_lock(self.state.lock());
             Ok(state.vectors.len())
         }
 
         fn clear(&self) -> Result<()> {
-            let mut state = self.state.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_state".to_string(),
-                cause: e.to_string(),
-            })?;
+            let mut state = recover_lock(self.state.lock());
             state.vectors.clear();
             state.dirty = true;
             Ok(())
@@ -1007,5 +1056,77 @@ mod tests {
 
         assert!(!results.is_empty());
         assert!(results[0].1 > 0.9); // High similarity to updated embedding
+    }
+
+    // Tests for memory-mapped loading (PERF-M2)
+
+    #[test]
+    fn test_load_mmap() {
+        let dir = TempDir::new().expect("tempdir failed");
+        let index_path = dir.path().join("mmap_test.idx");
+
+        // Create and populate backend
+        {
+            let backend = create_backend(&index_path, 384);
+
+            let id = MemoryId::new("mmap-test");
+            let embedding = create_random_embedding(384);
+            backend.upsert(&id, &embedding).expect("upsert failed");
+            backend.save().expect("save failed");
+        }
+
+        // Load using mmap in new backend
+        {
+            let backend = create_backend(&index_path, 384);
+            backend.load_mmap().expect("load_mmap failed");
+
+            assert_eq!(backend.count().expect("count failed"), 1);
+
+            // Search should work with mmap-loaded index
+            let query = create_random_embedding(384);
+            let results = backend
+                .search(&query, &VectorFilter::new(), 1)
+                .expect("search failed");
+
+            assert!(!results.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_is_mmap_loaded_false_by_default() {
+        let backend = create_in_memory(384);
+        assert!(!backend.is_mmap_loaded());
+    }
+
+    #[test]
+    fn test_is_mmap_loaded_after_regular_load() {
+        let dir = TempDir::new().expect("tempdir failed");
+        let index_path = dir.path().join("regular_load.idx");
+
+        // Create and save
+        {
+            let backend = create_backend(&index_path, 384);
+            let id = MemoryId::new("test");
+            let embedding = create_random_embedding(384);
+            backend.upsert(&id, &embedding).expect("upsert failed");
+            backend.save().expect("save failed");
+        }
+
+        // Load regularly
+        {
+            let backend = create_backend(&index_path, 384);
+            backend.load().expect("load failed");
+            // Regular load should not set mmap flag
+            assert!(!backend.is_mmap_loaded());
+        }
+    }
+
+    #[test]
+    fn test_load_mmap_nonexistent_file() {
+        let backend = create_backend("/nonexistent/path/mmap.idx", 384);
+        let result = backend.load_mmap();
+        // Should succeed with empty index (same as load())
+        assert!(result.is_ok());
+        assert_eq!(backend.count().expect("count failed"), 0);
     }
 }

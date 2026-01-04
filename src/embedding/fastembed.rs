@@ -14,6 +14,7 @@ use crate::{Error, Result};
 #[cfg(feature = "fastembed-embeddings")]
 mod native {
     use super::{DEFAULT_DIMENSIONS, Embedder, Error, Result};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::OnceLock;
     use std::time::Instant;
 
@@ -57,8 +58,19 @@ mod native {
 
         /// Gets or initializes the embedding model (thread-safe).
         ///
+        /// # Performance Note
+        ///
         /// The model is loaded lazily on first use to preserve cold start time.
         /// Subsequent calls return the cached instance.
+        ///
+        /// The first call blocks synchronously (~100-500ms) while loading the ONNX model.
+        /// This is an intentional design decision:
+        /// - One-time cost amortized over all subsequent calls (instant)
+        /// - Sync API is simpler and doesn't require async runtime everywhere
+        /// - Alternative (`tokio::spawn_blocking`) would require async `Embedder` trait
+        ///
+        /// For applications sensitive to first-call latency, consider warming up the
+        /// embedder during startup: `FastEmbedEmbedder::new().embed("warmup").ok();`
         fn get_model() -> Result<&'static fastembed::TextEmbedding> {
             // Check if already initialized
             if let Some(model) = EMBEDDING_MODEL.get() {
@@ -118,14 +130,34 @@ mod native {
             }
 
             let model = Self::get_model()?;
+            let text_owned = text.to_string();
 
-            let embeddings =
-                model
-                    .embed(vec![text.to_string()], None)
-                    .map_err(|e| Error::OperationFailed {
+            // Wrap ONNX runtime call in catch_unwind for graceful degradation (RES-M1).
+            // ONNX runtime can panic on malformed inputs or internal errors.
+            // AssertUnwindSafe is safe here because we don't access any mutable state
+            // after the panic, and fastembed::TextEmbedding is Send + Sync.
+            let result = catch_unwind(AssertUnwindSafe(|| model.embed(vec![text_owned], None)));
+
+            let embeddings = result
+                .map_err(|panic_info| {
+                    let panic_msg = panic_info
+                        .downcast_ref::<&str>()
+                        .map(|s| (*s).to_string())
+                        .or_else(|| panic_info.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "unknown panic".to_string());
+                    tracing::error!(
+                        panic_message = %panic_msg,
+                        "ONNX runtime panicked during embedding"
+                    );
+                    Error::OperationFailed {
                         operation: "embed".to_string(),
-                        cause: e.to_string(),
-                    })?;
+                        cause: format!("ONNX runtime panic: {panic_msg}"),
+                    }
+                })?
+                .map_err(|e| Error::OperationFailed {
+                    operation: "embed".to_string(),
+                    cause: e.to_string(),
+                })?;
 
             embeddings
                 .into_iter()
@@ -150,8 +182,26 @@ mod native {
             // Convert &[&str] to Vec<String> for fastembed
             let texts_owned: Vec<String> = texts.iter().map(|s| (*s).to_string()).collect();
 
-            model
-                .embed(texts_owned, None)
+            // Wrap ONNX runtime call in catch_unwind for graceful degradation (RES-M1).
+            let result = catch_unwind(AssertUnwindSafe(|| model.embed(texts_owned, None)));
+
+            result
+                .map_err(|panic_info| {
+                    let panic_msg = panic_info
+                        .downcast_ref::<&str>()
+                        .map(|s| (*s).to_string())
+                        .or_else(|| panic_info.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "unknown panic".to_string());
+                    tracing::error!(
+                        panic_message = %panic_msg,
+                        batch_size = texts.len(),
+                        "ONNX runtime panicked during batch embedding"
+                    );
+                    Error::OperationFailed {
+                        operation: "embed_batch".to_string(),
+                        cause: format!("ONNX runtime panic: {panic_msg}"),
+                    }
+                })?
                 .map_err(|e| Error::OperationFailed {
                     operation: "embed_batch".to_string(),
                     cause: e.to_string(),

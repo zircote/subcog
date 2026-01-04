@@ -1,0 +1,14 @@
+{
+  "description": "Complex filter: ns:decisions tag:rust,python -tag:test since:7d source:src/*.rs",
+  "expected": {
+    "namespaces": ["decisions"],
+    "tags": [],
+    "tags_any": ["rust", "python"],
+    "excluded_tags": ["test"],
+    "statuses": [],
+    "source_pattern": "src/*.rs",
+    "has_created_after": true,
+    "created_before": null,
+    "limit": null
+  }
+}

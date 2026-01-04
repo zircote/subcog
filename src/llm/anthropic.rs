@@ -2,6 +2,7 @@
 
 use super::{CaptureAnalysis, LlmHttpConfig, LlmProvider, build_http_client};
 use crate::{Error, Result};
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
 /// Escapes XML special characters to prevent prompt injection (SEC-M3).
@@ -24,9 +25,12 @@ fn escape_xml(s: &str) -> String {
 }
 
 /// Anthropic Claude LLM client.
+///
+/// API keys are stored using `SecretString` which zeroizes memory on drop,
+/// preventing sensitive credentials from lingering in memory after use.
 pub struct AnthropicClient {
-    /// API key.
-    api_key: Option<String>,
+    /// API key (zeroized on drop for security).
+    api_key: Option<SecretString>,
     /// API endpoint.
     endpoint: String,
     /// Model to use.
@@ -45,7 +49,9 @@ impl AnthropicClient {
     /// Creates a new Anthropic client.
     #[must_use]
     pub fn new() -> Self {
-        let api_key = std::env::var("ANTHROPIC_API_KEY").ok();
+        let api_key = std::env::var("ANTHROPIC_API_KEY")
+            .ok()
+            .map(SecretString::from);
         Self {
             api_key,
             endpoint: Self::DEFAULT_ENDPOINT.to_string(),
@@ -57,7 +63,7 @@ impl AnthropicClient {
     /// Sets the API key.
     #[must_use]
     pub fn with_api_key(mut self, key: impl Into<String>) -> Self {
-        self.api_key = Some(key.into());
+        self.api_key = Some(SecretString::from(key.into()));
         self
     }
 
@@ -95,8 +101,8 @@ impl AnthropicClient {
                 cause: "ANTHROPIC_API_KEY not set".to_string(),
             })?;
 
-        // Validate key format (SEC-M1)
-        if !Self::is_valid_api_key_format(key) {
+        // Validate key format (SEC-M1) - expose secret only for validation
+        if !Self::is_valid_api_key_format(key.expose_secret()) {
             return Err(Error::OperationFailed {
                 operation: "anthropic_request".to_string(),
                 cause: "Invalid API key format: expected 'sk-ant-' prefix".to_string(),
@@ -152,7 +158,7 @@ impl AnthropicClient {
         let response = self
             .client
             .post(format!("{}/messages", self.endpoint))
-            .header("x-api-key", api_key)
+            .header("x-api-key", api_key.expose_secret())
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
             .json(&request)
@@ -351,7 +357,12 @@ mod tests {
             .with_endpoint("https://custom.endpoint")
             .with_model("claude-3-opus-20240229");
 
-        assert_eq!(client.api_key, Some("test-key".to_string()));
+        // SecretString doesn't implement PartialEq for security - use expose_secret()
+        assert!(client.api_key.is_some());
+        assert_eq!(
+            client.api_key.as_ref().map(ExposeSecret::expose_secret),
+            Some("test-key")
+        );
         assert_eq!(client.endpoint, "https://custom.endpoint");
         assert_eq!(client.model, "claude-3-opus-20240229");
     }

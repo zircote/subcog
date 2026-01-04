@@ -32,6 +32,7 @@
 // Drop timing not critical for correctness in service code
 #![allow(clippy::significant_drop_tightening)]
 
+pub mod auth;
 mod backend_factory;
 mod capture;
 mod consolidation;
@@ -48,6 +49,7 @@ mod recall;
 mod sync;
 mod topic_index;
 
+pub use auth::{AuthContext, AuthContextBuilder, Permission};
 pub use backend_factory::{BackendFactory, BackendSet};
 pub use capture::CaptureService;
 pub use consolidation::ConsolidationService;
@@ -70,8 +72,7 @@ pub use topic_index::{TopicIndexService, TopicInfo};
 
 use crate::config::SubcogConfig;
 use crate::embedding::Embedder;
-use crate::git::{NotesManager, YamlFrontMatterParser};
-use crate::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace};
+use crate::models::{Memory, MemoryId};
 use crate::storage::index::{
     DomainIndexConfig, DomainIndexManager, DomainScope, OrgIndexConfig, SqliteBackend,
     find_repo_root, get_user_data_dir,
@@ -574,7 +575,10 @@ impl ServiceContainer {
         manager.get_index_path(scope)
     }
 
-    /// Reindexes memories from git notes into the index for a specific scope.
+    /// Rebuilds the FTS index from `SQLite` data for a specific scope.
+    ///
+    /// Since `SQLite` is the authoritative storage, this function reads all memories
+    /// from the `SQLite` database and rebuilds the FTS5 full-text search index.
     ///
     /// # Arguments
     ///
@@ -586,36 +590,9 @@ impl ServiceContainer {
     ///
     /// # Errors
     ///
-    /// Returns an error if notes cannot be read or indexing fails.
+    /// Returns an error if reading or indexing fails.
     pub fn reindex_scope(&self, scope: DomainScope) -> Result<usize> {
-        let repo_path = self
-            .repo_path
-            .as_ref()
-            .ok_or_else(|| Error::InvalidInput("Repository path not configured".to_string()))?;
-
-        let notes = NotesManager::new(repo_path);
-
-        // Get all notes
-        let all_notes = notes.list()?;
-
-        if all_notes.is_empty() {
-            return Ok(0);
-        }
-
-        // Parse notes into memories
-        let mut memories = Vec::with_capacity(all_notes.len());
-        for (note_id, content) in &all_notes {
-            match parse_note_to_memory(note_id, content) {
-                Ok(memory) => memories.push(memory),
-                Err(e) => {
-                    tracing::warn!("Failed to parse note {note_id}: {e}");
-                },
-            }
-        }
-
-        if memories.is_empty() {
-            return Ok(0);
-        }
+        use crate::models::SearchFilter;
 
         // Create index backend using high-level API
         let index = {
@@ -629,7 +606,27 @@ impl ServiceContainer {
             manager.create_backend(scope)?
         };
 
-        // Clear and reindex
+        // Get all memory IDs from SQLite
+        let filter = SearchFilter::default();
+        let all_ids = index.list_all(&filter, usize::MAX)?;
+
+        if all_ids.is_empty() {
+            return Ok(0);
+        }
+
+        // Get full memories
+        let ids: Vec<MemoryId> = all_ids.into_iter().map(|(id, _)| id).collect();
+        let memories: Vec<Memory> = index
+            .get_memories_batch(&ids)?
+            .into_iter()
+            .flatten()
+            .collect();
+
+        if memories.is_empty() {
+            return Ok(0);
+        }
+
+        // Clear FTS and rebuild
         index.clear()?;
         let count = memories.len();
         index.reindex(&memories)?;
@@ -670,117 +667,5 @@ impl ServiceContainer {
         }
 
         Ok(results)
-    }
-}
-
-/// Parses a git note into a Memory object.
-///
-/// # Arguments
-///
-/// * `note_id` - The git commit OID the note is attached to (used as fallback ID)
-/// * `content` - The note content with optional YAML front matter
-///
-/// # Errors
-///
-/// Returns an error if the note cannot be parsed.
-fn parse_note_to_memory(note_id: &str, content: &str) -> Result<Memory> {
-    let (metadata, body) = YamlFrontMatterParser::parse(content)?;
-
-    // Extract fields from metadata, using defaults where necessary
-    let id = metadata
-        .get("id")
-        .and_then(|v| v.as_str())
-        .map_or_else(|| MemoryId::new(note_id), MemoryId::new);
-
-    let namespace = metadata
-        .get("namespace")
-        .and_then(|v| v.as_str())
-        .and_then(Namespace::parse)
-        .unwrap_or_default();
-
-    let domain = metadata
-        .get("domain")
-        .and_then(|v| v.as_str())
-        .map_or_else(Domain::new, parse_domain_string);
-
-    let status = metadata
-        .get("status")
-        .and_then(|v| v.as_str())
-        .map_or(MemoryStatus::Active, parse_status_string);
-
-    let created_at = metadata
-        .get("created_at")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-
-    let updated_at = metadata
-        .get("updated_at")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(created_at);
-
-    let tags = metadata
-        .get("tags")
-        .and_then(|v| v.as_array())
-        .map_or_else(Vec::new, |arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        });
-
-    let source = metadata
-        .get("source")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-
-    Ok(Memory {
-        id,
-        content: body,
-        namespace,
-        domain,
-        status,
-        created_at,
-        updated_at,
-        embedding: None,
-        tags,
-        source,
-    })
-}
-
-/// Parses a domain string (e.g., "org/repo") into a Domain.
-fn parse_domain_string(s: &str) -> Domain {
-    if s == "global" || s.is_empty() {
-        return Domain::new();
-    }
-
-    let parts: Vec<&str> = s.split('/').collect();
-    match parts.len() {
-        1 => Domain {
-            organization: Some(parts[0].to_string()),
-            project: None,
-            repository: None,
-        },
-        2 => Domain {
-            organization: Some(parts[0].to_string()),
-            project: None,
-            repository: Some(parts[1].to_string()),
-        },
-        3 => Domain {
-            organization: Some(parts[0].to_string()),
-            project: Some(parts[1].to_string()),
-            repository: Some(parts[2].to_string()),
-        },
-        _ => Domain::new(),
-    }
-}
-
-/// Parses a status string into a `MemoryStatus`.
-fn parse_status_string(s: &str) -> MemoryStatus {
-    match s.to_lowercase().as_str() {
-        "archived" => MemoryStatus::Archived,
-        "superseded" => MemoryStatus::Superseded,
-        "pending" => MemoryStatus::Pending,
-        "deleted" => MemoryStatus::Deleted,
-        // Default to Active for "active" and any unknown status
-        _ => MemoryStatus::Active,
     }
 }

@@ -2,10 +2,11 @@
 //!
 //! Enriches memories with tags, structure, and context using LLM.
 
-use crate::git::{NotesManager, YamlFrontMatterParser};
 use crate::llm::LlmProvider;
+use crate::models::{Memory, MemoryId, SearchFilter};
+use crate::storage::traits::IndexBackend;
 use crate::{Error, Result};
-use std::path::Path;
+use std::sync::Arc;
 use std::time::Instant;
 use tracing::instrument;
 
@@ -13,18 +14,15 @@ use tracing::instrument;
 pub struct EnrichmentService<P: LlmProvider> {
     /// LLM provider for generating enrichments.
     llm: P,
-    /// Repository path for git notes access.
-    repo_path: std::path::PathBuf,
+    /// Index backend for memory access.
+    index: Arc<dyn IndexBackend>,
 }
 
 impl<P: LlmProvider> EnrichmentService<P> {
     /// Creates a new enrichment service.
     #[must_use]
-    pub fn new(llm: P, repo_path: impl AsRef<Path>) -> Self {
-        Self {
-            llm,
-            repo_path: repo_path.as_ref().to_path_buf(),
-        }
+    pub fn new(llm: P, index: Arc<dyn IndexBackend>) -> Self {
+        Self { llm, index }
     }
 
     /// Enriches all memories that have empty tags.
@@ -37,22 +35,25 @@ impl<P: LlmProvider> EnrichmentService<P> {
     /// # Errors
     ///
     /// Returns [`Error::OperationFailed`] if:
-    /// - Git notes listing fails (repository access error)
-    /// - Note parsing fails for all memories (malformed YAML front matter)
+    /// - Memory listing fails (database access error)
+    /// - LLM enrichment fails for all memories
     #[instrument(skip(self), fields(operation = "enrich_all", dry_run = dry_run, update_all = update_all))]
     pub fn enrich_all(&self, dry_run: bool, update_all: bool) -> Result<EnrichmentStats> {
         let start = Instant::now();
         let result = (|| {
-            let notes = NotesManager::new(&self.repo_path);
-            let all_notes = notes.list()?;
+            // Get all memory IDs from SQLite
+            let filter = SearchFilter::default();
+            let all_ids = self.index.list_all(&filter, usize::MAX)?;
 
             let mut stats = EnrichmentStats {
-                total: all_notes.len(),
+                total: all_ids.len(),
                 ..Default::default()
             };
 
-            for (commit_id, content) in &all_notes {
-                self.process_note(commit_id, content, dry_run, update_all, &mut stats);
+            for (memory_id, _score) in &all_ids {
+                if let Some(memory) = self.index.get_memory(memory_id)? {
+                    self.process_memory(&memory, dry_run, update_all, &mut stats);
+                }
             }
 
             Ok(stats)
@@ -77,29 +78,16 @@ impl<P: LlmProvider> EnrichmentService<P> {
         result
     }
 
-    /// Processes a single note for enrichment.
-    fn process_note(
+    /// Processes a single memory for enrichment.
+    fn process_memory(
         &self,
-        commit_id: &str,
-        content: &str,
+        memory: &Memory,
         dry_run: bool,
         update_all: bool,
         stats: &mut EnrichmentStats,
     ) {
-        let (metadata, body) = match YamlFrontMatterParser::parse(content) {
-            Ok(result) => result,
-            Err(e) => {
-                tracing::warn!("Failed to parse note {commit_id}: {e}");
-                stats.failed += 1;
-                return;
-            },
-        };
-
         // Check if tags exist
-        let has_tags = metadata
-            .get("tags")
-            .and_then(|v| v.as_array())
-            .is_some_and(|arr| !arr.is_empty());
+        let has_tags = !memory.tags.is_empty();
 
         // Skip if has tags and not updating all
         if has_tags && !update_all {
@@ -107,20 +95,12 @@ impl<P: LlmProvider> EnrichmentService<P> {
             return;
         }
 
-        let memory_id = metadata
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or(commit_id);
+        let namespace = memory.namespace.as_str();
 
-        let namespace = metadata
-            .get("namespace")
-            .and_then(|v| v.as_str())
-            .unwrap_or("decisions");
-
-        let new_tags = match self.generate_tags(&body, namespace) {
+        let new_tags = match self.generate_tags(&memory.content, namespace) {
             Ok(tags) => tags,
             Err(e) => {
-                tracing::warn!("Failed to generate tags for {memory_id}: {e}");
+                tracing::warn!("Failed to generate tags for {}: {e}", memory.id.as_str());
                 stats.failed += 1;
                 return;
             },
@@ -129,7 +109,10 @@ impl<P: LlmProvider> EnrichmentService<P> {
         let action = if has_tags { "update" } else { "enrich" };
 
         if dry_run {
-            tracing::info!("Would {action} {memory_id} with tags: {new_tags:?}");
+            tracing::info!(
+                "Would {action} {} with tags: {new_tags:?}",
+                memory.id.as_str()
+            );
             if has_tags {
                 stats.would_update += 1;
             } else {
@@ -138,9 +121,9 @@ impl<P: LlmProvider> EnrichmentService<P> {
             return;
         }
 
-        match self.update_note_tags(commit_id, content, &new_tags) {
+        match self.update_memory_tags(memory, &new_tags) {
             Ok(()) => {
-                tracing::info!("{action}ed {memory_id} with tags: {new_tags:?}");
+                tracing::info!("{action}ed {} with tags: {new_tags:?}", memory.id.as_str());
                 if has_tags {
                     stats.updated += 1;
                 } else {
@@ -148,7 +131,7 @@ impl<P: LlmProvider> EnrichmentService<P> {
                 }
             },
             Err(e) => {
-                tracing::warn!("Failed to update note {memory_id}: {e}");
+                tracing::warn!("Failed to update memory {}: {e}", memory.id.as_str());
                 stats.failed += 1;
             },
         }
@@ -160,61 +143,41 @@ impl<P: LlmProvider> EnrichmentService<P> {
     ///
     /// Returns [`Error::OperationFailed`] if:
     /// - The memory with the given ID is not found
-    /// - Git notes listing fails (repository access error)
     /// - LLM tag generation fails (provider error or invalid response)
-    /// - Note update fails (write permission or git error)
+    /// - Memory update fails (database error)
     #[instrument(skip(self), fields(operation = "enrich_one", dry_run = dry_run, memory_id = memory_id))]
     pub fn enrich_one(&self, memory_id: &str, dry_run: bool) -> Result<EnrichmentResult> {
         let start = Instant::now();
         let result = (|| {
-            let notes = NotesManager::new(&self.repo_path);
-            let all_notes = notes.list()?;
+            let id = MemoryId::new(memory_id);
+            let memory = self
+                .index
+                .get_memory(&id)?
+                .ok_or_else(|| Error::OperationFailed {
+                    operation: "enrich_one".to_string(),
+                    cause: format!("Memory not found: {memory_id}"),
+                })?;
 
-            // Find the note with matching ID
-            for (commit_id, content) in &all_notes {
-                let (metadata, body) = match YamlFrontMatterParser::parse(content) {
-                    Ok(result) => result,
-                    Err(_) => continue,
-                };
+            let namespace = memory.namespace.as_str();
 
-                let id = metadata
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(commit_id);
+            // Generate tags
+            let new_tags = self.generate_tags(&memory.content, namespace)?;
 
-                if id != memory_id {
-                    continue;
-                }
-
-                let namespace = metadata
-                    .get("namespace")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("decisions");
-
-                // Generate tags
-                let new_tags = self.generate_tags(&body, namespace)?;
-
-                if dry_run {
-                    return Ok(EnrichmentResult {
-                        memory_id: memory_id.to_string(),
-                        new_tags,
-                        applied: false,
-                    });
-                }
-
-                // Update the note
-                self.update_note_tags(commit_id, content, &new_tags)?;
-
+            if dry_run {
                 return Ok(EnrichmentResult {
                     memory_id: memory_id.to_string(),
                     new_tags,
-                    applied: true,
+                    applied: false,
                 });
             }
 
-            Err(Error::OperationFailed {
-                operation: "enrich_one".to_string(),
-                cause: format!("Memory not found: {memory_id}"),
+            // Update the memory
+            self.update_memory_tags(&memory, &new_tags)?;
+
+            Ok(EnrichmentResult {
+                memory_id: memory_id.to_string(),
+                new_tags,
+                applied: true,
             })
         })();
 
@@ -260,34 +223,27 @@ Respond with ONLY a JSON array of strings, no other text. Example: ["rust", "err
         Ok(tags)
     }
 
-    /// Updates a note with new tags.
-    fn update_note_tags(
-        &self,
-        commit_id: &str,
-        original_content: &str,
-        new_tags: &[String],
-    ) -> Result<()> {
-        let (mut metadata, body) = YamlFrontMatterParser::parse(original_content)?;
+    /// Updates a memory with new tags.
+    fn update_memory_tags(&self, memory: &Memory, new_tags: &[String]) -> Result<()> {
+        // Create updated memory with new tags
+        let updated_memory = Memory {
+            id: memory.id.clone(),
+            content: memory.content.clone(),
+            namespace: memory.namespace,
+            domain: memory.domain.clone(),
+            status: memory.status,
+            created_at: memory.created_at,
+            updated_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(memory.updated_at),
+            embedding: memory.embedding.clone(),
+            tags: new_tags.to_vec(),
+            source: memory.source.clone(),
+        };
 
-        // Update tags in metadata - metadata is a serde_json::Value (Object)
-        if let Some(obj) = metadata.as_object_mut() {
-            obj.insert(
-                "tags".to_string(),
-                serde_json::Value::Array(
-                    new_tags
-                        .iter()
-                        .map(|t| serde_json::Value::String(t.clone()))
-                        .collect(),
-                ),
-            );
-        }
-
-        // Use the parser's serialize method
-        let updated_content = YamlFrontMatterParser::serialize(&metadata, &body)?;
-
-        // Write the updated note
-        let notes = NotesManager::new(&self.repo_path);
-        notes.add(commit_id, &updated_content)?;
+        // Re-index the updated memory
+        self.index.index(&updated_memory)?;
 
         Ok(())
     }

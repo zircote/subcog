@@ -4,27 +4,43 @@ use super::HookHandler;
 use crate::Result;
 use crate::current_timestamp;
 use crate::services::SyncService;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::instrument;
+
+/// Default timeout for stop hook operations (30 seconds).
+const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 
 /// Handles Stop hook events.
 ///
 /// Performs session analysis and sync at session end.
+/// Includes timeout enforcement to prevent hanging (RES-M2).
 pub struct StopHandler {
     /// Sync service.
     sync: Option<SyncService>,
     /// Whether to auto-sync on stop.
     auto_sync: bool,
+    /// Timeout for stop hook operations in milliseconds.
+    timeout_ms: u64,
 }
 
 impl StopHandler {
-    /// Creates a new handler.
+    /// Creates a new handler with default 30s timeout.
     #[must_use]
     pub const fn new() -> Self {
         Self {
             sync: None,
             auto_sync: true,
+            timeout_ms: DEFAULT_TIMEOUT_MS,
         }
+    }
+
+    /// Sets the timeout in milliseconds.
+    ///
+    /// Operations that exceed this timeout will return a partial response.
+    #[must_use]
+    pub const fn with_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = timeout_ms;
+        self
     }
 
     /// Sets the sync service.
@@ -370,11 +386,18 @@ impl HookHandler for StopHandler {
 
     #[instrument(
         skip(self, input),
-        fields(hook = "Stop", session_id = tracing::field::Empty, sync_performed = tracing::field::Empty)
+        fields(hook = "Stop", session_id = tracing::field::Empty, sync_performed = tracing::field::Empty, timed_out = tracing::field::Empty)
     )]
     fn handle(&self, input: &str) -> Result<String> {
         let start = Instant::now();
-        tracing::info!(hook = "Stop", "Processing stop hook");
+        let deadline = Duration::from_millis(self.timeout_ms);
+        let mut timed_out = false;
+
+        tracing::info!(
+            hook = "Stop",
+            timeout_ms = self.timeout_ms,
+            "Processing stop hook"
+        );
 
         // Parse input and generate summary
         let input_json: serde_json::Value =
@@ -385,13 +408,68 @@ impl HookHandler for StopHandler {
         let span = tracing::Span::current();
         span.record("session_id", summary.session_id.as_str());
 
-        // Perform sync if enabled
-        let sync_result = self.perform_sync();
+        // Check deadline before sync (RES-M2)
+        // Reserve 1 second for response building
+        let sync_result = if start.elapsed() < deadline.saturating_sub(Duration::from_secs(1)) {
+            self.perform_sync()
+        } else {
+            tracing::warn!(
+                hook = "Stop",
+                elapsed_ms = start.elapsed().as_millis(),
+                deadline_ms = self.timeout_ms,
+                "Skipping sync due to timeout deadline"
+            );
+            timed_out = true;
+            None
+        };
         span.record("sync_performed", sync_result.is_some());
 
+        // Check deadline before response building
+        if start.elapsed() >= deadline {
+            tracing::warn!(
+                hook = "Stop",
+                elapsed_ms = start.elapsed().as_millis(),
+                deadline_ms = self.timeout_ms,
+                "Stop hook exceeded timeout, returning minimal response"
+            );
+            metrics::counter!(
+                "hook_timeouts_total",
+                "hook_type" => "Stop"
+            )
+            .increment(1);
+
+            // Return minimal response on timeout
+            let timeout_response = serde_json::json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "Stop",
+                    "additionalContext": format!(
+                        "**Subcog Session Summary** (truncated due to {}ms timeout)\n\nSession: `{}`\n\n<!-- subcog-metadata: {{\"timed_out\": true, \"elapsed_ms\": {}}} -->",
+                        self.timeout_ms,
+                        summary.session_id,
+                        start.elapsed().as_millis()
+                    )
+                }
+            });
+            span.record("timed_out", true);
+            return serde_json::to_string(&timeout_response).map_err(|e| {
+                crate::Error::OperationFailed {
+                    operation: "serialize_response".to_string(),
+                    cause: e.to_string(),
+                }
+            });
+        }
+
         // Build response components using helper methods
-        let metadata = Self::build_metadata(&summary, sync_result.as_ref());
+        let mut metadata = Self::build_metadata(&summary, sync_result.as_ref());
         let context = Self::build_context_lines(&summary, sync_result.as_ref());
+
+        // Add timeout info to metadata if we were close to deadline
+        if timed_out {
+            metadata["sync_skipped_timeout"] = serde_json::json!(true);
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        let elapsed_ms = start.elapsed().as_millis() as u64; // u128 to u64 safe for <584M years
+        metadata["elapsed_ms"] = serde_json::json!(elapsed_ms);
 
         // Build Claude Code hook response format
         let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
@@ -404,6 +482,8 @@ impl HookHandler for StopHandler {
                 "additionalContext": context_with_metadata
             }
         });
+
+        span.record("timed_out", timed_out);
 
         let result = serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
             operation: "serialize_response".to_string(),
@@ -717,5 +797,45 @@ mod tests {
         assert_eq!(tags.len(), 3);
         assert_eq!(tags[0], ("rust".to_string(), 10)); // Highest count first
         assert_eq!(tags[1], ("testing".to_string(), 5));
+    }
+
+    #[test]
+    fn test_default_timeout() {
+        let handler = StopHandler::new();
+        assert_eq!(handler.timeout_ms, DEFAULT_TIMEOUT_MS);
+        assert_eq!(handler.timeout_ms, 30_000);
+    }
+
+    #[test]
+    fn test_with_timeout_ms() {
+        let handler = StopHandler::new().with_timeout_ms(5_000);
+        assert_eq!(handler.timeout_ms, 5_000);
+    }
+
+    #[test]
+    fn test_timeout_metadata_included() {
+        let handler = StopHandler::new();
+        let input = r#"{"session_id": "test-session"}"#;
+
+        let result = handler.handle(input);
+        assert!(result.is_ok());
+
+        let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        let context = response["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+
+        // Should contain elapsed_ms in metadata
+        assert!(context.contains("\"elapsed_ms\""));
+    }
+
+    #[test]
+    fn test_builder_chaining() {
+        let handler = StopHandler::new()
+            .with_timeout_ms(10_000)
+            .with_auto_sync(false);
+
+        assert_eq!(handler.timeout_ms, 10_000);
+        assert!(!handler.auto_sync);
     }
 }

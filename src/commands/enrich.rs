@@ -4,6 +4,7 @@
 //! LLM-powered memory tag enrichment.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use subcog::cli::{
     build_anthropic_client, build_lmstudio_client, build_ollama_client, build_openai_client,
@@ -12,6 +13,7 @@ use subcog::cli::{
 use subcog::config::{LlmProvider, SubcogConfig};
 use subcog::llm::LlmProvider as LlmProviderTrait;
 use subcog::services::ServiceContainer;
+use subcog::storage::traits::IndexBackend;
 
 /// Enrich command.
 pub fn cmd_enrich(
@@ -84,10 +86,14 @@ fn run_enrich_with_client<P: LlmProviderTrait>(
     dry_run: bool,
     cwd: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Create service container to get index backend
+    let container = ServiceContainer::for_repo(cwd, None)?;
+    let index: Arc<dyn IndexBackend> = Arc::new(container.index()?);
+
     let resilience_config = build_resilience_config(llm_config);
     let client = subcog::llm::ResilientLlmProvider::new(client, resilience_config);
     run_enrichment(
-        subcog::services::EnrichmentService::new(client, cwd),
+        subcog::services::EnrichmentService::new(client, index),
         all,
         update_all,
         id,

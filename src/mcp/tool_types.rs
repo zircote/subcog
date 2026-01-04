@@ -1,6 +1,12 @@
 //! Argument types and helper functions for MCP tools.
 //!
 //! Extracted from `tools.rs` to reduce file size.
+//!
+//! # Security
+//!
+//! All argument types use `#[serde(deny_unknown_fields)]` to prevent
+//! parameter pollution attacks where attackers inject unexpected fields
+//! that could bypass validation or trigger unintended behavior.
 
 use crate::models::{DetailLevel, MemoryStatus, Namespace, SearchFilter, SearchMode};
 use crate::storage::index::DomainScope;
@@ -9,6 +15,7 @@ use std::collections::HashMap;
 
 /// Arguments for the capture tool.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CaptureArgs {
     /// The memory content to capture.
     pub content: String,
@@ -22,6 +29,7 @@ pub struct CaptureArgs {
 
 /// Arguments for the recall tool.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RecallArgs {
     /// Search query text.
     pub query: String,
@@ -39,6 +47,7 @@ pub struct RecallArgs {
 
 /// Arguments for the consolidate tool.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConsolidateArgs {
     /// Namespace to consolidate (required).
     pub namespace: String,
@@ -52,6 +61,7 @@ pub struct ConsolidateArgs {
 
 /// Arguments for the enrich tool.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EnrichArgs {
     /// ID of the memory to enrich.
     pub memory_id: String,
@@ -65,6 +75,7 @@ pub struct EnrichArgs {
 
 /// Arguments for the sync tool.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SyncArgs {
     /// Sync direction: "push", "fetch", or "full" (default: "full").
     pub direction: Option<String>,
@@ -72,6 +83,7 @@ pub struct SyncArgs {
 
 /// Arguments for the reindex tool.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReindexArgs {
     /// Path to git repository (default: current directory).
     pub repo_path: Option<String>,
@@ -83,6 +95,7 @@ pub struct ReindexArgs {
 
 /// Arguments for the prompt.save tool.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PromptSaveArgs {
     /// Unique prompt name (kebab-case, e.g., "code-review").
     pub name: String,
@@ -105,6 +118,7 @@ pub struct PromptSaveArgs {
 
 /// Variable definition argument for prompt.save.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PromptVariableArg {
     /// Variable name (without braces).
     pub name: String,
@@ -118,6 +132,7 @@ pub struct PromptVariableArg {
 
 /// Arguments for the prompt.list tool.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PromptListArgs {
     /// Filter by domain scope: "project", "user", or "org".
     pub domain: Option<String>,
@@ -131,15 +146,17 @@ pub struct PromptListArgs {
 
 /// Arguments for the prompt.get tool.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PromptGetArgs {
     /// Prompt name to retrieve.
     pub name: String,
-    /// Domain to search (if not specified, searches Project → User → Org).
+    /// Domain to search (if not specified, searches Project -> User -> Org).
     pub domain: Option<String>,
 }
 
 /// Arguments for the prompt.run tool.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PromptRunArgs {
     /// Prompt name to execute.
     pub name: String,
@@ -151,6 +168,7 @@ pub struct PromptRunArgs {
 
 /// Arguments for the prompt.delete tool.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PromptDeleteArgs {
     /// Prompt name to delete.
     pub name: String,
@@ -292,5 +310,106 @@ pub fn build_filter_description(filter: &SearchFilter) -> String {
         String::new()
     } else {
         format!(", filter: {}", parts.join(" "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==========================================================================
+    // MED-SEC-001: Tests for deny_unknown_fields protection
+    // ==========================================================================
+
+    #[test]
+    fn test_capture_args_rejects_unknown_fields() {
+        let json = r#"{"content": "test", "namespace": "decisions", "unknown_field": "bad"}"#;
+        let result: Result<CaptureArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn test_capture_args_accepts_valid_fields() {
+        let json = r#"{"content": "test", "namespace": "decisions", "tags": ["a", "b"]}"#;
+        let result: Result<CaptureArgs, _> = serde_json::from_str(json);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_recall_args_rejects_unknown_fields() {
+        let json = r#"{"query": "test", "malicious_param": "attack"}"#;
+        let result: Result<RecallArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_consolidate_args_rejects_unknown_fields() {
+        let json = r#"{"namespace": "decisions", "extra": true}"#;
+        let result: Result<ConsolidateArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_enrich_args_rejects_unknown_fields() {
+        let json = r#"{"memory_id": "123", "inject": "payload"}"#;
+        let result: Result<EnrichArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sync_args_rejects_unknown_fields() {
+        let json = r#"{"direction": "push", "force": true}"#;
+        let result: Result<SyncArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reindex_args_rejects_unknown_fields() {
+        let json = r#"{"repo_path": "/path", "delete_all": true}"#;
+        let result: Result<ReindexArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_prompt_save_args_rejects_unknown_fields() {
+        let json = r#"{"name": "test", "admin_override": true}"#;
+        let result: Result<PromptSaveArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_prompt_variable_arg_rejects_unknown_fields() {
+        let json = r#"{"name": "var", "execute_code": "rm -rf /"}"#;
+        let result: Result<PromptVariableArg, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_prompt_list_args_rejects_unknown_fields() {
+        let json = r#"{"domain": "user", "bypass_auth": true}"#;
+        let result: Result<PromptListArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_prompt_get_args_rejects_unknown_fields() {
+        let json = r#"{"name": "test", "include_secrets": true}"#;
+        let result: Result<PromptGetArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_prompt_run_args_rejects_unknown_fields() {
+        let json = r#"{"name": "test", "shell_escape": true}"#;
+        let result: Result<PromptRunArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_prompt_delete_args_rejects_unknown_fields() {
+        let json = r#"{"name": "test", "domain": "user", "recursive": true}"#;
+        let result: Result<PromptDeleteArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
     }
 }

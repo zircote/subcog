@@ -10,7 +10,7 @@ Subcog is a persistent memory system for AI coding assistants, written in Rust. 
 
 - **Single-binary distribution** (<100MB, <10ms cold start)
 - **Three-layer storage architecture** (Persistence, Index, Vector)
-- **Pluggable backends** (Git Notes, SQLite+usearch, PostgreSQL+pgvector)
+- **Pluggable backends** (`SQLite`+usearch, PostgreSQL+pgvector)
 - **MCP server integration** for AI agent interoperability
 - **Claude Code hooks** for seamless IDE integration
 - **Semantic search** with hybrid vector + BM25 ranking (RRF fusion)
@@ -39,7 +39,7 @@ src/
 │   │   ├── index.rs         # IndexBackend trait
 │   │   └── vector.rs        # VectorBackend trait
 │   ├── persistence/
-│   │   ├── git_notes.rs     # Git notes implementation (primary)
+│   │   ├── sqlite.rs        # SQLite implementation (primary)
 │   │   ├── postgresql.rs    # PostgreSQL implementation
 │   │   └── filesystem.rs    # Fallback filesystem storage
 │   ├── index/
@@ -73,8 +73,7 @@ src/
 │       └── service.rs       # DeduplicationService orchestrator
 │
 ├── git/                      # Git operations
-│   ├── notes.rs             # Git notes CRUD
-│   ├── remote.rs            # Fetch/push operations
+│   ├── remote.rs            # Git context detection (branch, remote, repo root)
 │   └── parser.rs            # YAML front matter parsing
 │
 ├── embedding/                # Embedding generation
@@ -743,11 +742,31 @@ This project uses `cargo-deny` to audit dependencies:
 - **Bans**: Block specific problematic crates
 - **Sources**: Only allow crates.io
 
+### Dependency Audit Schedule
+
+| Frequency | Task | Command |
+|-----------|------|---------|
+| **Every PR** | CI runs cargo-deny | `cargo deny check` |
+| **Weekly** | Dependabot updates | Automated via GitHub |
+| **Quarterly** | Full audit review | See checklist below |
+
+**Quarterly Audit Checklist** (January, April, July, October):
+1. `cargo update --dry-run` - Review available updates
+2. `cargo outdated` - Check for major version bumps
+3. `cargo deny check advisories` - Review any new advisories
+4. Review `deny.toml` ignored advisories - Remove resolved, document ongoing
+5. Check pre-release dependencies: `cargo tree | grep -E '(rc|alpha|beta)'`
+6. Review transitive dependency tree: `cargo tree --duplicates`
+7. Update MSRV if Rust stable has new features we need
+
+**Pre-release Dependencies** (monitored, not blocked):
+- `ort v2.0.0-rc.9` - Transitive via fastembed. Tracking stable v2.0.0 release
+
 ## Architecture Guidelines
 
 ### Three-Layer Storage
 
-1. **Persistence Layer** (Authoritative): Git Notes (primary), PostgreSQL, Filesystem
+1. **Persistence Layer** (Authoritative): `SQLite` (primary), PostgreSQL, Filesystem
 2. **Index Layer** (Searchable): SQLite + FTS5, PostgreSQL full-text, RediSearch
 3. **Vector Layer** (Embeddings): usearch HNSW, pgvector, Redis vector
 
@@ -755,7 +774,7 @@ This project uses `cargo-deny` to audit dependencies:
 
 | Tier | Features | Requirements |
 |------|----------|--------------|
-| **Core** | Capture, search, git notes, CLI | None |
+| **Core** | Capture, search, `SQLite`, CLI | None |
 | **Enhanced** | Secrets filtering, multi-domain, audit | Configuration |
 | **LLM-Powered** | Auto-capture, consolidation, temporal | LLM provider |
 
@@ -841,16 +860,30 @@ The following hooks run automatically on file save:
 
 ### Active Specifications
 
-**Subcog Rust Rewrite** - `docs/spec/active/2025-12-28-subcog-rust-rewrite/`:
-
-- [REQUIREMENTS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/REQUIREMENTS.md) - Product requirements
-- [ARCHITECTURE.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/ARCHITECTURE.md) - Technical architecture
-- [IMPLEMENTATION_PLAN.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/IMPLEMENTATION_PLAN.md) - Phased implementation
-- [DECISIONS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/DECISIONS.md) - Architecture decision records
-- [PROGRESS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/PROGRESS.md) - Implementation progress
-- always run `make ci` before commiting or declaring success ensuring all gates pass
+**Issue #45: Storage Config Fix** - `docs/spec/active/2026-01-03-issue-45-storage-config/`:
+- Active remediation for GitNotes removal and SQLite consolidation
+- always run `make ci` before committing or declaring success ensuring all gates pass
 
 ### Completed Specifications
+
+- **[Storage Architecture Simplification](docs/spec/completed/2026-01-03-storage-simplification/)** (2026-01-03)
+  - **Completed**: 2026-01-03
+  - **Outcome**: Success - All 32 tasks + 176 code review fixes delivered
+  - **Effort**: ~10 hours (planned 24-40 hours, 60-75% under budget)
+  - **Features**:
+    - Removed git-notes storage layer (fixes critical CaptureService HEAD overwrite bug)
+    - User-level SQLite/PostgreSQL storage with project/branch/path faceting
+    - Context detection from git remote, branch, and cwd
+    - Branch garbage collection with lazy/explicit modes
+    - Tombstone pattern for soft deletes
+    - 7 CRITICAL security fixes (CRIT-001 to CRIT-007)
+    - 30 HIGH priority fixes (security, performance, testing, database)
+    - 77 MEDIUM priority fixes (quality, architecture, compliance)
+  - **Quality**: 896+ tests passing, all clippy lints resolved, make ci passes
+  - **PR**: https://github.com/zircote/subcog/pull/44
+  - **Satisfaction**: Very satisfied
+  - **Key learnings**: Bottom-up development prevents rework, code review timing matters (176 findings post-implementation), LRU caches require careful const handling, rustdoc link resolution is strict
+  - **Key docs**: REQUIREMENTS.md, ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, DECISIONS.md, PROGRESS.md, RETROSPECTIVE.md
 
 - **[Pre-Compact Deduplication](docs/spec/completed/2026-01-01-pre-compact-deduplication/)** (2026-01-02)
   - **Completed**: 2026-01-02

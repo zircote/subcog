@@ -7,7 +7,7 @@
 //!
 //! | Backend | Use Case | Trade-offs |
 //! |---------|----------|------------|
-//! | `GitNotesBackend` | Primary; portable, versioned | Requires git repo |
+//! | `SqliteBackend` | Primary; embedded, ACID | Single-process access |
 //! | `PostgresBackend` | Multi-user, ACID | Requires PostgreSQL server |
 //! | `FilesystemBackend` | Fallback; simple | No transactional guarantees |
 //!
@@ -19,7 +19,7 @@
 //!
 //! | Backend | Atomicity | Isolation | Durability |
 //! |---------|-----------|-----------|------------|
-//! | `GitNotes` | Single-op | None | On flush |
+//! | `SQLite` | Full ACID | Serializable | On commit (WAL) |
 //! | PostgreSQL | Full ACID | Serializable | On commit |
 //! | Filesystem | None | None | On fsync |
 //!
@@ -35,8 +35,8 @@
 //! ## Consistency Guarantees
 //!
 //! - **Read-after-write**: Guaranteed for all backends
-//! - **Concurrent writes**: `GitNotes` uses file locking; `PostgreSQL` uses transactions
-//! - **Partial failures**: `GitNotes` may leave `.lock` files; `PostgreSQL` rolls back
+//! - **Concurrent writes**: `SQLite` uses WAL mode with busy timeout; `PostgreSQL` uses transactions
+//! - **Partial failures**: `SQLite` rolls back; `PostgreSQL` rolls back
 
 use crate::Result;
 use crate::models::{Memory, MemoryId};
@@ -85,6 +85,25 @@ pub trait PersistenceBackend: Send + Sync {
     ///
     /// Returns an error if the list operation fails.
     fn list_ids(&self) -> Result<Vec<MemoryId>>;
+
+    /// Retrieves multiple memories by their IDs in a single batch operation.
+    ///
+    /// This method avoids N+1 queries by fetching all requested memories
+    /// in a single database round-trip (where supported by the backend).
+    ///
+    /// # Default Implementation
+    ///
+    /// Falls back to calling `get()` for each ID. Backends should override
+    /// this with an optimized batch query (e.g., `SELECT ... WHERE id IN (...)`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any retrieval operation fails.
+    fn get_batch(&self, ids: &[MemoryId]) -> Result<Vec<Memory>> {
+        ids.iter()
+            .filter_map(|id| self.get(id).transpose())
+            .collect()
+    }
 
     /// Checks if a memory exists.
     ///

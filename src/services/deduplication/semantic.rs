@@ -13,6 +13,38 @@ use tracing::instrument;
 
 use super::config::DeduplicationConfig;
 
+// ============================================================================
+// Trait Aliases (RUST-M1)
+// ============================================================================
+// These trait aliases reduce repetition of bounds throughout the module.
+// They document the intent: backends must be thread-safe for concurrent access.
+
+/// Thread-safe embedder backend.
+///
+/// Trait alias for embedders that can be shared across threads.
+/// All embedders used with `SemanticSimilarityChecker` must implement this.
+///
+/// Note: This trait is used as a bound on generic parameters. The `dead_code`
+/// lint doesn't recognize trait bound usage, hence the allow attribute.
+#[allow(dead_code)]
+pub trait ThreadSafeEmbedder: Embedder + Send + Sync {}
+
+/// Blanket implementation for all thread-safe embedders.
+impl<T: Embedder + Send + Sync> ThreadSafeEmbedder for T {}
+
+/// Thread-safe vector backend.
+///
+/// Trait alias for vector backends that can be shared across threads.
+/// All vector backends used with `SemanticSimilarityChecker` must implement this.
+///
+/// Note: This trait is used as a bound on generic parameters. The `dead_code`
+/// lint doesn't recognize trait bound usage, hence the allow attribute.
+#[allow(dead_code)]
+pub trait ThreadSafeVectorBackend: VectorBackend + Send + Sync {}
+
+/// Blanket implementation for all thread-safe vector backends.
+impl<T: VectorBackend + Send + Sync> ThreadSafeVectorBackend for T {}
+
 /// Checker for semantic similarity using embeddings.
 ///
 /// # How it works
@@ -48,7 +80,7 @@ use super::config::DeduplicationConfig;
 ///     println!("Semantic match found: {} (score: {:.2})", urn, score);
 /// }
 /// ```
-pub struct SemanticSimilarityChecker<E: Embedder + Send + Sync, V: VectorBackend + Send + Sync> {
+pub struct SemanticSimilarityChecker<E: ThreadSafeEmbedder, V: ThreadSafeVectorBackend> {
     /// Embedder for generating vectors.
     embedder: Arc<E>,
     /// Vector backend for similarity search.
@@ -57,7 +89,7 @@ pub struct SemanticSimilarityChecker<E: Embedder + Send + Sync, V: VectorBackend
     config: DeduplicationConfig,
 }
 
-impl<E: Embedder + Send + Sync, V: VectorBackend + Send + Sync> SemanticSimilarityChecker<E, V> {
+impl<E: ThreadSafeEmbedder, V: ThreadSafeVectorBackend> SemanticSimilarityChecker<E, V> {
     /// Creates a new semantic similarity checker.
     ///
     /// # Arguments

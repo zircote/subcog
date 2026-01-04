@@ -6,7 +6,38 @@ pub use features::FeatureFlags;
 
 use serde::Deserialize;
 use std::borrow::Cow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Warns if a config file has world-readable permissions (SEC-M4).
+///
+/// Config files may contain API keys or other sensitive data. World-readable
+/// permissions (mode 0o004 on Unix) pose a security risk in multi-user systems.
+///
+/// This function logs a warning but does not prevent loading - the user may
+/// have intentionally set these permissions.
+#[cfg(unix)]
+fn warn_if_world_readable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    if let Ok(metadata) = std::fs::metadata(path) {
+        let mode = metadata.permissions().mode();
+        // Check if "others" have read permission (0o004)
+        if mode & 0o004 != 0 {
+            tracing::warn!(
+                path = %path.display(),
+                mode = format!("{mode:04o}"),
+                "Config file is world-readable. Consider restricting permissions with: chmod 600 {}",
+                path.display()
+            );
+        }
+    }
+}
+
+/// No-op on non-Unix platforms.
+#[cfg(not(unix))]
+fn warn_if_world_readable(_path: &Path) {
+    // Windows has a different permission model; skip this check
+}
 
 /// Expands environment variable references in a string.
 ///
@@ -843,17 +874,18 @@ pub struct StorageBackendConfig {
     pub path: Option<String>,
     /// Connection string for database backends.
     pub connection_string: Option<String>,
+    /// Maximum connection pool size for database backends (PostgreSQL).
+    /// Defaults to 20 if not specified.
+    pub pool_max_size: Option<usize>,
 }
 
 /// Storage backend types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StorageBackendType {
-    /// Git notes (default for project).
-    GitNotes,
-    /// `SQLite` database (default for user).
+    /// `SQLite` database (default, authoritative storage).
     #[default]
     Sqlite,
-    /// Filesystem.
+    /// Filesystem (fallback).
     Filesystem,
     /// PostgreSQL.
     PostgreSQL,
@@ -868,11 +900,10 @@ impl StorageBackendType {
     #[must_use]
     pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
-            "git_notes" | "gitnotes" | "git-notes" => Self::GitNotes,
             "filesystem" | "fs" | "file" => Self::Filesystem,
             "postgresql" | "postgres" | "pg" => Self::PostgreSQL,
             "redis" => Self::Redis,
-            // sqlite is the default for any unrecognized value
+            // sqlite is the default for any unrecognized value (including legacy "git_notes")
             _ => Self::Sqlite,
         }
     }
@@ -1029,6 +1060,9 @@ impl SubcogConfig {
     ///
     /// Returns an error if the file cannot be read or parsed.
     pub fn load_from_file(path: &std::path::Path) -> crate::Result<Self> {
+        // SEC-M4: Warn if config file is world-readable (may contain API keys)
+        warn_if_world_readable(path);
+
         let contents =
             std::fs::read_to_string(path).map_err(|e| crate::Error::OperationFailed {
                 operation: "read_config_file".to_string(),
@@ -1215,6 +1249,9 @@ fn apply_config_path(config: &mut SubcogConfig, path: &std::path::Path) -> bool 
 }
 
 fn load_config_file(path: &std::path::Path) -> crate::Result<ConfigFile> {
+    // SEC-M4: Warn if config file is world-readable (may contain API keys)
+    warn_if_world_readable(path);
+
     let contents = std::fs::read_to_string(path).map_err(|e| crate::Error::OperationFailed {
         operation: "read_config_file".to_string(),
         cause: e.to_string(),
@@ -1363,5 +1400,47 @@ mod tests {
         let result = expand_env_vars("${${INNER}}");
         // First finds ${${INNER} - var name is "${INNER", which won't exist
         assert_eq!(result, "${${INNER}}");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_warn_if_world_readable_does_not_panic() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        // Create a temp file with world-readable permissions
+        let dir = tempfile::tempdir().ok();
+        if let Some(ref dir) = dir {
+            let path = dir.path().join("test_config.toml");
+            let mut file = std::fs::File::create(&path).ok();
+            if let Some(ref mut f) = file {
+                let _ = f.write_all(b"[llm]\nprovider = \"anthropic\"\n");
+            }
+
+            // Set world-readable permission (0o644)
+            if let Ok(metadata) = std::fs::metadata(&path) {
+                let mut perms = metadata.permissions();
+                perms.set_mode(0o644);
+                let _ = std::fs::set_permissions(&path, perms);
+            }
+
+            // Function should not panic
+            warn_if_world_readable(&path);
+
+            // Also test with restrictive permissions (0o600)
+            if let Ok(metadata) = std::fs::metadata(&path) {
+                let mut perms = metadata.permissions();
+                perms.set_mode(0o600);
+                let _ = std::fs::set_permissions(&path, perms);
+            }
+            warn_if_world_readable(&path);
+        }
+    }
+
+    #[test]
+    fn test_warn_if_world_readable_nonexistent_file() {
+        // Should not panic on non-existent file
+        let path = Path::new("/nonexistent/path/to/config.toml");
+        warn_if_world_readable(path);
     }
 }

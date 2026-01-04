@@ -96,9 +96,60 @@ fn escape_like_wildcards(s: &str) -> String {
     result
 }
 
-/// SQLite-based index backend with FTS5.
+/// Converts a glob pattern to a SQL LIKE pattern safely (HIGH-SEC-005).
+///
+/// First escapes existing SQL LIKE wildcards (`%`, `_`, `\`), then converts
+/// glob wildcards (`*` → `%`, `?` → `_`). This prevents SQL injection via
+/// patterns like `foo%bar` where `%` would otherwise be a SQL wildcard.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Glob wildcards are converted
+/// assert_eq!(glob_to_like_pattern("src/*.rs"), "src/%\\.rs");
+/// // Literal % is escaped
+/// assert_eq!(glob_to_like_pattern("100%"), "100\\%");
+/// // Combined: literal % escaped, glob * converted
+/// assert_eq!(glob_to_like_pattern("foo%*bar"), "foo\\%%bar");
+/// ```
+fn glob_to_like_pattern(pattern: &str) -> String {
+    let mut result = String::with_capacity(pattern.len() * 2);
+    for c in pattern.chars() {
+        match c {
+            // Escape existing SQL LIKE wildcards (they're meant to be literal)
+            '%' | '_' | '\\' => {
+                result.push('\\');
+                result.push(c);
+            },
+            // Convert glob wildcards to SQL LIKE wildcards
+            '*' => result.push('%'),
+            '?' => result.push('_'),
+            _ => result.push(c),
+        }
+    }
+    result
+}
+
+/// `SQLite`-based index backend with FTS5.
+///
+/// # Concurrency Model
+///
+/// Uses a `Mutex<Connection>` for thread-safe access. While this serializes
+/// database operations, `SQLite`'s WAL mode and `busy_timeout` pragma mitigate
+/// contention:
+///
+/// - **WAL mode**: Allows concurrent readers with a single writer
+/// - **`busy_timeout`**: Waits up to 5 seconds for locks instead of failing immediately
+/// - **NORMAL synchronous**: Balances durability with performance
+///
+/// For high-throughput scenarios requiring true connection pooling, consider
+/// using `r2d2-rusqlite` or `deadpool-sqlite`. This would require refactoring
+/// to use `Pool<SqliteConnectionManager>` instead of `Mutex<Connection>`.
 pub struct SqliteBackend {
     /// Connection to the `SQLite` database.
+    ///
+    /// Protected by Mutex because `rusqlite::Connection` is not `Sync`.
+    /// WAL mode and `busy_timeout` handle concurrent access gracefully.
     conn: Mutex<Connection>,
     /// Path to the `SQLite` database (None for in-memory).
     db_path: Option<PathBuf>,
@@ -171,6 +222,9 @@ impl SqliteBackend {
         // a string like "wal" which would cause execute_batch to fail
         let _ = conn.pragma_update(None, "journal_mode", "WAL");
         let _ = conn.pragma_update(None, "synchronous", "NORMAL");
+        // Set busy timeout to 5 seconds to handle lock contention gracefully
+        // This prevents SQLITE_BUSY errors during high concurrent access
+        let _ = conn.pragma_update(None, "busy_timeout", "5000");
 
         // Create the main table for memory metadata
         conn.execute(
@@ -246,6 +300,18 @@ impl SqliteBackend {
         // Composite index for common filter patterns
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_namespace_status ON memories(namespace, status)",
+            [],
+        );
+
+        // Compound index for time-filtered namespace queries (Phase 15 fix)
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_namespace_created ON memories(namespace, created_at DESC)",
+            [],
+        );
+
+        // Compound index for source filtering with status (Phase 15 fix)
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_source_status ON memories(source, status)",
             [],
         );
     }
@@ -330,12 +396,11 @@ impl SqliteBackend {
         }
 
         // Source pattern (glob-style converted to SQL LIKE)
+        // HIGH-SEC-005: Use glob_to_like_pattern to escape SQL wildcards before conversion
         if let Some(ref pattern) = filter.source_pattern {
-            // Convert glob pattern to SQL LIKE pattern: * -> %, ? -> _
-            let sql_pattern = pattern.replace('*', "%").replace('?', "_");
-            conditions.push(format!("m.source LIKE ?{param_idx}"));
+            conditions.push(format!("m.source LIKE ?{param_idx} ESCAPE '\\'"));
             param_idx += 1;
-            params.push(sql_pattern);
+            params.push(glob_to_like_pattern(pattern));
         }
 
         if let Some(after) = filter.created_after {
@@ -379,6 +444,139 @@ impl SqliteBackend {
             "status" => status
         )
         .record(start.elapsed().as_secs_f64() * 1000.0);
+    }
+
+    /// Performs a WAL checkpoint to merge WAL file into main database (RES-M3).
+    ///
+    /// This is useful for:
+    /// - Graceful shutdown (ensure WAL is flushed)
+    /// - Periodic maintenance (prevent WAL file growth)
+    /// - Before backup operations
+    ///
+    /// Uses TRUNCATE mode which blocks briefly but ensures WAL is fully merged
+    /// and then truncated to zero bytes.
+    ///
+    /// # Returns
+    ///
+    /// Returns a tuple of (`pages_written`, `pages_remaining`) on success.
+    /// `pages_remaining` should be 0 if checkpoint completed fully.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the checkpoint operation fails.
+    #[instrument(skip(self), fields(operation = "checkpoint", backend = "sqlite"))]
+    pub fn checkpoint(&self) -> Result<(u32, u32)> {
+        let start = Instant::now();
+        let conn = acquire_lock(&self.conn);
+
+        // PRAGMA wal_checkpoint(TRUNCATE) checkpoints and truncates the WAL file
+        // Returns: (busy, log_pages, checkpointed_pages)
+        // - busy: 0 if not blocked, 1 if another connection blocked us
+        // - log_pages: total pages in WAL
+        // - checkpointed_pages: pages successfully written to main database
+        let result: std::result::Result<(i32, i32, i32), _> =
+            conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            });
+
+        match result {
+            Ok((busy, log_pages, checkpointed_pages)) => {
+                #[allow(clippy::cast_sign_loss)]
+                let (log, checkpointed) = (log_pages as u32, checkpointed_pages as u32);
+
+                tracing::info!(
+                    busy = busy,
+                    log_pages = log,
+                    checkpointed_pages = checkpointed,
+                    duration_ms = start.elapsed().as_millis(),
+                    "WAL checkpoint completed"
+                );
+
+                metrics::counter!(
+                    "sqlite_checkpoint_total",
+                    "status" => "success"
+                )
+                .increment(1);
+                metrics::gauge!("sqlite_wal_pages_checkpointed").set(f64::from(checkpointed));
+                metrics::histogram!("sqlite_checkpoint_duration_ms")
+                    .record(start.elapsed().as_secs_f64() * 1000.0);
+
+                Ok((checkpointed, log.saturating_sub(checkpointed)))
+            },
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    duration_ms = start.elapsed().as_millis(),
+                    "WAL checkpoint failed"
+                );
+
+                metrics::counter!(
+                    "sqlite_checkpoint_total",
+                    "status" => "error"
+                )
+                .increment(1);
+
+                Err(Error::OperationFailed {
+                    operation: "wal_checkpoint".to_string(),
+                    cause: e.to_string(),
+                })
+            },
+        }
+    }
+
+    /// Returns the current WAL file size in pages.
+    ///
+    /// Useful for monitoring and deciding when to trigger a checkpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    #[must_use]
+    pub fn wal_size(&self) -> Option<u32> {
+        let conn = acquire_lock(&self.conn);
+
+        // PRAGMA wal_checkpoint(PASSIVE) returns current state without blocking
+        let result: std::result::Result<(i32, i32, i32), _> =
+            conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            });
+
+        result.ok().map(|(_, log_pages, _)| {
+            #[allow(clippy::cast_sign_loss)]
+            let pages = log_pages as u32;
+            pages
+        })
+    }
+
+    /// Checkpoints the WAL if it exceeds the given threshold in pages.
+    ///
+    /// Default `SQLite` auto-checkpoint threshold is 1000 pages (~4MB with 4KB pages).
+    /// This method allows explicit control over checkpointing.
+    ///
+    /// # Arguments
+    ///
+    /// * `threshold_pages` - Checkpoint if WAL size exceeds this number of pages.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some((pages_written, pages_remaining))` if checkpoint was performed,
+    /// `None` if WAL was below threshold.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the checkpoint operation fails.
+    pub fn checkpoint_if_needed(&self, threshold_pages: u32) -> Result<Option<(u32, u32)>> {
+        if let Some(current_size) = self.wal_size() {
+            if current_size > threshold_pages {
+                tracing::debug!(
+                    current_pages = current_size,
+                    threshold = threshold_pages,
+                    "WAL exceeds threshold, triggering checkpoint"
+                );
+                return self.checkpoint().map(Some);
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -1469,6 +1667,71 @@ mod tests {
     }
 
     #[test]
+    fn test_glob_to_like_pattern() {
+        // Glob wildcards are converted
+        assert_eq!(glob_to_like_pattern("*"), "%");
+        assert_eq!(glob_to_like_pattern("?"), "_");
+        assert_eq!(glob_to_like_pattern("src/*.rs"), "src/%.rs");
+        assert_eq!(glob_to_like_pattern("test?.txt"), "test_.txt");
+
+        // Literal SQL LIKE wildcards are escaped
+        assert_eq!(glob_to_like_pattern("100%"), "100\\%");
+        assert_eq!(glob_to_like_pattern("user_name"), "user\\_name");
+
+        // Combined: literal % escaped, glob * converted
+        assert_eq!(glob_to_like_pattern("foo%*bar"), "foo\\%%bar");
+        assert_eq!(glob_to_like_pattern("*_test%?"), "%\\_test\\%_");
+
+        // Backslash is escaped
+        assert_eq!(glob_to_like_pattern("path\\file*"), "path\\\\file%");
+
+        // Complex pattern (** becomes %%, each * is a separate wildcard)
+        assert_eq!(
+            glob_to_like_pattern("src/**/test_*.rs"),
+            "src/%%/test\\_%.rs"
+        );
+
+        // Empty string
+        assert_eq!(glob_to_like_pattern(""), "");
+
+        // No special characters
+        assert_eq!(glob_to_like_pattern("normal"), "normal");
+    }
+
+    #[test]
+    fn test_source_pattern_with_sql_wildcards() {
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        // Create memories with various source paths
+        let mut memory1 = create_test_memory("id1", "Test 100% pass", Namespace::Decisions);
+        memory1.source = Some("src/100%_file.rs".to_string());
+        backend.index(&memory1).unwrap();
+
+        let mut memory2 = create_test_memory("id2", "Test content", Namespace::Decisions);
+        memory2.source = Some("src/other_file.rs".to_string());
+        backend.index(&memory2).unwrap();
+
+        // Search with source pattern containing literal % (should be escaped)
+        let filter = SearchFilter::new().with_source_pattern("src/100%*");
+        let results = backend.search("Test", &filter, 10).unwrap();
+        assert_eq!(
+            results.len(),
+            1,
+            "Should find only file with literal 100% in name"
+        );
+        assert_eq!(results[0].0.as_str(), "id1");
+
+        // Search with glob wildcard only (should match both)
+        let filter2 = SearchFilter::new().with_source_pattern("src/*");
+        let results2 = backend.search("Test", &filter2, 10).unwrap();
+        assert_eq!(
+            results2.len(),
+            2,
+            "Should find both files with glob wildcard"
+        );
+    }
+
+    #[test]
     fn test_tag_filtering_with_special_characters() {
         let backend = SqliteBackend::in_memory().unwrap();
 
@@ -1496,5 +1759,63 @@ mod tests {
             0,
             "Should not match partial tag due to proper escaping"
         );
+    }
+
+    #[test]
+    fn test_checkpoint() {
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        // Index some data to create WAL entries
+        let memory = create_test_memory("checkpoint-test", "Test checkpoint", Namespace::Decisions);
+        backend.index(&memory).unwrap();
+
+        // Checkpoint should succeed (even on empty WAL)
+        let result = backend.checkpoint();
+        assert!(result.is_ok(), "Checkpoint should succeed");
+
+        let (written, remaining) = result.unwrap();
+        // In-memory databases may have 0 pages since WAL behavior differs
+        assert_eq!(
+            remaining, 0,
+            "No pages should remain after TRUNCATE checkpoint"
+        );
+        // written can be 0 for in-memory DBs
+        let _ = written;
+    }
+
+    #[test]
+    fn test_wal_size() {
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        // WAL size should be queryable
+        let size = backend.wal_size();
+        // In-memory databases might return Some(0) or None depending on WAL mode
+        // The important thing is it doesn't crash
+        let _ = size;
+    }
+
+    #[test]
+    fn test_checkpoint_if_needed_below_threshold() {
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        // First check current WAL size
+        let wal_size = backend.wal_size().unwrap_or(0);
+
+        // With threshold above current size, checkpoint shouldn't trigger
+        let result = backend.checkpoint_if_needed(wal_size.saturating_add(1000));
+        assert!(result.is_ok());
+        // In-memory databases have minimal WAL, so this should not checkpoint
+        // unless WAL is already above threshold
+        let _ = result.unwrap(); // Just verify it doesn't error
+    }
+
+    #[test]
+    fn test_checkpoint_if_needed_above_threshold() {
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        // With threshold of 0, checkpoint should always trigger (if WAL exists)
+        let result = backend.checkpoint_if_needed(0);
+        assert!(result.is_ok());
+        // Result may be Some or None depending on WAL state
     }
 }
