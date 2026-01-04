@@ -388,14 +388,14 @@ org_scope_enabled = true
 #### Option A: Create New ADR (Recommended)
 **File:** `docs/adrs/adr_0059.md`
 
-- [ ] Create new ADR file: adr_0059.md
-- [ ] Add YAML frontmatter
-- [ ] Document that this supersedes ADR-0009
-- [ ] Explain why custom JSON-RPC was chosen
-- [ ] Reference ADRs 0054-0058 for notification compliance
-- [ ] Document benefits of custom implementation
-- [ ] Update README.md to show ADR-0009 as superseded
-- [ ] Update ADR-0009 to reference ADR-0059
+- [x] Create new ADR file: adr_0059.md ✓
+- [x] Add YAML frontmatter ✓
+- [x] Document that this supersedes ADR-0009 ✓
+- [x] Explain why custom JSON-RPC was chosen ✓
+- [x] Reference ADRs 0054-0058 for notification compliance ✓
+- [x] Document benefits of custom implementation ✓
+- [x] Update README.md to show ADR-0009 as superseded ✓
+- [x] Update ADR-0009 to reference ADR-0059 ✓
 
 **OR**
 
