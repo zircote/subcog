@@ -161,6 +161,7 @@ struct MemoryRow {
     domain: Option<String>,
     status: String,
     created_at: i64,
+    tombstoned_at: Option<i64>,
     tags: Option<String>,
     content: String,
 }
@@ -592,7 +593,7 @@ impl SqliteBackend {
 fn fetch_memory_row(conn: &Connection, id: &MemoryId) -> Result<Option<MemoryRow>> {
     let mut stmt = conn
         .prepare(
-            "SELECT m.id, m.namespace, m.domain, m.status, m.created_at, m.tags, f.content
+            "SELECT m.id, m.namespace, m.domain, m.status, m.created_at, m.tombstoned_at, m.tags, f.content
              FROM memories m
              JOIN memories_fts f ON m.id = f.id
              WHERE m.id = ?1",
@@ -610,8 +611,9 @@ fn fetch_memory_row(conn: &Connection, id: &MemoryId) -> Result<Option<MemoryRow
                 domain: row.get(2)?,
                 status: row.get(3)?,
                 created_at: row.get(4)?,
-                tags: row.get(5)?,
-                content: row.get(6)?,
+                tombstoned_at: row.get(5)?,
+                tags: row.get(6)?,
+                content: row.get(7)?,
             })
         })
         .optional();
@@ -668,6 +670,8 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
 
     #[allow(clippy::cast_sign_loss)]
     let created_at_u64 = row.created_at as u64;
+    #[allow(clippy::cast_sign_loss)]
+    let tombstoned_at_u64 = row.tombstoned_at.map(|t| t as u64);
 
     Memory {
         id: MemoryId::new(row.id),
@@ -677,7 +681,7 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
         status,
         created_at: created_at_u64,
         updated_at: created_at_u64,
-        tombstoned_at: None,
+        tombstoned_at: tombstoned_at_u64,
         embedding: None,
         tags,
         source: None,
@@ -715,9 +719,11 @@ impl IndexBackend for SqliteBackend {
                 // Note: Cast u64 to i64 for SQLite compatibility (rusqlite doesn't impl ToSql for u64)
                 #[allow(clippy::cast_possible_wrap)]
                 let created_at_i64 = memory.created_at as i64;
+                #[allow(clippy::cast_possible_wrap)]
+                let tombstoned_at_i64 = memory.tombstoned_at.map(|t| t as i64);
                 conn.execute(
-                    "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags, source)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags, source, tombstoned_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                     params![
                         memory.id.as_str(),
                         memory.namespace.as_str(),
@@ -725,7 +731,8 @@ impl IndexBackend for SqliteBackend {
                         memory.status.as_str(),
                         created_at_i64,
                         tags_str,
-                        memory.source.as_deref()
+                        memory.source.as_deref(),
+                        tombstoned_at_i64
                     ],
                 )
                 .map_err(|e| Error::OperationFailed {
@@ -1088,7 +1095,7 @@ impl IndexBackend for SqliteBackend {
             let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
 
             let sql = format!(
-                "SELECT m.id, m.namespace, m.domain, m.status, m.created_at, m.tags, f.content
+                "SELECT m.id, m.namespace, m.domain, m.status, m.created_at, m.tombstoned_at, m.tags, f.content
                  FROM memories m
                  JOIN memories_fts f ON m.id = f.id
                  WHERE m.id IN ({})",
@@ -1113,8 +1120,9 @@ impl IndexBackend for SqliteBackend {
                         domain: row.get(2)?,
                         status: row.get(3)?,
                         created_at: row.get(4)?,
-                        tags: row.get(5)?,
-                        content: row.get(6)?,
+                        tombstoned_at: row.get(5)?,
+                        tags: row.get(6)?,
+                        content: row.get(7)?,
                     })
                 })
                 .map_err(|e| Error::OperationFailed {

@@ -151,15 +151,15 @@ CREATE INDEX idx_memories_tombstoned ON memories(tombstoned_at) WHERE tombstoned
 - `src/storage/persistence/postgresql.rs`
 - `src/storage/persistence/filesystem.rs`
 
-- [ ] Update SQLite INSERT statements to include tombstoned_at
-- [ ] Update SQLite SELECT statements to fetch tombstoned_at
-- [ ] Update PostgreSQL INSERT statements
-- [ ] Update PostgreSQL SELECT statements
-- [ ] Update filesystem persistence serialization
-- [ ] Update memory deserialization to handle NULL tombstoned_at
-- [ ] Verify all persistence backends handle new field
-- [ ] Run existing persistence tests
-- [ ] Add new tests for tombstoned memories
+- [x] Update SQLite INSERT statements to include tombstoned_at ✓
+- [x] Update SQLite SELECT statements to fetch tombstoned_at ✓
+- [x] Update PostgreSQL INSERT statements ✓
+- [x] Update PostgreSQL SELECT statements ✓
+- [x] Update filesystem persistence serialization ✓
+- [x] Update memory deserialization to handle NULL tombstoned_at ✓
+- [x] Verify all persistence backends handle new field ✓
+- [x] Run existing persistence tests ✓
+- [x] Add new tests for tombstoned memories ✓
 
 ---
 
