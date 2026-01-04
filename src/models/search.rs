@@ -110,6 +110,8 @@ pub struct SearchFilter {
     pub created_before: Option<u64>,
     /// Minimum similarity score (0.0 to 1.0).
     pub min_score: Option<f32>,
+    /// Include tombstoned memories (default: false).
+    pub include_tombstoned: bool,
 }
 
 impl SearchFilter {
@@ -127,6 +129,7 @@ impl SearchFilter {
             created_after: None,
             created_before: None,
             min_score: None,
+            include_tombstoned: false,
         }
     }
 
@@ -197,6 +200,13 @@ impl SearchFilter {
     #[must_use]
     pub const fn with_created_before(mut self, timestamp: u64) -> Self {
         self.created_before = Some(timestamp);
+        self
+    }
+
+    /// Includes tombstoned memories in results.
+    #[must_use]
+    pub const fn with_include_tombstoned(mut self, include: bool) -> Self {
+        self.include_tombstoned = include;
         self
     }
 

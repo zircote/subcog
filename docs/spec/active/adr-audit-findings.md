@@ -170,12 +170,12 @@ CREATE INDEX idx_memories_tombstoned ON memories(tombstoned_at) WHERE tombstoned
 - [x] Implement `tombstone_memory(&self, id: &str) -> Result<(), MemoryError>` ✓
   - [x] Set status to MemoryStatus::Tombstoned ✓
   - [x] Set tombstoned_at to Utc::now() ✓
-  - [ ] Update in persistence layer
+  - [x] Update in persistence layer ✓
   - [x] Use transaction for atomicity ✓
 - [x] Implement `untombstone_memory(&self, id: &str) -> Result<(), MemoryError>` ✓
   - [x] Set status back to Active ✓
   - [x] Clear tombstoned_at (set to None) ✓
-  - [ ] Update in persistence layer
+  - [x] Update in persistence layer ✓
 - [x] Implement `purge_tombstoned(&self, older_than: Duration) -> Result<usize, MemoryError>` ✓
   - [x] Query tombstoned memories older than threshold ✓
   - [x] Permanently delete from persistence ✓

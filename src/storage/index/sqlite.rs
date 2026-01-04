@@ -425,6 +425,11 @@ impl SqliteBackend {
             params.push(before.to_string());
         }
 
+        // Exclude tombstoned memories by default (ADR-0053)
+        if !filter.include_tombstoned {
+            conditions.push("m.status != 'tombstoned'".to_string());
+        }
+
         let clause = if conditions.is_empty() {
             String::new()
         } else {

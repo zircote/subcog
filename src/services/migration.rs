@@ -284,6 +284,7 @@ mod tests {
             status: crate::MemoryStatus::Active,
             created_at: 0,
             updated_at: 0,
+            tombstoned_at: None,
             embedding: if with_embedding {
                 Some(vec![0.1, 0.2, 0.3])
             } else {
