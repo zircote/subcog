@@ -490,8 +490,8 @@ org_scope_enabled = true
 - [x] Add "Remediation Completed: 2026-MM-DD" to each audit section ✓
 - [x] Update critical issues section in README ✓
 - [x] Recalculate compliance percentages ✓
-- [ ] Update "Next Scheduled Audit" date
-- [ ] Remove tasks from critical issues section
+- [x] Update "Next Scheduled Audit" date ✓
+- [x] Remove tasks from critical issues section ✓
 
 **Expected Final Stats:**
 - Total ADRs: 58
