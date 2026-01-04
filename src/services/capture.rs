@@ -329,8 +329,8 @@ impl CaptureService {
     /// Generates a URN for the memory.
     #[allow(clippy::unused_self)] // Method kept for potential future use of self
     fn generate_urn(&self, memory: &Memory) -> String {
-        let domain_part = if memory.domain.is_global() {
-            "global".to_string()
+        let domain_part = if memory.domain.is_project_scoped() {
+            "project".to_string()
         } else {
             memory.domain.to_string()
         };

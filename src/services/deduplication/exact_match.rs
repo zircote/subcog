@@ -71,7 +71,7 @@ impl ExactMatchChecker {
     /// # Example
     ///
     /// ```rust,ignore
-    /// let result = checker.check("content", Namespace::Decisions, "global")?;
+    /// let result = checker.check("content", Namespace::Decisions, "project")?;
     /// match result {
     ///     Some((id, urn)) => println!("Duplicate: {}", urn),
     ///     None => println!("No duplicate found"),
@@ -219,7 +219,7 @@ mod tests {
 
         // Check for content that doesn't exist
         let result = checker
-            .check("Non-existent content", Namespace::Decisions, "global")
+            .check("Non-existent content", Namespace::Decisions, "project")
             .unwrap();
 
         assert!(result.is_none());
@@ -247,13 +247,13 @@ mod tests {
 
         // Check for the same content
         let result = checker
-            .check(content, Namespace::Decisions, "global")
+            .check(content, Namespace::Decisions, "project")
             .unwrap();
 
         assert!(result.is_some());
         let (id, urn) = result.unwrap();
         assert_eq!(id.as_str(), "test-memory-123");
-        assert_eq!(urn, "subcog://global/decisions/test-memory-123");
+        assert_eq!(urn, "subcog://project/decisions/test-memory-123");
     }
 
     #[test]
@@ -278,7 +278,7 @@ mod tests {
 
         // Check in different namespace should not find match
         let result = checker
-            .check(content, Namespace::Patterns, "global")
+            .check(content, Namespace::Patterns, "project")
             .unwrap();
 
         assert!(result.is_none());
@@ -306,7 +306,7 @@ mod tests {
 
         // Check with whitespace and case variations should still match
         let result = checker
-            .check("  USE  postgresql  ", Namespace::Decisions, "global")
+            .check("  USE  postgresql  ", Namespace::Decisions, "project")
             .unwrap();
 
         assert!(result.is_some());

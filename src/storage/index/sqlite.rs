@@ -618,7 +618,7 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
 
     let namespace = Namespace::parse(&row.namespace).unwrap_or_default();
     let domain = row.domain.map_or_else(Domain::new, |d: String| {
-        if d.is_empty() || d == "global" {
+        if d.is_empty() || d == "project" {
             Domain::new()
         } else {
             let parts: Vec<&str> = d.split('/').collect();

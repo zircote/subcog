@@ -2,18 +2,21 @@
 project_id: SPEC-2026-01-04-001
 project_name: "MCP Server JSON-RPC Notification Compliance"
 slug: issue-46-mcp-notification-fix
-status: approved
+status: completed
 created: 2026-01-04T04:30:00Z
 approved: 2026-01-04T15:09:30Z
 approved_by: "Robert Allen <zircote@gmail.com>"
-started: null
-completed: null
+started: 2026-01-04T15:15:00Z
+completed: 2026-01-04T16:30:00Z
+outcome: success
 expires: 2026-04-04T04:30:00Z
 superseded_by: null
 tags: [mcp, json-rpc, notifications, bug-fix, protocol-compliance]
 stakeholders: []
 github_issue: 46
 github_url: https://github.com/zircote/subcog/issues/46
+github_pr: 47
+github_pr_url: https://github.com/zircote/subcog/pull/47
 ---
 
 # MCP Server JSON-RPC Notification Compliance

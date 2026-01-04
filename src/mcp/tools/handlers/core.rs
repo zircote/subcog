@@ -138,9 +138,9 @@ pub fn execute_recall(arguments: Value) -> Result<ToolResult> {
         };
 
         // Build URN: subcog://{domain}/{namespace}/{id}
-        // Domain: global, project, or org/repo path
-        let domain_part = if hit.memory.domain.is_global() {
-            "global".to_string()
+        // Domain: project, user, or org/repo path
+        let domain_part = if hit.memory.domain.is_project_scoped() {
+            "project".to_string()
         } else {
             hit.memory.domain.to_string()
         };
@@ -180,7 +180,7 @@ pub fn execute_status(_arguments: Value) -> Result<ToolResult> {
         "version": env!("CARGO_PKG_VERSION"),
         "status": "operational",
         "backends": {
-            "persistence": "git-notes",
+            "persistence": "sqlite",
             "index": "sqlite-fts5",
             "vector": "usearch"
         },
@@ -266,8 +266,8 @@ pub fn execute_consolidate(arguments: Value) -> Result<ToolResult> {
         .iter()
         .enumerate()
         .map(|(i, hit)| {
-            let domain_part = if hit.memory.domain.is_global() {
-                "global".to_string()
+            let domain_part = if hit.memory.domain.is_project_scoped() {
+                "project".to_string()
             } else {
                 hit.memory.domain.to_string()
             };

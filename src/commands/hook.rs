@@ -30,7 +30,7 @@ pub fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn s
     // Try to initialize services for hooks (may fail if no data dir)
     let recall_service = try_init_recall_service();
 
-    // Get repo path so captures are stored to git notes
+    // Get repo path for project-scoped SQLite storage
     let cwd = std::env::current_dir().ok();
     let mut capture_config = subcog::config::Config::from(config.clone());
     if let Some(path) = cwd.as_ref() {

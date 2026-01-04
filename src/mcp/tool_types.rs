@@ -247,13 +247,76 @@ pub fn find_missing_required_variables<'a>(
         .collect()
 }
 
-/// Truncates a string to a maximum length.
+/// Finds the largest valid UTF-8 character boundary at or before `index`.
+///
+/// This is an MSRV-compatible implementation of `str::floor_char_boundary`
+/// (stable since Rust 1.80, but we target 1.86 MSRV).
+///
+/// # Arguments
+///
+/// * `s` - The string to find a boundary in.
+/// * `index` - The byte index to search from (will find boundary at or before).
+///
+/// # Returns
+///
+/// The largest valid character boundary at or before `index`, or 0 if none found.
+fn floor_char_boundary(s: &str, index: usize) -> usize {
+    if index >= s.len() {
+        return s.len();
+    }
+
+    // Find the last character boundary at or before index using char_indices.
+    // char_indices() yields (byte_offset, char) for each character.
+    // We want the largest byte_offset <= index.
+    let mut boundary = 0;
+    for (byte_offset, _) in s.char_indices() {
+        if byte_offset <= index {
+            boundary = byte_offset;
+        } else {
+            break;
+        }
+    }
+    boundary
+}
+
+/// Truncates a string to a maximum length, respecting UTF-8 character boundaries.
+///
+/// This function safely handles multi-byte UTF-8 characters (e.g., degree symbol,
+/// emoji, CJK characters) by finding the nearest valid character boundary.
+///
+/// # Arguments
+///
+/// * `s` - The string to truncate.
+/// * `max_len` - Maximum byte length for the result (including "..." suffix).
+///
+/// # Returns
+///
+/// The original string if it fits, otherwise a truncated version with "..." appended.
+///
+/// # Examples
+///
+/// ```ignore
+/// // ASCII text
+/// assert_eq!(truncate("Hello, world!", 10), "Hello, ...");
+///
+/// // Multi-byte UTF-8 characters (degree symbol is 2 bytes)
+/// assert_eq!(truncate("32 °C temperature", 10), "32 °C ...");
+///
+/// // String shorter than max_len
+/// assert_eq!(truncate("short", 100), "short");
+/// ```
 pub fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        return s.to_string();
     }
+
+    // Reserve 3 bytes for "..."
+    let target_len = max_len.saturating_sub(3);
+
+    // Find the largest valid character boundary <= target_len
+    let boundary = floor_char_boundary(s, target_len);
+
+    format!("{}...", &s[..boundary])
 }
 
 /// Formats content based on detail level.
@@ -411,5 +474,124 @@ mod tests {
         let json = r#"{"name": "test", "domain": "user", "recursive": true}"#;
         let result: Result<PromptDeleteArgs, _> = serde_json::from_str(json);
         assert!(result.is_err());
+    }
+
+    // ==========================================================================
+    // UTF-8 safe truncation tests
+    // ==========================================================================
+
+    #[test]
+    fn test_truncate_ascii_short() {
+        assert_eq!(truncate("short", 100), "short");
+    }
+
+    #[test]
+    fn test_truncate_ascii_exact() {
+        assert_eq!(truncate("hello", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_ascii_long() {
+        assert_eq!(truncate("hello world", 8), "hello...");
+    }
+
+    #[test]
+    fn test_truncate_degree_symbol() {
+        // The degree symbol (°) is 2 bytes (U+00B0: 0xC2 0xB0)
+        // "32 °C" = [51, 50, 32, 194, 176, 67] = 6 bytes
+        let s = "32 °C temperature";
+        // With max_len=10, target_len=7, boundary should be at 6 (after °)
+        let result = truncate(s, 10);
+        assert!(result.ends_with("..."));
+        // Should not panic and should contain valid UTF-8
+        assert!(result.is_ascii() || !result.is_empty());
+    }
+
+    #[test]
+    fn test_truncate_multi_byte_boundary() {
+        // Test the exact case from the panic: degree symbol at byte 196-198
+        let s = "Document 301:\nThe Mallee and upper Wimmera are Victoria's warmest regions with hot winds blowing from nearby semi-deserts. Average temperatures exceed 32 °C (90 °F) during summer and 15 °C (59 °F) in winter...";
+
+        // This was panicking at max_len=200 because byte 197 is inside °
+        let result = truncate(s, 200);
+        assert!(result.ends_with("..."));
+        // Verify it's valid UTF-8 (won't compile if not, but good to be explicit)
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_truncate_emoji() {
+        // Emoji are 4 bytes each
+        let s = "Hello 👋 World 🌍 Test";
+        let result = truncate(s, 15);
+        assert!(result.ends_with("..."));
+    }
+
+    #[test]
+    fn test_truncate_cjk() {
+        // CJK characters are 3 bytes each
+        let s = "Hello 你好 World";
+        let result = truncate(s, 12);
+        assert!(result.ends_with("..."));
+    }
+
+    #[test]
+    fn test_truncate_empty() {
+        assert_eq!(truncate("", 10), "");
+    }
+
+    #[test]
+    fn test_truncate_very_small_max() {
+        // With max_len=3, we have 0 bytes for content
+        let result = truncate("hello", 3);
+        assert_eq!(result, "...");
+    }
+
+    #[test]
+    fn test_truncate_max_len_zero() {
+        // Edge case: max_len=0
+        let result = truncate("hello", 0);
+        assert_eq!(result, "...");
+    }
+
+    // ==========================================================================
+    // floor_char_boundary tests
+    // ==========================================================================
+
+    #[test]
+    fn test_floor_char_boundary_ascii() {
+        let s = "hello";
+        assert_eq!(floor_char_boundary(s, 0), 0);
+        assert_eq!(floor_char_boundary(s, 2), 2);
+        assert_eq!(floor_char_boundary(s, 5), 5);
+        assert_eq!(floor_char_boundary(s, 10), 5); // beyond end
+    }
+
+    #[test]
+    fn test_floor_char_boundary_multi_byte() {
+        // "°" is bytes 0..2 (2 bytes)
+        let s = "°C";
+        assert_eq!(floor_char_boundary(s, 0), 0);
+        assert_eq!(floor_char_boundary(s, 1), 0); // inside °, floor to 0
+        assert_eq!(floor_char_boundary(s, 2), 2); // at C
+        assert_eq!(floor_char_boundary(s, 3), 3); // end
+    }
+
+    #[test]
+    fn test_floor_char_boundary_emoji() {
+        // "👋" is 4 bytes
+        let s = "a👋b";
+        assert_eq!(floor_char_boundary(s, 0), 0); // at 'a'
+        assert_eq!(floor_char_boundary(s, 1), 1); // at start of emoji
+        assert_eq!(floor_char_boundary(s, 2), 1); // inside emoji
+        assert_eq!(floor_char_boundary(s, 3), 1); // inside emoji
+        assert_eq!(floor_char_boundary(s, 4), 1); // inside emoji
+        assert_eq!(floor_char_boundary(s, 5), 5); // at 'b'
+    }
+
+    #[test]
+    fn test_floor_char_boundary_empty() {
+        assert_eq!(floor_char_boundary("", 0), 0);
+        assert_eq!(floor_char_boundary("", 5), 0);
     }
 }

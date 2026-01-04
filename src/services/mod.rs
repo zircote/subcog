@@ -233,7 +233,7 @@ impl ServiceContainer {
 
         let index_manager = DomainIndexManager::new(config)?;
 
-        // Create CaptureService with repo_path so it stores to git notes
+        // Create CaptureService with repo_path for project-scoped storage
         let capture_config = crate::config::Config::new().with_repo_path(&repo_root);
 
         // Create storage paths using PathManager
@@ -277,7 +277,7 @@ impl ServiceContainer {
     /// Creates a service container for user-scoped storage.
     ///
     /// Used when operating outside a git repository. Stores memories in the
-    /// user's local data directory using `SQLite` persistence (no git notes).
+    /// user's local data directory using `SQLite` persistence.
     ///
     /// # Storage Paths
     ///
@@ -315,7 +315,7 @@ impl ServiceContainer {
         };
         let index_manager = DomainIndexManager::new(config)?;
 
-        // Create CaptureService WITHOUT repo_path (no git notes)
+        // Create CaptureService WITHOUT repo_path (user scope)
         let capture_config = crate::config::Config::new();
 
         // Create backends using factory (centralizes initialization logic)
@@ -342,7 +342,7 @@ impl ServiceContainer {
     /// Creates a service container from the current directory, falling back to user scope.
     ///
     /// This is the recommended factory method for CLI and MCP entry points:
-    /// - If in a git repository → uses project scope (git notes + local index)
+    /// - If in a git repository → uses project scope (`SQLite` + local index)
     /// - If NOT in a git repository → uses user scope (SQLite-only)
     ///
     /// # Examples
@@ -351,7 +351,7 @@ impl ServiceContainer {
     /// // Works in any directory
     /// let container = ServiceContainer::from_current_dir_or_user()?;
     ///
-    /// // In git repo: subcog://global/{namespace}/{id}
+    /// // In git repo: subcog://project/{namespace}/{id}
     /// // Outside git: subcog://user/{namespace}/{id}
     /// let result = container.capture().capture(request)?;
     /// ```

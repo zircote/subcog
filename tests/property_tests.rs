@@ -66,9 +66,9 @@ proptest! {
         }
     }
 
-    /// Property: Domain::is_global is true iff all fields are None.
+    /// Property: Domain::is_project_scoped is true iff all fields are None.
     #[test]
-    fn prop_domain_is_global_iff_all_none(
+    fn prop_domain_is_project_scoped_iff_all_none(
         org in proptest::option::of("[a-z]{1,10}"),
         proj in proptest::option::of("[a-z]{1,10}"),
         repo in proptest::option::of("[a-z]{1,10}")
@@ -79,27 +79,27 @@ proptest! {
             repository: repo.clone(),
         };
 
-        let expected_global = org.is_none() && proj.is_none() && repo.is_none();
-        prop_assert_eq!(domain.is_global(), expected_global);
+        let expected_project_scoped = org.is_none() && proj.is_none() && repo.is_none();
+        prop_assert_eq!(domain.is_project_scoped(), expected_project_scoped);
     }
 
-    /// Property: Domain::for_repository creates non-global domain.
+    /// Property: Domain::for_repository creates non-project-scoped domain.
     #[test]
-    fn prop_domain_for_repository_not_global(
+    fn prop_domain_for_repository_not_project_scoped(
         org in "[a-z]{1,10}",
         repo in "[a-z]{1,10}"
     ) {
         let domain = Domain::for_repository(&org, &repo);
-        prop_assert!(!domain.is_global());
+        prop_assert!(!domain.is_project_scoped());
         prop_assert_eq!(domain.organization, Some(org));
         prop_assert_eq!(domain.repository, Some(repo));
     }
 
-    /// Property: Domain::for_user is not global but is_user returns true.
+    /// Property: Domain::for_user is not project-scoped but is_user returns true.
     #[test]
     fn prop_domain_for_user_is_user(_dummy in 0..1i32) {
         let domain = Domain::for_user();
-        prop_assert!(!domain.is_global());
+        prop_assert!(!domain.is_project_scoped());
         prop_assert!(domain.is_user());
     }
 
@@ -364,8 +364,8 @@ mod manual_property_tests {
     /// Test Domain display formatting.
     #[test]
     fn test_domain_display_formats() {
-        let global = Domain::new();
-        assert_eq!(global.to_string(), "global");
+        let project = Domain::new();
+        assert_eq!(project.to_string(), "project");
 
         let user = Domain::for_user();
         assert_eq!(user.to_string(), "user");

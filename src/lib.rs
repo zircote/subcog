@@ -1,7 +1,7 @@
 //! # Subcog
 //!
 //! A persistent memory system for AI coding assistants.
-//! Rust rewrite of git-notes-memory.
+//! Persistent memory system for AI coding assistants.
 //!
 //! Subcog captures decisions, learnings, and context from coding sessions
 //! and surfaces them when relevant through semantic search.
@@ -10,7 +10,7 @@
 //!
 //! - Single-binary distribution (<100MB, <10ms cold start)
 //! - Three-layer storage architecture (Persistence, Index, Vector)
-//! - Pluggable backends (Git Notes, SQLite+usearch, PostgreSQL+pgvector)
+//! - Pluggable backends (SQLite+usearch, PostgreSQL+pgvector)
 //! - MCP server integration for AI agent interoperability
 //! - Claude Code hooks for seamless IDE integration
 //! - Semantic search with hybrid vector + BM25 ranking
@@ -97,7 +97,6 @@ pub enum Error {
     /// An operation failed.
     ///
     /// Raised when:
-    /// - Git notes read/write operations fail
     /// - `SQLite` database operations fail
     /// - Filesystem I/O errors occur
     /// - Index backend is not configured

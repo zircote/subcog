@@ -39,7 +39,7 @@ impl DomainScope {
     /// - If NOT in a git repository: returns `User`
     ///
     /// This ensures memories are stored in the appropriate scope:
-    /// - Project-scoped memories are stored in git notes (requires git repo)
+    /// - Project-scoped memories are stored in `SQLite` with project faceting
     /// - User-scoped memories are stored in sqlite (works anywhere)
     #[must_use]
     pub fn default_for_context() -> Self {

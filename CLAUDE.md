@@ -866,6 +866,22 @@ The following hooks run automatically on file save:
 
 ### Completed Specifications
 
+- **[MCP Server JSON-RPC Notification Compliance](docs/spec/completed/2026-01-04-issue-46-mcp-notification-fix/)** (2026-01-04)
+  - **GitHub Issue**: [#46](https://github.com/zircote/subcog/issues/46)
+  - **PR**: [#47](https://github.com/zircote/subcog/pull/47)
+  - **Completed**: 2026-01-04
+  - **Outcome**: Success - All 7 tasks delivered (100% scope completion)
+  - **Effort**: ~1.5 hours (planned 2-4 hours, 38-63% under budget)
+  - **Features**:
+    - Added `is_notification()` const fn to `JsonRpcRequest` for notification detection
+    - Updated stdio transport to skip responses for notifications (empty string + skip writeln)
+    - Updated HTTP transport to return 204 No Content for notifications
+    - Fixed `format_error()` to always include `id` field (null for parse errors)
+    - 12 new unit tests for JSON-RPC 2.0 compliance
+  - **Quality**: 1019+ tests passing, `make ci` clean
+  - **Key learnings**: Serde deserializes `"id": null` as `None` (not `Some(Value::Null)`), JSON-RPC 2.0 spec treatment of `"id": null` is ambiguous (treated as notification for safety), clippy enforces `const fn` for simple methods
+  - **Key docs**: REQUIREMENTS.md, ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, DECISIONS.md, PROGRESS.md, RETROSPECTIVE.md
+
 - **[Storage Architecture Simplification](docs/spec/completed/2026-01-03-storage-simplification/)** (2026-01-03)
   - **Completed**: 2026-01-03
   - **Outcome**: Success - All 32 tasks + 176 code review fixes delivered

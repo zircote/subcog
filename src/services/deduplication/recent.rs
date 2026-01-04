@@ -57,7 +57,7 @@ struct CacheEntry {
 /// let checker = RecentCaptureChecker::new(1000, Duration::from_secs(300));
 ///
 /// // Record a capture
-/// checker.record("content", MemoryId::new("id1"), Namespace::Decisions, "global");
+/// checker.record("content", MemoryId::new("id1"), Namespace::Decisions, "project");
 ///
 /// // Check if same content was recently captured
 /// let result = checker.check("content", Namespace::Decisions);
@@ -213,7 +213,7 @@ impl RecentCaptureChecker {
     ///     "Use PostgreSQL for storage",
     ///     MemoryId::new("mem-123"),
     ///     Namespace::Decisions,
-    ///     "global",
+    ///     "project",
     /// );
     /// ```
     #[instrument(
@@ -355,7 +355,7 @@ mod tests {
         let memory_id = MemoryId::new("mem-123");
 
         // Record the capture
-        checker.record(content, &memory_id, Namespace::Decisions, "global");
+        checker.record(content, &memory_id, Namespace::Decisions, "project");
 
         assert_eq!(checker.len(), 1);
 
@@ -365,7 +365,7 @@ mod tests {
 
         let (id, urn) = result.unwrap();
         assert_eq!(id.as_str(), "mem-123");
-        assert_eq!(urn, "subcog://global/decisions/mem-123");
+        assert_eq!(urn, "subcog://project/decisions/mem-123");
     }
 
     #[test]
@@ -385,7 +385,7 @@ mod tests {
             content,
             &MemoryId::new("mem-123"),
             Namespace::Decisions,
-            "global",
+            "project",
         );
 
         // Check in different namespace should not find it
@@ -403,7 +403,7 @@ mod tests {
             content,
             &MemoryId::new("mem-123"),
             Namespace::Decisions,
-            "global",
+            "project",
         );
 
         // Wait for expiration
@@ -423,7 +423,7 @@ mod tests {
             "Use PostgreSQL",
             &MemoryId::new("mem-123"),
             Namespace::Decisions,
-            "global",
+            "project",
         );
 
         // Check with whitespace/case variations should still match
@@ -440,13 +440,13 @@ mod tests {
             "content1",
             &MemoryId::new("mem-1"),
             Namespace::Decisions,
-            "global",
+            "project",
         );
         checker.record(
             "content2",
             &MemoryId::new("mem-2"),
             Namespace::Decisions,
-            "global",
+            "project",
         );
 
         assert_eq!(checker.len(), 2);
@@ -456,7 +456,7 @@ mod tests {
             "content3",
             &MemoryId::new("mem-3"),
             Namespace::Decisions,
-            "global",
+            "project",
         );
 
         assert_eq!(checker.len(), 2);
@@ -481,13 +481,13 @@ mod tests {
             "content1",
             &MemoryId::new("mem-1"),
             Namespace::Decisions,
-            "global",
+            "project",
         );
         checker.record(
             "content2",
             &MemoryId::new("mem-2"),
             Namespace::Decisions,
-            "global",
+            "project",
         );
 
         assert_eq!(checker.len(), 2);
@@ -510,7 +510,7 @@ mod tests {
             &hash,
             &MemoryId::new("mem-123"),
             Namespace::Decisions,
-            "global",
+            "project",
         );
 
         // Check with content should find it
@@ -529,7 +529,7 @@ mod tests {
             content,
             &MemoryId::new("mem-old"),
             Namespace::Decisions,
-            "global",
+            "project",
         );
 
         // Record again with different ID
@@ -537,7 +537,7 @@ mod tests {
             content,
             &MemoryId::new("mem-new"),
             Namespace::Decisions,
-            "global",
+            "project",
         );
 
         assert_eq!(checker.len(), 1);
@@ -565,7 +565,7 @@ mod tests {
                     &format!("content-t1-{i}"),
                     &MemoryId::new(format!("mem-t1-{i}")),
                     Namespace::Decisions,
-                    "global",
+                    "project",
                 );
             }
         });
@@ -576,7 +576,7 @@ mod tests {
                     &format!("content-t2-{i}"),
                     &MemoryId::new(format!("mem-t2-{i}")),
                     Namespace::Patterns,
-                    "global",
+                    "project",
                 );
             }
         });

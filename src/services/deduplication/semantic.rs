@@ -75,7 +75,7 @@ impl<T: VectorBackend + Send + Sync> ThreadSafeVectorBackend for T {}
 /// let config = DeduplicationConfig::default();
 /// let checker = SemanticSimilarityChecker::new(embedder, vector, config);
 ///
-/// let result = checker.check("Use PostgreSQL for storage", Namespace::Decisions, "global")?;
+/// let result = checker.check("Use PostgreSQL for storage", Namespace::Decisions, "project")?;
 /// if let Some((memory_id, urn, score)) = result {
 ///     println!("Semantic match found: {} (score: {:.2})", urn, score);
 /// }
@@ -128,7 +128,7 @@ impl<E: ThreadSafeEmbedder, V: ThreadSafeVectorBackend> SemanticSimilarityChecke
     /// # Example
     ///
     /// ```rust,ignore
-    /// let result = checker.check("content", Namespace::Decisions, "global")?;
+    /// let result = checker.check("content", Namespace::Decisions, "project")?;
     /// match result {
     ///     Some((id, urn, score)) => println!("Similar: {} ({:.2})", urn, score),
     ///     None => println!("No similar content found"),
@@ -412,7 +412,7 @@ mod tests {
 
         // Content shorter than min_semantic_length (50) should be skipped
         let result = checker
-            .check("short", Namespace::Decisions, "global")
+            .check("short", Namespace::Decisions, "project")
             .unwrap();
         assert!(result.is_none());
     }
@@ -424,7 +424,7 @@ mod tests {
         // Content long enough but no vectors in the index
         let content = "This is a sufficiently long piece of content that should trigger semantic similarity checking in the deduplication system.";
         let result = checker
-            .check(content, Namespace::Decisions, "global")
+            .check(content, Namespace::Decisions, "project")
             .unwrap();
         assert!(result.is_none());
     }
@@ -449,13 +449,13 @@ mod tests {
 
         // Check with identical content (should match with very high score)
         let result = checker
-            .check(existing_content, Namespace::Decisions, "global")
+            .check(existing_content, Namespace::Decisions, "project")
             .unwrap();
 
         assert!(result.is_some());
         let (id, urn, score) = result.unwrap();
         assert_eq!(id.as_str(), "existing-memory-123");
-        assert_eq!(urn, "subcog://global/decisions/existing-memory-123");
+        assert_eq!(urn, "subcog://project/decisions/existing-memory-123");
         assert!(score > 0.99); // Near-identical content
     }
 
@@ -482,7 +482,7 @@ mod tests {
         let new_content =
             "Use MongoDB for document storage in the application for maximum flexibility.";
         let result = checker
-            .check(new_content, Namespace::Decisions, "global")
+            .check(new_content, Namespace::Decisions, "project")
             .unwrap();
 
         // May or may not match depending on pseudo-embedding behavior

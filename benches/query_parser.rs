@@ -317,19 +317,19 @@ fn bench_domain(c: &mut Criterion) {
         b.iter(subcog::Domain::for_user);
     });
 
-    // Benchmark is_global check
-    group.bench_function("is_global_true", |b| {
+    // Benchmark is_project_scoped check
+    group.bench_function("is_project_scoped_true", |b| {
         let domain = subcog::Domain::new();
-        b.iter(|| black_box(&domain).is_global());
+        b.iter(|| black_box(&domain).is_project_scoped());
     });
 
-    group.bench_function("is_global_false", |b| {
+    group.bench_function("is_project_scoped_false", |b| {
         let domain = subcog::Domain::for_repository("org", "repo");
-        b.iter(|| black_box(&domain).is_global());
+        b.iter(|| black_box(&domain).is_project_scoped());
     });
 
     // Benchmark to_string
-    group.bench_function("to_string_global", |b| {
+    group.bench_function("to_string_project", |b| {
         let domain = subcog::Domain::new();
         b.iter(|| black_box(&domain).to_string());
     });

@@ -1,7 +1,7 @@
 //! Storage layer abstraction.
 //!
 //! This module provides a three-layer storage architecture:
-//! - **Persistence**: Authoritative storage (Git Notes, PostgreSQL, Filesystem)
+//! - **Persistence**: Authoritative storage (`SQLite`, PostgreSQL, Filesystem)
 //! - **Index**: Full-text search (`SQLite` + FTS5, PostgreSQL, `RediSearch`)
 //! - **Vector**: Embedding similarity search (usearch, pgvector, Redis)
 

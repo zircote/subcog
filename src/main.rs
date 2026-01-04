@@ -108,7 +108,7 @@ enum Commands {
     /// Run consolidation.
     Consolidate,
 
-    /// Rebuild search index from git notes.
+    /// Rebuild search index from stored memories.
     Reindex {
         /// Path to the git repository (default: current directory).
         #[arg(short, long)]

@@ -962,15 +962,15 @@ fn test_domain_default_for_context() {
     // Domain::default_for_context() returns appropriate domain based on git presence
     let domain = Domain::default_for_context();
 
-    // Domain should be usable (is_global returns true when all fields are None)
+    // Domain should be usable (is_project_scoped returns true when all fields are None)
     // In a git repo, it may have project/repository info
     // The key test is that it doesn't panic
-    let _is_global = domain.is_global();
+    let _is_project_scoped = domain.is_project_scoped();
 
-    // Domain::new() should create an empty/global domain
+    // Domain::new() should create an empty/project-scoped domain
     let empty_domain = Domain::new();
     assert!(
-        empty_domain.is_global(),
-        "Domain::new() should create a global domain"
+        empty_domain.is_project_scoped(),
+        "Domain::new() should create a project-scoped domain"
     );
 }

@@ -188,8 +188,8 @@ impl PostToolUseHandler {
             .filter(|hit| hit.score >= self.min_relevance)
             .map(|hit| {
                 // Build full URN: subcog://{domain}/{namespace}/{id}
-                let domain_part = if hit.memory.domain.is_global() {
-                    "global".to_string()
+                let domain_part = if hit.memory.domain.is_project_scoped() {
+                    "project".to_string()
                 } else {
                     hit.memory.domain.to_string()
                 };

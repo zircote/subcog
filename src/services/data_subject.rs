@@ -72,7 +72,7 @@ pub struct ExportedMemory {
     pub content: String,
     /// Namespace (e.g., "decisions", "learnings").
     pub namespace: String,
-    /// Domain (e.g., "global", "org/repo").
+    /// Domain (e.g., "project", "user", "org/repo").
     pub domain: String,
     /// Status (e.g., "active", "archived").
     pub status: String,
@@ -157,7 +157,7 @@ pub struct DeletionFailure {
 /// # Storage Layers
 ///
 /// Operations affect all three storage layers:
-/// 1. **Persistence** (Git Notes) - Authoritative storage
+/// 1. **Persistence** (SQLite) - Authoritative storage
 /// 2. **Index** (SQLite FTS5) - Full-text search index
 /// 3. **Vector** (usearch) - Embedding vectors
 ///
@@ -280,7 +280,7 @@ impl DataSubjectService {
     ///
     /// 1. **Index** (SQLite) - Memory metadata and FTS index
     /// 2. **Vector** (usearch) - Embedding vectors (if configured)
-    /// 3. **Persistence** (Git Notes) - Authoritative storage (if configured)
+    /// 3. **Persistence** (SQLite) - Authoritative storage (if configured)
     ///
     /// # Returns
     ///
@@ -618,7 +618,7 @@ mod tests {
                 id: "test".to_string(),
                 content: "Content".to_string(),
                 namespace: "decisions".to_string(),
-                domain: "global".to_string(),
+                domain: "project".to_string(),
                 status: "active".to_string(),
                 created_at: 1_700_000_000,
                 updated_at: 1_700_000_000,

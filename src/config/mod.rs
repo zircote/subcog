@@ -903,7 +903,7 @@ impl StorageBackendType {
             "filesystem" | "fs" | "file" => Self::Filesystem,
             "postgresql" | "postgres" | "pg" => Self::PostgreSQL,
             "redis" => Self::Redis,
-            // sqlite is the default for any unrecognized value (including legacy "git_notes")
+            // sqlite is the default for any unrecognized value
             _ => Self::Sqlite,
         }
     }

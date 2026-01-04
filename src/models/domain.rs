@@ -174,7 +174,7 @@ impl Domain {
     /// - If NOT in a git repository: returns a user-scoped domain
     ///
     /// This ensures memories are routed to the appropriate storage backend:
-    /// - Project domains use git notes storage
+    /// - Project domains use `SQLite` storage with project faceting
     /// - User domains use sqlite storage
     #[must_use]
     pub fn default_for_context() -> Self {
@@ -212,9 +212,9 @@ impl Domain {
         }
     }
 
-    /// Returns true if this is a global/project domain (no restrictions).
+    /// Returns true if this is a project-scoped domain (no org/repo restrictions).
     #[must_use]
-    pub const fn is_global(&self) -> bool {
+    pub const fn is_project_scoped(&self) -> bool {
         self.organization.is_none() && self.project.is_none() && self.repository.is_none()
     }
 
@@ -226,9 +226,9 @@ impl Domain {
 
     /// Returns the scope string for URN construction.
     ///
-    /// - `"project"` for project-scoped (org + repo)
+    /// - `"project"` for project-scoped (no org/repo restrictions)
     /// - `"org/{name}"` for organization-scoped
-    /// - `"global"` for global domain
+    /// - `"{org}/{repo}"` for repository-scoped
     #[must_use]
     pub fn to_scope_string(&self) -> String {
         match (&self.organization, &self.repository) {
@@ -251,14 +251,14 @@ impl fmt::Display for Domain {
             (None, Some(proj), _) if proj == "user" => write!(f, "user"),
             (None, Some(proj), _) => write!(f, "{proj}"),
             (None, None, Some(repo)) => write!(f, "{repo}"),
-            // Global/project domain shows as "global" (legacy) or "project"
-            (None, None, None) => write!(f, "global"),
+            // Project-scoped domain (no org/repo restrictions)
+            (None, None, None) => write!(f, "project"),
         }
     }
 }
 
 /// Status of a memory entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum MemoryStatus {
     /// Active and searchable.
     #[default]
@@ -271,6 +271,8 @@ pub enum MemoryStatus {
     Pending,
     /// Marked for deletion.
     Deleted,
+    /// Soft-deleted, hidden by default.
+    Tombstoned,
 }
 
 impl MemoryStatus {
@@ -283,6 +285,7 @@ impl MemoryStatus {
             Self::Superseded => "superseded",
             Self::Pending => "pending",
             Self::Deleted => "deleted",
+            Self::Tombstoned => "tombstoned",
         }
     }
 }

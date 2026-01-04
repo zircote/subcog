@@ -8,7 +8,7 @@ receivers:
   filelog:
     include:
       - /var/log/subcog/*.log
-    start_at: beginning
+    start_at: end
     operators:
       - type: json_parser
         timestamp:
@@ -33,6 +33,15 @@ processors:
       - key: job
         value: subcog
         action: upsert
+  # Transform processor to ensure OTLP logs have proper level attribute for Loki
+  # See: https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/18742
+  transform/logs:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          # Copy severity_text to level attribute for Loki compatibility
+          - set(attributes["level"], severity_text) where severity_text != ""
 
 connectors:
   spanmetrics:
@@ -71,5 +80,5 @@ service:
       exporters: [prometheus]
     logs:
       receivers: [otlp, filelog]
-      processors: [memory_limiter, resource, batch]
+      processors: [memory_limiter, resource, transform/logs, batch]
       exporters: [otlphttp/loki]

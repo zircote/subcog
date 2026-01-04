@@ -225,7 +225,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{job=\"subcog\", level=~\"$level\"} | json | line_format \"[{{.severity}}] {{.instrumentation_scope_name}}: {{.body}}\"",
+          "expr": "{job=\"subcog\", level=~\"$level\"} | line_format \"[{{.level}}] {{.scope_name}}: {{__line__}}\"",
           "queryType": "range",
           "refId": "A"
         }
@@ -262,7 +262,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{job=\"subcog\", level=~\"$level\"} | json | instrumentation_scope_name =~ \".*hook.*\" | line_format \"[{{.severity}}] {{.instrumentation_scope_name}}: {{.body}}\"",
+          "expr": "{job=\"subcog\", level=~\"$level\"} | scope_name =~ \".*hook.*\" | line_format \"[{{.level}}] {{.scope_name}}: {{__line__}}\"",
           "queryType": "range",
           "refId": "A"
         }
@@ -299,7 +299,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{job=\"subcog\", level=~\"$level\"} | json | instrumentation_scope_name =~ \".*llm.*\" | line_format \"[{{.severity}}] {{.instrumentation_scope_name}}: {{.body}}\"",
+          "expr": "{job=\"subcog\", level=~\"$level\"} | scope_name =~ \".*llm.*\" | line_format \"[{{.level}}] {{.scope_name}}: {{__line__}}\"",
           "queryType": "range",
           "refId": "A"
         }
@@ -336,7 +336,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{job=\"subcog\", level=~\"ERROR|WARN\"} | json | line_format \"[{{.severity}}] {{.instrumentation_scope_name}}: {{.body}}\"",
+          "expr": "{job=\"subcog\", level=~\"ERROR|WARN\"} | line_format \"[{{.level}}] {{.scope_name}}: {{__line__}}\"",
           "queryType": "range",
           "refId": "A"
         }
@@ -373,7 +373,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{job=\"subcog\", level=~\"$level\"} | json | instrumentation_scope_name =~ \".*mcp.*\" | line_format \"[{{.severity}}] {{.instrumentation_scope_name}}: {{.body}}\"",
+          "expr": "{job=\"subcog\", level=~\"$level\"} | scope_name =~ \".*mcp.*\" | line_format \"[{{.level}}] {{.scope_name}}: {{__line__}}\"",
           "queryType": "range",
           "refId": "A"
         }
@@ -410,7 +410,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{job=\"subcog\", level=~\"$level\"} | json | instrumentation_scope_name =~ \".*services.*|.*storage.*\" | line_format \"[{{.severity}}] {{.instrumentation_scope_name}}: {{.body}}\"",
+          "expr": "{job=\"subcog\", level=~\"$level\"} | scope_name =~ \".*services.*|.*storage.*\" | line_format \"[{{.level}}] {{.scope_name}}: {{__line__}}\"",
           "queryType": "range",
           "refId": "A"
         }
