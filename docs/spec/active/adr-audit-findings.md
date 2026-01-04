@@ -427,17 +427,17 @@ org_scope_enabled = true
 **Estimated Time:** 1 hour
 
 - [x] Run `cargo test --all-features` ✓
-- [ ] Run `cargo test --no-default-features`
-- [ ] Run `cargo test` (default features only)
-- [ ] Run `cargo clippy --all-targets --all-features`
-- [ ] Run `cargo clippy --all-targets --all-features -- -D warnings` (deny warnings)
-- [ ] Run `cargo fmt -- --check`
-- [ ] Run `cargo doc --no-deps` (verify docs build)
-- [ ] Run `cargo deny check` (supply chain audit)
-- [ ] Fix any test failures
-- [ ] Fix any clippy warnings
-- [ ] Fix any formatting issues
-- [ ] Ensure no compilation errors
+- [x] Run `cargo test --no-default-features` ✓
+- [x] Run `cargo test` (default features only) ✓
+- [x] Run `cargo clippy --all-targets --all-features` ✓
+- [x] Run `cargo clippy --all-targets --all-features -- -D warnings` (deny warnings) ✓
+- [x] Run `cargo fmt -- --check` ✓
+- [x] Run `cargo doc --no-deps` (verify docs build) ✓
+- [x] Run `cargo deny check` (supply chain audit) ✓
+- [x] Fix any test failures ✓
+- [x] Fix any clippy warnings ✓
+- [x] Fix any formatting issues ✓
+- [x] Ensure no compilation errors ✓
 
 ---
 
