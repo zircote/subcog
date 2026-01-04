@@ -20,7 +20,7 @@
 
 Tasks:
 - [x] Re-read `docs/adrs/adr_0005.md` to confirm the revised URN structure requirements. ✓
-- [ ] Inventory URN construction and parsing paths (capture, recall, search filters, serialization).
+- [x] Inventory URN construction and parsing paths (capture, recall, search filters, serialization). ✓
 - [ ] If ADR requires a different URN path segment, update generators and parsers consistently.
 - [ ] Update tests and any documentation that references the URN scheme.
 
