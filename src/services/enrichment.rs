@@ -237,6 +237,7 @@ Respond with ONLY a JSON array of strings, no other text. Example: ["rust", "err
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(memory.updated_at),
+            tombstoned_at: memory.tombstoned_at,
             embedding: memory.embedding.clone(),
             tags: new_tags.to_vec(),
             source: memory.source.clone(),

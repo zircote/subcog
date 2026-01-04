@@ -52,11 +52,11 @@
 **File:** `src/models/domain.rs` (around line 260-295)
 
 - [x] Add `Tombstoned` variant to MemoryStatus enum ✓
-- [ ] Update `as_str()` method to handle Tombstoned case
-- [ ] Update `from_str()` method to parse "tombstoned"
-- [ ] Verify serde serialization works correctly
-- [ ] Ensure enum ordering doesn't break existing functionality
-- [ ] Run unit tests for MemoryStatus
+- [x] Update `as_str()` method to handle Tombstoned case ✓
+- [x] Update `from_str()` method to parse "tombstoned" ✓
+- [x] Verify serde serialization works correctly ✓
+- [x] Ensure enum ordering doesn't break existing functionality ✓
+- [x] Run unit tests for MemoryStatus ✓
 
 **Code Change:**
 ```rust
@@ -76,13 +76,13 @@ pub enum MemoryStatus {
 **Estimated Time:** 1 hour
 **File:** `src/models/memory.rs` (around line 43-66)
 
-- [ ] Add `pub tombstoned_at: Option<DateTime<Utc>>` field to Memory struct
-- [ ] Configure serde attributes for JSON serialization
-- [ ] Ensure default value is `None` for new memories
-- [ ] Update getter/setter methods if they exist
-- [ ] Update all Memory constructors to include new field
-- [ ] Update Display/Debug implementations if needed
-- [ ] Run unit tests for Memory struct
+- [x] Add `pub tombstoned_at: Option<DateTime<Utc>>` field to Memory struct ✓
+- [x] Configure serde attributes for JSON serialization ✓
+- [x] Ensure default value is `None` for new memories ✓
+- [x] Update getter/setter methods if they exist ✓
+- [x] Update all Memory constructors to include new field ✓
+- [x] Update Display/Debug implementations if needed ✓
+- [x] Run unit tests for Memory struct ✓
 
 **Code Change:**
 ```rust

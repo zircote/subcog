@@ -244,6 +244,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             status: MemoryStatus::Active,
             created_at: target.created_at.min(source_created_at),
             updated_at: now,
+            tombstoned_at: None,
             embedding: None, // Will need re-embedding
             tags: merged_tags,
             source: target.source.or(source_source),
@@ -334,6 +335,7 @@ mod tests {
             status: MemoryStatus::Active,
             created_at: current_timestamp(),
             updated_at: current_timestamp(),
+            tombstoned_at: None,
             embedding: None,
             tags: vec!["test".to_string()],
             source: None,
