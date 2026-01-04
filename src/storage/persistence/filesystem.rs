@@ -99,6 +99,7 @@ impl StoredMemory {
             "superseded" => MemoryStatus::Superseded,
             "pending" => MemoryStatus::Pending,
             "deleted" => MemoryStatus::Deleted,
+            "tombstoned" => MemoryStatus::Tombstoned,
             _ => MemoryStatus::Active,
         };
 
