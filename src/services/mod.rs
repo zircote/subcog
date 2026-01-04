@@ -47,6 +47,7 @@ mod prompt_parser;
 mod query_parser;
 mod recall;
 mod sync;
+mod tombstone;
 mod topic_index;
 
 pub use auth::{AuthContext, AuthContextBuilder, Permission};
@@ -68,6 +69,7 @@ pub use prompt_parser::{PromptFormat, PromptParser};
 pub use query_parser::parse_filter_query;
 pub use recall::RecallService;
 pub use sync::SyncService;
+pub use tombstone::TombstoneService;
 pub use topic_index::{TopicIndexService, TopicInfo};
 
 use crate::config::SubcogConfig;

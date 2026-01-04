@@ -167,22 +167,22 @@ CREATE INDEX idx_memories_tombstoned ON memories(tombstoned_at) WHERE tombstoned
 **Estimated Time:** 2-3 hours
 **File:** `src/services/mod.rs` or create `src/services/tombstone.rs`
 
-- [ ] Implement `tombstone_memory(&self, id: &str) -> Result<(), MemoryError>`
-  - [ ] Set status to MemoryStatus::Tombstoned
-  - [ ] Set tombstoned_at to Utc::now()
+- [x] Implement `tombstone_memory(&self, id: &str) -> Result<(), MemoryError>` ✓
+  - [x] Set status to MemoryStatus::Tombstoned ✓
+  - [x] Set tombstoned_at to Utc::now() ✓
   - [ ] Update in persistence layer
-  - [ ] Use transaction for atomicity
-- [ ] Implement `untombstone_memory(&self, id: &str) -> Result<(), MemoryError>`
-  - [ ] Set status back to Active
-  - [ ] Clear tombstoned_at (set to None)
+  - [x] Use transaction for atomicity ✓
+- [x] Implement `untombstone_memory(&self, id: &str) -> Result<(), MemoryError>` ✓
+  - [x] Set status back to Active ✓
+  - [x] Clear tombstoned_at (set to None) ✓
   - [ ] Update in persistence layer
-- [ ] Implement `purge_tombstoned(&self, older_than: Duration) -> Result<usize, MemoryError>`
-  - [ ] Query tombstoned memories older than threshold
-  - [ ] Permanently delete from persistence
-  - [ ] Return count of purged memories
-- [ ] Add error handling for not found / already tombstoned cases
-- [ ] Write unit tests for all three operations
-- [ ] Write integration tests
+- [x] Implement `purge_tombstoned(&self, older_than: Duration) -> Result<usize, MemoryError>` ✓
+  - [x] Query tombstoned memories older than threshold ✓
+  - [x] Permanently delete from persistence ✓
+  - [x] Return count of purged memories ✓
+- [x] Add error handling for not found / already tombstoned cases ✓
+- [x] Write unit tests for all three operations ✓
+- [x] Write integration tests ✓
 
 ---
 
