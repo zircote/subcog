@@ -1,6 +1,6 @@
 [package]
 name = "subcog"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2024"
 rust-version = "1.86"
 description = "A persistent memory system for AI coding assistants"
