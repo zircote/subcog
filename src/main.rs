@@ -194,6 +194,21 @@ enum Commands {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+
+    /// Garbage collect tombstoned memories.
+    Gc {
+        /// Dry-run mode (show what would be deleted).
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Purge tombstoned memories older than threshold.
+        #[arg(long)]
+        purge: bool,
+
+        /// Age threshold in days for purging.
+        #[arg(long, default_value = "30")]
+        older_than: u64,
+    },
 }
 
 /// Main entry point.
@@ -308,6 +323,12 @@ fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::error:
             generate(shell, &mut cmd, "subcog", &mut io::stdout());
             Ok(())
         },
+
+        Commands::Gc {
+            dry_run,
+            purge,
+            older_than,
+        } => subcog::cli::gc::execute(dry_run, purge, older_than).map_err(Into::into),
     }
 }
 
