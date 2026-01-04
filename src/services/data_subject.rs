@@ -74,6 +74,15 @@ pub struct ExportedMemory {
     pub namespace: String,
     /// Domain (e.g., "project", "user", "org/repo").
     pub domain: String,
+    /// Project identifier (git remote URL).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    /// Branch name (git branch).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// File path relative to repo root.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
     /// Status (e.g., "active", "archived").
     pub status: String,
     /// Creation timestamp (Unix epoch seconds).
@@ -105,6 +114,9 @@ impl From<Memory> for ExportedMemory {
             content: memory.content,
             namespace: memory.namespace.as_str().to_string(),
             domain: memory.domain.to_string(),
+            project_id: memory.project_id,
+            branch: memory.branch,
+            file_path: memory.file_path,
             status: memory.status.as_str().to_string(),
             created_at: memory.created_at,
             updated_at: memory.updated_at,
@@ -490,17 +502,16 @@ mod tests {
             content: content.to_string(),
             namespace,
             domain: Domain::new(),
-            status: MemoryStatus::Active,
-            created_at: 1_700_000_000,
-            updated_at: 1_700_000_000,
-            embedding: None,
-            tags: vec!["test".to_string()],
-            source: Some("test.rs".to_string()),
             project_id: None,
             branch: None,
             file_path: None,
+            status: MemoryStatus::Active,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
             tombstoned_at: None,
-            classification: None,
+            embedding: None,
+            tags: vec!["test".to_string()],
+            source: Some("test.rs".to_string()),
         }
     }
 
@@ -619,6 +630,9 @@ mod tests {
                 content: "Content".to_string(),
                 namespace: "decisions".to_string(),
                 domain: "project".to_string(),
+                project_id: None,
+                branch: None,
+                file_path: None,
                 status: "active".to_string(),
                 created_at: 1_700_000_000,
                 updated_at: 1_700_000_000,

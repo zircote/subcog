@@ -87,6 +87,33 @@ source:src/auth.rs    # From specific file
 source:*.rs           # From any Rust file
 ```
 
+### Project Filter (`project:`)
+
+Filter by project identifier (normalized git remote URL):
+
+```
+project:github.com/org/repo
+project:github.com/zircote/subcog
+```
+
+### Branch Filter (`branch:`)
+
+Filter by git branch:
+
+```
+branch:main
+branch:feature/auth
+```
+
+### Path Filter (`path:`)
+
+Filter by file path relative to repo root:
+
+```
+path:src/main.rs
+path:src/services/*
+```
+
 ### Status Filter (`status:`)
 
 Filter by memory status:
@@ -133,6 +160,12 @@ ns:apis tag:rest,graphql
 
 # Technical debt from the auth module
 ns:tech-debt source:src/auth/*
+
+# Decisions scoped to a project branch
+ns:decisions project:github.com/org/repo branch:main
+
+# Memories tied to a specific file path
+path:src/storage/index/sqlite.rs
 
 # All memories about error handling
 tag:error,error-handling,exceptions

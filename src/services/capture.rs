@@ -4,11 +4,14 @@
 //! Now also generates embeddings and indexes memories for searchability.
 
 use crate::config::Config;
+use crate::context::GitContext;
 use crate::embedding::Embedder;
 use crate::models::{CaptureRequest, CaptureResult, Memory, MemoryEvent, MemoryId, MemoryStatus};
+use crate::services::deduplication::ContentHasher;
 use crate::security::{ContentRedactor, SecretDetector, record_event};
 use crate::storage::traits::{IndexBackend, VectorBackend};
 use crate::{Error, Result};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::instrument;
@@ -219,18 +222,37 @@ impl CaptureService {
                 None
             };
 
+            // Resolve git context for facets.
+            let git_context = self
+                .config
+                .repo_path
+                .as_ref()
+                .map(|path| GitContext::from_path(path))
+                .unwrap_or_else(GitContext::from_cwd);
+
+            let file_path = resolve_file_path(self.config.repo_path.as_deref(), request.source.as_ref());
+
+            let mut tags = request.tags;
+            let hash_tag = ContentHasher::content_to_tag(&content);
+            if !tags.iter().any(|tag| tag == &hash_tag) {
+                tags.push(hash_tag);
+            }
+
             // Create memory
             let mut memory = Memory {
                 id: memory_id.clone(),
                 content,
                 namespace: request.namespace,
                 domain: request.domain,
+                project_id: git_context.project_id,
+                branch: git_context.branch,
+                file_path,
                 status: MemoryStatus::Active,
                 created_at: now,
                 updated_at: now,
                 tombstoned_at: None,
                 embedding: embedding.clone(),
-                tags: request.tags,
+                tags,
                 source: request.source,
             };
 
@@ -401,6 +423,28 @@ impl CaptureService {
     }
 }
 
+fn resolve_file_path(repo_root: Option<&Path>, source: Option<&String>) -> Option<String> {
+    let source = source?;
+    if source.contains("://") {
+        return None;
+    }
+
+    let source_path = Path::new(source);
+    let Some(repo_root) = repo_root else {
+        return None;
+    };
+
+    if let Ok(relative) = source_path.strip_prefix(repo_root) {
+        return Some(relative.to_string_lossy().to_string());
+    }
+
+    if source_path.is_relative() {
+        return Some(source.clone());
+    }
+
+    None
+}
+
 impl Default for CaptureService {
     fn default() -> Self {
         Self::new(Config::default())
@@ -526,6 +570,9 @@ mod tests {
             content: "Test".to_string(),
             namespace: Namespace::Decisions,
             domain: Domain::for_repository("zircote", "subcog"),
+            project_id: None,
+            branch: None,
+            file_path: None,
             status: MemoryStatus::Active,
             created_at: 0,
             updated_at: 0,
@@ -546,8 +593,32 @@ mod tests {
     // ========================================================================
 
     use crate::embedding::FastEmbedEmbedder;
+    use crate::services::deduplication::ContentHasher;
     use crate::storage::index::SqliteBackend;
     use crate::storage::vector::UsearchBackend;
+    use git2::{Repository, Signature};
+    use tempfile::TempDir;
+
+    fn init_test_repo() -> (TempDir, Repository) {
+        let dir = TempDir::new().expect("Failed to create temp dir");
+        let repo = Repository::init(dir.path()).expect("Failed to init repo");
+
+        let sig = Signature::now("test", "test@test.com").expect("Failed to create signature");
+        let tree_id = repo
+            .index()
+            .expect("Failed to get index")
+            .write_tree()
+            .expect("Failed to write tree");
+        {
+            let tree = repo.find_tree(tree_id).expect("Failed to find tree");
+            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+                .expect("Failed to create commit");
+        }
+        repo.remote("origin", "https://github.com/org/repo.git")
+            .expect("Failed to add remote");
+
+        (dir, repo)
+    }
 
     #[test]
     fn test_capture_with_embedder_generates_embedding() {
@@ -573,6 +644,43 @@ mod tests {
         let request = test_request("Use PostgreSQL for primary storage");
         let result = service.capture(request);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_capture_sets_facets_and_hash_tag() {
+        let (dir, _repo) = init_test_repo();
+        let repo_path = dir.path();
+        let index: Arc<dyn IndexBackend + Send + Sync> =
+            Arc::new(SqliteBackend::in_memory().unwrap());
+        let config = Config::new().with_repo_path(repo_path);
+        let service = CaptureService::new(config).with_index(Arc::clone(&index));
+
+        let file_path = repo_path.join("src").join("lib.rs");
+        std::fs::create_dir_all(file_path.parent().expect("parent path"))
+            .expect("create dir");
+        std::fs::write(&file_path, "fn main() {}\n").expect("write file");
+
+        let request = CaptureRequest {
+            content: "Test content for facets".to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            tags: vec!["test".to_string()],
+            source: Some(file_path.to_string_lossy().to_string()),
+            skip_security_check: false,
+        };
+
+        let result = service.capture(request).expect("capture");
+        let stored = index
+            .get_memory(&result.memory_id)
+            .expect("get memory")
+            .expect("stored memory");
+
+        assert_eq!(stored.project_id.as_deref(), Some("github.com/org/repo"));
+        assert!(stored.branch.is_some());
+        assert_eq!(stored.file_path.as_deref(), Some("src/lib.rs"));
+
+        let hash_tag = ContentHasher::content_to_tag(&stored.content);
+        assert!(stored.tags.contains(&hash_tag));
     }
 
     #[test]

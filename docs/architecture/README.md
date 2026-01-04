@@ -43,7 +43,7 @@ Subcog is a persistent memory system for AI coding assistants, built with a modu
 │  │ Persistence │  │    Index    │  │   Vector    │           │
 │  │   (Truth)   │  │  (Search)   │  │(Embeddings) │           │
 │  ├─────────────┤  ├─────────────┤  ├─────────────┤           │
-│  │ • Git Notes │  │ • SQLite    │  │ • usearch   │           │
+│  │ • SQLite    │  │ • SQLite    │  │ • usearch   │           │
 │  │ • PostgreSQL│  │ • PostgreSQL│  │ • pgvector  │           │
 │  │ • Filesystem│  │ • Redis     │  │ • Redis     │           │
 │  └─────────────┘  └─────────────┘  └─────────────┘           │

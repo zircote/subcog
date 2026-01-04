@@ -236,7 +236,7 @@ mcp:
 
 ### At Rest
 
-- Git notes: Protected by filesystem permissions
+- Filesystem fallback: File permissions (600)
 - SQLite: File permissions (600)
 - PostgreSQL: Database authentication
 

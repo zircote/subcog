@@ -844,7 +844,7 @@ pub struct ConfigFileStorage {
 /// Storage backend configuration.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ConfigFileStorageBackend {
-    /// Backend type: sqlite, filesystem, git\_notes, postgresql, redis.
+    /// Backend type: sqlite, filesystem, postgresql, redis.
     pub backend: Option<String>,
     /// Path for file-based backends (sqlite, filesystem).
     pub path: Option<String>,

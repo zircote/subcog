@@ -231,6 +231,9 @@ Respond with ONLY a JSON array of strings, no other text. Example: ["rust", "err
             content: memory.content.clone(),
             namespace: memory.namespace,
             domain: memory.domain.clone(),
+            project_id: memory.project_id.clone(),
+            branch: memory.branch.clone(),
+            file_path: memory.file_path.clone(),
             status: memory.status,
             created_at: memory.created_at,
             updated_at: std::time::SystemTime::now()

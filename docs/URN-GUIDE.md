@@ -59,7 +59,7 @@ Memory IDs can be in different formats depending on the storage backend:
 
 | Format | Example | Source |
 |--------|---------|--------|
-| Git SHA1 | `dc58d23a35876f5a59426e81aaa81d796efa7fc1` | Git notes backend |
+| Git SHA1 | `dc58d23a35876f5a59426e81aaa81d796efa7fc1` | Legacy import (deprecated) |
 | Short UUID | `abc123def456` | Capture service (12 hex chars) |
 
 IDs are opaque identifiers - use them as-is without parsing.

@@ -159,10 +159,14 @@ struct MemoryRow {
     id: String,
     namespace: String,
     domain: Option<String>,
+    project_id: Option<String>,
+    branch: Option<String>,
+    file_path: Option<String>,
     status: String,
     created_at: i64,
     tombstoned_at: Option<i64>,
     tags: Option<String>,
+    source: Option<String>,
     content: String,
 }
 
@@ -233,6 +237,9 @@ impl SqliteBackend {
                 id TEXT PRIMARY KEY,
                 namespace TEXT NOT NULL,
                 domain TEXT,
+                project_id TEXT,
+                branch TEXT,
+                file_path TEXT,
                 status TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 tags TEXT,
@@ -247,6 +254,11 @@ impl SqliteBackend {
 
         // Add source column if it doesn't exist (for migration)
         let _ = conn.execute("ALTER TABLE memories ADD COLUMN source TEXT", []);
+
+        // Add facet columns if they don't exist (ADR-0048/0049)
+        let _ = conn.execute("ALTER TABLE memories ADD COLUMN project_id TEXT", []);
+        let _ = conn.execute("ALTER TABLE memories ADD COLUMN branch TEXT", []);
+        let _ = conn.execute("ALTER TABLE memories ADD COLUMN file_path TEXT", []);
 
         // Add tombstoned_at column if it doesn't exist (ADR-0053)
         let _ = conn.execute("ALTER TABLE memories ADD COLUMN tombstoned_at INTEGER", []);
@@ -316,6 +328,20 @@ impl SqliteBackend {
         // Compound index for source filtering with status (Phase 15 fix)
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_source_status ON memories(source, status)",
+            [],
+        );
+
+        // Facet indexes (ADR-0049)
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_project_id ON memories(project_id)",
+            [],
+        );
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_project_branch ON memories(project_id, branch)",
+            [],
+        );
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_file_path ON memories(file_path)",
             [],
         );
 
@@ -411,6 +437,24 @@ impl SqliteBackend {
             conditions.push(format!("m.source LIKE ?{param_idx} ESCAPE '\\'"));
             param_idx += 1;
             params.push(glob_to_like_pattern(pattern));
+        }
+
+        if let Some(ref project_id) = filter.project_id {
+            conditions.push(format!("m.project_id = ?{param_idx}"));
+            param_idx += 1;
+            params.push(project_id.clone());
+        }
+
+        if let Some(ref branch) = filter.branch {
+            conditions.push(format!("m.branch = ?{param_idx}"));
+            param_idx += 1;
+            params.push(branch.clone());
+        }
+
+        if let Some(ref file_path) = filter.file_path {
+            conditions.push(format!("m.file_path = ?{param_idx}"));
+            param_idx += 1;
+            params.push(file_path.clone());
         }
 
         if let Some(after) = filter.created_after {
@@ -598,7 +642,8 @@ impl SqliteBackend {
 fn fetch_memory_row(conn: &Connection, id: &MemoryId) -> Result<Option<MemoryRow>> {
     let mut stmt = conn
         .prepare(
-            "SELECT m.id, m.namespace, m.domain, m.status, m.created_at, m.tombstoned_at, m.tags, f.content
+            "SELECT m.id, m.namespace, m.domain, m.project_id, m.branch, m.file_path, m.status, m.created_at,
+                    m.tombstoned_at, m.tags, m.source, f.content
              FROM memories m
              JOIN memories_fts f ON m.id = f.id
              WHERE m.id = ?1",
@@ -614,11 +659,15 @@ fn fetch_memory_row(conn: &Connection, id: &MemoryId) -> Result<Option<MemoryRow
                 id: row.get(0)?,
                 namespace: row.get(1)?,
                 domain: row.get(2)?,
-                status: row.get(3)?,
-                created_at: row.get(4)?,
-                tombstoned_at: row.get(5)?,
-                tags: row.get(6)?,
-                content: row.get(7)?,
+                project_id: row.get(3)?,
+                branch: row.get(4)?,
+                file_path: row.get(5)?,
+                status: row.get(6)?,
+                created_at: row.get(7)?,
+                tombstoned_at: row.get(8)?,
+                tags: row.get(9)?,
+                source: row.get(10)?,
+                content: row.get(11)?,
             })
         })
         .optional();
@@ -683,13 +732,16 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
         content: row.content,
         namespace,
         domain,
+        project_id: row.project_id,
+        branch: row.branch,
+        file_path: row.file_path,
         status,
         created_at: created_at_u64,
         updated_at: created_at_u64,
         tombstoned_at: tombstoned_at_u64,
         embedding: None,
         tags,
-        source: None,
+        source: row.source,
     }
 }
 
@@ -727,12 +779,15 @@ impl IndexBackend for SqliteBackend {
                 #[allow(clippy::cast_possible_wrap)]
                 let tombstoned_at_i64 = memory.tombstoned_at.map(|t| t as i64);
                 conn.execute(
-                    "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags, source, tombstoned_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    "INSERT OR REPLACE INTO memories (id, namespace, domain, project_id, branch, file_path, status, created_at, tags, source, tombstoned_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                     params![
                         memory.id.as_str(),
                         memory.namespace.as_str(),
                         domain_str,
+                        memory.project_id.as_deref(),
+                        memory.branch.as_deref(),
+                        memory.file_path.as_deref(),
                         memory.status.as_str(),
                         created_at_i64,
                         tags_str,
@@ -1100,7 +1155,8 @@ impl IndexBackend for SqliteBackend {
             let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
 
             let sql = format!(
-                "SELECT m.id, m.namespace, m.domain, m.status, m.created_at, m.tombstoned_at, m.tags, f.content
+                "SELECT m.id, m.namespace, m.domain, m.project_id, m.branch, m.file_path, m.status, m.created_at,
+                        m.tombstoned_at, m.tags, m.source, f.content
                  FROM memories m
                  JOIN memories_fts f ON m.id = f.id
                  WHERE m.id IN ({})",
@@ -1123,11 +1179,15 @@ impl IndexBackend for SqliteBackend {
                         id: row.get(0)?,
                         namespace: row.get(1)?,
                         domain: row.get(2)?,
-                        status: row.get(3)?,
-                        created_at: row.get(4)?,
-                        tombstoned_at: row.get(5)?,
-                        tags: row.get(6)?,
-                        content: row.get(7)?,
+                        project_id: row.get(3)?,
+                        branch: row.get(4)?,
+                        file_path: row.get(5)?,
+                        status: row.get(6)?,
+                        created_at: row.get(7)?,
+                        tombstoned_at: row.get(8)?,
+                        tags: row.get(9)?,
+                        source: row.get(10)?,
+                        content: row.get(11)?,
                     })
                 })
                 .map_err(|e| Error::OperationFailed {
@@ -1309,6 +1369,9 @@ mod tests {
             content: content.to_string(),
             namespace,
             domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
             status: MemoryStatus::Active,
             created_at: 1_234_567_890,
             updated_at: 1_234_567_890,
@@ -1357,6 +1420,27 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0.as_str(), "id2");
+    }
+
+    #[test]
+    fn test_search_with_facet_filters() {
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        let mut memory = create_test_memory("id1", "Rust facets", Namespace::Decisions);
+        memory.project_id = Some("github.com/org/repo".to_string());
+        memory.branch = Some("main".to_string());
+        memory.file_path = Some("src/lib.rs".to_string());
+
+        backend.index(&memory).unwrap();
+
+        let filter = SearchFilter::new()
+            .with_project_id("github.com/org/repo")
+            .with_branch("main")
+            .with_file_path("src/lib.rs");
+
+        let results = backend.search("Rust", &filter, 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0.as_str(), "id1");
     }
 
     #[test]

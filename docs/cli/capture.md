@@ -12,7 +12,7 @@ subcog capture [OPTIONS] -
 
 ## Description
 
-The `capture` command stores a new memory in the persistent storage layer (Git Notes by default). Memories are categorized by namespace and can be tagged for easy retrieval.
+The `capture` command stores a new memory in the persistent storage layer (SQLite by default). Memories are categorized by namespace and can be tagged for easy retrieval.
 
 ## Arguments
 

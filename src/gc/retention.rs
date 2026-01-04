@@ -153,7 +153,7 @@ impl RetentionConfig {
         }
 
         // Per-namespace overrides
-        for ns in Namespace::all() {
+        for ns in Namespace::all().iter().copied() {
             let env_key = format!(
                 "SUBCOG_RETENTION_{}_DAYS",
                 ns.as_str().to_uppercase().replace('-', "_")
@@ -351,7 +351,7 @@ impl<I: IndexBackend> RetentionGarbageCollector<I> {
         let now = crate::current_timestamp();
 
         // Process each namespace with its specific retention policy
-        for namespace in Namespace::user_namespaces() {
+        for namespace in Namespace::user_namespaces().iter().copied() {
             let cutoff = self.config.cutoff_timestamp(namespace);
             let retention_days = self.config.effective_days(namespace);
 
@@ -468,17 +468,16 @@ mod tests {
             content: format!("Test memory {id}"),
             namespace,
             domain: Domain::new(),
-            status: MemoryStatus::Active,
-            created_at,
-            updated_at: created_at,
-            embedding: None,
-            tags: vec!["test".to_string()],
-            source: None,
             project_id: None,
             branch: None,
             file_path: None,
+            status: MemoryStatus::Active,
+            created_at,
+            updated_at: created_at,
             tombstoned_at: None,
-            classification: None,
+            embedding: None,
+            tags: vec!["test".to_string()],
+            source: None,
         }
     }
 

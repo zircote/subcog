@@ -556,17 +556,16 @@ mod tests {
             content: format!("Test memory for {branch}"),
             namespace: Namespace::Decisions,
             domain: Domain::new(),
-            status: MemoryStatus::Active,
-            created_at: 1_234_567_890,
-            updated_at: 1_234_567_890,
-            embedding: None,
-            tags: vec!["test".to_string()],
-            source: None,
             project_id: Some(project_id.to_string()),
             branch: Some(branch.to_string()),
             file_path: None,
+            status: MemoryStatus::Active,
+            created_at: 1_234_567_890,
+            updated_at: 1_234_567_890,
             tombstoned_at: None,
-            classification: None,
+            embedding: None,
+            tags: vec!["test".to_string()],
+            source: None,
         }
     }
 

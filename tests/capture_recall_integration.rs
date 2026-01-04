@@ -417,7 +417,7 @@ fn test_capture_graceful_degradation() {
     assert!(!capture_service.has_index(), "Should not have index");
     assert!(!capture_service.has_vector(), "Should not have vector");
 
-    // Capture should still succeed (Git Notes is the authoritative store)
+    // Capture should still succeed even without persistence backends
     let request = CaptureRequest {
         namespace: Namespace::TechDebt,
         content: "TODO: Refactor authentication module".to_string(),
@@ -427,7 +427,7 @@ fn test_capture_graceful_degradation() {
         skip_security_check: true,
     };
 
-    // Note: This may fail without Git repo, but the point is it doesn't crash
+    // Note: This may fail without a repo context, but the point is it doesn't crash
     // due to missing embedder/index/vector
     let _result = capture_service.capture(request);
     // We just verify it doesn't panic

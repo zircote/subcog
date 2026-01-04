@@ -60,6 +60,18 @@ mod implementation {
                 CREATE INDEX IF NOT EXISTS idx_{table}_tombstoned ON {table} (tombstoned_at) WHERE tombstoned_at IS NOT NULL;
             ",
         },
+        Migration {
+            version: 5,
+            description: "Add facet columns (ADR-0048/0049)",
+            sql: r"
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS project_id TEXT;
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS branch TEXT;
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS file_path TEXT;
+                CREATE INDEX IF NOT EXISTS idx_{table}_project_id ON {table} (project_id);
+                CREATE INDEX IF NOT EXISTS idx_{table}_project_branch ON {table} (project_id, branch);
+                CREATE INDEX IF NOT EXISTS idx_{table}_file_path ON {table} (file_path);
+            ",
+        },
     ];
 
     /// PostgreSQL-based persistence backend.
@@ -241,14 +253,18 @@ mod implementation {
 
             let upsert = format!(
                 r"INSERT INTO {} (id, content, namespace, domain_org, domain_project, domain_repo,
+                    project_id, branch, file_path,
                     status, tags, source, embedding, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                 ON CONFLICT (id) DO UPDATE SET
                     content = EXCLUDED.content,
                     namespace = EXCLUDED.namespace,
                     domain_org = EXCLUDED.domain_org,
                     domain_project = EXCLUDED.domain_project,
                     domain_repo = EXCLUDED.domain_repo,
+                    project_id = EXCLUDED.project_id,
+                    branch = EXCLUDED.branch,
+                    file_path = EXCLUDED.file_path,
                     status = EXCLUDED.status,
                     tags = EXCLUDED.tags,
                     source = EXCLUDED.source,
@@ -268,14 +284,17 @@ mod implementation {
                         &memory.id.as_str(),
                         &memory.content,
                         &memory.namespace.as_str(),
-                        &memory.domain.organization,
-                        &memory.domain.project,
-                        &memory.domain.repository,
-                        &memory.status.as_str(),
-                        &tags,
-                        &memory.source,
-                        &embedding_json,
-                        &(memory.created_at as i64),
+                    &memory.domain.organization,
+                    &memory.domain.project,
+                    &memory.domain.repository,
+                    &memory.project_id,
+                    &memory.branch,
+                    &memory.file_path,
+                    &memory.status.as_str(),
+                    &tags,
+                    &memory.source,
+                    &embedding_json,
+                    &(memory.created_at as i64),
                         &(memory.updated_at as i64),
                     ],
                 )
@@ -292,6 +311,7 @@ mod implementation {
 
             let query = format!(
                 r"SELECT id, content, namespace, domain_org, domain_project, domain_repo,
+                    project_id, branch, file_path,
                     status, tags, source, embedding, created_at, updated_at
                 FROM {}
                 WHERE id = $1",
@@ -315,6 +335,9 @@ mod implementation {
             let domain_org: Option<String> = row.get("domain_org");
             let domain_project: Option<String> = row.get("domain_project");
             let domain_repo: Option<String> = row.get("domain_repo");
+            let project_id: Option<String> = row.get("project_id");
+            let branch: Option<String> = row.get("branch");
+            let file_path: Option<String> = row.get("file_path");
             let status_str: String = row.get("status");
             let tags: Vec<String> = row.get("tags");
             let source: Option<String> = row.get("source");
@@ -344,6 +367,9 @@ mod implementation {
                     project: domain_project,
                     repository: domain_repo,
                 },
+                project_id,
+                branch,
+                file_path,
                 status,
                 tags,
                 source,
@@ -548,6 +574,9 @@ mod tests {
                 project: Some("test-project".to_string()),
                 repository: Some("test-repo".to_string()),
             },
+            project_id: Some("github.com/test-org/test-repo".to_string()),
+            branch: Some("main".to_string()),
+            file_path: Some("src/lib.rs".to_string()),
             status: MemoryStatus::Active,
             created_at: 1_700_000_000,
             updated_at: 1_700_000_000,
@@ -779,6 +808,9 @@ mod stub_tests {
             content: "Test content".to_string(),
             namespace: Namespace::Decisions,
             domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
             status: MemoryStatus::Active,
             created_at: 1_700_000_000,
             updated_at: 1_700_000_000,

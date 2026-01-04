@@ -76,6 +76,18 @@ mod implementation {
                 CREATE INDEX IF NOT EXISTS {table}_created_idx ON {table} (created_at DESC);
             ",
         },
+        Migration {
+            version: 5,
+            description: "Add facet columns (ADR-0048/0049)",
+            sql: r"
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS project_id TEXT;
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS branch TEXT;
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS file_path TEXT;
+                CREATE INDEX IF NOT EXISTS {table}_project_idx ON {table} (project_id);
+                CREATE INDEX IF NOT EXISTS {table}_project_branch_idx ON {table} (project_id, branch);
+                CREATE INDEX IF NOT EXISTS {table}_file_path_idx ON {table} (file_path);
+            ",
+        },
     ];
 
     /// Allowed table names for SQL injection prevention.
@@ -404,6 +416,9 @@ mod implementation {
 
             Self::add_namespace_filter(filter, &mut clauses, &mut params, &mut param_num);
             Self::add_domain_filter(filter, &mut clauses, &mut params, &mut param_num);
+            Self::add_project_filter(filter, &mut clauses, &mut params, &mut param_num);
+            Self::add_branch_filter(filter, &mut clauses, &mut params, &mut param_num);
+            Self::add_file_path_filter(filter, &mut clauses, &mut params, &mut param_num);
             Self::add_status_filter(filter, &mut clauses, &mut params, &mut param_num);
 
             let clause = if clauses.is_empty() {
@@ -490,18 +505,63 @@ mod implementation {
             }
         }
 
+        fn add_project_filter(
+            filter: &SearchFilter,
+            clauses: &mut Vec<String>,
+            params: &mut Vec<String>,
+            param_num: &mut i32,
+        ) {
+            let Some(project_id) = filter.project_id.as_ref() else {
+                return;
+            };
+            clauses.push(format!("project_id = ${param_num}"));
+            *param_num += 1;
+            params.push(project_id.clone());
+        }
+
+        fn add_branch_filter(
+            filter: &SearchFilter,
+            clauses: &mut Vec<String>,
+            params: &mut Vec<String>,
+            param_num: &mut i32,
+        ) {
+            let Some(branch) = filter.branch.as_ref() else {
+                return;
+            };
+            clauses.push(format!("branch = ${param_num}"));
+            *param_num += 1;
+            params.push(branch.clone());
+        }
+
+        fn add_file_path_filter(
+            filter: &SearchFilter,
+            clauses: &mut Vec<String>,
+            params: &mut Vec<String>,
+            param_num: &mut i32,
+        ) {
+            let Some(file_path) = filter.file_path.as_ref() else {
+                return;
+            };
+            clauses.push(format!("file_path = ${param_num}"));
+            *param_num += 1;
+            params.push(file_path.clone());
+        }
+
         /// Async implementation of index operation.
         #[allow(clippy::cast_possible_wrap)]
         async fn index_async(&self, memory: &Memory) -> Result<()> {
             let client = self.pool.get().await.map_err(pool_error)?;
 
             let upsert = format!(
-                r"INSERT INTO {} (id, content, namespace, domain, status, tags, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                r"INSERT INTO {} (id, content, namespace, domain, project_id, branch, file_path, status, tags, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 ON CONFLICT (id) DO UPDATE SET
                     content = EXCLUDED.content,
                     namespace = EXCLUDED.namespace,
                     domain = EXCLUDED.domain,
+                    project_id = EXCLUDED.project_id,
+                    branch = EXCLUDED.branch,
+                    file_path = EXCLUDED.file_path,
                     status = EXCLUDED.status,
                     tags = EXCLUDED.tags,
                     updated_at = EXCLUDED.updated_at",
@@ -519,13 +579,16 @@ mod implementation {
                     &[
                         &memory.id.as_str(),
                         &memory.content,
-                        &namespace_str,
-                        &domain_str,
-                        &status_str,
-                        &tags,
-                        &(memory.created_at as i64),
-                        &(memory.updated_at as i64),
-                    ],
+                    &namespace_str,
+                    &domain_str,
+                    &memory.project_id,
+                    &memory.branch,
+                    &memory.file_path,
+                    &status_str,
+                    &tags,
+                    &(memory.created_at as i64),
+                    &(memory.updated_at as i64),
+                ],
                 )
                 .await
                 .map_err(|e| query_error("postgres_index", e))?;

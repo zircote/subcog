@@ -51,6 +51,12 @@ pub struct Memory {
     pub namespace: super::Namespace,
     /// The domain this memory is associated with.
     pub domain: super::Domain,
+    /// Optional project identifier (normalized git remote URL).
+    pub project_id: Option<String>,
+    /// Optional branch name for project-scoped memories.
+    pub branch: Option<String>,
+    /// Optional file path relative to repository root.
+    pub file_path: Option<String>,
     /// Current status of the memory.
     pub status: super::MemoryStatus,
     /// Creation timestamp (Unix epoch seconds).

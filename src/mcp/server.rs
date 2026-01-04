@@ -15,7 +15,7 @@ use crate::mcp::{
 };
 use crate::observability::flush_metrics;
 use crate::services::ServiceContainer;
-use crate::{Error, Result};
+use crate::{Error, Result as SubcogResult};
 use rmcp::model::{
     AnnotateAble, CallToolRequestParam, CallToolResult, Content, GetPromptRequestParam,
     GetPromptResult, Implementation, ListPromptsResult, ListResourceTemplatesResult,
@@ -29,11 +29,14 @@ use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::borrow::Cow;
+#[cfg(feature = "http")]
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+
+type McpResult<T> = std::result::Result<T, McpError>;
 
 /// Global shutdown flag for graceful termination (RES-M4).
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -59,7 +62,7 @@ pub fn request_shutdown() {
 /// # Errors
 ///
 /// Returns an error if the signal handler cannot be installed.
-pub fn setup_signal_handler() -> Result<()> {
+pub fn setup_signal_handler() -> SubcogResult<()> {
     ctrlc::set_handler(move || {
         tracing::info!("Shutdown signal received, initiating graceful shutdown");
         request_shutdown();
@@ -270,7 +273,7 @@ impl ServerHandler for McpHandler {
         &self,
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ListToolsResult, McpError>> + Send + '_ {
+    ) -> impl std::future::Future<Output = McpResult<ListToolsResult>> + Send + '_ {
         let tools = self
             .state
             .tools
@@ -284,12 +287,12 @@ impl ServerHandler for McpHandler {
     fn call_tool(
         &self,
         request: CallToolRequestParam,
-        context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<CallToolResult, McpError>> + Send + '_ {
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = McpResult<CallToolResult>> + Send + '_ {
         let state = self.state.clone();
         async move {
             #[cfg(feature = "http")]
-            if let Some(claims) = context.extensions.get::<Claims>() {
+            if let Some(claims) = _context.extensions.get::<Claims>() {
                 if !state.tool_auth.is_authorized(claims, &request.name) {
                     let required_scope = state.tool_auth.required_scope(&request.name);
                     let scope_str = required_scope.unwrap_or("unknown");
@@ -321,7 +324,7 @@ impl ServerHandler for McpHandler {
         &self,
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ListResourcesResult, McpError>> + Send + '_ {
+    ) -> impl std::future::Future<Output = McpResult<ListResourcesResult>> + Send + '_ {
         let state = self.state.clone();
         async move {
             let resources = state
@@ -340,7 +343,7 @@ impl ServerHandler for McpHandler {
         &self,
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ListResourceTemplatesResult, McpError>> + Send + '_ {
+    ) -> impl std::future::Future<Output = McpResult<ListResourceTemplatesResult>> + Send + '_ {
         std::future::ready(Ok(ListResourceTemplatesResult::with_all_items(
             Vec::new(),
         )))
@@ -350,7 +353,7 @@ impl ServerHandler for McpHandler {
         &self,
         request: rmcp::model::ReadResourceRequestParam,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<rmcp::model::ReadResourceResult, McpError>> + Send + '_
+    ) -> impl std::future::Future<Output = McpResult<rmcp::model::ReadResourceResult>> + Send + '_
     {
         let state = self.state.clone();
         async move {
@@ -370,7 +373,7 @@ impl ServerHandler for McpHandler {
         &self,
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ListPromptsResult, McpError>> + Send + '_ {
+    ) -> impl std::future::Future<Output = McpResult<ListPromptsResult>> + Send + '_ {
         let prompts: Vec<Prompt> = self
             .state
             .prompts
@@ -385,7 +388,7 @@ impl ServerHandler for McpHandler {
         &self,
         request: GetPromptRequestParam,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<GetPromptResult, McpError>> + Send + '_ {
+    ) -> impl std::future::Future<Output = McpResult<GetPromptResult>> + Send + '_ {
         let messages = match request.arguments {
             Some(args) => Value::Object(args),
             None => Value::Object(Map::new()),
@@ -401,7 +404,10 @@ impl ServerHandler for McpHandler {
                     .into_iter()
                     .map(prompt_message_to_rmcp)
                     .collect::<Vec<_>>();
-                GetPromptResult { messages: mapped }
+                GetPromptResult {
+                    description: None,
+                    messages: mapped,
+                }
             });
 
         std::future::ready(result)
@@ -619,7 +625,7 @@ impl McpServer {
     ///
     /// Returns an error if `SUBCOG_MCP_JWT_SECRET` is not set or too short.
     #[cfg(feature = "http")]
-    pub fn with_jwt_from_env(self) -> Result<Self> {
+    pub fn with_jwt_from_env(self) -> SubcogResult<Self> {
         let config = JwtConfig::from_env()?;
         let authenticator = JwtAuthenticator::new(&config);
         Ok(self.with_jwt_authenticator(authenticator))
@@ -691,7 +697,7 @@ impl McpServer {
     /// # Errors
     ///
     /// Returns an error if the server fails to start or signal handler cannot be installed.
-    pub fn start(&mut self) -> Result<()> {
+    pub fn start(&mut self) -> SubcogResult<()> {
         // Set up signal handler for graceful shutdown (RES-M4)
         setup_signal_handler()?;
 
@@ -709,7 +715,7 @@ impl McpServer {
     }
 
     /// Runs the server over stdio with graceful shutdown (RES-M4).
-    fn run_stdio(&mut self) -> Result<()> {
+    fn run_stdio(&mut self) -> SubcogResult<()> {
         let handler = self.build_handler();
         let rt = tokio::runtime::Runtime::new().map_err(|e| Error::OperationFailed {
             operation: "create_runtime".to_string(),
@@ -749,6 +755,7 @@ impl McpServer {
     }
 
     /// Performs graceful shutdown cleanup (RES-M4).
+    #[allow(dead_code)]
     fn graceful_shutdown(&self) {
         let start = Instant::now();
         tracing::info!("Starting graceful shutdown sequence");
@@ -771,7 +778,7 @@ impl McpServer {
     ///
     /// Requires the `http` feature and `SUBCOG_MCP_JWT_SECRET` environment variable.
     #[cfg(feature = "http")]
-    fn run_http(&mut self) -> Result<()> {
+    fn run_http(&mut self) -> SubcogResult<()> {
         use axum::extract::State;
         use axum::http::{Method, StatusCode, header};
         use axum::middleware::Next;
@@ -982,7 +989,7 @@ impl McpServer {
 
     /// Runs the server over HTTP (feature not enabled).
     #[cfg(not(feature = "http"))]
-    fn run_http(&self) -> Result<()> {
+    fn run_http(&self) -> SubcogResult<()> {
         Err(Error::FeatureNotEnabled("http".to_string()))
     }
 }

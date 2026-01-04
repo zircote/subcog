@@ -360,6 +360,18 @@ pub fn build_filter_description(filter: &SearchFilter) -> String {
         parts.push(format!("source:{pattern}"));
     }
 
+    if let Some(ref project_id) = filter.project_id {
+        parts.push(format!("project:{project_id}"));
+    }
+
+    if let Some(ref branch) = filter.branch {
+        parts.push(format!("branch:{branch}"));
+    }
+
+    if let Some(ref file_path) = filter.file_path {
+        parts.push(format!("path:{file_path}"));
+    }
+
     if !filter.statuses.is_empty() {
         let status_list: Vec<_> = filter.statuses.iter().map(MemoryStatus::as_str).collect();
         parts.push(format!("status:{}", status_list.join(",")));

@@ -60,7 +60,7 @@ Configuration reference:
 
 Three-layer storage system:
 
-- [Persistence Layer](storage/persistence.md) - Git Notes, PostgreSQL, Filesystem
+- [Persistence Layer](storage/persistence.md) - SQLite, PostgreSQL, Filesystem
 - [Index Layer](storage/index.md) - SQLite, PostgreSQL FTS, RediSearch
 - [Vector Layer](storage/vector.md) - usearch, pgvector, Redis Vector
 - [Domains](storage/domains.md) - Project, User, Org scoping
