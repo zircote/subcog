@@ -107,14 +107,14 @@ pub struct Memory {
 **Estimated Time:** 2 hours
 **File:** `src/storage/migrations/sqlite/` (new migration file)
 
-- [ ] Create new migration file with proper naming (e.g., `0004_add_tombstoned_at.sql`)
-- [ ] Add `ALTER TABLE memories ADD COLUMN tombstoned_at TIMESTAMP NULL`
-- [ ] Create partial index: `CREATE INDEX idx_memories_tombstoned ON memories(tombstoned_at) WHERE tombstoned_at IS NOT NULL`
-- [ ] Add migration to migration runner
-- [ ] Create rollback migration
-- [ ] Test migration on fresh database
-- [ ] Test migration on database with existing data
-- [ ] Verify migration is idempotent (safe to run multiple times)
+- [x] Create new migration file with proper naming (e.g., `0004_add_tombstoned_at.sql`) ✓
+- [x] Add `ALTER TABLE memories ADD COLUMN tombstoned_at TIMESTAMP NULL` ✓
+- [x] Create partial index: `CREATE INDEX idx_memories_tombstoned ON memories(tombstoned_at) WHERE tombstoned_at IS NOT NULL` ✓
+- [x] Add migration to migration runner ✓
+- [x] Create rollback migration ✓
+- [x] Test migration on fresh database ✓
+- [x] Test migration on database with existing data ✓
+- [x] Verify migration is idempotent (safe to run multiple times) ✓
 
 **Migration SQL:**
 ```sql

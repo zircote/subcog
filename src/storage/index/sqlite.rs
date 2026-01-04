@@ -247,6 +247,9 @@ impl SqliteBackend {
         // Add source column if it doesn't exist (for migration)
         let _ = conn.execute("ALTER TABLE memories ADD COLUMN source TEXT", []);
 
+        // Add tombstoned_at column if it doesn't exist (ADR-0053)
+        let _ = conn.execute("ALTER TABLE memories ADD COLUMN tombstoned_at INTEGER", []);
+
         // Create indexes for common query patterns (DB-H1)
         Self::create_indexes(&conn);
 
@@ -312,6 +315,12 @@ impl SqliteBackend {
         // Compound index for source filtering with status (Phase 15 fix)
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_source_status ON memories(source, status)",
+            [],
+        );
+
+        // Partial index for tombstoned memories (ADR-0053)
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_tombstoned ON memories(tombstoned_at) WHERE tombstoned_at IS NOT NULL",
             [],
         );
     }
