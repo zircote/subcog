@@ -213,7 +213,7 @@ CREATE INDEX idx_memories_tombstoned ON memories(tombstoned_at) WHERE tombstoned
 **File:** `src/gc/branch.rs`
 
 - [x] Run existing GC test suite ✓
-- [ ] Fix compilation errors from new tombstoned_at field
+- [x] Fix compilation errors from new tombstoned_at field ✓
 - [x] Verify tombstone_memory() is called correctly ✓
 - [x] Verify status check works: `memory.status != MemoryStatus::Tombstoned` ✓
 - [x] Verify tombstoned_at is set correctly ✓
@@ -229,17 +229,17 @@ CREATE INDEX idx_memories_tombstoned ON memories(tombstoned_at) WHERE tombstoned
 **Estimated Time:** 1 hour
 **File:** `tests/gc_integration_test.rs` (new file)
 
-- [ ] Create new integration test file
-- [ ] Test: Create memory for branch "feature/test"
-- [ ] Test: Delete branch "feature/test"
-- [ ] Test: Recall memories (should trigger lazy GC)
-- [ ] Test: Verify memory status is Tombstoned
-- [ ] Test: Verify memory not in default results
-- [ ] Test: Recall with --include-tombstoned
-- [ ] Test: Verify memory appears in results
-- [ ] Test: Run purge operation
-- [ ] Test: Verify memory permanently deleted
-- [ ] Ensure test cleans up after itself
+- [x] Create new integration test file ✓
+- [x] Test: Create memory for branch "feature/test" ✓
+- [x] Test: Delete branch "feature/test" ✓
+- [x] Test: Recall memories (should trigger lazy GC) ✓
+- [x] Test: Verify memory status is Tombstoned ✓
+- [x] Test: Verify memory not in default results ✓
+- [x] Test: Recall with --include-tombstoned ✓
+- [x] Test: Verify memory appears in results ✓
+- [x] Test: Run purge operation ✓
+- [x] Test: Verify memory permanently deleted ✓
+- [x] Ensure test cleans up after itself ✓
 
 **Test Code Template:**
 ```rust
