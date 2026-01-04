@@ -438,15 +438,18 @@ impl McpServer {
             request_count += 1;
             let response = self.handle_request(&line);
 
-            writeln!(stdout, "{response}").map_err(|e| Error::OperationFailed {
-                operation: "write_stdout".to_string(),
-                cause: e.to_string(),
-            })?;
+            // JSON-RPC 2.0: Skip writing response for notifications (empty string)
+            if !response.is_empty() {
+                writeln!(stdout, "{response}").map_err(|e| Error::OperationFailed {
+                    operation: "write_stdout".to_string(),
+                    cause: e.to_string(),
+                })?;
 
-            stdout.flush().map_err(|e| Error::OperationFailed {
-                operation: "flush_stdout".to_string(),
-                cause: e.to_string(),
-            })?;
+                stdout.flush().map_err(|e| Error::OperationFailed {
+                    operation: "flush_stdout".to_string(),
+                    cause: e.to_string(),
+                })?;
+            }
 
             // Flush metrics to push gateway after each request
             // This ensures metrics are captured even if process is killed
@@ -609,6 +612,10 @@ impl McpServer {
     }
 
     /// Handles a JSON-RPC request.
+    ///
+    /// Returns an empty string for notifications (requests without `id`),
+    /// per JSON-RPC 2.0 specification which states notifications MUST NOT
+    /// receive any response.
     fn handle_request(&mut self, request: &str) -> String {
         // SEC-H4: Check request size before processing to prevent DoS
         if request.len() > MAX_REQUEST_BODY_SIZE {
@@ -654,6 +661,28 @@ impl McpServer {
                 if let Some(id) = &req.id {
                     let id_str = id.to_string();
                     span.record("rpc.id", id_str.as_str());
+                }
+
+                // JSON-RPC 2.0: Notifications (requests without id) MUST NOT receive any response
+                if req.is_notification() {
+                    tracing::debug!(
+                        method = %method_label,
+                        transport = transport_label,
+                        "Received notification, no response will be sent"
+                    );
+                    metrics::counter!(
+                        "mcp_notifications_total",
+                        "method" => method_label.clone(),
+                        "transport" => transport_label
+                    )
+                    .increment(1);
+                    span.record("status", "notification");
+
+                    // Still dispatch the method for side effects (e.g., notifications/initialized)
+                    let _ = self.dispatch_method(&req.method, req.params);
+
+                    // Return empty string to signal no response should be sent
+                    return String::new();
                 }
 
                 tracing::info!(method = %method_label, transport = transport_label, "Processing MCP request");
@@ -943,10 +972,15 @@ impl McpServer {
     }
 
     /// Formats an error response.
+    ///
+    /// Per JSON-RPC 2.0 specification, error responses MUST include the `id` field.
+    /// If the original request's id could not be determined (e.g., parse error),
+    /// `id` MUST be `null`.
     fn format_error(&self, id: Option<Value>, code: i32, message: &str) -> String {
         let response = JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
-            id,
+            // JSON-RPC 2.0: Error responses MUST include id (use null if unknown)
+            id: Some(id.unwrap_or(Value::Null)),
             result: None,
             error: Some(JsonRpcError {
                 code,
@@ -988,6 +1022,17 @@ struct JsonRpcRequest {
     id: Option<Value>,
     method: String,
     params: Option<Value>,
+}
+
+impl JsonRpcRequest {
+    /// Returns `true` if this request is a notification (no `id` field).
+    ///
+    /// Per JSON-RPC 2.0 specification, notifications are requests without an `id` member.
+    /// They MUST NOT receive any response, not even an error.
+    #[must_use]
+    const fn is_notification(&self) -> bool {
+        self.id.is_none()
+    }
 }
 
 /// JSON-RPC response.
@@ -1215,11 +1260,39 @@ mod http_transport {
 
         match parsed {
             Ok(req) => {
+                // JSON-RPC 2.0: Notifications (requests without id) MUST NOT receive any response
+                if req.is_notification() {
+                    tracing::debug!(
+                        method = %req.method,
+                        "HTTP: Received notification, returning 204 No Content"
+                    );
+                    metrics::counter!(
+                        "mcp_notifications_total",
+                        "method" => req.method.clone(),
+                        "transport" => "http"
+                    )
+                    .increment(1);
+
+                    // Still dispatch the method for side effects
+                    if let Ok(mut state_guard) = state.lock() {
+                        let _ = dispatch_http_method(
+                            &mut state_guard,
+                            &req.method,
+                            req.params,
+                            &claims,
+                        );
+                    }
+
+                    // Return 204 No Content for notifications (ADR-004)
+                    return (StatusCode::NO_CONTENT, Json(serde_json::json!(null)));
+                }
+
                 let Ok(mut state_guard) = state.lock() else {
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(serde_json::json!({
                             "jsonrpc": "2.0",
+                            "id": null,
                             "error": {
                                 "code": -32603,
                                 "message": "Internal server error"
@@ -1249,10 +1322,12 @@ mod http_transport {
 
                 (StatusCode::OK, Json(response))
             },
+            // Parse errors: id is null per JSON-RPC 2.0 spec (couldn't determine original id)
             Err(e) => (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
                     "jsonrpc": "2.0",
+                    "id": null,
                     "error": {
                         "code": -32700,
                         "message": format!("Parse error: {e}")
@@ -1569,6 +1644,163 @@ mod tests {
         let response = server.handle_request(request);
 
         assert!(response.contains("error"));
+    }
+
+    // =========================================================================
+    // JSON-RPC 2.0 Notification Compliance Tests (Issue #46)
+    // =========================================================================
+
+    #[test]
+    fn test_is_notification_without_id() {
+        // A request without id is a notification
+        let request: JsonRpcRequest =
+            serde_json::from_str(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
+                .expect("Failed to parse notification");
+        assert!(request.is_notification());
+    }
+
+    #[test]
+    fn test_is_notification_with_id() {
+        // A request with id is NOT a notification
+        let request: JsonRpcRequest =
+            serde_json::from_str(r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#)
+                .expect("Failed to parse request");
+        assert!(!request.is_notification());
+    }
+
+    #[test]
+    fn test_is_notification_with_null_id() {
+        // Per JSON-RPC 2.0, "id": null in a request is ambiguous. The spec says
+        // notifications are requests "by the omission of the id member."
+        //
+        // In practice, serde deserializes "id": null as None for Option<Value>,
+        // treating it the same as absent. This means we treat "id": null as a
+        // notification, which is consistent with how Python MCP clients behave.
+        //
+        // This is the safer interpretation: if a client sends "id": null,
+        // we won't send back an error response that could cause parsing issues.
+        let request: JsonRpcRequest =
+            serde_json::from_str(r#"{"jsonrpc":"2.0","id":null,"method":"initialize"}"#)
+                .expect("Failed to parse request");
+        // serde treats "id": null as None, so this IS a notification
+        assert!(
+            request.is_notification(),
+            "Request with 'id': null is treated as notification (serde deserializes as None)"
+        );
+    }
+
+    #[test]
+    fn test_is_notification_with_string_id() {
+        // A request with string id is NOT a notification
+        let request: JsonRpcRequest =
+            serde_json::from_str(r#"{"jsonrpc":"2.0","id":"abc-123","method":"initialize"}"#)
+                .expect("Failed to parse request");
+        assert!(!request.is_notification());
+    }
+
+    #[test]
+    fn test_notification_returns_empty_response() {
+        // Notifications MUST NOT receive any response (returns empty string)
+        let mut server = McpServer::new();
+        let request = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
+        let response = server.handle_request(request);
+
+        assert!(
+            response.is_empty(),
+            "Notification should return empty string, got: {response}"
+        );
+    }
+
+    #[test]
+    fn test_notification_with_params_returns_empty() {
+        // Notifications with params should also return empty
+        let mut server = McpServer::new();
+        let request =
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{"foo":"bar"}}"#;
+        let response = server.handle_request(request);
+
+        assert!(
+            response.is_empty(),
+            "Notification with params should return empty string, got: {response}"
+        );
+    }
+
+    #[test]
+    fn test_request_with_id_returns_response() {
+        // Regular requests (with id) should return a response
+        let mut server = McpServer::new();
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#;
+        let response = server.handle_request(request);
+
+        assert!(
+            !response.is_empty(),
+            "Request with id should return a response"
+        );
+        assert!(response.contains("\"id\":1"), "Response should include id");
+    }
+
+    #[test]
+    fn test_error_response_includes_id_null_for_parse_error() {
+        // Parse errors should have id: null (per JSON-RPC 2.0 spec)
+        let mut server = McpServer::new();
+        let request = "not valid json at all";
+        let response = server.handle_request(request);
+
+        assert!(response.contains("error"), "Should contain error");
+        assert!(response.contains("-32700"), "Should be parse error code");
+        assert!(
+            response.contains("\"id\":null"),
+            "Parse error response should have id: null, got: {response}"
+        );
+    }
+
+    #[test]
+    fn test_error_response_includes_original_id() {
+        // Error responses should include the original request id
+        let mut server = McpServer::new();
+        let request = r#"{"jsonrpc":"2.0","id":42,"method":"unknown/method"}"#;
+        let response = server.handle_request(request);
+
+        assert!(response.contains("error"), "Should contain error");
+        assert!(response.contains("-32601"), "Should be method not found");
+        assert!(
+            response.contains("\"id\":42"),
+            "Error response should include original id, got: {response}"
+        );
+    }
+
+    #[test]
+    fn test_error_response_includes_string_id() {
+        // Error responses should preserve string ids
+        let mut server = McpServer::new();
+        let request = r#"{"jsonrpc":"2.0","id":"req-abc","method":"unknown/method"}"#;
+        let response = server.handle_request(request);
+
+        assert!(response.contains("error"), "Should contain error");
+        assert!(
+            response.contains("\"id\":\"req-abc\""),
+            "Error response should include string id, got: {response}"
+        );
+    }
+
+    #[test]
+    fn test_format_error_always_includes_id() {
+        // format_error should always include id field
+        let server = McpServer::new();
+
+        // With None id (parse error case)
+        let response = server.format_error(None, -32700, "Parse error");
+        assert!(
+            response.contains("\"id\":null"),
+            "format_error(None) should produce id: null, got: {response}"
+        );
+
+        // With Some id
+        let response = server.format_error(Some(serde_json::json!(123)), -32600, "Invalid");
+        assert!(
+            response.contains("\"id\":123"),
+            "format_error(Some(123)) should produce id: 123, got: {response}"
+        );
     }
 }
 
