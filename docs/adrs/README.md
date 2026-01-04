@@ -1,232 +1,86 @@
-# Architecture Decision Records (ADRs)
+# ADR Compliance Summary
 
-This directory contains all Architecture Decision Records for the Subcog project.
+**Audit Date:** 2026-01-04
+**Audited By:** Claude Code
+**Codebase:** /Users/AllenR1_1/Projects/zircote/subcog
 
-**Last Audit:** 2026-01-04
+## Overview
 
----
+| # | ADR | Status | Health | Action Required |
+|---|-----|--------|--------|-----------------|
+| 1 | [ADR-0001: Rust as Implementation Language](./adr_0001.md) | Accepted | ✅ Compliant | None |
+| 2 | [ADR-0002: Three-Layer Storage Architecture](./adr_0002.md) | Accepted | ✅ Compliant | None |
+| 3 | [ADR-0003: Feature Tier System](./adr_0003.md) | Accepted | ⚠️ Partial | Update tier definitions to reflect current storage or reintroduce Tier 1 persistence mapping. |
+| 4 | [ADR-0004: Event Bus for Cross-Component Communication](./adr_0004.md) | Accepted | ❌ Violated | Implement a tokio broadcast event bus or revise the ADR to match current event handling. |
+| 5 | [ADR-0005: URN Scheme for Memory Addressing](./adr_0005.md) | Accepted | ❌ Violated | Align URN format to `subcog://mem/{domain}/{namespace}/{id}` or update the ADR. |
+| 6 | [ADR-0007: fastembed for Embedding Generation](./adr_0007.md) | Accepted | ✅ Compliant | None |
+| 7 | [ADR-0008: usearch for Vector Search](./adr_0008.md) | Accepted | ✅ Compliant | None |
+| 8 | [ADR-0009: rmcp for MCP Server Implementation](./adr_0009.md) | Accepted | ❌ Violated | Adopt rmcp or update ADR-0009 to document the custom server choice. |
+| 9 | [ADR-0010: OpenTelemetry for Observability](./adr_0010.md) | Accepted | ✅ Compliant | None |
+| 10 | [ADR-0011: Hybrid Detection Strategy (Keyword + LLM)](./adr_0011.md) | Accepted | ✅ Compliant | None |
+| 11 | [ADR-0012: Namespace Weighting Over Query Rewriting](./adr_0012.md) | Accepted | ✅ Compliant | None |
+| 12 | [ADR-0013: In-Memory Topic Index](./adr_0013.md) | Accepted | ✅ Compliant | None |
+| 13 | [ADR-0014: 200ms LLM Timeout](./adr_0014.md) | Accepted | ✅ Compliant | None |
+| 14 | [ADR-0015: Token Budget for Injected Memories](./adr_0015.md) | Accepted | ⚠️ Partial | Apply max token budget when assembling injected memory context. |
+| 15 | [ADR-0016: Confidence Threshold for Injection](./adr_0016.md) | Accepted | ✅ Compliant | None |
+| 16 | [ADR-0017: Short-Circuit Evaluation Order](./adr_0017.md) | Accepted | ✅ Compliant | None |
+| 17 | [ADR-0018: Content Hash Storage as Tags](./adr_0018.md) | Accepted | ⚠️ Partial | Append the hash tag to memory.tags during capture. |
+| 18 | [ADR-0019: Per-Namespace Similarity Thresholds](./adr_0019.md) | Accepted | ✅ Compliant | None |
+| 19 | [ADR-0020: In-Memory LRU Cache for Recent Captures](./adr_0020.md) | Accepted | ✅ Compliant | None |
+| 20 | [ADR-0021: Fail-Open on Deduplication Errors](./adr_0021.md) | Accepted | ✅ Compliant | None |
+| 21 | [ADR-0022: Semantic Check Minimum Length](./adr_0022.md) | Accepted | ✅ Compliant | None |
+| 22 | [ADR-0023: RecallService for Deduplication Lookups](./adr_0023.md) | Accepted | ✅ Compliant | None |
+| 23 | [ADR-0024: Hook Output Format for Skip Reporting](./adr_0024.md) | Accepted | ✅ Compliant | None |
+| 24 | [ADR-0025: Fenced Code Blocks Only](./adr_0025.md) | Accepted | ✅ Compliant | None |
+| 25 | [ADR-0026: LLM Enrichment Always On](./adr_0026.md) | Accepted | ✅ Compliant | None |
+| 26 | [ADR-0027: Full Enrichment Scope](./adr_0027.md) | Accepted | ✅ Compliant | None |
+| 27 | [ADR-0028: Regex-Based Code Block Detection](./adr_0028.md) | Accepted | ✅ Compliant | None |
+| 28 | [ADR-0029: Existing LLM Provider Infrastructure](./adr_0029.md) | Accepted | ✅ Compliant | None |
+| 29 | [ADR-0030: User Frontmatter Preservation](./adr_0030.md) | Accepted | ✅ Compliant | None |
+| 30 | [ADR-0031: Graceful Fallback Strategy](./adr_0031.md) | Accepted | ✅ Compliant | None |
+| 31 | [ADR-0032: Use fastembed-rs for Embeddings](./adr_0032.md) | Accepted | ✅ Compliant | None |
+| 32 | [ADR-0033: Lazy Load Embedding Model](./adr_0033.md) | Accepted | ✅ Compliant | None |
+| 33 | [ADR-0034: Three-Layer Storage Synchronization Strategy](./adr_0034.md) | Accepted | ❌ Violated | Update the ADR or reintroduce Git Notes as authoritative storage. |
+| 34 | [ADR-0035: Score Normalization to 0.0-1.0 Range](./adr_0035.md) | Accepted | ✅ Compliant | None |
+| 35 | [ADR-0036: Graceful Degradation Strategy](./adr_0036.md) | Accepted | ✅ Compliant | None |
+| 36 | [ADR-0037: Model Selection - all-MiniLM-L6-v2](./adr_0037.md) | Accepted | ✅ Compliant | None |
+| 37 | [ADR-0038: Vector Index Implementation - usearch](./adr_0038.md) | Accepted | ✅ Compliant | None |
+| 38 | [ADR-0039: Backward Compatibility with Existing Memories](./adr_0039.md) | Accepted | ⚠️ Partial | Expose migration status in the status command or update ADR expectations. |
+| 39 | [ADR-0040: SQLite for User-Scope Persistence](./adr_0040.md) | Accepted | ✅ Compliant | None |
+| 40 | [ADR-0041: Conditional Git Notes in CaptureService](./adr_0041.md) | Accepted | ❌ Violated | Implement use_git_notes flag or update ADR-0041. |
+| 41 | [ADR-0042: Factory Method Pattern for ServiceContainer](./adr_0042.md) | Accepted | ✅ Compliant | None |
+| 42 | [ADR-0043: No-Op SyncService for User Scope](./adr_0043.md) | Accepted | ✅ Compliant | None |
+| 43 | [ADR-0044: User Data Directory Location](./adr_0044.md) | Accepted | ✅ Compliant | None |
+| 44 | [ADR-0045: URN Format for User Scope](./adr_0045.md) | Accepted | ✅ Compliant | None |
+| 45 | [ADR-0046: Fallback Order in `from_current_dir_or_user()`](./adr_0046.md) | Accepted | ✅ Compliant | None |
+| 46 | [ADR-0047: Remove Git-Notes Storage Layer](./adr_0047.md) | Accepted | ✅ Compliant | None |
+| 47 | [ADR-0048: Consolidate to User-Level Storage with Faceting](./adr_0048.md) | Accepted | ❌ Violated | Add facet fields to Memory and persist them in SQLite, or revise ADR-0048. |
+| 48 | [ADR-0049: Inline Facet Columns (Denormalized)](./adr_0049.md) | Accepted | ❌ Violated | Add facet columns (project_id, branch, file_path) and update queries. |
+| 49 | [ADR-0050: Fresh Start - No Migration of Legacy Data](./adr_0050.md) | Accepted | ✅ Compliant | None |
+| 50 | [ADR-0051: Feature-Gate Org-Scope Implementation](./adr_0051.md) | Accepted | ⚠️ Partial | Gate org-scope initialization behind org_scope_enabled or cfg(feature = "org-scope"). |
+| 51 | [ADR-0052: Lazy Branch Garbage Collection](./adr_0052.md) | Accepted | ❌ Violated | Add facet fields and filters to the model or refactor GC to use existing fields. |
+| 52 | [ADR-0053: Tombstone Pattern for Soft Deletes](./adr_0053.md) | Accepted | ✅ Compliant | None |
+| 53 | [ADR-0054: Notification Detection via `id` Field Absence](./adr_0054.md) | Accepted | ✅ Compliant | None |
+| 54 | [ADR-0055: Empty String Return for Notification Responses](./adr_0055.md) | Accepted | ✅ Compliant | None |
+| 55 | [ADR-0056: Always Include `id` in Error Responses](./adr_0056.md) | Accepted | ✅ Compliant | None |
+| 56 | [ADR-0057: HTTP Transport Returns 204 for Notifications](./adr_0057.md) | Accepted | ✅ Compliant | None |
+| 57 | [ADR-0058: Debug-Level Logging for Notifications](./adr_0058.md) | Accepted | ✅ Compliant | None |
 
-## ADR Health Summary
+## Critical Findings
 
-### Overall Statistics
+- ADR-0004: Event Bus for Cross-Component Communication: Implement a tokio broadcast event bus or revise the ADR to match current event handling.
+- ADR-0005: URN Scheme for Memory Addressing: Align URN format to `subcog://mem/{domain}/{namespace}/{id}` or update the ADR.
+- ADR-0009: rmcp for MCP Server Implementation: Adopt rmcp or update ADR-0009 to document the custom server choice.
+- ADR-0034: Three-Layer Storage Synchronization Strategy: Update the ADR or reintroduce Git Notes as authoritative storage.
+- ADR-0041: Conditional Git Notes in CaptureService: Implement use_git_notes flag or update ADR-0041.
+- ADR-0048: Consolidate to User-Level Storage with Faceting: Add facet fields to Memory and persist them in SQLite, or revise ADR-0048.
+- ADR-0049: Inline Facet Columns (Denormalized): Add facet columns (project_id, branch, file_path) and update queries.
+- ADR-0052: Lazy Branch Garbage Collection: Add facet fields and filters to the model or refactor GC to use existing fields.
 
-- **Total ADRs:** 58
-- **Compliant:** 52 (89.7%)
-- **Partial/Superseded:** 3 (5.2%)
-- **Non-Compliant:** 0 (0%)
-- **Deprecated:** 1 (1.7%)
-- **Not Applicable:** 2 (3.4%)
+## Recommendations
 
-### Health by Category
-
-| Category | Total | Compliant | Issues |
-|----------|-------|-----------|--------|
-| Architecture | 22 | 22 | 0 |
-| Storage | 12 | 11 | 1 |
-| Search | 7 | 7 | 0 |
-| AI/ML | 3 | 3 | 0 |
-| Integration | 6 | 5 | 1 |
-| Observability | 2 | 2 | 0 |
-| Performance | 2 | 2 | 0 |
-| Configuration | 2 | 2 | 0 |
-| Indexing | 0 | 0 | 0 |
-| Parsing | 1 | 1 | 0 |
-| Resilience | 0 | 0 | 0 |
-| Migration | 1 | 1 | 0 |
-| Caching | 0 | 0 | 0 |
-
----
-
-## Complete ADR Inventory
-
-### ✅ Compliant ADRs (52)
-
-| # | Title | Category | Status | Health |
-|---|-------|----------|--------|--------|
-| 0001 | Rust as Implementation Language | architecture | published | ✅ COMPLIANT |
-| 0002 | Three-Layer Storage Architecture | architecture | published | ✅ COMPLIANT |
-| 0003 | Feature Tier System | architecture | published | ✅ COMPLIANT |
-| 0005 | URN Scheme for Memory Addressing | architecture | published | ✅ COMPLIANT |
-| 0007 | fastembed for Embedding Generation | ai-ml | published | ✅ COMPLIANT |
-| 0008 | usearch for Vector Search | ai-ml | published | ✅ COMPLIANT |
-| 0010 | OpenTelemetry for Observability | observability | published | ✅ COMPLIANT |
-| 0011 | Hybrid Detection Strategy (Keyword + LLM) | search | published | ✅ COMPLIANT |
-| 0012 | Namespace Weighting Over Query Rewriting | search | published | ✅ COMPLIANT |
-| 0013 | In-Memory Topic Index | search | published | ✅ COMPLIANT |
-| 0014 | FTS5 for Text Search | indexing | published | ✅ COMPLIANT |
-| 0015 | Token Budget for Injected Memories | search | published | ✅ COMPLIANT |
-| 0016 | Confidence Threshold for Injection | search | published | ✅ COMPLIANT |
-| 0017 | Short-Circuit Evaluation Order | resilience | published | ✅ COMPLIANT |
-| 0018 | Content Hash Storage as Tags | storage | published | ✅ COMPLIANT |
-| 0019 | Per-Namespace Similarity Thresholds | search | published | ✅ COMPLIANT |
-| 0020 | In-Memory LRU Cache for Recent Captures | caching | published | ✅ COMPLIANT |
-| 0021 | Hybrid Search with RRF | search | published | ✅ COMPLIANT |
-| 0022 | ServiceContainer Pattern | architecture | published | ✅ COMPLIANT |
-| 0023 | Feature Flags via Cargo Features | configuration | published | ✅ COMPLIANT |
-| 0024 | JSON Serialization with serde | architecture | published | ✅ COMPLIANT |
-| 0025 | Schema Migration Strategy | storage | published | ✅ COMPLIANT |
-| 0026 | URN Resource Scheme for MCP | integration | published | ✅ COMPLIANT |
-| 0027 | Graceful Degradation on Component Failure | resilience | published | ✅ COMPLIANT |
-| 0028 | Secrets Detection and Filtering | architecture | published | ✅ COMPLIANT |
-| 0029 | Claude Code Hook Integration | integration | published | ✅ COMPLIANT |
-| 0030 | Single SQLite Database File | storage | published | ✅ COMPLIANT |
-| 0031 | Graceful Fallback Strategy | resilience | published | ✅ COMPLIANT |
-| 0032 | Use fastembed-rs for Embeddings | ai-ml | published | ✅ COMPLIANT |
-| 0033 | Lazy Load Embedding Model | performance | published | ✅ COMPLIANT |
-| 0035 | Score Normalization to 0.0-1.0 Range | search | published | ✅ COMPLIANT |
-| 0036 | Graceful Degradation Strategy | resilience | published | ✅ COMPLIANT |
-| 0037 | Model Selection - all-MiniLM-L6-v2 | ai-ml | published | ✅ COMPLIANT |
-| 0038 | Vector Index Implementation - usearch | storage | published | ✅ COMPLIANT |
-| 0040 | SQLite for User-Scope Persistence | storage | published | ✅ COMPLIANT |
-| 0041 | Environment Variables for Configuration | configuration | published | ✅ COMPLIANT |
-| 0042 | Factory Method Pattern for ServiceContainer | architecture | published | ✅ COMPLIANT |
-| 0043 | No-Op SyncService for User Scope | architecture | published | ✅ COMPLIANT |
-| 0044 | User Data Directory Location | configuration | published | ✅ COMPLIANT |
-| 0045 | URN Format for User Scope | architecture | published | ✅ COMPLIANT |
-| 0046 | Fallback Order in from_current_dir_or_user() | architecture | published | ✅ COMPLIANT |
-| 0047 | Remove Git-Notes Storage Layer | storage | published | ✅ COMPLIANT |
-| 0048 | Consolidate to User-Level Storage with Faceting | storage | published | ✅ COMPLIANT |
-| 0049 | Inline Facet Columns (Denormalized) | storage | published | ✅ COMPLIANT |
-| 0050 | Fresh Start - No Migration of Legacy Data | migration | published | ✅ COMPLIANT |
-| 0051 | Feature-Gate Org-Scope Implementation | architecture | published | ✅ COMPLIANT |
-| 0052 | Lazy Branch Garbage Collection | architecture | published | ✅ COMPLIANT |
-| 0053 | Tombstone Pattern for Soft Deletes | architecture | published | ✅ COMPLIANT |
-| 0054 | Notification Detection via id Field Absence | integration | published | ✅ COMPLIANT |
-| 0055 | Empty String Return for Notification Responses | integration | published | ✅ COMPLIANT |
-| 0056 | Always Include id in Error Responses | integration | published | ✅ COMPLIANT |
-| 0057 | HTTP Transport Returns 204 for Notifications | integration | published | ✅ COMPLIANT |
-| 0058 | Debug-Level Logging for Notifications | observability | published | ✅ COMPLIANT |
-
-### ⚠️ Partial/Superseded ADRs (2)
-
-| # | Title | Category | Status | Health | Notes |
-|---|-------|----------|--------|--------|-------|
-| 0034 | Three-Layer Storage Synchronization Strategy | storage | published | ⚠️ PARTIAL | Superseded by ADR-0047 (Remove Git-Notes). Historical reference only. |
-| 0039 | Backward Compatibility with Existing Memories | storage | published | ⚠️ PARTIAL | Superseded by ADR-0050 (Fresh Start). No migration needed. |
-
-### ❌ Non-Compliant ADRs (1)
-
-| # | Title | Category | Status | Health | Severity | Issue |
-|---|-------|----------|--------|--------|----------|-------|
-| 0009 | rmcp for MCP Server Implementation | integration | published | ❌ NON-COMPLIANT | MEDIUM | Custom JSON-RPC 2.0 implementation used instead of rmcp crate. Deliberate architectural choice for better spec compliance. |
-
-### 🔄 Deprecated ADRs (1)
-
-| # | Title | Category | Status | Health |
-|---|-------|----------|--------|--------|
-| 0006 | Git Notes for Project-Scope Persistence | storage | deprecated | 🔄 DEPRECATED |
-
-### ⊘ Not Applicable (2)
-
-| # | Title | Category | Status | Health | Notes |
-|---|-------|----------|--------|--------|-------|
-| 0004 | Event Bus for Cross-Component Communication | architecture | published | ⊘ N/A | Superseded by service-based architecture. Never implemented. |
-
----
-
-## Critical Issues Requiring Immediate Attention
-
-### 1. **MEDIUM: MCP Server Implementation Deviation (ADR-0009)**
-
-**Severity:** 🟡 MEDIUM
-**Impact:** None (working as intended with better spec compliance)
-
-**Issue:**
-- ADR specifies using `rmcp` crate for MCP server
-- Custom JSON-RPC 2.0 implementation built instead
-- ADRs 0054-0058 document why custom implementation was needed (notification compliance)
-
-**Remediation:**
-- **No action required** - this was a deliberate architectural decision
-- Consider updating ADR-0009 to document why rmcp was not used
-- Note: Custom implementation achieved JSON-RPC 2.0 compliance that rmcp couldn't provide
-
----
-
-## ADR Audit Process
-
-Each ADR has been audited with the following methodology:
-
-1. **ADR Review**: Read decision, rationale, and expected implementation
-2. **Codebase Search**: Located relevant files via Grep/Glob patterns
-3. **Evidence Collection**: Documented file paths, line numbers, and implementation details
-4. **Compliance Assessment**: Rated as COMPLIANT, PARTIAL, NON-COMPLIANT, or N/A
-5. **Documentation**: Added audit section to each ADR with findings
-
-### Audit Sections in ADRs
-
-Each ADR now contains an `## Audit` section with:
-- **Date**: Audit completion date (2026-01-04)
-- **Finding**: COMPLIANT / PARTIAL / NON-COMPLIANT / N/A / DEPRECATED
-- **Evidence**: File paths and line numbers supporting the finding
-- **Comment**: Brief assessment and any recommended actions
-
----
-
-## How to Use This Document
-
-### For Developers
-
-When working on a feature:
-1. Check if relevant ADRs exist in the inventory above
-2. Review the ADR's health status and audit findings
-3. Follow compliant ADRs as implementation guidelines
-4. Fix non-compliant implementations before adding new features
-
-### For Architects
-
-When proposing new decisions:
-1. Review related ADRs in same category
-2. Check for superseded patterns (Partial/Deprecated status)
-3. Update or create new ADR using MADR format
-4. Run `make audit` to verify compliance
-
-### For Code Reviewers
-
-During PR review:
-1. Verify changes align with relevant ADRs
-2. Check audit findings for implementation guidance
-3. Flag deviations from accepted architectural patterns
-4. Update audit sections if implementation changes
-
----
-
-## Re-Audit Schedule
-
-ADRs should be re-audited:
-- **After major refactors**: When storage, search, or service layers change significantly
-- **Quarterly**: Every 3 months to catch drift
-- **On ADR updates**: When new ADRs added or existing ones modified
-- **Before major releases**: Ensure architecture integrity
-
-**Next Scheduled Audit:** 2026-04-04
-**Last Remediation:** 2026-01-04 (ADR-0051, ADR-0052, ADR-0053)
-
----
-
-## ADR Naming Convention
-
-- **File format**: `adr_NNNN.md` (e.g., `adr_0001.md`)
-- **Numbering**: Sequential, zero-padded to 4 digits
-- **Status**: `published` (active), `deprecated` (superseded), `proposed` (pending)
-- **Frontmatter**: YAML with title, description, type, category, tags, status, dates, author, project
-
----
-
-## Contributing
-
-To propose a new ADR:
-1. Copy `docs/spec/active/adr-template.md` (if exists) or use MADR format
-2. Number sequentially (next available number)
-3. Fill in decision, context, consequences, alternatives
-4. Submit PR with ADR + implementation
-5. Update this README after merge
-
----
-
-## References
-
-- **MADR Format**: https://adr.github.io/madr/
-- **ADR Process**: `docs/architecture/README.md`
-- **Project Architecture**: `CLAUDE.md` (root)
-- **Spec Projects**: `docs/spec/` (active and completed specifications)
+- Align URN format ADRs with current implementation (add /mem or update ADR-0005).
+- Implement or document replacement for Git Notes in ADR-0034/ADR-0041 to avoid drift.
+- Add faceting fields (project_id, branch, file_path) and schema columns to satisfy ADR-0048/ADR-0049.
+- Enforce token budgets and hash-tagging during capture to close ADR-0015/ADR-0018 gaps.
+- Gate org-scope initialization behind feature flag or cfg to satisfy ADR-0051.
