@@ -350,6 +350,7 @@ mod implementation {
                 embedding,
                 created_at: created_at as u64,
                 updated_at: updated_at as u64,
+                tombstoned_at: None,
             }
         }
 
@@ -550,6 +551,7 @@ mod tests {
             status: MemoryStatus::Active,
             created_at: 1_700_000_000,
             updated_at: 1_700_000_000,
+            tombstoned_at: None,
             embedding: None,
             tags: vec!["test".to_string(), "integration".to_string()],
             source: Some("test.rs".to_string()),

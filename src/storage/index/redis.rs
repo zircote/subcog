@@ -431,6 +431,7 @@ mod implementation {
                         status,
                         created_at,
                         updated_at,
+                        tombstoned_at: None,
                         embedding: None,
                         tags,
                         source: None,

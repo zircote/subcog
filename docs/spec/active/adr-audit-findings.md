@@ -402,18 +402,18 @@ org_scope_enabled = true
 #### Option B: Amend ADR-0009
 **File:** `docs/adrs/adr_0009.md`
 
-- [ ] Add "Implementation Update" section after audit section
-- [ ] Explain deviation from original decision
-- [ ] Document rationale for custom JSON-RPC implementation
-- [ ] Reference ADRs 0054-0058
-- [ ] Note this is a beneficial deviation
-- [ ] Update README.md compliance stats
+- [x] Add "Implementation Update" section after audit section ✓
+- [x] Explain deviation from original decision ✓
+- [x] Document rationale for custom JSON-RPC implementation ✓
+- [x] Reference ADRs 0054-0058 ✓
+- [x] Note this is a beneficial deviation ✓
+- [x] Update README.md compliance stats ✓
 
 **Completion Criteria:**
-- [ ] Decision is documented
-- [ ] Rationale is clear
-- [ ] Links to supporting ADRs provided
-- [ ] README.md audit section updated
+- [x] Decision is documented ✓
+- [x] Rationale is clear ✓
+- [x] Links to supporting ADRs provided ✓
+- [x] README.md audit section updated ✓
 
 ---
 
