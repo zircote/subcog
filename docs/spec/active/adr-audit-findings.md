@@ -268,7 +268,7 @@ async fn test_lazy_gc_flow() {
 **File:** `src/config/features.rs`
 
 - [x] Add `pub org_scope_enabled: bool` field to FeatureFlags struct ✓
-- [ ] Set default to `false` in Default implementation
+- [x] Set default to `false` in Default implementation ✓
 - [x] Add serde attributes for serialization ✓
 - [x] Update FeatureFlags::default() method ✓
 - [x] Update any FeatureFlags builders/constructors ✓
@@ -303,12 +303,12 @@ impl Default for FeatureFlags {
 **Estimated Time:** 30 minutes
 **File:** `src/config/mod.rs`
 
-- [ ] Add environment variable loading for SUBCOG_ORG_SCOPE_ENABLED
-- [ ] Support boolean parsing (true/false, 1/0, yes/no, on/off)
-- [ ] Handle invalid values gracefully (default to false)
-- [ ] Add logging when org-scope enabled via env var
-- [ ] Test environment variable loading
-- [ ] Document env var in code comments
+- [x] Add environment variable loading for SUBCOG_ORG_SCOPE_ENABLED ✓
+- [x] Support boolean parsing (true/false, 1/0, yes/no, on/off) ✓
+- [x] Handle invalid values gracefully (default to false) ✓
+- [x] Add logging when org-scope enabled via env var ✓
+- [x] Test environment variable loading ✓
+- [x] Document env var in code comments ✓
 
 **Code Change:**
 ```rust
@@ -324,13 +324,13 @@ if let Ok(val) = env::var("SUBCOG_ORG_SCOPE_ENABLED") {
 **Estimated Time:** 1 hour
 **Files:** Search codebase for org-scope initialization
 
-- [ ] Search codebase for org-scope initialization code
-- [ ] Add feature flag check before org-scope initialization
-- [ ] Add warning log if org-scope disabled but PostgreSQL configured
-- [ ] Add error message explaining how to enable org-scope
-- [ ] Verify org-scope only initializes when flag is true
-- [ ] Test that org-scope is disabled by default
-- [ ] Test that org-scope can be enabled via env var
+- [x] Search codebase for org-scope initialization code ✓
+- [x] Add feature flag check before org-scope initialization ✓
+- [x] Add warning log if org-scope disabled but PostgreSQL configured ✓
+- [x] Add error message explaining how to enable org-scope ✓
+- [x] Verify org-scope only initializes when flag is true ✓
+- [x] Test that org-scope is disabled by default ✓
+- [x] Test that org-scope can be enabled via env var ✓
 
 ---
 
@@ -341,13 +341,13 @@ if let Ok(val) = env::var("SUBCOG_ORG_SCOPE_ENABLED") {
 - `README.md` (if applicable)
 - `docs/configuration.md` (if exists)
 
-- [ ] Document org_scope_enabled feature flag in CLAUDE.md
-- [ ] Document SUBCOG_ORG_SCOPE_ENABLED environment variable
-- [ ] Document when to enable org-scope (multi-team scenarios)
-- [ ] Document PostgreSQL requirements for org-scope
-- [ ] Provide configuration example
-- [ ] Document security considerations
-- [ ] Add troubleshooting section
+- [x] Document org_scope_enabled feature flag in CLAUDE.md ✓
+- [x] Document SUBCOG_ORG_SCOPE_ENABLED environment variable ✓
+- [x] Document when to enable org-scope (multi-team scenarios) ✓
+- [x] Document PostgreSQL requirements for org-scope ✓
+- [x] Provide configuration example ✓
+- [x] Document security considerations ✓
+- [x] Add troubleshooting section ✓
 
 **Documentation Template:**
 ```markdown
