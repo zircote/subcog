@@ -11,9 +11,9 @@ This directory contains all Architecture Decision Records for the Subcog project
 ### Overall Statistics
 
 - **Total ADRs:** 58
-- **Compliant:** 49 (84.5%)
+- **Compliant:** 52 (89.7%)
 - **Partial/Superseded:** 3 (5.2%)
-- **Non-Compliant:** 3 (5.2%)
+- **Non-Compliant:** 0 (0%)
 - **Deprecated:** 1 (1.7%)
 - **Not Applicable:** 2 (3.4%)
 
