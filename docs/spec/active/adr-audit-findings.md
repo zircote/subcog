@@ -212,16 +212,16 @@ CREATE INDEX idx_memories_tombstoned ON memories(tombstoned_at) WHERE tombstoned
 **Estimated Time:** 2 hours
 **File:** `src/gc/branch.rs`
 
-- [ ] Run existing GC test suite
+- [x] Run existing GC test suite ✓
 - [ ] Fix compilation errors from new tombstoned_at field
-- [ ] Verify tombstone_memory() is called correctly
-- [ ] Verify status check works: `memory.status != MemoryStatus::Tombstoned`
-- [ ] Verify tombstoned_at is set correctly
-- [ ] Test branch deletion triggers tombstoning
-- [ ] Test lazy GC during recall works
-- [ ] Test 5-minute branch existence cache
-- [ ] Test dry-run mode shows what would be tombstoned
-- [ ] Fix any broken tests
+- [x] Verify tombstone_memory() is called correctly ✓
+- [x] Verify status check works: `memory.status != MemoryStatus::Tombstoned` ✓
+- [x] Verify tombstoned_at is set correctly ✓
+- [x] Test branch deletion triggers tombstoning ✓
+- [x] Test lazy GC during recall works ✓
+- [x] Test 5-minute branch existence cache ✓
+- [x] Test dry-run mode shows what would be tombstoned ✓
+- [x] Fix any broken tests ✓
 
 ---
 
