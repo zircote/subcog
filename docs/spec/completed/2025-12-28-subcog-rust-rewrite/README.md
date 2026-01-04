@@ -90,7 +90,7 @@ This specification was generated from comprehensive research documents:
 
 - **PRD.md** (v2.1.0) - Core requirements, architecture overview, phasing
 - **STORAGE_AND_OBSERVABILITY.md** - Three-layer storage, trait definitions, observability
-- **MCP_RESOURCES_AND_LLM.md** - URN scheme (`subcog://mem/{domain}/{namespace}/{id}`), LLM providers
+- **MCP_RESOURCES_AND_LLM.md** - URN scheme (`subcog://{domain}/{namespace}/{id}`), LLM providers
 - **ACCESS_INTERFACES.md** - CLI, MCP server, streaming API, hooks
 - **SEAMLESS_INTEGRATION.md** - Event bus, pipeline composition, error propagation
 

@@ -352,7 +352,7 @@ This document defines the phased implementation plan for Subcog, the Rust rewrit
 ### 3.3 MCP Resources
 
 - [ ] **3.3.1** Implement resource URNs
-  - Parse `subcog://mem/{domain}/{namespace}/{id}`
+  - Parse `subcog://{domain}/{namespace}/{id}`
   - Build URNs from memories
   - Resource templates
 

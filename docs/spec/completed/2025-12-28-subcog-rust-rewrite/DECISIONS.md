@@ -222,12 +222,12 @@ Memories need unique, stable identifiers that:
 - Enable linking between memories
 
 ### Decision
-Adopt the URN scheme: `subcog://mem/{domain}/{namespace}/{id}`
+Adopt the URN scheme: `subcog://{domain}/{namespace}/{id}`
 
 Examples:
-- `subcog://mem/project:my-app/decisions/abc1234:0`
-- `subcog://mem/user/learnings/def5678:1`
-- `subcog://mem/org:acme-corp/patterns/ghi9012:0`
+- `subcog://project:my-app/decisions/abc1234:0`
+- `subcog://user/learnings/def5678:1`
+- `subcog://org:acme-corp/patterns/ghi9012:0`
 
 ### Consequences
 

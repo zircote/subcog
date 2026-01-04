@@ -35,7 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - CLI interface with clap (capture, recall, status, sync, consolidate, config, serve, hook)
 - MCP server with rmcp (6 tools, resources, prompts, subscriptions)
 - Hook system for Claude Code integration (5 hooks)
-- URN scheme: `subcog://mem/{domain}/{namespace}/{id}`
+- URN scheme: `subcog://{domain}/{namespace}/{id}`
 
 #### Observability
 - OpenTelemetry integration (tracing + metrics)

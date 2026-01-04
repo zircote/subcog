@@ -729,7 +729,7 @@ impl RecallService {
         Ok(SearchResult {
             results: redacted_results,
             total: redacted_results.len(),
-            resource_template: "subcog://mem/{domain}/{namespace}/{id}".into(),
+            resource_template: "subcog://{domain}/{namespace}/{id}".into(),
         })
     }
 }
@@ -781,12 +781,12 @@ impl MemoryMcpServer {
 All memories are addressable via URN:
 
 ```
-subcog://mem/{domain}/{namespace}/{id}
+subcog://{domain}/{namespace}/{id}
 
 Examples:
-- subcog://mem/project:my-app/decisions/abc1234:0
-- subcog://mem/user/learnings/def5678:1
-- subcog://mem/org:acme-corp/patterns/ghi9012:0
+- subcog://project:my-app/decisions/abc1234:0
+- subcog://user/learnings/def5678:1
+- subcog://org:acme-corp/patterns/ghi9012:0
 ```
 
 ### 6.4 Hook System

@@ -489,7 +489,7 @@ impl RecallService {
         Ok(SearchResult {
             results: final_results,
             total: final_results.len(),
-            resource_template: "subcog://mem/{domain}/{namespace}/{id}".into(),
+            resource_template: "subcog://{domain}/{namespace}/{id}".into(),
         })
     }
 }
@@ -936,7 +936,7 @@ pub fn generate_urn(memory: &Memory) -> String {
     };
 
     format!(
-        "subcog://mem/{}/{}/{}",
+        "subcog://project/{}/{}/{}",
         domain_prefix,
         memory.namespace.as_str(),
         memory.id
@@ -1039,7 +1039,7 @@ async fn test_capture_recall_consolidate_integration() {
     assert!(!memory.content.contains("sk-1234567890"));
 
     // Verify URN format
-    assert!(result.uri.starts_with("subcog://mem/"));
+    assert!(result.uri.starts_with("subcog://project/"));
 
     // 2. Recall should find the memory
     let search_result = services.recall()
@@ -1122,7 +1122,7 @@ This document ensures that:
 2. **Events propagate to all interested components** - via the event bus
 3. **Errors propagate with full context** - enabling debugging and recovery
 4. **Observability spans the entire system** - traces, metrics, logs integrated
-5. **URNs are consistent everywhere** - `subcog://mem/{domain}/{namespace}/{id}`
+5. **URNs are consistent everywhere** - `subcog://{domain}/{namespace}/{id}`
 6. **Configuration validates feature dependencies** - no orphaned features
 7. **Tests verify feature composition** - matrix testing all combinations
 

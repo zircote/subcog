@@ -22,7 +22,7 @@ Tasks:
 - [x] Re-read `docs/adrs/adr_0005.md` to confirm the revised URN structure requirements. ✓
 - [x] Inventory URN construction and parsing paths (capture, recall, search filters, serialization). ✓
 - [x] If ADR requires a different URN path segment, update generators and parsers consistently. ✓
-- [ ] Update tests and any documentation that references the URN scheme.
+- [x] Update tests and any documentation that references the URN scheme. ✓
 
 ### 2) ADR-0009 MCP Server Migration (rmcp)
 

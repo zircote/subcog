@@ -11,13 +11,12 @@
 All memories are exposed as MCP resources using a consistent URN scheme that includes domain:
 
 ```
-subcog://mem/{domain}/{namespace}/{memory_id}
+subcog://{domain}/{namespace}/{memory_id}
 ```
 
 **Components:**
 - `subcog://` - Protocol identifier for the subconsciousness memory system
-- `mem/` - Resource type prefix
-- `{domain}` - Memory domain scope:
+- `{domain}` - Memory domain scope (first path segment):
   - `project:{project-id}` - Project-scoped memories (e.g., `project:my-app`)
   - `user` - User-level global memories (cross-project)
   - `org:{org-id}` - Organization-level shared memories (e.g., `org:acme-corp`)
@@ -26,11 +25,11 @@ subcog://mem/{domain}/{namespace}/{memory_id}
 
 **Examples:**
 ```
-subcog://mem/project:my-app/decisions/abc1234:0
-subcog://mem/project:auth-service/learnings/def5678:1
-subcog://mem/user/patterns/ghi9012:0
-subcog://mem/user/preferences/jkl3456:2
-subcog://mem/org:acme-corp/standards/mno7890:0
+subcog://project:my-app/decisions/abc1234:0
+subcog://project:auth-service/learnings/def5678:1
+subcog://user/patterns/ghi9012:0
+subcog://user/preferences/jkl3456:2
+subcog://org:acme-corp/standards/mno7890:0
 ```
 
 ### 1.2 Domain Hierarchy and Storage Mapping
@@ -53,7 +52,7 @@ Each domain maps to an appropriate storage backend:
 │  │ Organization-wide patterns, standards, compliance           │   │
 │  │ Shared across all projects and users in the org             │   │
 │  │ Multi-user access, team collaboration                       │   │
-│  │ Example: subcog://mem/org:acme-corp/standards/sec-001       │   │
+│  │ Example: subcog://org:acme-corp/standards/sec-001       │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │       │                                                             │
 │       ▼                                                             │
@@ -62,7 +61,7 @@ Each domain maps to an appropriate storage backend:
 │  │ Personal learnings, preferences, cross-project patterns     │   │
 │  │ Follows user across all projects (local machine)            │   │
 │  │ ~/.local/share/memory/user.db                               │   │
-│  │ Example: subcog://mem/user/learnings/rust-tips-001          │   │
+│  │ Example: subcog://user/learnings/rust-tips-001          │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │       │                                                             │
 │       ▼                                                             │
@@ -71,7 +70,7 @@ Each domain maps to an appropriate storage backend:
 │  │ Project-specific decisions, blockers, progress              │   │
 │  │ Scoped to single repository, syncs with git remote          │   │
 │  │ refs/notes/mem/{namespace}                                  │   │
-│  │ Example: subcog://mem/project:my-app/decisions/db-choice    │   │
+│  │ Example: subcog://project:my-app/decisions/db-choice    │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
@@ -110,19 +109,19 @@ MCP resource templates enable dynamic resource discovery:
 {
   "resourceTemplates": [
     {
-      "uriTemplate": "subcog://mem/{namespace}/{memory_id}",
+      "uriTemplate": "subcog://{domain}/{namespace}/{memory_id}",
       "name": "Memory Resource",
       "description": "Access a specific memory by namespace and ID",
       "mimeType": "application/json"
     },
     {
-      "uriTemplate": "subcog://mem/{namespace}",
+      "uriTemplate": "subcog://{domain}/{namespace}",
       "name": "Namespace Listing",
       "description": "List all memories in a namespace",
       "mimeType": "application/json"
     },
     {
-      "uriTemplate": "subcog://mem",
+      "uriTemplate": "subcog://{domain}",
       "name": "All Memories",
       "description": "List all memory namespaces and counts",
       "mimeType": "application/json"
@@ -136,7 +135,7 @@ MCP resource templates enable dynamic resource discovery:
 **Single Memory Resource:**
 ```json
 {
-  "uri": "subcog://mem/decisions/abc1234:0",
+  "uri": "subcog://project/decisions/abc1234:0",
   "name": "Use PostgreSQL for data layer",
   "description": "Architecture decision for database selection",
   "mimeType": "application/json",
@@ -158,7 +157,7 @@ MCP resource templates enable dynamic resource discovery:
 **Namespace Listing:**
 ```json
 {
-  "uri": "subcog://mem/decisions",
+  "uri": "subcog://project/decisions",
   "name": "Decisions",
   "description": "Architecture Decision Records (45 memories)",
   "mimeType": "application/json",
@@ -171,7 +170,7 @@ MCP resource templates enable dynamic resource discovery:
     },
     "memories": [
       {
-        "uri": "subcog://mem/decisions/abc1234:0",
+        "uri": "subcog://project/decisions/abc1234:0",
         "summary": "Use PostgreSQL for data layer",
         "timestamp": "2025-01-15T10:30:00Z"
       }
@@ -189,18 +188,18 @@ Memory URNs are embedded in Claude Code's `additionalContext` for deep integrati
   <project>my-project</project>
   <spec>feature-auth</spec>
   <resources>
-    <resource uri="subcog://mem/decisions/abc1234:0" relevance="0.92">
+    <resource uri="subcog://project/decisions/abc1234:0" relevance="0.92">
       <summary>Use JWT for authentication</summary>
       <namespace>decisions</namespace>
       <timestamp>2025-01-10T14:00:00Z</timestamp>
     </resource>
-    <resource uri="subcog://mem/learnings/def5678:1" relevance="0.85">
+    <resource uri="subcog://project/learnings/def5678:1" relevance="0.85">
       <summary>Token refresh flow reduces logout issues</summary>
       <namespace>learnings</namespace>
       <timestamp>2025-01-12T09:30:00Z</timestamp>
     </resource>
   </resources>
-  <resource_template uri="subcog://mem/{namespace}/{id}" />
+  <resource_template uri="subcog://{domain}/{namespace}/{id}" />
 </memory_context>
 ```
 
@@ -213,7 +212,7 @@ Memory URNs are embedded in Claude Code's `additionalContext` for deep integrati
 {
   "success": true,
   "resource": {
-    "uri": "subcog://mem/decisions/abc1234:0",
+    "uri": "subcog://project/decisions/abc1234:0",
     "name": "Use PostgreSQL for data layer"
   },
   "indexed": true
@@ -225,14 +224,14 @@ Memory URNs are embedded in Claude Code's `additionalContext` for deep integrati
 {
   "results": [
     {
-      "uri": "subcog://mem/decisions/abc1234:0",
+      "uri": "subcog://project/decisions/abc1234:0",
       "namespace": "decisions",
       "summary": "Use PostgreSQL for data layer",
       "relevance": 0.92,
       "domain": "project"
     }
   ],
-  "resource_template": "subcog://mem/{namespace}/{id}"
+  "resource_template": "subcog://{domain}/{namespace}/{id}"
 }
 ```
 
@@ -240,15 +239,15 @@ Memory URNs are embedded in Claude Code's `additionalContext` for deep integrati
 ```json
 {
   "total_memories": 150,
-  "resource_base": "subcog://mem",
+  "resource_base": "subcog://{domain}",
   "namespaces": [
     {
-      "uri": "subcog://mem/decisions",
+      "uri": "subcog://project/decisions",
       "name": "decisions",
       "count": 45
     },
     {
-      "uri": "subcog://mem/learnings",
+      "uri": "subcog://project/learnings",
       "name": "learnings",
       "count": 80
     }
@@ -267,7 +266,7 @@ pub struct MemoryResourceHandler {
 impl MemoryResourceHandler {
     /// Parse a memory URN into components
     pub fn parse_uri(uri: &str) -> Result<MemoryResourcePath> {
-        // subcog://mem/decisions/abc1234:0
+        // subcog://project/decisions/abc1234:0
         let parsed = url::Url::parse(uri)?;
 
         if parsed.scheme() != "subcog" {
@@ -279,11 +278,13 @@ impl MemoryResourceHandler {
             .collect();
 
         match path_segments.as_slice() {
-            ["mem"] => Ok(MemoryResourcePath::Root),
-            ["mem", namespace] => Ok(MemoryResourcePath::Namespace(
-                Namespace::from_str(namespace)?
-            )),
-            ["mem", namespace, memory_id] => Ok(MemoryResourcePath::Memory {
+            [domain] => Ok(MemoryResourcePath::Domain(domain.to_string())),
+            [domain, namespace] => Ok(MemoryResourcePath::Namespace {
+                domain: domain.to_string(),
+                namespace: Namespace::from_str(namespace)?,
+            }),
+            [domain, namespace, memory_id] => Ok(MemoryResourcePath::Memory {
+                domain: domain.to_string(),
                 namespace: Namespace::from_str(namespace)?,
                 id: MemoryId(memory_id.to_string()),
             }),
@@ -292,21 +293,21 @@ impl MemoryResourceHandler {
     }
 
     /// Build a memory URN from components
-    pub fn build_uri(namespace: Namespace, id: &MemoryId) -> String {
-        format!("subcog://mem/{}/{}", namespace.as_str(), id.0)
+    pub fn build_uri(domain: &str, namespace: Namespace, id: &MemoryId) -> String {
+        format!("subcog://{}/{}/{}", domain, namespace.as_str(), id.0)
     }
 
     /// Build a namespace URI
-    pub fn namespace_uri(namespace: Namespace) -> String {
-        format!("subcog://mem/{}", namespace.as_str())
+    pub fn namespace_uri(domain: &str, namespace: Namespace) -> String {
+        format!("subcog://{}/{}", domain, namespace.as_str())
     }
 }
 
 #[derive(Debug)]
 pub enum MemoryResourcePath {
-    Root,
-    Namespace(Namespace),
-    Memory { namespace: Namespace, id: MemoryId },
+    Domain(String),
+    Namespace { domain: String, namespace: Namespace },
+    Memory { domain: String, namespace: Namespace, id: MemoryId },
 }
 
 /// MCP resources/list handler
@@ -315,10 +316,11 @@ pub async fn handle_resources_list(
     cursor: Option<String>,
 ) -> Result<ListResourcesResult> {
     let stats = handler.storage.stats().await?;
+    let domain = "project";
 
     let resources: Vec<Resource> = stats.by_namespace.iter()
         .map(|(ns, count)| Resource {
-            uri: MemoryResourceHandler::namespace_uri(*ns),
+            uri: MemoryResourceHandler::namespace_uri(domain, *ns),
             name: ns.as_str().to_string(),
             description: Some(format!("{} memories", count)),
             mime_type: Some("application/json".to_string()),
@@ -339,21 +341,21 @@ pub async fn handle_resource_read(
     let path = MemoryResourceHandler::parse_uri(uri)?;
 
     match path {
-        MemoryResourcePath::Root => {
+        MemoryResourcePath::Domain(domain) => {
             let stats = handler.storage.stats().await?;
             Ok(ReadResourceResult {
                 contents: vec![ResourceContents::Text {
-                    uri: "subcog://mem".to_string(),
+                    uri: format!("subcog://{}", domain),
                     mime_type: Some("application/json".to_string()),
                     text: serde_json::to_string(&stats)?,
                 }],
             })
         }
-        MemoryResourcePath::Namespace(ns) => {
+        MemoryResourcePath::Namespace { domain, namespace: ns } => {
             let memories = handler.storage.list_namespace(ns).await?;
             Ok(ReadResourceResult {
                 contents: vec![ResourceContents::Text {
-                    uri: MemoryResourceHandler::namespace_uri(ns),
+                    uri: MemoryResourceHandler::namespace_uri(&domain, ns),
                     mime_type: Some("application/json".to_string()),
                     text: serde_json::to_string(&memories)?,
                 }],
@@ -378,13 +380,13 @@ pub fn handle_resource_templates() -> ListResourceTemplatesResult {
     ListResourceTemplatesResult {
         resource_templates: vec![
             ResourceTemplate {
-                uri_template: "subcog://mem/{namespace}/{memory_id}".to_string(),
+                uri_template: "subcog://{domain}/{namespace}/{memory_id}".to_string(),
                 name: "Memory Resource".to_string(),
                 description: Some("Access a specific memory".to_string()),
                 mime_type: Some("application/json".to_string()),
             },
             ResourceTemplate {
-                uri_template: "subcog://mem/{namespace}".to_string(),
+                uri_template: "subcog://{domain}/{namespace}".to_string(),
                 name: "Namespace Listing".to_string(),
                 description: Some("List memories in a namespace".to_string()),
                 mime_type: Some("application/json".to_string()),
@@ -766,8 +768,8 @@ Every MCP tool MUST return resource URNs:
 
 | Tool | Input URN | Output URN |
 |------|-----------|------------|
-| `memory.capture` | - | `subcog://mem/{namespace}/{id}` |
-| `memory.recall` | - | List of `subcog://mem/{namespace}/{id}` |
+| `memory.capture` | - | `subcog://{domain}/{namespace}/{id}` |
+| `memory.recall` | - | List of `subcog://{domain}/{namespace}/{id}` |
 | `memory.status` | - | Namespace URIs |
 | `memory.sync` | - | Synced resource URIs |
 | `memory.consolidate` | - | Affected resource URIs |

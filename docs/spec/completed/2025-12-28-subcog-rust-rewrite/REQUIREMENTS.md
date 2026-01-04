@@ -464,7 +464,7 @@ Capture a new memory to git-backed storage.
 {
   "success": true,
   "memory_id": "decisions:abc1234:0",
-  "uri": "subcog://mem/project:my-app/decisions/abc1234:0",
+  "uri": "subcog://project:my-app/decisions/abc1234:0",
   "indexed": true,
   "warning": null
 }
@@ -491,7 +491,7 @@ Search and retrieve relevant memories.
 {
   "results": [
     {
-      "uri": "subcog://mem/project:my-app/decisions/abc1234:0",
+      "uri": "subcog://project:my-app/decisions/abc1234:0",
       "namespace": "decisions",
       "summary": "Use PostgreSQL for data layer",
       "distance": 0.15,
@@ -500,7 +500,7 @@ Search and retrieve relevant memories.
     }
   ],
   "total": 1,
-  "resource_template": "subcog://mem/{domain}/{namespace}/{id}"
+  "resource_template": "subcog://{domain}/{namespace}/{id}"
 }
 ```
 
@@ -547,7 +547,7 @@ View or update memory system configuration.
 
 | Term | Definition |
 |------|------------|
-| URN | Uniform Resource Name for memories: `subcog://mem/{domain}/{namespace}/{id}` |
+| URN | Uniform Resource Name for memories: `subcog://{domain}/{namespace}/{id}` |
 | MCP | Model Context Protocol - standard for AI agent tools |
 | RRF | Reciprocal Rank Fusion - algorithm for combining search results |
 | BM25 | Best Match 25 - probabilistic full-text ranking |

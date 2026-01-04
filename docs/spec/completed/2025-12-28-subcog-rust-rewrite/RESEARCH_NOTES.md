@@ -87,7 +87,7 @@ The Python implementation (git-notes-memory) validated the core architecture wit
 - Subscription support for real-time updates
 
 **URN Design:**
-- `subcog://mem/{domain}/{namespace}/{id}` format
+- `subcog://{domain}/{namespace}/{id}` format
 - Domain hierarchy: project, user, org
 - Namespace: decisions, learnings, etc.
 - ID: commit-based with index

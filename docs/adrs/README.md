@@ -12,7 +12,7 @@
 | 2 | [ADR-0002: Three-Layer Storage Architecture](./adr_0002.md) | Accepted | ✅ Compliant | None |
 | 3 | [ADR-0003: Feature Tier System](./adr_0003.md) | Accepted | ⚠️ Partial | Update tier definitions to reflect current storage or reintroduce Tier 1 persistence mapping. |
 | 4 | [ADR-0004: Event Bus for Cross-Component Communication](./adr_0004.md) | Accepted | ❌ Violated | Implement a tokio broadcast event bus or revise the ADR to match current event handling. |
-| 5 | [ADR-0005: URN Scheme for Memory Addressing](./adr_0005.md) | Accepted | ❌ Violated | Align URN format to `subcog://mem/{domain}/{namespace}/{id}` or update the ADR. |
+| 5 | [ADR-0005: URN Scheme for Memory Addressing](./adr_0005.md) | Accepted | ❌ Violated | Align URN format to `subcog://{domain}/{namespace}/{id}` or update the ADR. |
 | 6 | [ADR-0007: fastembed for Embedding Generation](./adr_0007.md) | Accepted | ✅ Compliant | None |
 | 7 | [ADR-0008: usearch for Vector Search](./adr_0008.md) | Accepted | ✅ Compliant | None |
 | 8 | [ADR-0009: rmcp for MCP Server Implementation](./adr_0009.md) | Accepted | ❌ Violated | Adopt rmcp or update ADR-0009 to document the custom server choice. |
@@ -69,7 +69,7 @@
 ## Critical Findings
 
 - ADR-0004: Event Bus for Cross-Component Communication: Implement a tokio broadcast event bus or revise the ADR to match current event handling.
-- ADR-0005: URN Scheme for Memory Addressing: Align URN format to `subcog://mem/{domain}/{namespace}/{id}` or update the ADR.
+- ADR-0005: URN Scheme for Memory Addressing: Align URN format to `subcog://{domain}/{namespace}/{id}` or update the ADR.
 - ADR-0009: rmcp for MCP Server Implementation: Adopt rmcp or update ADR-0009 to document the custom server choice.
 - ADR-0034: Three-Layer Storage Synchronization Strategy: Update the ADR or reintroduce Git Notes as authoritative storage.
 - ADR-0041: Conditional Git Notes in CaptureService: Implement use_git_notes flag or update ADR-0041.
@@ -79,7 +79,7 @@
 
 ## Recommendations
 
-- Align URN format ADRs with current implementation (add /mem or update ADR-0005).
+- Align URN format ADRs with current implementation (update ADR-0005).
 - Implement or document replacement for Git Notes in ADR-0034/ADR-0041 to avoid drift.
 - Add faceting fields (project_id, branch, file_path) and schema columns to satisfy ADR-0048/ADR-0049.
 - Enforce token budgets and hash-tagging during capture to close ADR-0015/ADR-0018 gaps.
