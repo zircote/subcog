@@ -618,7 +618,7 @@ org_scope_enabled = true
 - [x] User-facing docs explain new features ✓
 
 ### Deployment Readiness
-- [ ] `make ci` passes clean
+- [x] `make ci` passes clean ✓
 - [ ] Database migrations tested
 - [ ] Rollback plan documented
 - [ ] Production deployment plan ready
