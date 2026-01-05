@@ -550,7 +550,7 @@ org_scope_enabled = true
 
 **Mitigation:**
 - [x] Test migration on copy of production database first ✓
-- [ ] Create and test rollback migration
+- [x] Create and test rollback migration ✓
 - [ ] Backup database before running migration
 - [ ] Test on database with real data volume
 - [ ] Verify migration is idempotent
