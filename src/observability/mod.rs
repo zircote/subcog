@@ -280,6 +280,8 @@ pub fn init(config: ObservabilityConfig) -> Result<ObservabilityHandle> {
                     tracing_subscriber::fmt::layer()
                         .with_writer(writer)
                         .with_ansi(false)
+                        .with_current_span(true)
+                        .with_span_list(true)
                         .with_target(true)
                         .with_thread_ids(true)
                         .with_thread_names(true),
@@ -312,6 +314,8 @@ pub fn init(config: ObservabilityConfig) -> Result<ObservabilityHandle> {
                 .with(
                     tracing_subscriber::fmt::layer()
                         .pretty()
+                        .with_current_span(true)
+                        .with_span_list(true)
                         .with_target(true)
                         .with_thread_ids(true)
                         .with_thread_names(true),
