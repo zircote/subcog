@@ -650,7 +650,7 @@ Copy this to track progress:
 - [x] Task 3.4: Document org-scope configuration ✓
 
 ## Phase 4: Documentation (ADR-0009) [0/1]
-- [ ] Task 4.1: Document MCP implementation choice
+- [x] Task 4.1: Document MCP implementation choice ✓
 
 ## Phase 5: Verification [0/3]
 - [ ] Task 5.1: Run full test suite
