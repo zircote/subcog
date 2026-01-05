@@ -477,6 +477,8 @@ impl ServerHandler for McpHandler {
         async move {
             #[cfg(feature = "http")]
             ensure_tool_authorized(&state.tool_auth, &context, &request.name)?;
+            #[cfg(not(feature = "http"))]
+            let _ = &context;
 
             let arguments = match request.arguments {
                 Some(args) => Value::Object(args),
