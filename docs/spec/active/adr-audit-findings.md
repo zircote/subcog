@@ -602,7 +602,7 @@ org_scope_enabled = true
 ### Functional Requirements
 - [x] ADR-0053 compliant: Tombstone pattern working end-to-end ✓
 - [x] ADR-0052 compliant: Lazy GC tombstones stale branch memories ✓
-- [ ] ADR-0051 compliant: Org-scope feature gate present and functional
+- [x] ADR-0051 compliant: Org-scope feature gate present and functional ✓
 - [ ] ADR-0009 deviation properly documented
 
 ### Testing
