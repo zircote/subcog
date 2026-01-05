@@ -7,6 +7,7 @@ use crate::current_timestamp;
 use crate::models::{
     EdgeType, EventMeta, Memory, MemoryEvent, MemoryStatus, MemoryTier, Namespace, RetentionScore,
 };
+use crate::observability::current_request_id;
 use crate::security::record_event;
 use crate::storage::traits::PersistenceBackend;
 use lru::LruCache;
@@ -101,7 +102,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
                     memory.status = MemoryStatus::Archived;
                     self.persistence.store(&memory)?;
                     record_event(MemoryEvent::Archived {
-                        meta: EventMeta::with_timestamp("consolidation", None, now),
+                        meta: EventMeta::with_timestamp("consolidation", current_request_id(), now),
                         memory_id: memory.id.clone(),
                         reason: "consolidation_archive".to_string(),
                     });
@@ -113,7 +114,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             stats.contradictions = self.detect_contradictions(&memory_ids)?;
 
             record_event(MemoryEvent::Consolidated {
-                meta: EventMeta::new("consolidation", None),
+                meta: EventMeta::new("consolidation", current_request_id()),
                 processed: stats.processed,
                 archived: stats.archived,
                 merged: stats.merged,

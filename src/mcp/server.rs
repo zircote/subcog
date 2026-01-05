@@ -13,7 +13,7 @@ use crate::mcp::{
     PromptRegistry, ResourceContent, ResourceDefinition, ResourceHandler, ToolContent,
     ToolDefinition, ToolRegistry, ToolResult,
 };
-use crate::observability::flush_metrics;
+use crate::observability::{RequestContext, current_request_id, flush_metrics, scope_request_context};
 use crate::models::{EventMeta, MemoryEvent};
 use crate::security::record_event;
 use crate::services::ServiceContainer;
@@ -54,6 +54,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+use tracing::info_span;
 use tokio::sync::Mutex;
 #[cfg(feature = "http")]
 use tower_http::cors::CorsLayer;
@@ -164,94 +165,107 @@ async fn auth_middleware(
     mut req: Request,
     next: Next,
 ) -> Response {
-    let auth_header = req
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok());
+    let request_context = RequestContext::new();
+    let request_id = request_context.request_id().to_string();
+    scope_request_context(request_context, async move {
+        let span = info_span!(
+            "subcog.mcp.auth",
+            request_id = %request_id,
+            component = "mcp",
+            operation = "auth"
+        );
+        let _span_guard = span.enter();
 
-    let claims = match auth_header {
-        Some(header_value) => match state.authenticator.validate_header(header_value) {
-            Ok(claims) => claims,
-            Err(e) => {
-                tracing::warn!(error = %e, "JWT authentication failed");
+        let auth_header = req
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|h| h.to_str().ok());
+
+        let claims = match auth_header {
+            Some(header_value) => match state.authenticator.validate_header(header_value) {
+                Ok(claims) => claims,
+                Err(e) => {
+                    tracing::warn!(error = %e, "JWT authentication failed");
+                    record_event(MemoryEvent::McpAuthFailed {
+                        meta: EventMeta::new("mcp", current_request_id()),
+                        client_id: None,
+                        reason: e.to_string(),
+                    });
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        Json(serde_json::json!({
+                            "error": {
+                                "code": -32000,
+                                "message": format!("Authentication failed: {e}")
+                            }
+                        })),
+                    )
+                        .into_response();
+                },
+            },
+            None => {
                 record_event(MemoryEvent::McpAuthFailed {
-                    meta: EventMeta::new("mcp", None),
+                    meta: EventMeta::new("mcp", current_request_id()),
                     client_id: None,
-                    reason: e.to_string(),
+                    reason: "missing authorization header".to_string(),
                 });
                 return (
                     StatusCode::UNAUTHORIZED,
                     Json(serde_json::json!({
                         "error": {
                             "code": -32000,
-                            "message": format!("Authentication failed: {e}")
+                            "message": "Authentication required"
                         }
                     })),
                 )
                     .into_response();
             },
-        },
-        None => {
-            record_event(MemoryEvent::McpAuthFailed {
-                meta: EventMeta::new("mcp", None),
-                client_id: None,
-                reason: "missing authorization header".to_string(),
+        };
+
+        let client_id = claims.sub.clone();
+        let mut rate_limits = state.rate_limits.lock().await;
+        let entry = rate_limits
+            .entry(client_id.clone())
+            .or_insert_with(|| RateLimitEntry {
+                count: 0,
+                window_start: Instant::now(),
             });
+
+        if entry.window_start.elapsed() > state.rate_limit.window {
+            entry.count = 0;
+            entry.window_start = Instant::now();
+        }
+
+        if entry.count >= state.rate_limit.max_requests {
+            tracing::warn!(
+                client = %client_id,
+                requests = entry.count,
+                "Per-client rate limit exceeded"
+            );
             return (
-                StatusCode::UNAUTHORIZED,
+                StatusCode::TOO_MANY_REQUESTS,
                 Json(serde_json::json!({
                     "error": {
                         "code": -32000,
-                        "message": "Authentication required"
+                        "message": format!(
+                            "Rate limit exceeded: max {} requests per {:?}",
+                            state.rate_limit.max_requests,
+                            state.rate_limit.window
+                        )
                     }
                 })),
             )
                 .into_response();
-        },
-    };
+        }
 
-    let client_id = claims.sub.clone();
-    let mut rate_limits = state.rate_limits.lock().await;
-    let entry = rate_limits
-        .entry(client_id.clone())
-        .or_insert_with(|| RateLimitEntry {
-            count: 0,
-            window_start: Instant::now(),
-        });
+        entry.count += 1;
+        drop(rate_limits);
 
-    if entry.window_start.elapsed() > state.rate_limit.window {
-        entry.count = 0;
-        entry.window_start = Instant::now();
-    }
+        req.extensions_mut().insert(claims);
 
-    if entry.count >= state.rate_limit.max_requests {
-        tracing::warn!(
-            client = %client_id,
-            requests = entry.count,
-            "Per-client rate limit exceeded"
-        );
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(serde_json::json!({
-                "error": {
-                    "code": -32000,
-                    "message": format!(
-                        "Rate limit exceeded: max {} requests per {:?}",
-                        state.rate_limit.max_requests,
-                        state.rate_limit.window
-                    )
-                }
-            })),
-        )
-            .into_response();
-    }
-
-    entry.count += 1;
-    drop(rate_limits);
-
-    req.extensions_mut().insert(claims);
-
-    next.run(req).await
+        next.run(req).await
+    })
+    .await
 }
 
 #[cfg(feature = "http")]
@@ -470,14 +484,37 @@ impl ServerHandler for McpHandler {
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListToolsResult>> + Send + '_ {
-        let tools = self
-            .state
-            .tools
-            .list_tools()
-            .into_iter()
-            .map(tool_definition_to_rmcp)
-            .collect();
-        std::future::ready(Ok(ListToolsResult::with_all_items(tools)))
+        let state = self.state.clone();
+        let existing_request_id = current_request_id();
+        let request_context = existing_request_id.is_none().then(RequestContext::new);
+        let request_id = existing_request_id
+            .unwrap_or_else(|| request_context.as_ref().unwrap().request_id().to_string());
+
+        async move {
+            let run = async move {
+                let span = info_span!(
+                    "subcog.mcp.list_tools",
+                    request_id = %request_id,
+                    component = "mcp",
+                    operation = "list_tools"
+                );
+                let _span_guard = span.enter();
+
+                let tools = state
+                    .tools
+                    .list_tools()
+                    .into_iter()
+                    .map(tool_definition_to_rmcp)
+                    .collect();
+                Ok(ListToolsResult::with_all_items(tools))
+            };
+
+            if let Some(context) = request_context {
+                scope_request_context(context, run).await
+            } else {
+                run.await
+            }
+        }
     }
 
     fn call_tool(
@@ -486,49 +523,70 @@ impl ServerHandler for McpHandler {
         context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<CallToolResult>> + Send + '_ {
         let state = self.state.clone();
+        let existing_request_id = current_request_id();
+        let request_context = existing_request_id.is_none().then(RequestContext::new);
+        let request_id = existing_request_id
+            .unwrap_or_else(|| request_context.as_ref().unwrap().request_id().to_string());
         async move {
-            let start = Instant::now();
-            #[cfg(feature = "http")]
-            if let Err(err) = ensure_tool_authorized(&state.tool_auth, &context, &request.name) {
-                record_event(MemoryEvent::McpRequestError {
-                    meta: EventMeta::new("mcp", None),
-                    operation: "call_tool".to_string(),
-                    error: err.to_string(),
-                });
-                return Err(err);
-            }
-            #[cfg(not(feature = "http"))]
-            let _ = &context;
+            let run = async move {
+                let span = info_span!(
+                    "subcog.mcp.call_tool",
+                    request_id = %request_id,
+                    component = "mcp",
+                    operation = "call_tool",
+                    tool_name = %request.name
+                );
+                let _span_guard = span.enter();
 
-            let arguments = match request.arguments {
-                Some(args) => Value::Object(args),
-                None => Value::Object(Map::new()),
+                let start = Instant::now();
+                #[cfg(feature = "http")]
+                if let Err(err) = ensure_tool_authorized(&state.tool_auth, &context, &request.name) {
+                    record_event(MemoryEvent::McpRequestError {
+                        meta: EventMeta::new("mcp", current_request_id()),
+                        operation: "call_tool".to_string(),
+                        error: err.to_string(),
+                    });
+                    return Err(err);
+                }
+                #[cfg(not(feature = "http"))]
+                let _ = &context;
+
+                let arguments = match request.arguments {
+                    Some(args) => Value::Object(args),
+                    None => Value::Object(Map::new()),
+                };
+
+                let result = state
+                    .tools
+                    .execute(&request.name, arguments)
+                    .map_err(|e| {
+                        record_event(MemoryEvent::McpRequestError {
+                            meta: EventMeta::new("mcp", current_request_id()),
+                            operation: "call_tool".to_string(),
+                            error: e.to_string(),
+                        });
+                        McpError::invalid_params(e.to_string(), None)
+                    })?;
+
+                let status = if result.is_error { "error" } else { "success" };
+                record_event(MemoryEvent::McpToolExecuted {
+                    meta: EventMeta::new("mcp", current_request_id()),
+                    tool_name: request.name.clone(),
+                    status: status.to_string(),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                    error: result
+                        .is_error
+                        .then_some("tool execution returned error".to_string()),
+                });
+
+                Ok(tool_result_to_rmcp(result))
             };
 
-            let result = state
-                .tools
-                .execute(&request.name, arguments)
-                .map_err(|e| {
-                    record_event(MemoryEvent::McpRequestError {
-                        meta: EventMeta::new("mcp", None),
-                        operation: "call_tool".to_string(),
-                        error: e.to_string(),
-                    });
-                    McpError::invalid_params(e.to_string(), None)
-                })?;
-
-            let status = if result.is_error { "error" } else { "success" };
-            record_event(MemoryEvent::McpToolExecuted {
-                meta: EventMeta::new("mcp", None),
-                tool_name: request.name.clone(),
-                status: status.to_string(),
-                duration_ms: start.elapsed().as_millis() as u64,
-                error: result
-                    .is_error
-                    .then_some("tool execution returned error".to_string()),
-            });
-
-            Ok(tool_result_to_rmcp(result))
+            if let Some(context) = request_context {
+                scope_request_context(context, run).await
+            } else {
+                run.await
+            }
         }
     }
 
@@ -538,16 +596,36 @@ impl ServerHandler for McpHandler {
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListResourcesResult>> + Send + '_ {
         let state = self.state.clone();
+        let existing_request_id = current_request_id();
+        let request_context = existing_request_id.is_none().then(RequestContext::new);
+        let request_id = existing_request_id
+            .unwrap_or_else(|| request_context.as_ref().unwrap().request_id().to_string());
         async move {
-            let resources = state
-                .resources
-                .lock()
-                .await
-                .list_resources()
-                .into_iter()
-                .map(resource_definition_to_rmcp)
-                .collect();
-            Ok(ListResourcesResult::with_all_items(resources))
+            let run = async move {
+                let span = info_span!(
+                    "subcog.mcp.list_resources",
+                    request_id = %request_id,
+                    component = "mcp",
+                    operation = "list_resources"
+                );
+                let _span_guard = span.enter();
+
+                let resources = state
+                    .resources
+                    .lock()
+                    .await
+                    .list_resources()
+                    .into_iter()
+                    .map(resource_definition_to_rmcp)
+                    .collect();
+                Ok(ListResourcesResult::with_all_items(resources))
+            };
+
+            if let Some(context) = request_context {
+                scope_request_context(context, run).await
+            } else {
+                run.await
+            }
         }
     }
 
@@ -556,7 +634,29 @@ impl ServerHandler for McpHandler {
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListResourceTemplatesResult>> + Send + '_ {
-        std::future::ready(Ok(ListResourceTemplatesResult::with_all_items(Vec::new())))
+        let existing_request_id = current_request_id();
+        let request_context = existing_request_id.is_none().then(RequestContext::new);
+        let request_id = existing_request_id
+            .unwrap_or_else(|| request_context.as_ref().unwrap().request_id().to_string());
+
+        async move {
+            let run = async move {
+                let span = info_span!(
+                    "subcog.mcp.list_resource_templates",
+                    request_id = %request_id,
+                    component = "mcp",
+                    operation = "list_resource_templates"
+                );
+                let _span_guard = span.enter();
+                Ok(ListResourceTemplatesResult::with_all_items(Vec::new()))
+            };
+
+            if let Some(context) = request_context {
+                scope_request_context(context, run).await
+            } else {
+                run.await
+            }
+        }
     }
 
     fn read_resource(
@@ -566,16 +666,37 @@ impl ServerHandler for McpHandler {
     ) -> impl std::future::Future<Output = McpResult<rmcp::model::ReadResourceResult>> + Send + '_
     {
         let state = self.state.clone();
+        let existing_request_id = current_request_id();
+        let request_context = existing_request_id.is_none().then(RequestContext::new);
+        let request_id = existing_request_id
+            .unwrap_or_else(|| request_context.as_ref().unwrap().request_id().to_string());
         async move {
-            let content = state
-                .resources
-                .lock()
-                .await
-                .get_resource(&request.uri)
-                .map_err(|e| McpError::resource_not_found(e.to_string(), None))?;
+            let run = async move {
+                let span = info_span!(
+                    "subcog.mcp.read_resource",
+                    request_id = %request_id,
+                    component = "mcp",
+                    operation = "read_resource",
+                    resource_uri = %request.uri
+                );
+                let _span_guard = span.enter();
 
-            let contents = vec![resource_content_to_rmcp(content)];
-            Ok(rmcp::model::ReadResourceResult { contents })
+                let content = state
+                    .resources
+                    .lock()
+                    .await
+                    .get_resource(&request.uri)
+                    .map_err(|e| McpError::resource_not_found(e.to_string(), None))?;
+
+                let contents = vec![resource_content_to_rmcp(content)];
+                Ok(rmcp::model::ReadResourceResult { contents })
+            };
+
+            if let Some(context) = request_context {
+                scope_request_context(context, run).await
+            } else {
+                run.await
+            }
         }
     }
 
@@ -584,14 +705,36 @@ impl ServerHandler for McpHandler {
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListPromptsResult>> + Send + '_ {
-        let prompts: Vec<Prompt> = self
-            .state
-            .prompts
-            .list_prompts()
-            .into_iter()
-            .map(prompt_definition_to_rmcp)
-            .collect();
-        std::future::ready(Ok(ListPromptsResult::with_all_items(prompts)))
+        let state = self.state.clone();
+        let existing_request_id = current_request_id();
+        let request_context = existing_request_id.is_none().then(RequestContext::new);
+        let request_id = existing_request_id
+            .unwrap_or_else(|| request_context.as_ref().unwrap().request_id().to_string());
+        async move {
+            let run = async move {
+                let span = info_span!(
+                    "subcog.mcp.list_prompts",
+                    request_id = %request_id,
+                    component = "mcp",
+                    operation = "list_prompts"
+                );
+                let _span_guard = span.enter();
+
+                let prompts: Vec<Prompt> = state
+                    .prompts
+                    .list_prompts()
+                    .into_iter()
+                    .map(prompt_definition_to_rmcp)
+                    .collect();
+                Ok(ListPromptsResult::with_all_items(prompts))
+            };
+
+            if let Some(context) = request_context {
+                scope_request_context(context, run).await
+            } else {
+                run.await
+            }
+        }
     }
 
     fn get_prompt(
@@ -599,28 +742,51 @@ impl ServerHandler for McpHandler {
         request: GetPromptRequestParam,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<GetPromptResult>> + Send + '_ {
-        let messages = match request.arguments {
-            Some(args) => Value::Object(args),
-            None => Value::Object(Map::new()),
-        };
+        let state = self.state.clone();
+        let existing_request_id = current_request_id();
+        let request_context = existing_request_id.is_none().then(RequestContext::new);
+        let request_id = existing_request_id
+            .unwrap_or_else(|| request_context.as_ref().unwrap().request_id().to_string());
+        async move {
+            let run = async move {
+                let span = info_span!(
+                    "subcog.mcp.get_prompt",
+                    request_id = %request_id,
+                    component = "mcp",
+                    operation = "get_prompt",
+                    prompt = %request.name
+                );
+                let _span_guard = span.enter();
 
-        let result = self
-            .state
-            .prompts
-            .get_prompt_messages(&request.name, &messages)
-            .ok_or_else(|| McpError::invalid_params("Unknown prompt".to_string(), None))
-            .map(|msgs| {
-                let mapped = msgs
-                    .into_iter()
-                    .map(prompt_message_to_rmcp)
-                    .collect::<Vec<_>>();
-                GetPromptResult {
-                    description: None,
-                    messages: mapped,
-                }
-            });
+                let messages = match request.arguments {
+                    Some(args) => Value::Object(args),
+                    None => Value::Object(Map::new()),
+                };
 
-        std::future::ready(result)
+                let result = state
+                    .prompts
+                    .get_prompt_messages(&request.name, &messages)
+                    .ok_or_else(|| McpError::invalid_params("Unknown prompt".to_string(), None))
+                    .map(|msgs| {
+                        let mapped = msgs
+                            .into_iter()
+                            .map(prompt_message_to_rmcp)
+                            .collect::<Vec<_>>();
+                        GetPromptResult {
+                            description: None,
+                            messages: mapped,
+                        }
+                    });
+
+                result
+            };
+
+            if let Some(context) = request_context {
+                scope_request_context(context, run).await
+            } else {
+                run.await
+            }
+        }
     }
 }
 
@@ -908,7 +1074,7 @@ impl McpServer {
             Transport::Http => ("http", Some(self.port)),
         };
         record_event(MemoryEvent::McpStarted {
-            meta: EventMeta::new("mcp", None),
+            meta: EventMeta::new("mcp", current_request_id()),
             transport: transport.to_string(),
             port,
         });

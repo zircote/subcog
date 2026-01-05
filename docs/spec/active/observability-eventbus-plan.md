@@ -37,7 +37,7 @@
 
 ### Phase 2: Tracing & Context Propagation
 - [x] Define trace/span naming conventions and required attributes ✓
-- [ ] Add request correlation IDs to CLI/MCP/hook flows (parity)
+- [x] Add request correlation IDs to CLI/MCP/hook flows (parity) ✓
 - [ ] Instrument capture/recall/consolidation/GC with spans and sub-spans
 - [ ] Instrument MCP tool execution and hook handlers with spans
 - [ ] Propagate context across async boundaries (tokio tasks, hooks, MCP)

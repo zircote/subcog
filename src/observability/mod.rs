@@ -4,12 +4,16 @@ mod event_bus;
 mod logging;
 mod metrics;
 mod otlp;
+mod request_context;
 mod tracing;
 
 pub use event_bus::{EventBus, global_event_bus};
 pub use logging::{LogFormat, Logger, LoggingConfig};
 pub use metrics::{Metrics, MetricsConfig, flush_global as flush_metrics, set_instance_label};
 pub use otlp::{OtlpConfig, OtlpExporter, OtlpProtocol};
+pub use request_context::{
+    RequestContext, current_request_id, enter_request_context, scope_request_context,
+};
 pub use tracing::{Tracer, TracingConfig};
 
 use crate::config::ObservabilitySettings;

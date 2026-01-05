@@ -12,6 +12,7 @@ use crate::Result;
 use crate::config::SearchIntentConfig;
 use crate::llm::LlmProvider;
 use crate::models::{CaptureRequest, CaptureResult, EventMeta, MemoryEvent, Namespace};
+use crate::observability::current_request_id;
 use crate::security::record_event;
 use crate::services::{CaptureService, RecallService};
 use regex::Regex;
@@ -250,7 +251,7 @@ impl UserPromptHandler {
         }
         let intent = self.classify_intent(prompt);
         record_event(MemoryEvent::HookClassified {
-            meta: EventMeta::new("hooks", None),
+            meta: EventMeta::new("hooks", current_request_id()),
             hook: "UserPromptSubmit".to_string(),
             classification: intent.intent_type.as_str().to_string(),
             classifier: intent.source.as_str().to_string(),
@@ -507,7 +508,7 @@ impl UserPromptHandler {
             "suggested"
         };
         record_event(MemoryEvent::HookCaptureDecision {
-            meta: EventMeta::new("hooks", None),
+            meta: EventMeta::new("hooks", current_request_id()),
             hook: "UserPromptSubmit".to_string(),
             decision: decision.to_string(),
             namespace: signals.first().map(|signal| signal.namespace.as_str().to_string()),

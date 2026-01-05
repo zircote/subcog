@@ -9,11 +9,12 @@ use subcog::hooks::{
     StopHandler, UserPromptHandler,
 };
 use subcog::models::{EventMeta, MemoryEvent};
-use subcog::observability::flush_metrics;
+use subcog::observability::{RequestContext, current_request_id, enter_request_context, flush_metrics};
 use subcog::security::record_event;
 use subcog::services::ContextBuilderService;
 use subcog::storage::index::SqliteBackend;
 use subcog::{CaptureService, RecallService, SyncService};
+use tracing::info_span;
 
 use super::HookEvent;
 
@@ -25,6 +26,18 @@ pub fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn s
     // Each hook type gets its own instance (hooks-session-start, hooks-user-prompt-submit, etc.)
     let instance_label = format!("hooks-{}", event.as_str());
     subcog::observability::set_instance_label(&instance_label);
+
+    let request_context = RequestContext::new();
+    let request_id = request_context.request_id().to_string();
+    let _request_guard = enter_request_context(request_context);
+    let span = info_span!(
+        "subcog.hook.invoke",
+        request_id = %request_id,
+        component = "hooks",
+        operation = "invoke",
+        hook = event.as_str()
+    );
+    let _span_guard = span.enter();
 
     // Read input from stdin as a string
     let input = read_hook_input()?;
@@ -43,7 +56,7 @@ pub fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn s
 
     let hook_name = event.as_str();
     record_event(MemoryEvent::HookInvoked {
-        meta: EventMeta::new("hooks", None),
+        meta: EventMeta::new("hooks", current_request_id()),
         hook: hook_name.to_string(),
     });
 
@@ -98,7 +111,7 @@ pub fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn s
         Ok(response) => response,
         Err(err) => {
             record_event(MemoryEvent::HookFailed {
-                meta: EventMeta::new("hooks", None),
+                meta: EventMeta::new("hooks", current_request_id()),
                 hook: hook_name.to_string(),
                 error: err.to_string(),
             });

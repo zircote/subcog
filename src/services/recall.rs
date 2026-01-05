@@ -10,6 +10,7 @@ use crate::models::{
     EventMeta, Memory, MemoryEvent, MemoryId, MemoryStatus, SearchFilter, SearchHit, SearchMode,
     SearchResult,
 };
+use crate::observability::current_request_id;
 use crate::security::record_event;
 use crate::storage::index::SqliteBackend;
 use crate::storage::traits::{IndexBackend, VectorBackend};
@@ -247,7 +248,7 @@ impl RecallService {
             let query_arc: std::sync::Arc<str> = query.into();
             for hit in &memories {
                 record_event(MemoryEvent::Retrieved {
-                    meta: EventMeta::with_timestamp("recall", None, timestamp),
+                    meta: EventMeta::with_timestamp("recall", current_request_id(), timestamp),
                     memory_id: hit.memory.id.clone(),
                     query: std::sync::Arc::clone(&query_arc),
                     score: hit.score,
@@ -391,7 +392,7 @@ impl RecallService {
             let query_arc: std::sync::Arc<str> = "*".into();
             for hit in &memories {
                 record_event(MemoryEvent::Retrieved {
-                    meta: EventMeta::with_timestamp("recall", None, timestamp),
+                    meta: EventMeta::with_timestamp("recall", current_request_id(), timestamp),
                     memory_id: hit.memory.id.clone(),
                     query: std::sync::Arc::clone(&query_arc),
                     score: hit.score,

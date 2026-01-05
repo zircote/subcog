@@ -32,6 +32,7 @@
 
 use crate::Result;
 use crate::models::{EventMeta, Memory, MemoryEvent, MemoryId, SearchFilter};
+use crate::observability::current_request_id;
 use crate::security::{AuditEntry, AuditOutcome, global_logger, record_event};
 use crate::storage::index::SqliteBackend;
 use crate::storage::traits::{IndexBackend, VectorBackend};
@@ -363,7 +364,7 @@ impl DataSubjectService {
                 Ok(()) => {
                     deleted_ids.push(id.to_string());
                     record_event(MemoryEvent::Deleted {
-                        meta: EventMeta::new("gdpr", None),
+                        meta: EventMeta::new("gdpr", current_request_id()),
                         memory_id: id.clone(),
                         reason: "gdpr.delete_user_data".to_string(),
                     });

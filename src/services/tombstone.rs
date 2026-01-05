@@ -1,6 +1,7 @@
 //! Tombstone operations for soft-delete functionality (ADR-0053).
 
 use crate::models::{EventMeta, MemoryEvent, MemoryId, MemoryStatus};
+use crate::observability::current_request_id;
 use crate::security::record_event;
 use crate::storage::traits::PersistenceBackend;
 use crate::{Error, Result};
@@ -55,7 +56,7 @@ impl TombstoneService {
         self.persistence.store(&memory)?;
 
         record_event(MemoryEvent::Updated {
-            meta: EventMeta::with_timestamp("tombstone", None, now),
+            meta: EventMeta::with_timestamp("tombstone", current_request_id(), now),
             memory_id: memory.id.clone(),
             modified_fields: vec!["status".to_string(), "tombstoned_at".to_string()],
         });
@@ -97,7 +98,7 @@ impl TombstoneService {
         self.persistence.store(&memory)?;
 
         record_event(MemoryEvent::Updated {
-            meta: EventMeta::with_timestamp("tombstone", None, memory.updated_at),
+            meta: EventMeta::with_timestamp("tombstone", current_request_id(), memory.updated_at),
             memory_id: memory.id.clone(),
             modified_fields: vec!["status".to_string(), "tombstoned_at".to_string()],
         });
@@ -135,7 +136,7 @@ impl TombstoneService {
                         if ts.timestamp() < threshold_i64 {
                             self.persistence.delete(&memory.id)?;
                             record_event(MemoryEvent::Deleted {
-                                meta: EventMeta::new("tombstone", None),
+                                meta: EventMeta::new("tombstone", current_request_id()),
                                 memory_id: memory.id.clone(),
                                 reason: "purge_tombstoned".to_string(),
                             });

@@ -26,8 +26,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use subcog::config::SubcogConfig;
 use subcog::mcp::{McpServer, Transport};
-use subcog::observability::{self, InitOptions};
+use subcog::observability::{self, InitOptions, RequestContext, scope_request_context};
 use subcog::security::AuditConfig;
+use tracing::info_span;
 
 use commands::{HookEvent, MigrateAction, PromptAction};
 
@@ -265,7 +266,37 @@ async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::
         subcog::security::init_global(audit_config)?;
     }
 
-    match cli.command {
+    let command_name = match &cli.command {
+        Commands::Capture { .. } => "capture",
+        Commands::Recall { .. } => "recall",
+        Commands::Status => "status",
+        Commands::Sync { .. } => "sync",
+        Commands::Consolidate => "consolidate",
+        Commands::Reindex { .. } => "reindex",
+        Commands::Enrich { .. } => "enrich",
+        Commands::Config { .. } => "config",
+        Commands::Serve { .. } => "serve",
+        Commands::Hook { .. } => "hook",
+        Commands::Prompt { .. } => "prompt",
+        Commands::Namespaces { .. } => "namespaces",
+        Commands::Migrate { .. } => "migrate",
+        Commands::Completions { .. } => "completions",
+        Commands::Gc { .. } => "gc",
+    };
+
+    let request_context = RequestContext::new();
+    let request_id = request_context.request_id().to_string();
+
+    scope_request_context(request_context, async move {
+        let span = info_span!(
+            "subcog.cli.command",
+            request_id = %request_id,
+            component = "cli",
+            operation = command_name
+        );
+        let _span_guard = span.enter();
+
+        match cli.command {
         Commands::Capture {
             content,
             namespace,
@@ -334,7 +365,9 @@ async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::
             purge,
             older_than,
         } => subcog::cli::gc::execute(dry_run, purge, older_than).map_err(Into::into),
-    }
+        }
+    })
+    .await
 }
 
 /// Loads configuration following a priority-based resolution order.

@@ -9,6 +9,7 @@ use crate::embedding::Embedder;
 use crate::models::{
     CaptureRequest, CaptureResult, EventMeta, Memory, MemoryEvent, MemoryId, MemoryStatus,
 };
+use crate::observability::current_request_id;
 use crate::security::{ContentRedactor, SecretDetector, record_event};
 use crate::services::deduplication::ContentHasher;
 use crate::storage::traits::{IndexBackend, VectorBackend};
@@ -310,7 +311,7 @@ impl CaptureService {
             memory.embedding = None;
 
             record_event(MemoryEvent::Captured {
-                meta: EventMeta::with_timestamp("capture", None, now),
+                meta: EventMeta::with_timestamp("capture", current_request_id(), now),
                 memory_id: memory_id.clone(),
                 namespace: memory.namespace,
                 domain: memory.domain.clone(),
@@ -318,7 +319,7 @@ impl CaptureService {
             });
             if was_redacted {
                 record_event(MemoryEvent::Redacted {
-                    meta: EventMeta::with_timestamp("capture", None, now),
+                    meta: EventMeta::with_timestamp("capture", current_request_id(), now),
                     memory_id: memory_id.clone(),
                     redaction_type: "secrets".to_string(),
                 });
