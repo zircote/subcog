@@ -15,7 +15,15 @@
 
 ## Tracing Spans & Correlation
 
-_(pending inventory)_
+**Instrumented spans (`#[instrument]`):**
+- Services: capture, recall, consolidation, tombstone, enrichment, prompt enrichment, sync, data subject deletion.
+- Hooks: session_start, pre_compact, post_tool_use, stop, user_prompt.
+- GC: branch and retention collectors.
+- Storage (SQLite index): checkpoint, index, remove, clear, get_memory, batch get, reindex.
+
+**Correlation fields:**
+- Span fields commonly include `operation`, `memory_id`, and `backend` where applicable.
+- No standardized `request_id` or correlation ID is currently present in spans/logs.
 
 ## Metrics & Exporters
 

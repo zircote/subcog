@@ -21,7 +21,7 @@
 
 ### Phase 0: Baseline & Inventory
 - [x] Audit current event emissions and consumers (capture, recall, consolidation, sync, GC, MCP, hooks) ✓
-- [ ] Inventory existing tracing spans and log fields for request correlation
+- [x] Inventory existing tracing spans and log fields for request correlation ✓
 - [ ] Document current metrics, exporters, and label cardinality risks
 - [ ] Identify missing observability coverage for critical paths
 
