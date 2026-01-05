@@ -640,7 +640,7 @@ Copy this to track progress:
 - [x] Task 1.7: Update RecallService filtering ✓
 
 ## Phase 2: Lazy GC (ADR-0052) [0/2]
-- [ ] Task 2.1: Verify BranchGarbageCollector works
+- [x] Task 2.1: Verify BranchGarbageCollector works ✓
 - [ ] Task 2.2: Add end-to-end GC integration test
 
 ## Phase 3: Org-Scope (ADR-0051) [0/4]
