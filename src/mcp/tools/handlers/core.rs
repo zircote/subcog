@@ -456,9 +456,9 @@ pub fn execute_reindex(arguments: Value) -> Result<ToolResult> {
 mod tests {
     use super::*;
     use crate::models::{Memory, MemoryId, MemoryStatus, Namespace};
+    use crate::services::RecallService;
     use crate::storage::index::SqliteBackend;
     use crate::storage::traits::IndexBackend;
-    use crate::services::RecallService;
 
     #[test]
     fn test_validate_input_length_within_limit() {
