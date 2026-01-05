@@ -47,6 +47,10 @@ pub fn cmd_config(
         println!("  LLM Features: {}", config.features.llm_features);
         println!("  Auto-Capture: {}", config.features.auto_capture);
         println!("  Consolidation: {}", config.features.consolidation);
+        println!(
+            "  Org Scope Enabled: {}",
+            config.features.org_scope_enabled
+        );
         println!();
         println!("LLM Configuration:");
         println!("  Provider: {:?}", config.llm.provider);

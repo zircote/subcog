@@ -228,6 +228,17 @@ impl ServiceContainer {
         // Find repository root
         let repo_root = find_repo_root(&repo_path)?;
 
+        if org_config.is_some() {
+            let config = SubcogConfig::load_default().with_repo_path(&repo_root);
+            if !(config.features.org_scope_enabled || cfg!(feature = "org-scope")) {
+                tracing::warn!(
+                    "Org-scope config provided but org-scope is disabled. \
+                     Set SUBCOG_ORG_SCOPE_ENABLED=true or build with --features org-scope."
+                );
+                return Err(Error::FeatureNotEnabled("org-scope".to_string()));
+            }
+        }
+
         let config = DomainIndexConfig {
             repo_path: Some(repo_root.clone()),
             org_config,

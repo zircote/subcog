@@ -150,6 +150,12 @@ impl PromptStorageFactory {
     ) -> Result<Arc<dyn PromptStorage>> {
         use crate::config::StorageBackendType;
 
+        if matches!(scope, DomainScope::Org)
+            && !(config.features.org_scope_enabled || cfg!(feature = "org-scope"))
+        {
+            return Err(Error::FeatureNotEnabled("org-scope".to_string()));
+        }
+
         let storage_config = match scope {
             DomainScope::Project => &config.storage.project,
             DomainScope::User => &config.storage.user,

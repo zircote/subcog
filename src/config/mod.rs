@@ -109,6 +109,14 @@ fn expand_env_vars(input: &str) -> Cow<'_, str> {
     Cow::Owned(result)
 }
 
+fn parse_bool_env(value: &str) -> Option<bool> {
+    match value.trim().to_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Some(true),
+        "false" | "0" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
 /// Main configuration for subcog.
 #[derive(Debug, Clone)]
 pub struct SubcogConfig {
@@ -693,6 +701,8 @@ pub struct ConfigFileFeatures {
     pub auto_capture: Option<bool>,
     /// Consolidation feature.
     pub consolidation: Option<bool>,
+    /// Enable org-scope storage.
+    pub org_scope_enabled: Option<bool>,
 }
 
 /// LLM section in config file.
@@ -1114,6 +1124,23 @@ impl SubcogConfig {
     }
 
     fn apply_env_overrides(&mut self) {
+        if let Ok(value) = std::env::var("SUBCOG_ORG_SCOPE_ENABLED") {
+            match parse_bool_env(&value) {
+                Some(enabled) => {
+                    self.features.org_scope_enabled = enabled;
+                    if enabled {
+                        tracing::info!("Org-scope enabled via SUBCOG_ORG_SCOPE_ENABLED");
+                    }
+                },
+                None => {
+                    self.features.org_scope_enabled = false;
+                    tracing::warn!(
+                        value = %value,
+                        "Invalid SUBCOG_ORG_SCOPE_ENABLED value, defaulting to false"
+                    );
+                },
+            }
+        }
         self.search_intent = self.search_intent.clone().with_env_overrides();
         self.prompt = self.prompt.clone().with_env_overrides();
     }
@@ -1157,6 +1184,9 @@ impl SubcogConfig {
             }
             if let Some(v) = features.consolidation {
                 self.features.consolidation = v;
+            }
+            if let Some(v) = features.org_scope_enabled {
+                self.features.org_scope_enabled = v;
             }
         }
         if let Some(llm) = file.llm {

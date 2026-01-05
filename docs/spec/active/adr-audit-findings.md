@@ -458,7 +458,7 @@ org_scope_enabled = true
 - [x] Verify purged memories are permanently deleted ✓
 
 #### Org-Scope Testing
-- [ ] Test with SUBCOG_ORG_SCOPE_ENABLED=false (default)
+- [x] Test with SUBCOG_ORG_SCOPE_ENABLED=false (default) ✓
 - [ ] Verify org-scope features are disabled
 - [ ] Test with SUBCOG_ORG_SCOPE_ENABLED=true
 - [ ] Verify org-scope features are enabled (if implemented)
