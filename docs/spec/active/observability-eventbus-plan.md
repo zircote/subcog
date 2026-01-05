@@ -28,7 +28,7 @@
 ### Phase 1: Event Bus Expansion
 - [x] Define event taxonomy (system, memory lifecycle, security, performance, MCP, hooks) ✓
 - [x] Add event payload schema guidelines (required fields, redaction rules) ✓
-- [ ] Add event bus subscription helpers (filtered subscribers by event type)
+- [x] Add event bus subscription helpers (filtered subscribers by event type) ✓
 - [ ] Emit events from all memory lifecycle operations (capture/update/delete/tombstone/recall)
 - [ ] Emit events for MCP lifecycle (startup, auth, tool execution, request errors)
 - [ ] Emit events for hook lifecycle (invocation, classification, capture decisions, failures)
