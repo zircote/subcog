@@ -10,7 +10,7 @@
 //!
 //! To verify chain integrity, use [`AuditLogger::verify_chain`].
 
-use crate::models::MemoryEvent;
+use crate::models::{EventMeta, MemoryEvent};
 use crate::observability::global_event_bus;
 use crate::{Error, Result};
 use chrono::{DateTime, Utc};
@@ -497,104 +497,296 @@ impl AuditLogger {
 
     /// Converts a `MemoryEvent` to an `AuditEntry`.
     fn event_to_entry(&self, event: &MemoryEvent) -> AuditEntry {
+        fn base_metadata(meta: &EventMeta) -> serde_json::Map<String, serde_json::Value> {
+            let mut metadata = serde_json::Map::new();
+            metadata.insert("event_id".to_string(), serde_json::Value::String(meta.event_id.clone()));
+            metadata.insert(
+                "correlation_id".to_string(),
+                meta.correlation_id
+                    .clone()
+                    .map(serde_json::Value::String)
+                    .unwrap_or(serde_json::Value::Null),
+            );
+            metadata.insert(
+                "source".to_string(),
+                serde_json::Value::String(meta.source.to_string()),
+            );
+            metadata.insert(
+                "event_timestamp".to_string(),
+                serde_json::Value::Number(meta.timestamp.into()),
+            );
+            metadata
+        }
+
         match event {
             MemoryEvent::Captured {
+                meta,
                 memory_id,
                 namespace,
                 domain,
                 content_length,
-                timestamp,
-            } => AuditEntry::new("memory.captured", "create")
-                .with_resource(memory_id.to_string())
-                .with_metadata(serde_json::json!({
-                    "namespace": namespace.as_str(),
-                    "domain": domain.to_string(),
-                    "content_length": content_length,
-                    "event_timestamp": timestamp
-                })),
+            } => {
+                let mut metadata = base_metadata(meta);
+                metadata.insert(
+                    "namespace".to_string(),
+                    serde_json::Value::String(namespace.as_str().to_string()),
+                );
+                metadata.insert(
+                    "domain".to_string(),
+                    serde_json::Value::String(domain.to_string()),
+                );
+                metadata.insert(
+                    "content_length".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(*content_length as u64)),
+                );
+
+                AuditEntry::new("memory.captured", "create")
+                    .with_resource(memory_id.to_string())
+                    .with_metadata(serde_json::Value::Object(metadata))
+            },
 
             MemoryEvent::Retrieved {
+                meta,
                 memory_id,
                 query,
                 score,
-                timestamp,
-            } => AuditEntry::new("memory.retrieved", "read")
-                .with_resource(memory_id.to_string())
-                .with_metadata(serde_json::json!({
-                    "query_length": query.len(),
-                    "score": score,
-                    "event_timestamp": timestamp
-                })),
+            } => {
+                let mut metadata = base_metadata(meta);
+                metadata.insert(
+                    "query_length".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(query.len() as u64)),
+                );
+                metadata.insert(
+                    "score".to_string(),
+                    serde_json::Value::Number(
+                        serde_json::Number::from_f64(f64::from(*score))
+                            .unwrap_or_else(|| serde_json::Number::from(0_u64)),
+                    ),
+                );
+
+                AuditEntry::new("memory.retrieved", "read")
+                    .with_resource(memory_id.to_string())
+                    .with_metadata(serde_json::Value::Object(metadata))
+            },
 
             MemoryEvent::Updated {
+                meta,
                 memory_id,
                 modified_fields,
-                timestamp,
-            } => AuditEntry::new("memory.updated", "update")
-                .with_resource(memory_id.to_string())
-                .with_metadata(serde_json::json!({
-                    "modified_fields": modified_fields,
-                    "event_timestamp": timestamp
-                })),
+            } => {
+                let mut metadata = base_metadata(meta);
+                metadata.insert(
+                    "modified_fields".to_string(),
+                    serde_json::Value::Array(
+                        modified_fields
+                            .iter()
+                            .cloned()
+                            .map(serde_json::Value::String)
+                            .collect(),
+                    ),
+                );
+
+                AuditEntry::new("memory.updated", "update")
+                    .with_resource(memory_id.to_string())
+                    .with_metadata(serde_json::Value::Object(metadata))
+            },
 
             MemoryEvent::Archived {
+                meta,
                 memory_id,
                 reason,
-                timestamp,
-            } => AuditEntry::new("memory.archived", "archive")
-                .with_resource(memory_id.to_string())
-                .with_metadata(serde_json::json!({
-                    "reason": reason,
-                    "event_timestamp": timestamp
-                })),
+            } => {
+                let mut metadata = base_metadata(meta);
+                metadata.insert(
+                    "reason".to_string(),
+                    serde_json::Value::String(reason.clone()),
+                );
+
+                AuditEntry::new("memory.archived", "archive")
+                    .with_resource(memory_id.to_string())
+                    .with_metadata(serde_json::Value::Object(metadata))
+            },
 
             MemoryEvent::Deleted {
+                meta,
                 memory_id,
                 reason,
-                timestamp,
-            } => AuditEntry::new("memory.deleted", "delete")
-                .with_resource(memory_id.to_string())
-                .with_metadata(serde_json::json!({
-                    "reason": reason,
-                    "event_timestamp": timestamp
-                })),
+            } => {
+                let mut metadata = base_metadata(meta);
+                metadata.insert(
+                    "reason".to_string(),
+                    serde_json::Value::String(reason.clone()),
+                );
+
+                AuditEntry::new("memory.deleted", "delete")
+                    .with_resource(memory_id.to_string())
+                    .with_metadata(serde_json::Value::Object(metadata))
+            },
 
             MemoryEvent::Redacted {
+                meta,
                 memory_id,
                 redaction_type,
-                timestamp,
-            } => AuditEntry::new("security.redacted", "redact")
-                .with_resource(memory_id.to_string())
-                .with_metadata(serde_json::json!({
-                    "redaction_type": redaction_type,
-                    "event_timestamp": timestamp
-                })),
+            } => {
+                let mut metadata = base_metadata(meta);
+                metadata.insert(
+                    "redaction_type".to_string(),
+                    serde_json::Value::String(redaction_type.clone()),
+                );
+
+                AuditEntry::new("security.redacted", "redact")
+                    .with_resource(memory_id.to_string())
+                    .with_metadata(serde_json::Value::Object(metadata))
+            },
 
             MemoryEvent::Synced {
+                meta,
                 pushed,
                 pulled,
                 conflicts,
-                timestamp,
-            } => AuditEntry::new("memory.synced", "sync").with_metadata(serde_json::json!({
-                "pushed": pushed,
-                "pulled": pulled,
-                "conflicts": conflicts,
-                "event_timestamp": timestamp
-            })),
+            } => {
+                let mut metadata = base_metadata(meta);
+                metadata.insert(
+                    "pushed".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(*pushed as u64)),
+                );
+                metadata.insert(
+                    "pulled".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(*pulled as u64)),
+                );
+                metadata.insert(
+                    "conflicts".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(*conflicts as u64)),
+                );
+
+                AuditEntry::new("memory.synced", "sync")
+                    .with_metadata(serde_json::Value::Object(metadata))
+            },
 
             MemoryEvent::Consolidated {
+                meta,
                 processed,
                 archived,
                 merged,
-                timestamp,
-            } => AuditEntry::new("memory.consolidated", "consolidate").with_metadata(
-                serde_json::json!({
-                    "processed": processed,
-                    "archived": archived,
-                    "merged": merged,
-                    "event_timestamp": timestamp
-                }),
-            ),
+            } => {
+                let mut metadata = base_metadata(meta);
+                metadata.insert(
+                    "processed".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(*processed as u64)),
+                );
+                metadata.insert(
+                    "archived".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(*archived as u64)),
+                );
+                metadata.insert(
+                    "merged".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(*merged as u64)),
+                );
+
+                AuditEntry::new("memory.consolidated", "consolidate")
+                    .with_metadata(serde_json::Value::Object(metadata))
+            },
+
+            MemoryEvent::McpStarted {
+                meta,
+                transport,
+                port,
+            } => {
+                let mut metadata = base_metadata(meta);
+                metadata.insert(
+                    "transport".to_string(),
+                    serde_json::Value::String(transport.clone()),
+                );
+                metadata.insert(
+                    "port".to_string(),
+                    port.map_or(serde_json::Value::Null, |p| serde_json::Value::Number(p.into())),
+                );
+
+                AuditEntry::new("mcp.started", "start")
+                    .with_metadata(serde_json::Value::Object(metadata))
+            },
+
+            MemoryEvent::McpAuthFailed {
+                meta,
+                client_id,
+                reason,
+            } => {
+                let mut metadata = base_metadata(meta);
+                metadata.insert(
+                    "client_id".to_string(),
+                    client_id
+                        .clone()
+                        .map(serde_json::Value::String)
+                        .unwrap_or(serde_json::Value::Null),
+                );
+                metadata.insert(
+                    "reason".to_string(),
+                    serde_json::Value::String(reason.clone()),
+                );
+
+                AuditEntry::new("mcp.auth_failed", "authenticate")
+                    .with_outcome(AuditOutcome::Denied)
+                    .with_metadata(serde_json::Value::Object(metadata))
+            },
+
+            MemoryEvent::McpToolExecuted {
+                meta,
+                tool_name,
+                status,
+                duration_ms,
+                error,
+            } => {
+                let mut metadata = base_metadata(meta);
+                metadata.insert(
+                    "tool_name".to_string(),
+                    serde_json::Value::String(tool_name.clone()),
+                );
+                metadata.insert(
+                    "status".to_string(),
+                    serde_json::Value::String(status.clone()),
+                );
+                metadata.insert(
+                    "duration_ms".to_string(),
+                    serde_json::Value::Number((*duration_ms).into()),
+                );
+                metadata.insert(
+                    "error".to_string(),
+                    error
+                        .clone()
+                        .map(serde_json::Value::String)
+                        .unwrap_or(serde_json::Value::Null),
+                );
+
+                let outcome = if status == "success" {
+                    AuditOutcome::Success
+                } else {
+                    AuditOutcome::Failure
+                };
+
+                AuditEntry::new("mcp.tool_executed", "execute")
+                    .with_outcome(outcome)
+                    .with_metadata(serde_json::Value::Object(metadata))
+            },
+
+            MemoryEvent::McpRequestError {
+                meta,
+                operation,
+                error,
+            } => {
+                let mut metadata = base_metadata(meta);
+                metadata.insert(
+                    "operation".to_string(),
+                    serde_json::Value::String(operation.clone()),
+                );
+                metadata.insert(
+                    "error".to_string(),
+                    serde_json::Value::String(error.clone()),
+                );
+
+                AuditEntry::new("mcp.request_error", "request")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_metadata(serde_json::Value::Object(metadata))
+            },
         }
     }
 
@@ -727,7 +919,7 @@ impl Default for AuditLogger {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Domain, MemoryId, Namespace};
+    use crate::models::{Domain, EventMeta, MemoryId, Namespace};
 
     #[test]
     fn test_audit_entry_creation() {
@@ -777,11 +969,11 @@ mod tests {
     fn test_log_memory_event() {
         let logger = AuditLogger::new();
         let event = MemoryEvent::Captured {
+            meta: EventMeta::with_timestamp("test", None, 1_234_567_890),
             memory_id: MemoryId::new("test_id"),
             namespace: Namespace::Decisions,
             domain: Domain::new(),
             content_length: 100,
-            timestamp: 1_234_567_890,
         };
 
         logger.log(&event);

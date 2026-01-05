@@ -14,6 +14,8 @@ use crate::mcp::{
     ToolDefinition, ToolRegistry, ToolResult,
 };
 use crate::observability::flush_metrics;
+use crate::models::{EventMeta, MemoryEvent};
+use crate::security::record_event;
 use crate::services::ServiceContainer;
 use crate::{Error, Result as SubcogResult};
 #[cfg(feature = "http")]
@@ -172,6 +174,11 @@ async fn auth_middleware(
             Ok(claims) => claims,
             Err(e) => {
                 tracing::warn!(error = %e, "JWT authentication failed");
+                record_event(MemoryEvent::McpAuthFailed {
+                    meta: EventMeta::new("mcp", None),
+                    client_id: None,
+                    reason: e.to_string(),
+                });
                 return (
                     StatusCode::UNAUTHORIZED,
                     Json(serde_json::json!({
@@ -185,6 +192,11 @@ async fn auth_middleware(
             },
         },
         None => {
+            record_event(MemoryEvent::McpAuthFailed {
+                meta: EventMeta::new("mcp", None),
+                client_id: None,
+                reason: "missing authorization header".to_string(),
+            });
             return (
                 StatusCode::UNAUTHORIZED,
                 Json(serde_json::json!({
@@ -475,8 +487,16 @@ impl ServerHandler for McpHandler {
     ) -> impl std::future::Future<Output = McpResult<CallToolResult>> + Send + '_ {
         let state = self.state.clone();
         async move {
+            let start = Instant::now();
             #[cfg(feature = "http")]
-            ensure_tool_authorized(&state.tool_auth, &context, &request.name)?;
+            if let Err(err) = ensure_tool_authorized(&state.tool_auth, &context, &request.name) {
+                record_event(MemoryEvent::McpRequestError {
+                    meta: EventMeta::new("mcp", None),
+                    operation: "call_tool".to_string(),
+                    error: err.to_string(),
+                });
+                return Err(err);
+            }
             #[cfg(not(feature = "http"))]
             let _ = &context;
 
@@ -488,7 +508,25 @@ impl ServerHandler for McpHandler {
             let result = state
                 .tools
                 .execute(&request.name, arguments)
-                .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+                .map_err(|e| {
+                    record_event(MemoryEvent::McpRequestError {
+                        meta: EventMeta::new("mcp", None),
+                        operation: "call_tool".to_string(),
+                        error: e.to_string(),
+                    });
+                    McpError::invalid_params(e.to_string(), None)
+                })?;
+
+            let status = if result.is_error { "error" } else { "success" };
+            record_event(MemoryEvent::McpToolExecuted {
+                meta: EventMeta::new("mcp", None),
+                tool_name: request.name.clone(),
+                status: status.to_string(),
+                duration_ms: start.elapsed().as_millis() as u64,
+                error: result
+                    .is_error
+                    .then_some("tool execution returned error".to_string()),
+            });
 
             Ok(tool_result_to_rmcp(result))
         }
@@ -864,6 +902,16 @@ impl McpServer {
     pub async fn start(&mut self) -> SubcogResult<()> {
         // Set up signal handler for graceful shutdown (RES-M4)
         setup_signal_handler()?;
+
+        let (transport, port) = match self.transport {
+            Transport::Stdio => ("stdio", None),
+            Transport::Http => ("http", Some(self.port)),
+        };
+        record_event(MemoryEvent::McpStarted {
+            meta: EventMeta::new("mcp", None),
+            transport: transport.to_string(),
+            port,
+        });
 
         match self.transport {
             Transport::Stdio => self.run_stdio().await,

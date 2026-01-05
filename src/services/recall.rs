@@ -7,7 +7,8 @@ use crate::current_timestamp;
 use crate::embedding::Embedder;
 use crate::gc::branch_exists;
 use crate::models::{
-    Memory, MemoryEvent, MemoryId, MemoryStatus, SearchFilter, SearchHit, SearchMode, SearchResult,
+    EventMeta, Memory, MemoryEvent, MemoryId, MemoryStatus, SearchFilter, SearchHit, SearchMode,
+    SearchResult,
 };
 use crate::security::record_event;
 use crate::storage::index::SqliteBackend;
@@ -246,10 +247,10 @@ impl RecallService {
             let query_arc: std::sync::Arc<str> = query.into();
             for hit in &memories {
                 record_event(MemoryEvent::Retrieved {
+                    meta: EventMeta::with_timestamp("recall", None, timestamp),
                     memory_id: hit.memory.id.clone(),
                     query: std::sync::Arc::clone(&query_arc),
                     score: hit.score,
-                    timestamp,
                 });
             }
 
@@ -390,10 +391,10 @@ impl RecallService {
             let query_arc: std::sync::Arc<str> = "*".into();
             for hit in &memories {
                 record_event(MemoryEvent::Retrieved {
+                    meta: EventMeta::with_timestamp("recall", None, timestamp),
                     memory_id: hit.memory.id.clone(),
                     query: std::sync::Arc::clone(&query_arc),
                     score: hit.score,
-                    timestamp,
                 });
             }
 

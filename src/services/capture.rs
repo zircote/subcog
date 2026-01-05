@@ -6,7 +6,9 @@
 use crate::config::Config;
 use crate::context::GitContext;
 use crate::embedding::Embedder;
-use crate::models::{CaptureRequest, CaptureResult, Memory, MemoryEvent, MemoryId, MemoryStatus};
+use crate::models::{
+    CaptureRequest, CaptureResult, EventMeta, Memory, MemoryEvent, MemoryId, MemoryStatus,
+};
 use crate::security::{ContentRedactor, SecretDetector, record_event};
 use crate::services::deduplication::ContentHasher;
 use crate::storage::traits::{IndexBackend, VectorBackend};
@@ -308,17 +310,17 @@ impl CaptureService {
             memory.embedding = None;
 
             record_event(MemoryEvent::Captured {
+                meta: EventMeta::with_timestamp("capture", None, now),
                 memory_id: memory_id.clone(),
                 namespace: memory.namespace,
                 domain: memory.domain.clone(),
                 content_length: memory.content.len(),
-                timestamp: now,
             });
             if was_redacted {
                 record_event(MemoryEvent::Redacted {
+                    meta: EventMeta::with_timestamp("capture", None, now),
                     memory_id: memory_id.clone(),
                     redaction_type: "secrets".to_string(),
-                    timestamp: now,
                 });
             }
 

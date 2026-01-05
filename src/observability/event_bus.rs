@@ -89,7 +89,7 @@ pub fn global_event_bus() -> &'static EventBus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Domain, MemoryId, MemoryEvent, Namespace};
+    use crate::models::{Domain, EventMeta, MemoryId, MemoryEvent, Namespace};
 
     #[tokio::test]
     async fn test_subscribe_filtered_skips_non_matching() {
@@ -97,12 +97,13 @@ mod tests {
         let mut filtered = bus.subscribe_event_type("captured");
 
         bus.publish(MemoryEvent::Retrieved {
+            meta: EventMeta::with_timestamp("test", None, 1),
             memory_id: MemoryId::new("id1"),
             query: "query".into(),
             score: 0.5,
-            timestamp: 1,
         });
         bus.publish(MemoryEvent::Captured {
+            meta: EventMeta::with_timestamp("test", None, 2),
             memory_id: MemoryId::new("id2"),
             namespace: Namespace::Decisions,
             domain: Domain {
@@ -111,7 +112,6 @@ mod tests {
                 repository: None,
             },
             content_length: 10,
-            timestamp: 2,
         });
 
         let event = filtered.recv().await.expect("receive event");

@@ -13,7 +13,7 @@ mod search;
 pub use capture::{CaptureRequest, CaptureResult};
 pub use consolidation::{EdgeType, MemoryTier, RetentionScore};
 pub use domain::{Domain, MemoryStatus, Namespace};
-pub use events::MemoryEvent;
+pub use events::{EventMeta, MemoryEvent};
 pub use memory::{Memory, MemoryId, MemoryResult};
 pub use prompt::{
     ExtractedVariable, IssueSeverity, MAX_VARIABLE_VALUE_LENGTH, PromptTemplate, PromptVariable,
