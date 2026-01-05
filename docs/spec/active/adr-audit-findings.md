@@ -636,7 +636,7 @@ Copy this to track progress:
 - [x] Task 1.3: Create SQLite migration for tombstoned_at ✓
 - [x] Task 1.4: Update PostgreSQL schema ✓
 - [x] Task 1.5: Update Memory CRUD operations ✓
-- [ ] Task 1.6: Implement tombstone operations
+- [x] Task 1.6: Implement tombstone operations ✓
 - [ ] Task 1.7: Update RecallService filtering
 
 ## Phase 2: Lazy GC (ADR-0052) [0/2]
