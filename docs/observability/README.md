@@ -44,3 +44,15 @@ Environment variables:
 - OTLP protocol matches collector (gRPC 4317 vs HTTP 4318).
 - Log sink permissions and file paths validated.
 - Metrics port exposed or push gateway configured.
+
+## Quickstart
+
+```bash
+export SUBCOG_LOG_FORMAT=json
+export SUBCOG_TRACING_ENABLED=true
+export SUBCOG_OTLP_ENDPOINT=http://localhost:4318
+export SUBCOG_METRICS_ENABLED=true
+export SUBCOG_METRICS_PORT=9090
+
+subcog status
+```

@@ -64,7 +64,7 @@
 - [x] Update user-facing docs for observability configuration ✓
 - [x] Add troubleshooting steps for tracing/logging/metrics ✓
 - [x] Add deployment checklist for OTLP endpoints and log sinks ✓
-- [ ] Provide a minimal “observability quickstart” example
+- [x] Provide a minimal “observability quickstart” example ✓
 - [ ] Define rollout steps and rollback criteria
 
 ### Phase 6: Verification
