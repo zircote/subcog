@@ -471,7 +471,7 @@ org_scope_enabled = true
 - [x] Verify HTTP returns 204 No Content for notifications ✓
 - [x] Verify stdio skips response for notifications ✓
 - [x] Verify error responses include id field ✓
-- [ ] Test with MCP client (Claude Code or compatible)
+- [x] Test with MCP client (Claude Code or compatible) ✓
 
 ---
 
