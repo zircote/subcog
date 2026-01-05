@@ -600,7 +600,7 @@ org_scope_enabled = true
 - [x] Supply chain audit passes: `cargo deny check` ✓
 
 ### Functional Requirements
-- [ ] ADR-0053 compliant: Tombstone pattern working end-to-end
+- [x] ADR-0053 compliant: Tombstone pattern working end-to-end ✓
 - [ ] ADR-0052 compliant: Lazy GC tombstones stale branch memories
 - [ ] ADR-0051 compliant: Org-scope feature gate present and functional
 - [ ] ADR-0009 deviation properly documented
