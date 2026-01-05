@@ -597,7 +597,7 @@ org_scope_enabled = true
 - [x] No clippy warnings: `cargo clippy --all-targets --all-features -- -D warnings` ✓
 - [x] Code properly formatted: `cargo fmt -- --check` ✓
 - [x] Documentation builds: `cargo doc --no-deps` ✓
-- [ ] Supply chain audit passes: `cargo deny check`
+- [x] Supply chain audit passes: `cargo deny check` ✓
 
 ### Functional Requirements
 - [ ] ADR-0053 compliant: Tombstone pattern working end-to-end
