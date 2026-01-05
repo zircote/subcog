@@ -20,7 +20,7 @@ mod native {
 
     /// Thread-safe singleton for the embedding model.
     /// Uses `OnceLock` for lazy initialization on first use.
-    static EMBEDDING_MODEL: OnceLock<fastembed::TextEmbedding> = OnceLock::new();
+    static EMBEDDING_MODEL: OnceLock<std::sync::Mutex<fastembed::TextEmbedding>> = OnceLock::new();
 
     /// `FastEmbed` embedder using all-MiniLM-L6-v2.
     ///
@@ -71,7 +71,7 @@ mod native {
         ///
         /// For applications sensitive to first-call latency, consider warming up the
         /// embedder during startup: `FastEmbedEmbedder::new().embed("warmup").ok();`
-        fn get_model() -> Result<&'static fastembed::TextEmbedding> {
+        fn get_model() -> Result<&'static std::sync::Mutex<fastembed::TextEmbedding>> {
             // Check if already initialized
             if let Some(model) = EMBEDDING_MODEL.get() {
                 return Ok(model);
@@ -97,7 +97,7 @@ mod native {
             );
 
             // Store the model, ignoring if another thread beat us to it
-            let _ = EMBEDDING_MODEL.set(model);
+            let _ = EMBEDDING_MODEL.set(std::sync::Mutex::new(model));
             // Return the (possibly other thread's) model
             // SAFETY: We just set the model, so it must be present
             EMBEDDING_MODEL.get().ok_or_else(|| Error::OperationFailed {
@@ -130,6 +130,10 @@ mod native {
             }
 
             let model = Self::get_model()?;
+            let mut model = model.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_embedding_model".to_string(),
+                cause: e.to_string(),
+            })?;
             let text_owned = text.to_string();
 
             // Wrap ONNX runtime call in catch_unwind for graceful degradation (RES-M1).
@@ -178,6 +182,10 @@ mod native {
             }
 
             let model = Self::get_model()?;
+            let mut model = model.lock().map_err(|e| Error::OperationFailed {
+                operation: "lock_embedding_model".to_string(),
+                cause: e.to_string(),
+            })?;
 
             // Convert &[&str] to Vec<String> for fastembed
             let texts_owned: Vec<String> = texts.iter().map(|s| (*s).to_string()).collect();
