@@ -11,7 +11,7 @@
 | 1 | [ADR-0001: Rust as Implementation Language](./adr_0001.md) | Accepted | ✅ Compliant | None |
 | 2 | [ADR-0002: Three-Layer Storage Architecture](./adr_0002.md) | Accepted | ✅ Compliant | None |
 | 3 | [ADR-0003: Feature Tier System](./adr_0003.md) | Accepted | ⚠️ Partial | Update tier definitions to reflect current storage or reintroduce Tier 1 persistence mapping. |
-| 4 | [ADR-0004: Event Bus for Cross-Component Communication](./adr_0004.md) | Accepted | ❌ Violated | Implement a tokio broadcast event bus or revise the ADR to match current event handling. |
+| 4 | [ADR-0004: Event Bus for Cross-Component Communication](./adr_0004.md) | Accepted | ✅ Compliant | None |
 | 5 | [ADR-0005: URN Scheme for Memory Addressing](./adr_0005.md) | Accepted | ✅ Compliant | None |
 | 6 | [ADR-0007: fastembed for Embedding Generation](./adr_0007.md) | Accepted | ✅ Compliant | None |
 | 7 | [ADR-0008: usearch for Vector Search](./adr_0008.md) | Accepted | ✅ Compliant | None |
@@ -57,7 +57,7 @@
 | 47 | [ADR-0048: Consolidate to User-Level Storage with Faceting](./adr_0048.md) | Accepted | ✅ Compliant | None |
 | 48 | [ADR-0049: Inline Facet Columns (Denormalized)](./adr_0049.md) | Accepted | ✅ Compliant | None |
 | 49 | [ADR-0050: Fresh Start - No Migration of Legacy Data](./adr_0050.md) | Accepted | ✅ Compliant | None |
-| 50 | [ADR-0051: Feature-Gate Org-Scope Implementation](./adr_0051.md) | Accepted | ⚠️ Partial | Gate org-scope initialization behind org_scope_enabled or cfg(feature = "org-scope"). |
+| 50 | [ADR-0051: Feature-Gate Org-Scope Implementation](./adr_0051.md) | Accepted | ✅ Compliant | None |
 | 51 | [ADR-0052: Lazy Branch Garbage Collection](./adr_0052.md) | Accepted | ✅ Compliant | None |
 | 52 | [ADR-0053: Tombstone Pattern for Soft Deletes](./adr_0053.md) | Accepted | ✅ Compliant | None |
 | 53 | [ADR-0054: Notification Detection via `id` Field Absence](./adr_0054.md) | Accepted | ✅ Compliant | None |
@@ -68,11 +68,9 @@
 
 ## Critical Findings
 
-- ADR-0004: Event Bus for Cross-Component Communication: Implement a tokio broadcast event bus or revise the ADR to match current event handling.
+None.
 
 ## Recommendations
 
-- Implement a tokio broadcast event bus or amend ADR-0004 to match current event handling.
 - Update ADR-0003 tier definitions to reflect the current storage architecture.
 - Expose migration status in the status command or revise ADR-0039 expectations.
-- Gate org-scope initialization behind feature flags to satisfy ADR-0051.

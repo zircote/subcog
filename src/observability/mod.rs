@@ -1,10 +1,12 @@
 //! Observability and telemetry.
 
+mod event_bus;
 mod logging;
 mod metrics;
 mod otlp;
 mod tracing;
 
+pub use event_bus::{EventBus, global_event_bus};
 pub use logging::{LogFormat, Logger, LoggingConfig};
 pub use metrics::{Metrics, MetricsConfig, flush_global as flush_metrics, set_instance_label};
 pub use otlp::{OtlpConfig, OtlpExporter, OtlpProtocol};

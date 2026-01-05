@@ -11,6 +11,7 @@
 //! To verify chain integrity, use [`AuditLogger::verify_chain`].
 
 use crate::models::MemoryEvent;
+use crate::observability::global_event_bus;
 use crate::{Error, Result};
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
@@ -685,6 +686,8 @@ pub fn init_global(config: AuditConfig) -> Result<()> {
             cause: "audit logger already initialized".to_string(),
         })?;
 
+    start_audit_subscription();
+
     Ok(())
 }
 
@@ -694,11 +697,25 @@ pub fn global_logger() -> Option<&'static AuditLogger> {
     GLOBAL_AUDIT_LOGGER.get()
 }
 
+fn start_audit_subscription() {
+    if tokio::runtime::Handle::try_current().is_err() {
+        tracing::warn!("Audit event subscription requires a Tokio runtime");
+        return;
+    }
+
+    let mut receiver = global_event_bus().subscribe();
+    tokio::spawn(async move {
+        while let Ok(event) = receiver.recv().await {
+            if let Some(logger) = global_logger() {
+                logger.log(&event);
+            }
+        }
+    });
+}
+
 /// Records a memory event through the global audit logger.
 pub fn record_event(event: MemoryEvent) {
-    if let Some(logger) = global_logger() {
-        logger.log(&event);
-    }
+    global_event_bus().publish(event);
 }
 
 impl Default for AuditLogger {

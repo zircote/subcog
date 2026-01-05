@@ -22,6 +22,10 @@ Subcog is a Rust rewrite of the [git-notes-memory](https://github.com/zircote/gi
 - **Faceted storage** with project, branch, and file path filtering
 - **Branch garbage collection** for stale branch cleanup
 
+## ADR Compliance
+
+ADR compliance is tracked in [`docs/adrs/README.md`](docs/adrs/README.md). Current compliance is **96% (53/55 active ADRs)** with documented partials in ADR-0003 and ADR-0039.
+
 ## Benchmark Results
 
 Subcog achieves **97% accuracy on factual recall** (LongMemEval) and **57% on personal context** (LoCoMo), compared to 0% baseline without memory. See [full benchmark results](docs/BENCHMARKS.md).

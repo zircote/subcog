@@ -612,8 +612,8 @@ org_scope_enabled = true
 - [x] Performance acceptable (no regression) ✓
 
 ### Documentation
-- [ ] README.md shows ≥95% compliance (or 100% with documented deviations)
-- [ ] All ADR audit sections updated with remediation dates
+- [x] README.md shows ≥95% compliance (or 100% with documented deviations) ✓
+- [x] All ADR audit sections updated with remediation dates ✓
 - [ ] Configuration documentation updated
 - [ ] User-facing docs explain new features
 
