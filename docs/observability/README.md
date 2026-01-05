@@ -31,3 +31,9 @@ Environment variables:
 - `SUBCOG_METRICS_PUSH_GATEWAY_USERNAME`
 - `SUBCOG_METRICS_PUSH_GATEWAY_PASSWORD`
 - `SUBCOG_METRICS_PUSH_GATEWAY_USE_POST`
+
+## Troubleshooting
+
+- Logging missing fields: confirm `SUBCOG_LOG_FORMAT=json` and `SUBCOG_LOG_LEVEL` are set.
+- Tracing not exported: verify `SUBCOG_OTLP_ENDPOINT` and `SUBCOG_OTLP_PROTOCOL` values.
+- Metrics empty: ensure `SUBCOG_METRICS_ENABLED=true` and check the metrics port.

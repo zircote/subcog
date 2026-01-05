@@ -62,7 +62,7 @@
 
 ### Phase 5: Documentation & Rollout
 - [x] Update user-facing docs for observability configuration ✓
-- [ ] Add troubleshooting steps for tracing/logging/metrics
+- [x] Add troubleshooting steps for tracing/logging/metrics ✓
 - [ ] Add deployment checklist for OTLP endpoints and log sinks
 - [ ] Provide a minimal “observability quickstart” example
 - [ ] Define rollout steps and rollback criteria
