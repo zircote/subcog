@@ -576,7 +576,7 @@ org_scope_enabled = true
 - [x] Default to None for existing memories ✓
 - [x] Maintain backward compatibility in JSON serialization ✓
 - [x] Test deserialization of old memory objects ✓
-- [ ] Version the Memory struct if needed
+- [x] Version the Memory struct if needed ✓
 
 ### Risk 4: GC Tests Fail After Changes
 **Likelihood:** Medium

@@ -65,6 +65,9 @@ pub struct Memory {
     /// Last update timestamp (Unix epoch seconds).
     pub updated_at: u64,
     /// Tombstone timestamp (UTC) when soft-deleted.
+    ///
+    /// Compatibility is handled in storage adapters, so explicit versioning
+    /// of the Memory struct is not required at this time.
     pub tombstoned_at: Option<DateTime<Utc>>,
     /// Optional embedding vector.
     pub embedding: Option<Vec<f32>>,
