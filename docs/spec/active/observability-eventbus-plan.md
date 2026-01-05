@@ -52,7 +52,7 @@
 - [x] Add log format validation tests (json format, required keys) ✓
 
 ### Phase 4: Metrics & Telemetry
-- [ ] Define metric naming conventions and required labels
+- [x] Define metric naming conventions and required labels ✓
 - [ ] Add metrics for event bus (queue depth, publish/subscribe counts)
 - [ ] Add metrics for memory lifecycle latency (capture/recall/GC/consolidation)
 - [ ] Add metrics for MCP request latency and error rates
