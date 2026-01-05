@@ -609,7 +609,7 @@ org_scope_enabled = true
 - [x] Unit tests pass for all new code ✓
 - [x] Integration tests pass for tombstone flow ✓
 - [x] Manual testing completed successfully ✓
-- [ ] Performance acceptable (no regression)
+- [x] Performance acceptable (no regression) ✓
 
 ### Documentation
 - [ ] README.md shows ≥95% compliance (or 100% with documented deviations)
