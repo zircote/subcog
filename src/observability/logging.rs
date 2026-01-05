@@ -228,6 +228,82 @@ impl Visit for RedactingVisitor<'_> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::RedactingJsonFields;
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::prelude::*;
+
+    #[derive(Clone)]
+    struct SharedWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for SharedWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedWriter {
+        type Writer = SharedWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    #[test]
+    fn test_json_log_format_includes_required_fields() {
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let writer = SharedWriter(buffer.clone());
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .json()
+                .fmt_fields(RedactingJsonFields::default())
+                .with_writer(writer)
+                .with_current_span(true)
+                .with_span_list(true),
+        );
+
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let span = tracing::info_span!(
+            "subcog.test",
+            request_id = "req-test",
+            component = "test",
+            operation = "unit"
+        );
+        let _span_guard = span.enter();
+
+        tracing::info!(event = "test_event", memory_id = "mem-1", domain = "project", "hello");
+
+        let output = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+        let line = output.lines().next().expect("log line");
+        let value: serde_json::Value = serde_json::from_str(line).unwrap();
+
+        assert!(value.get("level").is_some(), "level missing");
+        let fields = value
+            .get("fields")
+            .and_then(|v| v.as_object())
+            .expect("fields missing");
+        assert_eq!(fields.get("event").and_then(|v| v.as_str()), Some("test_event"));
+        assert!(fields.get("message").is_some(), "message missing");
+
+        let span_fields = value
+            .get("span")
+            .and_then(|span| span.get("fields"))
+            .and_then(|f| f.as_object())
+            .expect("span fields missing");
+        assert_eq!(
+            span_fields.get("request_id").and_then(|v| v.as_str()),
+            Some("req-test")
+        );
+    }
+}
+
 fn parse_log_format(value: &str) -> Option<LogFormat> {
     match value.to_lowercase().as_str() {
         "pretty" => Some(LogFormat::Pretty),

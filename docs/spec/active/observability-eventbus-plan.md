@@ -49,7 +49,7 @@
 - [x] Ensure logs include correlation IDs and span context ✓
 - [x] Add log redaction rules for sensitive content ✓
 - [x] Normalize log levels across services (error/warn/info/debug) ✓
-- [ ] Add log format validation tests (json format, required keys)
+- [x] Add log format validation tests (json format, required keys) ✓
 
 ### Phase 4: Metrics & Telemetry
 - [ ] Define metric naming conventions and required labels
