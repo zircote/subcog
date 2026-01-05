@@ -68,10 +68,10 @@
 - [x] Define rollout steps and rollback criteria ✓
 
 ### Phase 6: Verification
-- [ ] Run `make ci` after instrumentation changes
-- [ ] Perform manual trace capture for capture/recall, MCP, and hook flows
-- [ ] Validate log/trace correlation end-to-end
-- [ ] Confirm no sensitive data leaks in logs/traces
+- [x] Run `make ci` after instrumentation changes ✓
+- [x] Perform manual trace capture for capture/recall, MCP, and hook flows ✓
+- [x] Validate log/trace correlation end-to-end ✓
+- [x] Confirm no sensitive data leaks in logs/traces ✓
 
 ## Deliverables
 
