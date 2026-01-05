@@ -26,7 +26,7 @@
 - [x] Identify missing observability coverage for critical paths ✓
 
 ### Phase 1: Event Bus Expansion
-- [ ] Define event taxonomy (system, memory lifecycle, security, performance, MCP, hooks)
+- [x] Define event taxonomy (system, memory lifecycle, security, performance, MCP, hooks) ✓
 - [ ] Add event payload schema guidelines (required fields, redaction rules)
 - [ ] Add event bus subscription helpers (filtered subscribers by event type)
 - [ ] Emit events from all memory lifecycle operations (capture/update/delete/tombstone/recall)
