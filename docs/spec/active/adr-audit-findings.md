@@ -658,7 +658,7 @@ Copy this to track progress:
 - [x] Task 5.3: Update ADR health status ✓
 
 ## Final Gates [0/5]
-- [ ] `make ci` passes clean
+- [x] `make ci` passes clean ✓
 - [ ] All critical ADR findings resolved
 - [ ] README.md compliance ≥95%
 - [ ] Manual testing complete
