@@ -606,7 +606,7 @@ org_scope_enabled = true
 - [x] ADR-0009 deviation properly documented ✓
 
 ### Testing
-- [ ] Unit tests pass for all new code
+- [x] Unit tests pass for all new code ✓
 - [ ] Integration tests pass for tombstone flow
 - [ ] Manual testing completed successfully
 - [ ] Performance acceptable (no regression)
