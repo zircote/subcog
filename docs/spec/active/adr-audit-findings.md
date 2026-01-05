@@ -659,7 +659,7 @@ Copy this to track progress:
 
 ## Final Gates [0/5]
 - [x] `make ci` passes clean ✓
-- [ ] All critical ADR findings resolved
+- [x] All critical ADR findings resolved ✓
 - [ ] README.md compliance ≥95%
 - [ ] Manual testing complete
 - [ ] Ready for production deployment
