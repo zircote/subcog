@@ -909,7 +909,7 @@ mod tests {
         assert!(result.is_ok());
         let context = result.unwrap();
         // Should include guidance content
-        assert!(context.content.contains("SUBCOG"));
+        assert!(context.content.contains("prompt_understanding"));
     }
 
     #[test]
