@@ -23,7 +23,7 @@
 - [x] Audit current event emissions and consumers (capture, recall, consolidation, sync, GC, MCP, hooks) ✓
 - [x] Inventory existing tracing spans and log fields for request correlation ✓
 - [x] Document current metrics, exporters, and label cardinality risks ✓
-- [ ] Identify missing observability coverage for critical paths
+- [x] Identify missing observability coverage for critical paths ✓
 
 ### Phase 1: Event Bus Expansion
 - [ ] Define event taxonomy (system, memory lifecycle, security, performance, MCP, hooks)

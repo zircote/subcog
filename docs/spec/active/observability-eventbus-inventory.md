@@ -45,4 +45,8 @@
 
 ## Coverage Gaps
 
-_(pending inventory)_
+- Event bus does not emit updates for update/delete/archived/sync/tombstone operations.
+- No events emitted for MCP lifecycle or hook lifecycle.
+- No standardized request/correlation IDs in logs or spans.
+- MCP request handling lacks explicit tracing spans and latency metrics.
+- No event bus health metrics (publish/drop/lag).
