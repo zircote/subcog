@@ -308,3 +308,27 @@ fn apply_env_overrides(config: &mut TracingConfig) {
         config.resource_attributes = parse_resource_attributes();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_otlp_tracing_init_smoke() {
+        let config = TracingConfig {
+            enabled: true,
+            otlp: OtlpConfig {
+                endpoint: Some("http://localhost:4318".to_string()),
+                protocol: OtlpProtocol::Http,
+            },
+            sample_ratio: 1.0,
+            service_name: "subcog-test".to_string(),
+            service_version: "0.0.0".to_string(),
+            resource_attributes: Vec::new(),
+        };
+
+        let init = build_tracing(&config).expect("build tracing").expect("init tracing");
+        let _ = init.provider.shutdown();
+        let _ = init.logger_provider.shutdown();
+    }
+}

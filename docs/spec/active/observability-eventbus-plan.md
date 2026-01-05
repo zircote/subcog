@@ -58,7 +58,7 @@
 - [x] Add metrics for MCP request latency and error rates ✓
 - [x] Add metrics for hook execution latency and error rates ✓
 - [x] Verify OTLP exporter settings (grpc/http) and env var docs ✓
-- [ ] Add smoke tests for metrics registry and OTLP initialization
+- [x] Add smoke tests for metrics registry and OTLP initialization ✓
 
 ### Phase 5: Documentation & Rollout
 - [ ] Update user-facing docs for observability configuration
