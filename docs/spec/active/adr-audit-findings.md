@@ -462,7 +462,7 @@ org_scope_enabled = true
 - [x] Verify org-scope features are disabled ✓
 - [x] Test with SUBCOG_ORG_SCOPE_ENABLED=true ✓
 - [x] Verify org-scope features are enabled (if implemented) ✓
-- [ ] Test with invalid env var value
+- [x] Test with invalid env var value ✓
 - [ ] Verify graceful fallback to false
 
 #### MCP Server Testing
