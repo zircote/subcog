@@ -7,8 +7,8 @@ use crate::config::Config;
 use crate::context::GitContext;
 use crate::embedding::Embedder;
 use crate::models::{CaptureRequest, CaptureResult, Memory, MemoryEvent, MemoryId, MemoryStatus};
-use crate::services::deduplication::ContentHasher;
 use crate::security::{ContentRedactor, SecretDetector, record_event};
+use crate::services::deduplication::ContentHasher;
 use crate::storage::traits::{IndexBackend, VectorBackend};
 use crate::{Error, Result};
 use std::path::Path;
@@ -223,12 +223,14 @@ impl CaptureService {
             };
 
             // Resolve git context for facets.
-            let git_context = self.config.repo_path.as_ref().map_or_else(
-                GitContext::from_cwd,
-                |path| GitContext::from_path(path),
-            );
+            let git_context = self
+                .config
+                .repo_path
+                .as_ref()
+                .map_or_else(GitContext::from_cwd, |path| GitContext::from_path(path));
 
-            let file_path = resolve_file_path(self.config.repo_path.as_deref(), request.source.as_ref());
+            let file_path =
+                resolve_file_path(self.config.repo_path.as_deref(), request.source.as_ref());
 
             let mut tags = request.tags;
             let hash_tag = ContentHasher::content_to_tag(&content);
@@ -652,8 +654,7 @@ mod tests {
         let service = CaptureService::new(config).with_index(Arc::clone(&index));
 
         let file_path = repo_path.join("src").join("lib.rs");
-        std::fs::create_dir_all(file_path.parent().expect("parent path"))
-            .expect("create dir");
+        std::fs::create_dir_all(file_path.parent().expect("parent path")).expect("create dir");
         std::fs::write(&file_path, "fn main() {}\n").expect("write file");
 
         let request = CaptureRequest {

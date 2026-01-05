@@ -4,7 +4,6 @@
 
 use crate::context::GitContext;
 use crate::current_timestamp;
-use chrono::{TimeZone, Utc};
 use crate::embedding::Embedder;
 use crate::gc::branch_exists;
 use crate::models::{
@@ -14,6 +13,7 @@ use crate::security::record_event;
 use crate::storage::index::SqliteBackend;
 use crate::storage::traits::{IndexBackend, VectorBackend};
 use crate::{Error, Result};
+use chrono::{TimeZone, Utc};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;

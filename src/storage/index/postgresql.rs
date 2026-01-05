@@ -579,16 +579,16 @@ mod implementation {
                     &[
                         &memory.id.as_str(),
                         &memory.content,
-                    &namespace_str,
-                    &domain_str,
-                    &memory.project_id,
-                    &memory.branch,
-                    &memory.file_path,
-                    &status_str,
-                    &tags,
-                    &(memory.created_at as i64),
-                    &(memory.updated_at as i64),
-                ],
+                        &namespace_str,
+                        &domain_str,
+                        &memory.project_id,
+                        &memory.branch,
+                        &memory.file_path,
+                        &status_str,
+                        &tags,
+                        &(memory.created_at as i64),
+                        &(memory.updated_at as i64),
+                    ],
                 )
                 .await
                 .map_err(|e| query_error("postgres_index", e))?;

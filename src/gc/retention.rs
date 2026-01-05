@@ -33,9 +33,9 @@
 //! println!("Tombstoned {} memories", result.memories_tombstoned);
 //! ```
 
+use crate::Result;
 use crate::models::{Namespace, SearchFilter};
 use crate::storage::traits::IndexBackend;
-use crate::Result;
 use chrono::{TimeZone, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -108,7 +108,7 @@ impl Default for RetentionConfig {
         Self {
             default_days: DEFAULT_RETENTION_DAYS,
             namespace_days: HashMap::new(),
-            minimum_days: 30,  // At least 30 days
+            minimum_days: 30,   // At least 30 days
             batch_limit: 10000, // Process up to 10k memories per run
         }
     }
@@ -360,9 +360,7 @@ impl<I: IndexBackend> RetentionGarbageCollector<I> {
 
             debug!(
                 namespace = namespace.as_str(),
-                retention_days,
-                cutoff,
-                "Processing namespace for retention GC"
+                retention_days, cutoff, "Processing namespace for retention GC"
             );
 
             let count = self.process_namespace(namespace, cutoff, now, dry_run, &mut result)?;
@@ -507,10 +505,7 @@ mod tests {
         assert_eq!(config.default_days, 180);
         assert_eq!(config.minimum_days, 7);
         assert_eq!(config.batch_limit, 5000);
-        assert_eq!(
-            config.namespace_days.get(&Namespace::Decisions),
-            Some(&730)
-        );
+        assert_eq!(config.namespace_days.get(&Namespace::Decisions), Some(&730));
     }
 
     #[test]
@@ -611,9 +606,7 @@ mod tests {
         let config = RetentionConfig::new().with_default_days(30);
         let gc = RetentionGarbageCollector::new(Arc::clone(&backend), config);
 
-        let result = gc
-            .gc_expired_memories(false)
-            .expect("GC should succeed");
+        let result = gc.gc_expired_memories(false).expect("GC should succeed");
 
         assert!(!result.has_expired_memories());
         assert_eq!(result.memories_checked, 1);
@@ -660,9 +653,7 @@ mod tests {
         let config = RetentionConfig::new().with_default_days(365);
         let gc = RetentionGarbageCollector::new(Arc::clone(&backend), config);
 
-        let result = gc
-            .gc_expired_memories(false)
-            .expect("GC should succeed");
+        let result = gc.gc_expired_memories(false).expect("GC should succeed");
 
         assert!(result.has_expired_memories());
         assert_eq!(result.memories_tombstoned, 1);
@@ -683,11 +674,8 @@ mod tests {
         let now = crate::current_timestamp();
 
         // Create a memory 100 days old in decisions
-        let decisions_mem = create_test_memory(
-            "decisions1",
-            Namespace::Decisions,
-            now - (100 * 86400),
-        );
+        let decisions_mem =
+            create_test_memory("decisions1", Namespace::Decisions, now - (100 * 86400));
         backend
             .index(&decisions_mem)
             .expect("Failed to index memory");
@@ -706,9 +694,7 @@ mod tests {
 
         let gc = RetentionGarbageCollector::new(Arc::clone(&backend), config);
 
-        let result = gc
-            .gc_expired_memories(false)
-            .expect("GC should succeed");
+        let result = gc.gc_expired_memories(false).expect("GC should succeed");
 
         // Only learnings should be expired (100 > 90)
         // Decisions should NOT be expired (100 < 730)

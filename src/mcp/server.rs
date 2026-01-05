@@ -19,7 +19,7 @@ use crate::{Error, Result as SubcogResult};
 #[cfg(feature = "http")]
 use axum::extract::{Request, State};
 #[cfg(feature = "http")]
-use axum::http::{header, Method, StatusCode};
+use axum::http::{Method, StatusCode, header};
 #[cfg(feature = "http")]
 use axum::middleware::Next;
 #[cfg(feature = "http")]
@@ -49,8 +49,8 @@ use serde_json::{Map, Value};
 use std::borrow::Cow;
 #[cfg(feature = "http")]
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 #[cfg(feature = "http")]
@@ -157,7 +157,11 @@ struct HttpAuthState {
 }
 
 #[cfg(feature = "http")]
-async fn auth_middleware(State(state): State<HttpAuthState>, mut req: Request, next: Next) -> Response {
+async fn auth_middleware(
+    State(state): State<HttpAuthState>,
+    mut req: Request,
+    next: Next,
+) -> Response {
     let auth_header = req
         .headers()
         .get(header::AUTHORIZATION)
@@ -178,7 +182,7 @@ async fn auth_middleware(State(state): State<HttpAuthState>, mut req: Request, n
                     })),
                 )
                     .into_response();
-            }
+            },
         },
         None => {
             return (
@@ -191,7 +195,7 @@ async fn auth_middleware(State(state): State<HttpAuthState>, mut req: Request, n
                 })),
             )
                 .into_response();
-        }
+        },
     };
 
     let client_id = claims.sub.clone();
@@ -253,16 +257,21 @@ fn build_cors_layer(config: &CorsConfig) -> SubcogResult<CorsLayer> {
         return Ok(CorsLayer::new());
     }
 
-    let mut cors = CorsLayer::new()
-        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS]);
+    let mut cors = CorsLayer::new().allow_methods([
+        Method::GET,
+        Method::POST,
+        Method::DELETE,
+        Method::OPTIONS,
+    ]);
 
     for origin in &config.allowed_origins {
-        let header_value = origin.parse::<header::HeaderValue>().map_err(|e| {
-            Error::OperationFailed {
-                operation: "cors_origin".to_string(),
-                cause: e.to_string(),
-            }
-        })?;
+        let header_value =
+            origin
+                .parse::<header::HeaderValue>()
+                .map_err(|e| Error::OperationFailed {
+                    operation: "cors_origin".to_string(),
+                    cause: e.to_string(),
+                })?;
         cors = cors.allow_origin(header_value);
     }
 
@@ -507,9 +516,7 @@ impl ServerHandler for McpHandler {
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListResourceTemplatesResult>> + Send + '_ {
-        std::future::ready(Ok(ListResourceTemplatesResult::with_all_items(
-            Vec::new(),
-        )))
+        std::future::ready(Ok(ListResourceTemplatesResult::with_all_items(Vec::new())))
     }
 
     fn read_resource(
@@ -578,11 +585,7 @@ impl ServerHandler for McpHandler {
 }
 
 fn tool_definition_to_rmcp(def: &ToolDefinition) -> Tool {
-    let schema = def
-        .input_schema
-        .as_object()
-        .cloned()
-        .unwrap_or_default();
+    let schema = def.input_schema.as_object().cloned().unwrap_or_default();
 
     Tool {
         name: Cow::Owned(def.name.clone()),
@@ -683,31 +686,27 @@ fn prompt_message_to_rmcp(message: SubcogPromptMessage) -> PromptMessage {
 
     let content = match message.content {
         SubcogPromptContent::Text { text } => PromptMessageContent::Text { text },
-        SubcogPromptContent::Image { data, mime_type } => {
-            PromptMessageContent::Image {
-                image: rmcp::model::RawImageContent {
-                    data,
-                    mime_type,
-                    meta: None,
-                }
-                .no_annotation(),
+        SubcogPromptContent::Image { data, mime_type } => PromptMessageContent::Image {
+            image: rmcp::model::RawImageContent {
+                data,
+                mime_type,
+                meta: None,
             }
-        }
-        SubcogPromptContent::Resource { uri } => {
-            PromptMessageContent::ResourceLink {
-                link: RawResource {
-                    uri: uri.clone(),
-                    name: uri,
-                    title: None,
-                    description: None,
-                    mime_type: None,
-                    size: None,
-                    icons: None,
-                    meta: None,
-                }
-                .no_annotation(),
+            .no_annotation(),
+        },
+        SubcogPromptContent::Resource { uri } => PromptMessageContent::ResourceLink {
+            link: RawResource {
+                uri: uri.clone(),
+                name: uri,
+                title: None,
+                description: None,
+                mime_type: None,
+                size: None,
+                icons: None,
+                meta: None,
             }
-        }
+            .no_annotation(),
+        },
     };
 
     PromptMessage { role, content }

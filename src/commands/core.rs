@@ -7,9 +7,7 @@ use std::path::PathBuf;
 
 use subcog::config::SubcogConfig;
 use subcog::storage::PersistenceBackend;
-use subcog::{
-    CaptureRequest, Domain, Namespace, SearchFilter, SearchMode, SyncService,
-};
+use subcog::{CaptureRequest, Domain, Namespace, SearchFilter, SearchMode, SyncService};
 
 /// Parses namespace string.
 pub fn parse_namespace(s: &str) -> Namespace {

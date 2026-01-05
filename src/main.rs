@@ -258,10 +258,7 @@ async fn main() -> ExitCode {
 }
 
 /// Runs the selected command.
-async fn run_command(
-    cli: Cli,
-    config: SubcogConfig,
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::error::Error>> {
     if config.features.audit_log {
         let audit_path = config.data_dir.join("audit.log");
         let audit_config = AuditConfig::new().with_log_path(audit_path);

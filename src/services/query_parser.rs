@@ -256,10 +256,7 @@ mod tests {
     #[test]
     fn test_parse_project_branch_path() {
         let filter = parse_filter_query("project:github.com/org/repo branch:main path:src/lib.rs");
-        assert_eq!(
-            filter.project_id.as_deref(),
-            Some("github.com/org/repo")
-        );
+        assert_eq!(filter.project_id.as_deref(), Some("github.com/org/repo"));
         assert_eq!(filter.branch.as_deref(), Some("main"));
         assert_eq!(filter.file_path.as_deref(), Some("src/lib.rs"));
     }

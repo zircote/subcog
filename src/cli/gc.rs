@@ -49,9 +49,7 @@ pub fn execute(dry_run: bool, purge: bool, older_than_days: u64) -> Result<()> {
         let older_than = Duration::from_secs(older_than_days * 24 * 60 * 60);
         let purged = tombstone_service.purge_tombstoned(older_than)?;
 
-        println!(
-            "Purged {purged} tombstoned memories older than {older_than_days} days"
-        );
+        println!("Purged {purged} tombstoned memories older than {older_than_days} days");
     } else {
         println!("Garbage collection complete");
         println!("Use --purge to permanently delete tombstoned memories");

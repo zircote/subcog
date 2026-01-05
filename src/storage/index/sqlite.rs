@@ -785,8 +785,7 @@ impl IndexBackend for SqliteBackend {
                 // Note: Cast u64 to i64 for SQLite compatibility (rusqlite doesn't impl ToSql for u64)
                 #[allow(clippy::cast_possible_wrap)]
                 let created_at_i64 = memory.created_at as i64;
-                let tombstoned_at_i64 =
-                    memory.tombstoned_at.map(|t| t.timestamp());
+                let tombstoned_at_i64 = memory.tombstoned_at.map(|t| t.timestamp());
                 conn.execute(
                     "INSERT OR REPLACE INTO memories (id, namespace, domain, project_id, branch, file_path, status, created_at, tags, source, tombstoned_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",

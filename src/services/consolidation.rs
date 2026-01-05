@@ -241,9 +241,15 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             content: merged_content,
             namespace: target.namespace,
             domain: target.domain,
-            project_id: target.project_id.clone().or_else(|| source.project_id.clone()),
+            project_id: target
+                .project_id
+                .clone()
+                .or_else(|| source.project_id.clone()),
             branch: target.branch.clone().or_else(|| source.branch.clone()),
-            file_path: target.file_path.clone().or_else(|| source.file_path.clone()),
+            file_path: target
+                .file_path
+                .clone()
+                .or_else(|| source.file_path.clone()),
             status: MemoryStatus::Active,
             created_at: target.created_at.min(source_created_at),
             updated_at: now,
