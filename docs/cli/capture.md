@@ -14,6 +14,8 @@ subcog capture [OPTIONS] -
 
 The `capture` command stores a new memory in the persistent storage layer (SQLite by default). Memories are categorized by namespace and can be tagged for easy retrieval.
 
+Capture also records git context facets (project_id, branch, file_path) when available. Subcog automatically appends a `hash:sha256:<prefix>` tag to support deduplication.
+
 ## Arguments
 
 | Argument | Description |

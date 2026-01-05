@@ -615,7 +615,7 @@ org_scope_enabled = true
 - [x] README.md shows ≥95% compliance (or 100% with documented deviations) ✓
 - [x] All ADR audit sections updated with remediation dates ✓
 - [x] Configuration documentation updated ✓
-- [ ] User-facing docs explain new features
+- [x] User-facing docs explain new features ✓
 
 ### Deployment Readiness
 - [ ] `make ci` passes clean
