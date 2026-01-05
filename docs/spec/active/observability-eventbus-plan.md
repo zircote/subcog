@@ -36,7 +36,7 @@
 - [x] Add unit tests for event dispatch and subscriber filtering ✓
 
 ### Phase 2: Tracing & Context Propagation
-- [ ] Define trace/span naming conventions and required attributes
+- [x] Define trace/span naming conventions and required attributes ✓
 - [ ] Add request correlation IDs to CLI/MCP/hook flows (parity)
 - [ ] Instrument capture/recall/consolidation/GC with spans and sub-spans
 - [ ] Instrument MCP tool execution and hook handlers with spans
