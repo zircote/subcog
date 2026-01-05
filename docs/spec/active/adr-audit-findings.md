@@ -445,7 +445,7 @@ org_scope_enabled = true
 **Estimated Time:** 2 hours
 
 #### Tombstone Testing
-- [ ] Create a memory in a feature branch context
+- [x] Create a memory in a feature branch context ✓
 - [x] Delete the feature branch ✓
 - [ ] Run recall (should trigger lazy GC)
 - [ ] Verify memory is tombstoned
