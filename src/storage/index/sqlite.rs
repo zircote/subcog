@@ -313,6 +313,12 @@ impl SqliteBackend {
             [],
         );
 
+        // Partial index on tombstoned_at for cleanup queries
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_tombstoned_at ON memories(tombstoned_at) WHERE tombstoned_at IS NOT NULL",
+            [],
+        );
+
         // Composite index for common filter patterns
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_namespace_status ON memories(namespace, status)",
