@@ -258,10 +258,11 @@ fn filter_from_env_override(default_filter: EnvFilter) -> EnvFilter {
 }
 
 fn normalize_level(level: String) -> String {
-    if level.contains('=') || level.contains(',') {
-        level
+    let normalized = level.trim().to_lowercase();
+    if normalized.contains('=') || normalized.contains(',') {
+        normalized
     } else {
-        format!("subcog={level}")
+        format!("subcog={normalized}")
     }
 }
 

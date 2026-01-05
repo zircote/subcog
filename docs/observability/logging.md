@@ -35,6 +35,13 @@ When tracing is enabled, include:
 - `span_id`
 - `parent_span_id`
 
+## Level Guidelines
+
+- `error`: Unexpected failures that require action.
+- `warn`: Degraded behavior or recoverable issues.
+- `info`: High-level lifecycle events and successful operations.
+- `debug`: Detailed diagnostics for troubleshooting.
+
 ## Redaction Rules
 
 - Never log raw memory content.
