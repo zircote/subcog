@@ -1074,6 +1074,7 @@ impl IndexBackend for SqliteBackend {
         let start = Instant::now();
         let result = (|| {
             let conn = acquire_lock(&self.conn);
+            let limit = limit.min(i64::MAX as usize);
 
             // Build filter clause (starting at parameter 1, no FTS query)
             let (filter_clause, filter_params, next_param) =
@@ -1502,6 +1503,22 @@ mod tests {
 
         let results = backend.search("memory", &SearchFilter::new(), 10).unwrap();
         assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn test_list_all_with_max_limit() {
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        backend
+            .index(&create_test_memory("id1", "memory one", Namespace::Decisions))
+            .unwrap();
+
+        let results = backend
+            .list_all(&SearchFilter::new(), usize::MAX)
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0.as_str(), "id1");
     }
 
     #[test]
