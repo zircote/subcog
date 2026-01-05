@@ -2,8 +2,10 @@
 //!
 //! Searches for memories using hybrid (vector + BM25) search with RRF fusion.
 
+use crate::context::GitContext;
 use crate::current_timestamp;
 use crate::embedding::Embedder;
+use crate::gc::branch_exists;
 use crate::models::{
     Memory, MemoryEvent, MemoryId, MemoryStatus, SearchFilter, SearchHit, SearchMode, SearchResult,
 };
@@ -15,7 +17,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::instrument;
+use tracing::{instrument, warn};
 
 /// RRF fusion entry storing indices instead of cloning [`SearchHit`].
 type RrfEntry = (f32, Option<usize>, Option<usize>, Option<f32>);
@@ -232,6 +234,8 @@ impl RecallService {
                 normalize_scores(&mut memories);
             }
 
+            self.lazy_tombstone_stale_branches(&mut memories, filter);
+
             // Safe cast: u128 milliseconds will practically never exceed u64::MAX
             let execution_time_ms = start.elapsed().as_millis() as u64;
             let total_count = memories.len();
@@ -272,6 +276,57 @@ impl RecallService {
         .record(start.elapsed().as_secs_f64() * 1000.0);
 
         result
+    }
+
+    fn lazy_tombstone_stale_branches(&self, hits: &mut Vec<SearchHit>, filter: &SearchFilter) {
+        let Some(index) = self.index.as_ref() else {
+            return;
+        };
+
+        let ctx = GitContext::from_cwd();
+        let Some(project_id) = ctx.project_id else {
+            return;
+        };
+
+        let now = current_timestamp();
+
+        for hit in hits.iter_mut() {
+            let Some(branch) = hit.memory.branch.as_deref() else {
+                continue;
+            };
+
+            if hit.memory.status == MemoryStatus::Tombstoned {
+                continue;
+            }
+
+            if hit.memory.project_id.as_deref() != Some(&project_id) {
+                continue;
+            }
+
+            if branch_exists(branch) {
+                continue;
+            }
+
+            let mut updated = hit.memory.clone();
+            updated.status = MemoryStatus::Tombstoned;
+            updated.tombstoned_at = Some(now);
+
+            if let Err(err) = index.index(&updated) {
+                warn!(
+                    error = %err,
+                    memory_id = %updated.id.as_str(),
+                    "Failed to tombstone stale branch memory during recall"
+                );
+                continue;
+            }
+
+            hit.memory.status = MemoryStatus::Tombstoned;
+            hit.memory.tombstoned_at = Some(now);
+        }
+
+        if !filter.include_tombstoned {
+            hits.retain(|hit| hit.memory.status != MemoryStatus::Tombstoned);
+        }
     }
 
     /// Lists all memories, optionally filtered by namespace.
