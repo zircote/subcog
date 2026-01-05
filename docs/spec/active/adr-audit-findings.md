@@ -583,7 +583,7 @@ org_scope_enabled = true
 **Impact:** Medium
 
 **Mitigation:**
-- [ ] Run GC tests frequently during development
+- [x] Run GC tests frequently during development ✓
 - [ ] Fix test failures immediately
 - [ ] Add new tests before removing old ones
 - [ ] Use TDD approach for new tombstone operations
