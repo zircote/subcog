@@ -453,7 +453,7 @@ org_scope_enabled = true
 - [x] Run recall with --include-tombstoned ✓
 - [x] Verify tombstoned memory appears ✓
 - [x] Test `subcog gc` command ✓
-- [ ] Test `subcog gc --dry-run`
+- [x] Test `subcog gc --dry-run` ✓
 - [ ] Test `subcog gc --purge --older-than=30d`
 - [ ] Verify purged memories are permanently deleted
 
