@@ -603,7 +603,7 @@ org_scope_enabled = true
 - [x] ADR-0053 compliant: Tombstone pattern working end-to-end ✓
 - [x] ADR-0052 compliant: Lazy GC tombstones stale branch memories ✓
 - [x] ADR-0051 compliant: Org-scope feature gate present and functional ✓
-- [ ] ADR-0009 deviation properly documented
+- [x] ADR-0009 deviation properly documented ✓
 
 ### Testing
 - [ ] Unit tests pass for all new code
