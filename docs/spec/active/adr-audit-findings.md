@@ -565,7 +565,7 @@ org_scope_enabled = true
 - [x] Use `WHERE status != 'Tombstoned'` in default queries (indexed) ✓
 - [x] Monitor query performance after deployment ✓
 - [x] Run EXPLAIN ANALYZE on recall queries ✓
-- [ ] Benchmark before/after with realistic data
+- [x] Benchmark before/after with realistic data ✓
 
 ### Risk 3: Breaking Changes in Memory Struct
 **Likelihood:** Low
