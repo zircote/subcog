@@ -33,7 +33,7 @@
 - [x] Emit events for MCP lifecycle (startup, auth, tool execution, request errors) ✓
 - [x] Emit events for hook lifecycle (invocation, classification, capture decisions, failures) ✓
 - [x] Add event bus health metrics (publish rate, drop rate, lag) ✓
-- [ ] Add unit tests for event dispatch and subscriber filtering
+- [x] Add unit tests for event dispatch and subscriber filtering ✓
 
 ### Phase 2: Tracing & Context Propagation
 - [ ] Define trace/span naming conventions and required attributes

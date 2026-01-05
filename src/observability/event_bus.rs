@@ -134,4 +134,25 @@ mod tests {
         let event = filtered.recv().await.expect("receive event");
         assert_eq!(event.event_type(), "captured");
     }
+
+    #[tokio::test]
+    async fn test_subscribe_receives_published_event() {
+        let bus = EventBus::new(16);
+        let mut receiver = bus.subscribe();
+
+        bus.publish(MemoryEvent::Captured {
+            meta: EventMeta::with_timestamp("test", None, 42),
+            memory_id: MemoryId::new("id3"),
+            namespace: Namespace::Decisions,
+            domain: Domain {
+                organization: None,
+                project: None,
+                repository: None,
+            },
+            content_length: 5,
+        });
+
+        let event = receiver.recv().await.expect("receive event");
+        assert_eq!(event.event_type(), "captured");
+    }
 }
