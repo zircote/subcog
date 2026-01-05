@@ -40,7 +40,7 @@ use chrono::{TimeZone, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, info_span, instrument, warn};
 
 /// Environment variable for default retention period in days.
 pub const RETENTION_DAYS_ENV: &str = "SUBCOG_RETENTION_DAYS";
@@ -337,15 +337,21 @@ impl<I: IndexBackend> RetentionGarbageCollector<I> {
     ///
     /// Returns an error if index backend operations fail.
     #[instrument(
+        name = "subcog.gc.retention",
         skip(self),
         fields(
-            operation = "gc_expired_memories",
+            request_id = tracing::field::Empty,
+            component = "gc",
+            operation = "retention",
             dry_run = dry_run,
             default_retention_days = self.config.default_days
         )
     )]
     pub fn gc_expired_memories(&self, dry_run: bool) -> Result<RetentionGcResult> {
         let start = Instant::now();
+        if let Some(request_id) = crate::observability::current_request_id() {
+            tracing::Span::current().record("request_id", &request_id.as_str());
+        }
         let mut result = RetentionGcResult {
             dry_run,
             ..Default::default()
@@ -357,6 +363,12 @@ impl<I: IndexBackend> RetentionGarbageCollector<I> {
         for namespace in Namespace::user_namespaces().iter().copied() {
             let cutoff = self.config.cutoff_timestamp(namespace);
             let retention_days = self.config.effective_days(namespace);
+            let _span = info_span!(
+                "subcog.gc.retention.namespace",
+                namespace = %namespace.as_str(),
+                retention_days = retention_days
+            )
+            .entered();
 
             debug!(
                 namespace = namespace.as_str(),

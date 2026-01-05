@@ -17,7 +17,7 @@ use crate::{Error, Result};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use tracing::instrument;
+use tracing::{info_span, instrument};
 
 /// Service for capturing memories.
 ///
@@ -136,8 +136,11 @@ impl CaptureService {
     /// - The content contains unredacted secrets (when blocking is enabled)
     /// - Storage fails
     #[instrument(
+        name = "subcog.memory.capture",
         skip(self, request),
         fields(
+            request_id = tracing::field::Empty,
+            component = "memory",
             operation = "capture",
             namespace = %request.namespace,
             domain = %request.domain,
@@ -151,6 +154,9 @@ impl CaptureService {
         let start = Instant::now();
         let namespace_label = request.namespace.as_str().to_string();
         let domain_label = request.domain.to_string();
+        if let Some(request_id) = current_request_id() {
+            tracing::Span::current().record("request_id", &request_id.as_str());
+        }
 
         tracing::info!(namespace = %namespace_label, domain = %domain_label, "Capturing memory");
 
@@ -158,34 +164,44 @@ impl CaptureService {
         const MAX_CONTENT_SIZE: usize = 500_000;
 
         let result = (|| {
-            // Validate content length (MED-SEC-002, MED-COMP-003)
-            if request.content.trim().is_empty() {
-                return Err(Error::InvalidInput("Content cannot be empty".to_string()));
-            }
-            if request.content.len() > MAX_CONTENT_SIZE {
-                return Err(Error::InvalidInput(format!(
-                    "Content exceeds maximum size of {} bytes (got {} bytes)",
-                    MAX_CONTENT_SIZE,
-                    request.content.len()
-                )));
-            }
+            let has_secrets = {
+                let _span = info_span!("subcog.memory.capture.validate").entered();
+                // Validate content length (MED-SEC-002, MED-COMP-003)
+                if request.content.trim().is_empty() {
+                    return Err(Error::InvalidInput("Content cannot be empty".to_string()));
+                }
+                if request.content.len() > MAX_CONTENT_SIZE {
+                    return Err(Error::InvalidInput(format!(
+                        "Content exceeds maximum size of {} bytes (got {} bytes)",
+                        MAX_CONTENT_SIZE,
+                        request.content.len()
+                    )));
+                }
 
-            // Check for secrets
-            let has_secrets = self.secret_detector.contains_secrets(&request.content);
-            if has_secrets && self.config.features.block_secrets && !request.skip_security_check {
-                return Err(Error::ContentBlocked {
-                    reason: "Content contains detected secrets".to_string(),
-                });
-            }
+                // Check for secrets
+                let has_secrets = self.secret_detector.contains_secrets(&request.content);
+                if has_secrets
+                    && self.config.features.block_secrets
+                    && !request.skip_security_check
+                {
+                    return Err(Error::ContentBlocked {
+                        reason: "Content contains detected secrets".to_string(),
+                    });
+                }
+                has_secrets
+            };
 
             // Optionally redact secrets
-            let (content, was_redacted) = if has_secrets
-                && self.config.features.redact_secrets
-                && !request.skip_security_check
-            {
-                (self.redactor.redact(&request.content), true)
-            } else {
-                (request.content.clone(), false)
+            let (content, was_redacted) = {
+                let _span = info_span!("subcog.memory.capture.redact").entered();
+                if has_secrets
+                    && self.config.features.redact_secrets
+                    && !request.skip_security_check
+                {
+                    (self.redactor.redact(&request.content), true)
+                } else {
+                    (request.content.clone(), false)
+                }
             };
 
             // Get current timestamp
@@ -202,27 +218,30 @@ impl CaptureService {
             span.record("memory.id", memory_id.as_str());
 
             // Generate embedding if embedder is available
-            let embedding = if let Some(ref embedder) = self.embedder {
-                match embedder.embed(&content) {
-                    Ok(emb) => {
-                        tracing::debug!(
-                            memory_id = %memory_id,
-                            dimensions = emb.len(),
-                            "Generated embedding for memory"
-                        );
-                        Some(emb)
-                    },
-                    Err(e) => {
-                        tracing::warn!(
-                            memory_id = %memory_id,
-                            error = %e,
-                            "Failed to generate embedding (continuing without)"
-                        );
-                        None
-                    },
+            let embedding = {
+                let _span = info_span!("subcog.memory.capture.embed").entered();
+                if let Some(ref embedder) = self.embedder {
+                    match embedder.embed(&content) {
+                        Ok(emb) => {
+                            tracing::debug!(
+                                memory_id = %memory_id,
+                                dimensions = emb.len(),
+                                "Generated embedding for memory"
+                            );
+                            Some(emb)
+                        },
+                        Err(e) => {
+                            tracing::warn!(
+                                memory_id = %memory_id,
+                                error = %e,
+                                "Failed to generate embedding (continuing without)"
+                            );
+                            None
+                        },
+                    }
+                } else {
+                    None
                 }
-            } else {
-                None
             };
 
             // Resolve git context for facets.
@@ -270,6 +289,7 @@ impl CaptureService {
 
             // Index memory for text search (best-effort)
             if let Some(ref index) = self.index {
+                let _span = info_span!("subcog.memory.capture.index").entered();
                 // Need mutable access - clone the Arc and get mutable ref
                 let index_clone = Arc::clone(index);
                 // IndexBackend::index takes &self with interior mutability
@@ -290,6 +310,7 @@ impl CaptureService {
 
             // Upsert embedding to vector store (best-effort)
             if let (Some(vector), Some(emb)) = (&self.vector, &embedding) {
+                let _span = info_span!("subcog.memory.capture.vector").entered();
                 // VectorBackend::upsert takes &self with interior mutability
                 let vector_clone = Arc::clone(vector);
                 match vector_clone.upsert(&memory_id, emb) {

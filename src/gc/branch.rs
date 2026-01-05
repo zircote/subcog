@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, info_span, instrument, warn};
 
 /// Safely converts Duration to milliseconds as u64, capping at `u64::MAX`.
 #[inline]
@@ -226,28 +226,43 @@ impl<I: IndexBackend> BranchGarbageCollector<I> {
     /// }
     /// ```
     #[instrument(
+        name = "subcog.gc.branches",
         skip(self),
         fields(
-            operation = "gc_stale_branches",
+            request_id = tracing::field::Empty,
+            component = "gc",
+            operation = "stale_branches",
             project_id = %project_id,
             dry_run = dry_run
         )
     )]
     pub fn gc_stale_branches(&self, project_id: &str, dry_run: bool) -> Result<GcResult> {
         let start = Instant::now();
+        if let Some(request_id) = crate::observability::current_request_id() {
+            tracing::Span::current().record("request_id", &request_id.as_str());
+        }
 
         // Step 1: Discover git repository
-        let repo = self.discover_repository()?;
+        let repo = {
+            let _span = info_span!("subcog.gc.branches.discover_repo").entered();
+            self.discover_repository()?
+        };
 
         // Step 2: Get current branches from the repository
-        let current_branches = Self::get_current_branches(&repo)?;
+        let current_branches = {
+            let _span = info_span!("subcog.gc.branches.list_repo").entered();
+            Self::get_current_branches(&repo)?
+        };
         debug!(
             branch_count = current_branches.len(),
             "Discovered current branches"
         );
 
         // Step 3: Get branches from the index for this project
-        let indexed_branches = self.get_indexed_branches(project_id)?;
+        let indexed_branches = {
+            let _span = info_span!("subcog.gc.branches.list_index").entered();
+            self.get_indexed_branches(project_id)?
+        };
         let branches_checked = indexed_branches.len();
         debug!(
             branch_count = branches_checked,

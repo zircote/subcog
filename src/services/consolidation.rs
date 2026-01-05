@@ -14,7 +14,7 @@ use lru::LruCache;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::time::Instant;
-use tracing::instrument;
+use tracing::{info_span, instrument};
 
 // Retention score calculation constants
 /// Seconds per day for age calculation.
@@ -72,9 +72,20 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     /// # Errors
     ///
     /// Returns an error if consolidation fails.
-    #[instrument(skip(self), fields(operation = "consolidate"))]
+    #[instrument(
+        name = "subcog.memory.consolidate",
+        skip(self),
+        fields(
+            request_id = tracing::field::Empty,
+            component = "memory",
+            operation = "consolidate"
+        )
+    )]
     pub fn consolidate(&mut self) -> Result<ConsolidationStats> {
         let start = Instant::now();
+        if let Some(request_id) = current_request_id() {
+            tracing::Span::current().record("request_id", &request_id.as_str());
+        }
         let result = (|| {
             let mut stats = ConsolidationStats::default();
 
@@ -97,21 +108,31 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             }
 
             // Archive identified memories
-            for id in to_archive {
-                if let Some(mut memory) = self.persistence.get(&id)? {
-                    memory.status = MemoryStatus::Archived;
-                    self.persistence.store(&memory)?;
-                    record_event(MemoryEvent::Archived {
-                        meta: EventMeta::with_timestamp("consolidation", current_request_id(), now),
-                        memory_id: memory.id.clone(),
-                        reason: "consolidation_archive".to_string(),
-                    });
-                    stats.archived += 1;
+            {
+                let _span = info_span!("subcog.memory.consolidate.archive").entered();
+                for id in to_archive {
+                    if let Some(mut memory) = self.persistence.get(&id)? {
+                        memory.status = MemoryStatus::Archived;
+                        self.persistence.store(&memory)?;
+                        record_event(MemoryEvent::Archived {
+                            meta: EventMeta::with_timestamp(
+                                "consolidation",
+                                current_request_id(),
+                                now,
+                            ),
+                            memory_id: memory.id.clone(),
+                            reason: "consolidation_archive".to_string(),
+                        });
+                        stats.archived += 1;
+                    }
                 }
             }
 
             // Detect contradictions (simple heuristic: same namespace, similar timestamps)
-            stats.contradictions = self.detect_contradictions(&memory_ids)?;
+            {
+                let _span = info_span!("subcog.memory.consolidate.contradictions").entered();
+                stats.contradictions = self.detect_contradictions(&memory_ids)?;
+            }
 
             record_event(MemoryEvent::Consolidated {
                 meta: EventMeta::new("consolidation", current_request_id()),

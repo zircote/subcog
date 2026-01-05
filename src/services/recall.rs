@@ -20,7 +20,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{instrument, warn};
+use tracing::{info_span, instrument, warn};
 
 /// RRF fusion entry storing indices instead of cloning [`SearchHit`].
 type RrfEntry = (f32, Option<usize>, Option<usize>, Option<f32>);
@@ -158,8 +158,11 @@ impl RecallService {
     /// - The search timeout is exceeded (RES-M5)
     #[allow(clippy::cast_possible_truncation)]
     #[instrument(
+        name = "subcog.memory.recall",
         skip(self, query, filter),
         fields(
+            request_id = tracing::field::Empty,
+            component = "memory",
             operation = "recall",
             mode = %mode,
             query_length = query.len(),
@@ -177,6 +180,9 @@ impl RecallService {
         let start = Instant::now();
         let domain_label = domain_label(filter);
         let mode_label = mode.as_str();
+        if let Some(request_id) = current_request_id() {
+            tracing::Span::current().record("request_id", &request_id.as_str());
+        }
 
         tracing::info!(mode = %mode_label, query_length = query.len(), limit = limit, timeout_ms = self.timeout_ms, "Searching memories");
 
@@ -214,9 +220,18 @@ impl RecallService {
             }
 
             let mut memories = match mode {
-                SearchMode::Text => self.text_search(query, filter, limit)?,
-                SearchMode::Vector => self.vector_search(query, filter, limit)?,
-                SearchMode::Hybrid => self.hybrid_search(query, filter, limit)?,
+                SearchMode::Text => {
+                    let _span = info_span!("subcog.memory.recall.text_search").entered();
+                    self.text_search(query, filter, limit)?
+                },
+                SearchMode::Vector => {
+                    let _span = info_span!("subcog.memory.recall.vector_search").entered();
+                    self.vector_search(query, filter, limit)?
+                },
+                SearchMode::Hybrid => {
+                    let _span = info_span!("subcog.memory.recall.hybrid_search").entered();
+                    self.hybrid_search(query, filter, limit)?
+                },
             };
 
             // Check timeout after search (RES-M5)
@@ -349,10 +364,22 @@ impl RecallService {
     /// - The index backend list operation fails
     /// - Batch memory retrieval fails
     #[allow(clippy::cast_possible_truncation)]
-    #[instrument(skip(self, filter), fields(operation = "list_all", limit = limit))]
+    #[instrument(
+        name = "subcog.memory.recall.list_all",
+        skip(self, filter),
+        fields(
+            request_id = tracing::field::Empty,
+            component = "memory",
+            operation = "list_all",
+            limit = limit
+        )
+    )]
     pub fn list_all(&self, filter: &SearchFilter, limit: usize) -> Result<SearchResult> {
         let start = Instant::now();
         let domain_label = domain_label(filter);
+        if let Some(request_id) = current_request_id() {
+            tracing::Span::current().record("request_id", &request_id.as_str());
+        }
 
         let result = (|| {
             let index = self.index.as_ref().ok_or_else(|| Error::OperationFailed {
