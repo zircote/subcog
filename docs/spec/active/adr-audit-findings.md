@@ -619,7 +619,7 @@ org_scope_enabled = true
 
 ### Deployment Readiness
 - [x] `make ci` passes clean ✓
-- [ ] Database migrations tested
+- [x] Database migrations tested ✓
 - [ ] Rollback plan documented
 - [ ] Production deployment plan ready
 
