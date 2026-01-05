@@ -292,6 +292,13 @@ impl RecallService {
             "backend" => "sqlite"
         )
         .record(start.elapsed().as_secs_f64() * 1000.0);
+        metrics::histogram!(
+            "memory_lifecycle_duration_ms",
+            "component" => "memory",
+            "operation" => "recall",
+            "mode" => mode_label
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
 
         result
     }
@@ -446,6 +453,13 @@ impl RecallService {
             "memory_search_duration_ms",
             "mode" => "list_all",
             "backend" => "sqlite"
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
+        metrics::histogram!(
+            "memory_lifecycle_duration_ms",
+            "component" => "memory",
+            "operation" => "recall",
+            "mode" => "list_all"
         )
         .record(start.elapsed().as_secs_f64() * 1000.0);
 

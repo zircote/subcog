@@ -369,6 +369,12 @@ impl CaptureService {
             "namespace" => namespace_label
         )
         .record(start.elapsed().as_secs_f64() * 1000.0);
+        metrics::histogram!(
+            "memory_lifecycle_duration_ms",
+            "component" => "memory",
+            "operation" => "capture"
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
 
         result
     }

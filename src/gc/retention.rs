@@ -394,6 +394,12 @@ impl<I: IndexBackend> RetentionGarbageCollector<I> {
         .increment(1);
         metrics::gauge!("gc_retention_tombstoned").set(usize_to_f64(result.memories_tombstoned));
         metrics::histogram!("gc_retention_duration_ms").record(u64_to_f64(result.duration_ms));
+        metrics::histogram!(
+            "memory_lifecycle_duration_ms",
+            "component" => "gc",
+            "operation" => "retention"
+        )
+        .record(u64_to_f64(result.duration_ms));
 
         info!(
             memories_checked = result.memories_checked,

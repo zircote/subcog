@@ -310,6 +310,12 @@ impl<I: IndexBackend> BranchGarbageCollector<I> {
         metrics::gauge!("gc_stale_branch_count").set(usize_to_f64(stale_branches.len()));
         metrics::gauge!("gc_memories_tombstoned").set(usize_to_f64(memories_tombstoned));
         metrics::histogram!("gc_duration_ms").record(u64_to_f64(duration_ms));
+        metrics::histogram!(
+            "memory_lifecycle_duration_ms",
+            "component" => "gc",
+            "operation" => "stale_branches"
+        )
+        .record(u64_to_f64(duration_ms));
 
         Ok(GcResult {
             branches_checked,

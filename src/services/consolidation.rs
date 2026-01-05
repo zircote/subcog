@@ -159,6 +159,12 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             "namespace" => "mixed"
         )
         .record(start.elapsed().as_secs_f64() * 1000.0);
+        metrics::histogram!(
+            "memory_lifecycle_duration_ms",
+            "component" => "memory",
+            "operation" => "consolidate"
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
 
         result
     }
