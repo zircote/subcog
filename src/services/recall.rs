@@ -4,6 +4,7 @@
 
 use crate::context::GitContext;
 use crate::current_timestamp;
+use chrono::{TimeZone, Utc};
 use crate::embedding::Embedder;
 use crate::gc::branch_exists;
 use crate::models::{
@@ -289,6 +290,10 @@ impl RecallService {
         };
 
         let now = current_timestamp();
+        let now_dt = Utc
+            .timestamp_opt(now as i64, 0)
+            .single()
+            .unwrap_or_else(Utc::now);
 
         for hit in hits.iter_mut() {
             let Some(branch) = hit.memory.branch.as_deref() else {
@@ -309,7 +314,7 @@ impl RecallService {
 
             let mut updated = hit.memory.clone();
             updated.status = MemoryStatus::Tombstoned;
-            updated.tombstoned_at = Some(now);
+            updated.tombstoned_at = Some(now_dt);
 
             if let Err(err) = index.index(&updated) {
                 warn!(
@@ -321,7 +326,7 @@ impl RecallService {
             }
 
             hit.memory.status = MemoryStatus::Tombstoned;
-            hit.memory.tombstoned_at = Some(now);
+            hit.memory.tombstoned_at = Some(now_dt);
         }
 
         if !filter.include_tombstoned {

@@ -29,6 +29,7 @@ use crate::security::encryption::is_encrypted;
 use crate::security::encryption::{EncryptionConfig, Encryptor};
 use crate::storage::traits::PersistenceBackend;
 use crate::{Error, Result};
+use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -52,6 +53,7 @@ struct StoredMemory {
     status: String,
     created_at: u64,
     updated_at: u64,
+    #[serde(default)]
     tombstoned_at: Option<u64>,
     embedding: Option<Vec<f32>>,
     tags: Vec<String>,
@@ -73,7 +75,9 @@ impl From<&Memory> for StoredMemory {
             status: m.status.as_str().to_string(),
             created_at: m.created_at,
             updated_at: m.updated_at,
-            tombstoned_at: m.tombstoned_at,
+            tombstoned_at: m
+                .tombstoned_at
+                .and_then(|ts| u64::try_from(ts.timestamp()).ok()),
             embedding: m.embedding.clone(),
             tags: m.tags.clone(),
             source: m.source.clone(),
@@ -124,7 +128,9 @@ impl StoredMemory {
             status,
             created_at: self.created_at,
             updated_at: self.updated_at,
-            tombstoned_at: self.tombstoned_at,
+            tombstoned_at: self
+                .tombstoned_at
+                .and_then(|ts| Utc.timestamp_opt(ts as i64, 0).single()),
             embedding: self.embedding.clone(),
             tags: self.tags.clone(),
             source: self.source.clone(),
@@ -451,6 +457,7 @@ fn extract_memory_id_from_path(path: &Path) -> Option<MemoryId> {
 mod tests {
     use super::*;
     use crate::models::{Domain, MemoryStatus, Namespace};
+    use serde_json;
     use tempfile::TempDir;
 
     fn create_test_memory(id: &str) -> Memory {
@@ -511,6 +518,31 @@ mod tests {
 
         let retrieved = backend.get(&MemoryId::new("to_delete")).unwrap();
         assert!(retrieved.is_none());
+    }
+
+    #[test]
+    fn test_deserialize_without_tombstoned_at() {
+        let json = r#"{
+            "id": "legacy-id",
+            "content": "Legacy content",
+            "namespace": "decisions",
+            "domain_org": null,
+            "domain_project": null,
+            "domain_repo": null,
+            "project_id": null,
+            "branch": null,
+            "file_path": null,
+            "status": "active",
+            "created_at": 123,
+            "updated_at": 123,
+            "embedding": null,
+            "tags": [],
+            "source": null
+        }"#;
+
+        let stored: StoredMemory = serde_json::from_str(json).unwrap();
+        let memory = stored.to_memory();
+        assert!(memory.tombstoned_at.is_none());
     }
 
     #[test]

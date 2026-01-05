@@ -1,5 +1,6 @@
 //! Memory types and identifiers.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -63,8 +64,8 @@ pub struct Memory {
     pub created_at: u64,
     /// Last update timestamp (Unix epoch seconds).
     pub updated_at: u64,
-    /// Tombstone timestamp (Unix epoch seconds) when soft-deleted.
-    pub tombstoned_at: Option<u64>,
+    /// Tombstone timestamp (UTC) when soft-deleted.
+    pub tombstoned_at: Option<DateTime<Utc>>,
     /// Optional embedding vector.
     pub embedding: Option<Vec<f32>>,
     /// Optional tags for categorization.

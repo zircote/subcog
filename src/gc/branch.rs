@@ -5,6 +5,7 @@
 use crate::context::GitContext;
 use crate::storage::traits::IndexBackend;
 use crate::{Error, Result};
+use chrono::{TimeZone, Utc};
 use git2::Repository;
 use std::collections::HashSet;
 use std::path::Path;
@@ -466,7 +467,11 @@ impl<I: IndexBackend> BranchGarbageCollector<I> {
         mut memory: crate::models::Memory,
         now: u64,
     ) -> bool {
-        memory.tombstoned_at = Some(now);
+        let now_dt = Utc
+            .timestamp_opt(now as i64, 0)
+            .single()
+            .unwrap_or_else(Utc::now);
+        memory.tombstoned_at = Some(now_dt);
         match self.index.index(&memory) {
             Ok(()) => true,
             Err(e) => {

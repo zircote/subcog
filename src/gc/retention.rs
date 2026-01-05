@@ -36,6 +36,7 @@
 use crate::models::{Namespace, SearchFilter};
 use crate::storage::traits::IndexBackend;
 use crate::Result;
+use chrono::{TimeZone, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -428,7 +429,11 @@ impl<I: IndexBackend> RetentionGarbageCollector<I> {
             } else {
                 // Tombstone the memory
                 let mut updated = memory.clone();
-                updated.tombstoned_at = Some(now);
+                let now_dt = Utc
+                    .timestamp_opt(now as i64, 0)
+                    .single()
+                    .unwrap_or_else(Utc::now);
+                updated.tombstoned_at = Some(now_dt);
 
                 match self.index.index(&updated) {
                     Ok(()) => {

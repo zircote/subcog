@@ -5,6 +5,7 @@
 use crate::models::{Memory, MemoryId, SearchFilter};
 use crate::storage::traits::IndexBackend;
 use crate::{Error, Result};
+use chrono::{TimeZone, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
@@ -715,6 +716,7 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
         "superseded" => MemoryStatus::Superseded,
         "pending" => MemoryStatus::Pending,
         "deleted" => MemoryStatus::Deleted,
+        "tombstoned" => MemoryStatus::Tombstoned,
         _ => MemoryStatus::Active,
     };
 
@@ -730,8 +732,9 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
 
     #[allow(clippy::cast_sign_loss)]
     let created_at_u64 = row.created_at as u64;
-    #[allow(clippy::cast_sign_loss)]
-    let tombstoned_at_u64 = row.tombstoned_at.map(|t| t as u64);
+    let tombstoned_at = row
+        .tombstoned_at
+        .and_then(|ts| Utc.timestamp_opt(ts, 0).single());
 
     Memory {
         id: MemoryId::new(row.id),
@@ -744,7 +747,7 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
         status,
         created_at: created_at_u64,
         updated_at: created_at_u64,
-        tombstoned_at: tombstoned_at_u64,
+        tombstoned_at,
         embedding: None,
         tags,
         source: row.source,
@@ -782,8 +785,8 @@ impl IndexBackend for SqliteBackend {
                 // Note: Cast u64 to i64 for SQLite compatibility (rusqlite doesn't impl ToSql for u64)
                 #[allow(clippy::cast_possible_wrap)]
                 let created_at_i64 = memory.created_at as i64;
-                #[allow(clippy::cast_possible_wrap)]
-                let tombstoned_at_i64 = memory.tombstoned_at.map(|t| t as i64);
+                let tombstoned_at_i64 =
+                    memory.tombstoned_at.map(|t| t.timestamp());
                 conn.execute(
                     "INSERT OR REPLACE INTO memories (id, namespace, domain, project_id, branch, file_path, status, created_at, tags, source, tombstoned_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",

@@ -3,8 +3,9 @@
 use crate::models::{MemoryId, MemoryStatus};
 use crate::storage::traits::PersistenceBackend;
 use crate::{Error, Result};
+use chrono::{TimeZone, Utc};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tracing::instrument;
 
 /// Service for tombstone operations (soft deletes).
@@ -38,12 +39,14 @@ impl TombstoneService {
             })?;
 
         // Set tombstone status and timestamp
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
+        let now = crate::current_timestamp();
+        let now_dt = Utc
+            .timestamp_opt(now as i64, 0)
+            .single()
+            .unwrap_or_else(Utc::now);
 
         memory.status = MemoryStatus::Tombstoned;
-        memory.tombstoned_at = Some(now);
+        memory.tombstoned_at = Some(now_dt);
         memory.updated_at = now;
 
         // Update in persistence
@@ -80,9 +83,7 @@ impl TombstoneService {
         // Clear tombstone status and timestamp
         memory.status = MemoryStatus::Active;
         memory.tombstoned_at = None;
-        memory.updated_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(memory.updated_at, |d| d.as_secs());
+        memory.updated_at = crate::current_timestamp();
 
         // Update in persistence
         self.persistence.store(&memory)?;
@@ -106,10 +107,8 @@ impl TombstoneService {
     /// Returns an error if the deletion operation fails.
     #[instrument(skip(self), fields(older_than_secs = older_than.as_secs()))]
     pub fn purge_tombstoned(&self, older_than: Duration) -> Result<usize> {
-        let threshold = SystemTime::now()
-            .checked_sub(older_than)
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map_or(0, |d| d.as_secs());
+        let threshold = crate::current_timestamp().saturating_sub(older_than.as_secs());
+        let threshold_i64 = i64::try_from(threshold).unwrap_or(i64::MAX);
 
         // List all memory IDs and check each
         let all_ids = self.persistence.list_ids()?;
@@ -119,7 +118,7 @@ impl TombstoneService {
             if let Some(memory) = self.persistence.get(&id)? {
                 if memory.status == MemoryStatus::Tombstoned {
                     if let Some(ts) = memory.tombstoned_at {
-                        if ts < threshold {
+                        if ts.timestamp() < threshold_i64 {
                             self.persistence.delete(&memory.id)?;
                             purged += 1;
                         }
@@ -215,20 +214,14 @@ mod tests {
         let old_memory = Memory {
             id: MemoryId::new("old"),
             status: MemoryStatus::Tombstoned,
-            tombstoned_at: Some(100), // Very old
+            tombstoned_at: Some(Utc.timestamp_opt(100, 0).unwrap()), // Very old
             ..create_test_memory("old")
         };
 
         let recent_memory = Memory {
             id: MemoryId::new("recent"),
             status: MemoryStatus::Tombstoned,
-            tombstoned_at: Some(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs()
-                    - 1,
-            ),
+            tombstoned_at: Some(Utc::now() - chrono::Duration::seconds(1)),
             ..create_test_memory("recent")
         };
 

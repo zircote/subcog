@@ -8,6 +8,7 @@ mod implementation {
     use crate::storage::migrations::{Migration, MigrationRunner};
     use crate::storage::traits::PersistenceBackend;
     use crate::{Error, Result};
+    use chrono::{TimeZone, Utc};
     use deadpool_postgres::{Config, Pool, Runtime};
     use tokio::runtime::Handle;
     use tokio_postgres::NoTls;
@@ -254,8 +255,8 @@ mod implementation {
             let upsert = format!(
                 r"INSERT INTO {} (id, content, namespace, domain_org, domain_project, domain_repo,
                     project_id, branch, file_path,
-                    status, tags, source, embedding, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                    status, tags, source, embedding, created_at, updated_at, tombstoned_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                 ON CONFLICT (id) DO UPDATE SET
                     content = EXCLUDED.content,
                     namespace = EXCLUDED.namespace,
@@ -269,13 +270,16 @@ mod implementation {
                     tags = EXCLUDED.tags,
                     source = EXCLUDED.source,
                     embedding = EXCLUDED.embedding,
-                    updated_at = EXCLUDED.updated_at",
+                    updated_at = EXCLUDED.updated_at,
+                    tombstoned_at = EXCLUDED.tombstoned_at",
                 self.table_name
             );
 
             let tags: Vec<&str> = memory.tags.iter().map(String::as_str).collect();
             let embedding_json: Option<serde_json::Value> =
                 memory.embedding.as_ref().map(|e| serde_json::json!(e));
+
+            let tombstoned_at = memory.tombstoned_at.map(|ts| ts.timestamp());
 
             client
                 .execute(
@@ -296,6 +300,7 @@ mod implementation {
                     &embedding_json,
                     &(memory.created_at as i64),
                         &(memory.updated_at as i64),
+                        &tombstoned_at,
                     ],
                 )
                 .await
@@ -312,7 +317,7 @@ mod implementation {
             let query = format!(
                 r"SELECT id, content, namespace, domain_org, domain_project, domain_repo,
                     project_id, branch, file_path,
-                    status, tags, source, embedding, created_at, updated_at
+                    status, tags, source, embedding, created_at, updated_at, tombstoned_at
                 FROM {}
                 WHERE id = $1",
                 self.table_name
@@ -344,6 +349,7 @@ mod implementation {
             let embedding_json: Option<serde_json::Value> = row.get("embedding");
             let created_at: i64 = row.get("created_at");
             let updated_at: i64 = row.get("updated_at");
+            let tombstoned_at: Option<i64> = row.get("tombstoned_at");
 
             let namespace = Namespace::parse(&namespace_str).unwrap_or_default();
             let status = match status_str.as_str() {
@@ -352,11 +358,14 @@ mod implementation {
                 "superseded" => MemoryStatus::Superseded,
                 "pending" => MemoryStatus::Pending,
                 "deleted" => MemoryStatus::Deleted,
+                "tombstoned" => MemoryStatus::Tombstoned,
                 _ => MemoryStatus::Active,
             };
 
             let embedding: Option<Vec<f32>> =
                 embedding_json.and_then(|v| serde_json::from_value(v).ok());
+
+            let tombstoned_at = tombstoned_at.and_then(|ts| Utc.timestamp_opt(ts, 0).single());
 
             Memory {
                 id: MemoryId::new(id),
@@ -376,7 +385,7 @@ mod implementation {
                 embedding,
                 created_at: created_at as u64,
                 updated_at: updated_at as u64,
-                tombstoned_at: None,
+                tombstoned_at,
             }
         }
 
@@ -429,7 +438,7 @@ mod implementation {
             let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("${i}")).collect();
             let query = format!(
                 r"SELECT id, content, namespace, domain_org, domain_project, domain_repo,
-                    status, tags, source, embedding, created_at, updated_at
+                    status, tags, source, embedding, created_at, updated_at, tombstoned_at
                 FROM {} WHERE id IN ({})",
                 self.table_name,
                 placeholders.join(", ")
