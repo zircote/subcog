@@ -53,7 +53,7 @@
 
 ### Phase 4: Metrics & Telemetry
 - [x] Define metric naming conventions and required labels ✓
-- [ ] Add metrics for event bus (queue depth, publish/subscribe counts)
+- [x] Add metrics for event bus (queue depth, publish/subscribe counts) ✓
 - [ ] Add metrics for memory lifecycle latency (capture/recall/GC/consolidation)
 - [ ] Add metrics for MCP request latency and error rates
 - [ ] Add metrics for hook execution latency and error rates
