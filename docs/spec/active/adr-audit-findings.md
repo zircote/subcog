@@ -653,7 +653,7 @@ Copy this to track progress:
 - [x] Task 4.1: Document MCP implementation choice ✓
 
 ## Phase 5: Verification [0/3]
-- [ ] Task 5.1: Run full test suite
+- [x] Task 5.1: Run full test suite ✓
 - [ ] Task 5.2: Manual integration testing
 - [ ] Task 5.3: Update ADR health status
 
