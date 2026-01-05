@@ -84,7 +84,7 @@ lru = "0.16"
 
 # FastEmbed for semantic embeddings (optional - fallback to pseudo-embeddings if not available)
 # Use rustls instead of native-tls (openssl) for TLS
-fastembed = { version = "4", optional = true, default-features = false, features = ["ort-download-binaries", "hf-hub-rustls-tls"] }
+fastembed = { version = "5", optional = true, default-features = false, features = ["ort-download-binaries", "hf-hub-rustls-tls"] }
 
 # usearch HNSW vector search (optional - pure Rust fallback if not available)
 usearch = { version = "2.21", optional = true }
