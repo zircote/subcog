@@ -45,7 +45,7 @@
 - [x] Add tests for trace context propagation in at least two critical flows ✓
 
 ### Phase 3: Logging Standardization
-- [ ] Define structured log schema (level, event, request_id, memory_id, domain)
+- [x] Define structured log schema (level, event, request_id, memory_id, domain) ✓
 - [ ] Ensure logs include correlation IDs and span context
 - [ ] Add log redaction rules for sensitive content
 - [ ] Normalize log levels across services (error/warn/info/debug)
