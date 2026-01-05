@@ -140,6 +140,20 @@ pub fn consolidate_tool() -> ToolDefinition {
     }
 }
 
+/// Defines the prompt understanding tool.
+pub fn prompt_understanding_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "prompt_understanding".to_string(),
+        description: "Provide detailed guidance on using Subcog MCP tools and workflows"
+            .to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    }
+}
+
 /// Defines the enrich tool.
 pub fn enrich_tool() -> ToolDefinition {
     ToolDefinition {

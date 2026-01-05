@@ -3,6 +3,7 @@
 //! Contains handlers for subcog's core memory operations:
 //! capture, recall, status, namespaces, consolidate, enrich, sync, reindex.
 
+use crate::mcp::prompt_understanding::PROMPT_UNDERSTANDING;
 use crate::mcp::tool_types::{
     CaptureArgs, ConsolidateArgs, EnrichArgs, RecallArgs, ReindexArgs, SyncArgs,
     build_filter_description, format_content_for_detail, parse_namespace, parse_search_mode,
@@ -209,6 +210,16 @@ pub fn execute_status(_arguments: Value) -> Result<ToolResult> {
         content: vec![ToolContent::Text {
             text: serde_json::to_string_pretty(&status)
                 .unwrap_or_else(|_| "Status unavailable".to_string()),
+        }],
+        is_error: false,
+    })
+}
+
+/// Executes the prompt_understanding tool.
+pub fn execute_prompt_understanding(_arguments: Value) -> Result<ToolResult> {
+    Ok(ToolResult {
+        content: vec![ToolContent::Text {
+            text: PROMPT_UNDERSTANDING.to_string(),
         }],
         is_error: false,
     })

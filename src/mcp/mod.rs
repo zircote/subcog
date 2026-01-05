@@ -45,6 +45,7 @@
 mod auth;
 mod dispatch;
 mod help_content;
+mod prompt_understanding;
 mod prompts;
 mod resources;
 mod server;

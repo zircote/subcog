@@ -43,6 +43,10 @@ impl ToolRegistry {
         tools.insert("subcog_enrich".to_string(), definitions::enrich_tool());
         tools.insert("subcog_sync".to_string(), definitions::sync_tool());
         tools.insert("subcog_reindex".to_string(), definitions::reindex_tool());
+        tools.insert(
+            "prompt_understanding".to_string(),
+            definitions::prompt_understanding_tool(),
+        );
 
         // Prompt management tools
         tools.insert("prompt_save".to_string(), definitions::prompt_save_tool());
@@ -84,6 +88,7 @@ impl ToolRegistry {
             "subcog_enrich" => handlers::execute_enrich(arguments),
             "subcog_sync" => handlers::execute_sync(arguments),
             "subcog_reindex" => handlers::execute_reindex(arguments),
+            "prompt_understanding" => handlers::execute_prompt_understanding(arguments),
             // Prompt management tools
             "prompt_save" => handlers::execute_prompt_save(arguments),
             "prompt_list" => handlers::execute_prompt_list(arguments),
@@ -242,6 +247,7 @@ mod tests {
     fn test_prompt_tools_registered() {
         let registry = ToolRegistry::new();
 
+        assert!(registry.get_tool("prompt_understanding").is_some());
         assert!(registry.get_tool("prompt_save").is_some());
         assert!(registry.get_tool("prompt_list").is_some());
         assert!(registry.get_tool("prompt_get").is_some());

@@ -61,9 +61,12 @@ Once configured, these tools are available:
 | `subcog_capture` | Capture a memory |
 | `subcog_recall` | Search memories |
 | `subcog_status` | Check system status |
+| `subcog_namespaces` | List memory namespaces |
 | `subcog_consolidate` | Consolidate memories (LLM) |
 | `subcog_enrich` | Enrich a memory (LLM) |
+| `subcog_reindex` | Rebuild search index |
 | `subcog_sync` | Sync with git remote |
+| `prompt_understanding` | Guidance for using Subcog MCP tools |
 
 ## Available MCP Resources
 

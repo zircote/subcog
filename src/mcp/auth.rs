@@ -165,6 +165,7 @@ impl ToolAuthorization {
         ("subcog_recall", "read"),
         ("subcog_status", "read"),
         ("subcog_namespaces", "read"),
+        ("prompt_understanding", "read"),
         ("prompt_list", "read"),
         ("prompt_get", "read"),
         ("prompt_run", "read"),
@@ -182,7 +183,7 @@ impl ToolAuthorization {
     ///
     /// Tool scope mapping:
     /// - `subcog_capture`, `subcog_enrich`, `subcog_consolidate`: "write"
-    /// - `subcog_recall`, `subcog_status`, `subcog_namespaces`: "read"
+    /// - `subcog_recall`, `subcog_status`, `subcog_namespaces`, `prompt_understanding`: "read"
     /// - `subcog_sync`, `subcog_reindex`: "admin"
     /// - `prompt_save`, `prompt_delete`: "write"
     /// - `prompt_list`, `prompt_get`, `prompt_run`: "read"
@@ -597,6 +598,7 @@ mod tests {
         assert_eq!(auth.required_scope("subcog_recall"), Some("read"));
         assert_eq!(auth.required_scope("subcog_status"), Some("read"));
         assert_eq!(auth.required_scope("subcog_namespaces"), Some("read"));
+        assert_eq!(auth.required_scope("prompt_understanding"), Some("read"));
         assert_eq!(auth.required_scope("prompt_list"), Some("read"));
         assert_eq!(auth.required_scope("prompt_get"), Some("read"));
         assert_eq!(auth.required_scope("prompt_run"), Some("read"));
