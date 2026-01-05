@@ -647,7 +647,7 @@ Copy this to track progress:
 - [x] Task 3.1: Add org_scope_enabled to FeatureFlags ✓
 - [x] Task 3.2: Add environment variable support ✓
 - [x] Task 3.3: Wire up feature check ✓
-- [ ] Task 3.4: Document org-scope configuration
+- [x] Task 3.4: Document org-scope configuration ✓
 
 ## Phase 4: Documentation (ADR-0009) [0/1]
 - [ ] Task 4.1: Document MCP implementation choice
