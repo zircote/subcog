@@ -468,7 +468,7 @@ org_scope_enabled = true
 #### MCP Server Testing
 - [x] Test MCP server with notifications ✓
 - [x] Verify notifications don't receive responses ✓
-- [ ] Verify HTTP returns 204 No Content for notifications
+- [x] Verify HTTP returns 204 No Content for notifications ✓
 - [ ] Verify stdio skips response for notifications
 - [ ] Verify error responses include id field
 - [ ] Test with MCP client (Claude Code or compatible)
