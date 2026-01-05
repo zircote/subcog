@@ -554,7 +554,7 @@ org_scope_enabled = true
 - [x] Backup database before running migration ✓
 - [x] Test on database with real data volume ✓
 - [x] Verify migration is idempotent ✓
-- [ ] Have rollback plan documented and tested
+- [x] Have rollback plan documented and tested ✓
 
 ### Risk 2: Tombstone Logic Affects Performance
 **Likelihood:** Low
