@@ -448,7 +448,7 @@ org_scope_enabled = true
 - [x] Create a memory in a feature branch context ✓
 - [x] Delete the feature branch ✓
 - [x] Run recall (should trigger lazy GC) ✓
-- [ ] Verify memory is tombstoned
+- [x] Verify memory is tombstoned ✓
 - [ ] Verify memory doesn't appear in default results
 - [ ] Run recall with --include-tombstoned
 - [ ] Verify tombstoned memory appears

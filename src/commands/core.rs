@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use subcog::config::SubcogConfig;
 use subcog::storage::PersistenceBackend;
 use subcog::{
-    CaptureRequest, CaptureService, Domain, Namespace, SearchFilter, SearchMode, SyncService,
+    CaptureRequest, Domain, Namespace, SearchFilter, SearchMode, SyncService,
 };
 
 /// Parses namespace string.
@@ -47,11 +47,8 @@ pub fn cmd_capture(
     tags: Option<String>,
     source: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Get repo path for project-scoped SQLite storage
-    let cwd = std::env::current_dir()?;
-    let mut service_config = subcog::config::Config::from(config.clone());
-    service_config = service_config.with_repo_path(&cwd);
-    let service = CaptureService::new(service_config);
+    let services = subcog::services::ServiceContainer::from_current_dir_or_user()?;
+    let service = services.capture();
 
     let tag_list = tags
         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
