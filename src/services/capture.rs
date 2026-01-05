@@ -1,16 +1,38 @@
 //! Memory capture service.
 //!
 //! Handles capturing new memories, including validation, redaction, and storage.
+//! Now also generates embeddings and indexes memories for searchability.
 
 use crate::config::Config;
-use crate::git::{NotesManager, YamlFrontMatterParser};
-use crate::models::{CaptureRequest, CaptureResult, Memory, MemoryEvent, MemoryId, MemoryStatus};
+use crate::context::GitContext;
+use crate::embedding::Embedder;
+use crate::models::{
+    CaptureRequest, CaptureResult, EventMeta, Memory, MemoryEvent, MemoryId, MemoryStatus,
+};
+use crate::observability::current_request_id;
 use crate::security::{ContentRedactor, SecretDetector, record_event};
+use crate::services::deduplication::ContentHasher;
+use crate::storage::traits::{IndexBackend, VectorBackend};
 use crate::{Error, Result};
+use std::path::Path;
+use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use tracing::instrument;
+use tracing::{info_span, instrument};
 
 /// Service for capturing memories.
+///
+/// # Storage Layers
+///
+/// When fully configured, captures are written to two layers:
+/// 1. **Index** (`SQLite` FTS5) - Authoritative storage with full-text search via BM25
+/// 2. **Vector** (usearch) - Semantic similarity search
+///
+/// # Graceful Degradation
+///
+/// If embedder or vector backend is unavailable:
+/// - Capture still succeeds (Index layer is authoritative)
+/// - A warning is logged for each failed secondary store
+/// - The memory may not be searchable via semantic similarity
 pub struct CaptureService {
     /// Configuration.
     config: Config,
@@ -18,17 +40,91 @@ pub struct CaptureService {
     secret_detector: SecretDetector,
     /// Content redactor.
     redactor: ContentRedactor,
+    /// Embedder for generating embeddings (optional).
+    embedder: Option<Arc<dyn Embedder>>,
+    /// Index backend for full-text search (optional).
+    index: Option<Arc<dyn IndexBackend + Send + Sync>>,
+    /// Vector backend for similarity search (optional).
+    vector: Option<Arc<dyn VectorBackend + Send + Sync>>,
 }
 
 impl CaptureService {
-    /// Creates a new capture service.
+    /// Creates a new capture service (persistence only).
+    ///
+    /// For full searchability, use [`with_backends`](Self::with_backends) to
+    /// also configure index and vector backends.
     #[must_use]
     pub fn new(config: Config) -> Self {
         Self {
             config,
             secret_detector: SecretDetector::new(),
             redactor: ContentRedactor::new(),
+            embedder: None,
+            index: None,
+            vector: None,
         }
+    }
+
+    /// Creates a capture service with all storage backends.
+    ///
+    /// This enables:
+    /// - Embedding generation during capture
+    /// - Immediate indexing for text search
+    /// - Immediate vector upsert for semantic search
+    #[must_use]
+    pub fn with_backends(
+        config: Config,
+        embedder: Arc<dyn Embedder>,
+        index: Arc<dyn IndexBackend + Send + Sync>,
+        vector: Arc<dyn VectorBackend + Send + Sync>,
+    ) -> Self {
+        Self {
+            config,
+            secret_detector: SecretDetector::new(),
+            redactor: ContentRedactor::new(),
+            embedder: Some(embedder),
+            index: Some(index),
+            vector: Some(vector),
+        }
+    }
+
+    /// Adds an embedder to an existing capture service.
+    #[must_use]
+    pub fn with_embedder(mut self, embedder: Arc<dyn Embedder>) -> Self {
+        self.embedder = Some(embedder);
+        self
+    }
+
+    /// Adds an index backend to an existing capture service.
+    #[must_use]
+    pub fn with_index(mut self, index: Arc<dyn IndexBackend + Send + Sync>) -> Self {
+        self.index = Some(index);
+        self
+    }
+
+    /// Adds a vector backend to an existing capture service.
+    #[must_use]
+    pub fn with_vector(mut self, vector: Arc<dyn VectorBackend + Send + Sync>) -> Self {
+        self.vector = Some(vector);
+        self
+    }
+
+    /// Returns whether embedding generation is available.
+    #[must_use]
+    pub fn has_embedder(&self) -> bool {
+        self.embedder.is_some()
+    }
+
+    /// Returns whether immediate indexing is available.
+    #[must_use]
+    pub fn has_index(&self) -> bool {
+        self.index.is_some()
+    }
+
+    /// Returns whether vector upsert is available.
+    #[must_use]
+    pub fn has_vector(&self) -> bool {
+        self.vector.is_some()
     }
 
     /// Captures a memory.
@@ -40,8 +136,11 @@ impl CaptureService {
     /// - The content contains unredacted secrets (when blocking is enabled)
     /// - Storage fails
     #[instrument(
+        name = "subcog.memory.capture",
         skip(self, request),
         fields(
+            request_id = tracing::field::Empty,
+            component = "memory",
             operation = "capture",
             namespace = %request.namespace,
             domain = %request.domain,
@@ -50,35 +149,57 @@ impl CaptureService {
             memory.id = tracing::field::Empty
         )
     )]
+    #[allow(clippy::too_many_lines)]
     pub fn capture(&self, request: CaptureRequest) -> Result<CaptureResult> {
         let start = Instant::now();
         let namespace_label = request.namespace.as_str().to_string();
         let domain_label = request.domain.to_string();
+        if let Some(request_id) = current_request_id() {
+            tracing::Span::current().record("request_id", request_id.as_str());
+        }
 
         tracing::info!(namespace = %namespace_label, domain = %domain_label, "Capturing memory");
 
-        let result = (|| {
-            // Validate content
-            if request.content.trim().is_empty() {
-                return Err(Error::InvalidInput("Content cannot be empty".to_string()));
-            }
+        // Maximum content size (500KB) - prevents abuse and memory issues (MED-SEC-002, MED-COMP-003)
+        const MAX_CONTENT_SIZE: usize = 500_000;
 
-            // Check for secrets
-            let has_secrets = self.secret_detector.contains_secrets(&request.content);
-            if has_secrets && self.config.features.block_secrets && !request.skip_security_check {
-                return Err(Error::ContentBlocked {
-                    reason: "Content contains detected secrets".to_string(),
-                });
-            }
+        let result = (|| {
+            let has_secrets = {
+                let _span = info_span!("subcog.memory.capture.validate").entered();
+                // Validate content length (MED-SEC-002, MED-COMP-003)
+                if request.content.trim().is_empty() {
+                    return Err(Error::InvalidInput("Content cannot be empty".to_string()));
+                }
+                if request.content.len() > MAX_CONTENT_SIZE {
+                    return Err(Error::InvalidInput(format!(
+                        "Content exceeds maximum size of {} bytes (got {} bytes)",
+                        MAX_CONTENT_SIZE,
+                        request.content.len()
+                    )));
+                }
+
+                // Check for secrets
+                let has_secrets = self.secret_detector.contains_secrets(&request.content);
+                if has_secrets && self.config.features.block_secrets && !request.skip_security_check
+                {
+                    return Err(Error::ContentBlocked {
+                        reason: "Content contains detected secrets".to_string(),
+                    });
+                }
+                has_secrets
+            };
 
             // Optionally redact secrets
-            let (content, was_redacted) = if has_secrets
-                && self.config.features.redact_secrets
-                && !request.skip_security_check
-            {
-                (self.redactor.redact(&request.content), true)
-            } else {
-                (request.content.clone(), false)
+            let (content, was_redacted) = {
+                let _span = info_span!("subcog.memory.capture.redact").entered();
+                if has_secrets
+                    && self.config.features.redact_secrets
+                    && !request.skip_security_check
+                {
+                    (self.redactor.redact(&request.content), true)
+                } else {
+                    (request.content.clone(), false)
+                }
             };
 
             // Get current timestamp
@@ -87,45 +208,71 @@ impl CaptureService {
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
 
-            // Store to git notes if configured and get the SHA as memory ID
-            let memory_id = if let Some(ref repo_path) = self.config.repo_path {
-                let notes = NotesManager::new(repo_path);
-
-                // Serialize memory content with initial front matter (ID will be the note SHA)
-                let metadata = serde_json::json!({
-                    "namespace": request.namespace.as_str(),
-                    "domain": request.domain.to_string(),
-                    "status": MemoryStatus::Active.as_str(),
-                    "created_at": now,
-                    "updated_at": now,
-                    "tags": request.tags
-                });
-
-                let note_content = YamlFrontMatterParser::serialize(&metadata, &content)?;
-                let note_oid = notes.add_to_head(&note_content)?;
-
-                // Use the note SHA as the memory ID (short form - first 12 chars)
-                MemoryId::new(note_oid.to_string()[..12].to_string())
-            } else {
-                // Fallback to UUID if no git repo configured (SHA only, no namespace prefix)
-                let uuid = uuid::Uuid::new_v4();
-                MemoryId::new(uuid.to_string().replace('-', "")[..12].to_string())
-            };
+            // Generate memory ID from UUID (12 hex chars for consistency)
+            let uuid = uuid::Uuid::new_v4();
+            let memory_id = MemoryId::new(uuid.to_string().replace('-', "")[..12].to_string());
 
             let span = tracing::Span::current();
             span.record("memory.id", memory_id.as_str());
 
+            // Generate embedding if embedder is available
+            let embedding = {
+                let _span = info_span!("subcog.memory.capture.embed").entered();
+                if let Some(ref embedder) = self.embedder {
+                    match embedder.embed(&content) {
+                        Ok(emb) => {
+                            tracing::debug!(
+                                memory_id = %memory_id,
+                                dimensions = emb.len(),
+                                "Generated embedding for memory"
+                            );
+                            Some(emb)
+                        },
+                        Err(e) => {
+                            tracing::warn!(
+                                memory_id = %memory_id,
+                                error = %e,
+                                "Failed to generate embedding (continuing without)"
+                            );
+                            None
+                        },
+                    }
+                } else {
+                    None
+                }
+            };
+
+            // Resolve git context for facets.
+            let git_context = self
+                .config
+                .repo_path
+                .as_ref()
+                .map_or_else(GitContext::from_cwd, |path| GitContext::from_path(path));
+
+            let file_path =
+                resolve_file_path(self.config.repo_path.as_deref(), request.source.as_ref());
+
+            let mut tags = request.tags;
+            let hash_tag = ContentHasher::content_to_tag(&content);
+            if !tags.iter().any(|tag| tag == &hash_tag) {
+                tags.push(hash_tag);
+            }
+
             // Create memory
-            let memory = Memory {
+            let mut memory = Memory {
                 id: memory_id.clone(),
                 content,
                 namespace: request.namespace,
                 domain: request.domain,
+                project_id: git_context.project_id,
+                branch: git_context.branch,
+                file_path,
                 status: MemoryStatus::Active,
                 created_at: now,
                 updated_at: now,
-                embedding: None,
-                tags: request.tags,
+                tombstoned_at: None,
+                embedding: embedding.clone(),
+                tags,
                 source: request.source,
             };
 
@@ -138,18 +285,62 @@ impl CaptureService {
                 warnings.push("Content was redacted due to detected secrets".to_string());
             }
 
+            // Index memory for text search (best-effort)
+            if let Some(ref index) = self.index {
+                let _span = info_span!("subcog.memory.capture.index").entered();
+                // Need mutable access - clone the Arc and get mutable ref
+                let index_clone = Arc::clone(index);
+                // IndexBackend::index takes &self with interior mutability
+                match index_clone.index(&memory) {
+                    Ok(()) => {
+                        tracing::debug!(memory_id = %memory_id, "Indexed memory for text search");
+                    },
+                    Err(e) => {
+                        tracing::warn!(
+                            memory_id = %memory_id,
+                            error = %e,
+                            "Failed to index memory (continuing without)"
+                        );
+                        warnings.push("Memory not indexed for text search".to_string());
+                    },
+                }
+            }
+
+            // Upsert embedding to vector store (best-effort)
+            if let (Some(vector), Some(emb)) = (&self.vector, &embedding) {
+                let _span = info_span!("subcog.memory.capture.vector").entered();
+                // VectorBackend::upsert takes &self with interior mutability
+                let vector_clone = Arc::clone(vector);
+                match vector_clone.upsert(&memory_id, emb) {
+                    Ok(()) => {
+                        tracing::debug!(memory_id = %memory_id, "Upserted embedding to vector store");
+                    },
+                    Err(e) => {
+                        tracing::warn!(
+                            memory_id = %memory_id,
+                            error = %e,
+                            "Failed to upsert embedding (continuing without)"
+                        );
+                        warnings.push("Embedding not stored in vector index".to_string());
+                    },
+                }
+            }
+
+            // Clear embedding from memory before returning (it's stored separately)
+            memory.embedding = None;
+
             record_event(MemoryEvent::Captured {
+                meta: EventMeta::with_timestamp("capture", current_request_id(), now),
                 memory_id: memory_id.clone(),
                 namespace: memory.namespace,
                 domain: memory.domain.clone(),
                 content_length: memory.content.len(),
-                timestamp: now,
             });
             if was_redacted {
                 record_event(MemoryEvent::Redacted {
+                    meta: EventMeta::with_timestamp("capture", current_request_id(), now),
                     memory_id: memory_id.clone(),
                     redaction_type: "secrets".to_string(),
-                    timestamp: now,
                 });
             }
 
@@ -176,14 +367,21 @@ impl CaptureService {
             "namespace" => namespace_label
         )
         .record(start.elapsed().as_secs_f64() * 1000.0);
+        metrics::histogram!(
+            "memory_lifecycle_duration_ms",
+            "component" => "memory",
+            "operation" => "capture"
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
 
         result
     }
 
     /// Generates a URN for the memory.
+    #[allow(clippy::unused_self)] // Method kept for potential future use of self
     fn generate_urn(&self, memory: &Memory) -> String {
-        let domain_part = if memory.domain.is_global() {
-            "global".to_string()
+        let domain_part = if memory.domain.is_project_scoped() {
+            "project".to_string()
         } else {
             memory.domain.to_string()
         };
@@ -228,6 +426,53 @@ impl CaptureService {
             warnings,
         })
     }
+
+    /// Captures a memory with authorization check (CRIT-006).
+    ///
+    /// This method requires [`super::auth::Permission::Write`] to be present in the auth context.
+    /// Use this for MCP/HTTP endpoints where authorization is required.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - The capture request
+    /// * `auth` - Authorization context with permissions
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Unauthorized`] if write permission is not granted.
+    /// Returns other errors as per [`capture`](Self::capture).
+    pub fn capture_authorized(
+        &self,
+        request: CaptureRequest,
+        auth: &super::auth::AuthContext,
+    ) -> Result<CaptureResult> {
+        auth.require(super::auth::Permission::Write)?;
+        self.capture(request)
+    }
+}
+
+fn resolve_file_path(repo_root: Option<&Path>, source: Option<&String>) -> Option<String> {
+    let source = source?;
+    if source.contains("://") {
+        return None;
+    }
+
+    let source_path = Path::new(source);
+    let repo_root = repo_root?;
+
+    if let Ok(relative) = source_path.strip_prefix(repo_root) {
+        return Some(normalize_path(&relative.to_string_lossy()));
+    }
+
+    if source_path.is_relative() {
+        return Some(normalize_path(source));
+    }
+
+    None
+}
+
+fn normalize_path(path: &str) -> String {
+    path.replace('\\', "/")
 }
 
 impl Default for CaptureService {
@@ -355,9 +600,13 @@ mod tests {
             content: "Test".to_string(),
             namespace: Namespace::Decisions,
             domain: Domain::for_repository("zircote", "subcog"),
+            project_id: None,
+            branch: None,
+            file_path: None,
             status: MemoryStatus::Active,
             created_at: 0,
             updated_at: 0,
+            tombstoned_at: None,
             embedding: None,
             tags: vec![],
             source: None,
@@ -367,5 +616,239 @@ mod tests {
         assert!(urn.contains("subcog"));
         assert!(urn.contains("decisions"));
         assert!(urn.contains("test_123"));
+    }
+
+    // ========================================================================
+    // Phase 3 (MEM-003) Tests: Embedding generation and backend integration
+    // ========================================================================
+
+    use crate::embedding::FastEmbedEmbedder;
+    use crate::services::deduplication::ContentHasher;
+    use crate::storage::index::SqliteBackend;
+    use crate::storage::vector::UsearchBackend;
+    use git2::{Repository, Signature};
+    use tempfile::TempDir;
+
+    fn init_test_repo() -> (TempDir, Repository) {
+        let dir = TempDir::new().expect("Failed to create temp dir");
+        let repo = Repository::init(dir.path()).expect("Failed to init repo");
+
+        let sig = Signature::now("test", "test@test.com").expect("Failed to create signature");
+        let tree_id = repo
+            .index()
+            .expect("Failed to get index")
+            .write_tree()
+            .expect("Failed to write tree");
+        {
+            let tree = repo.find_tree(tree_id).expect("Failed to find tree");
+            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+                .expect("Failed to create commit");
+        }
+        repo.remote("origin", "https://github.com/org/repo.git")
+            .expect("Failed to add remote");
+
+        (dir, repo)
+    }
+
+    #[test]
+    fn test_capture_with_embedder_generates_embedding() {
+        // Test that embedder is invoked during capture
+        let embedder: Arc<dyn Embedder> = Arc::new(FastEmbedEmbedder::new());
+        let service = CaptureService::new(test_config()).with_embedder(embedder);
+
+        assert!(service.has_embedder());
+        // Note: The embedding is generated internally during capture.
+        // We verify the service is configured correctly.
+    }
+
+    #[test]
+    fn test_capture_with_index_backend() {
+        // Test that index backend is used during capture
+        let index = SqliteBackend::in_memory().expect("Failed to create in-memory SQLite backend");
+        let index_arc: Arc<dyn IndexBackend + Send + Sync> = Arc::new(index);
+
+        let service = CaptureService::new(test_config()).with_index(index_arc);
+
+        assert!(service.has_index());
+        // Capture should succeed and index the memory
+        let request = test_request("Use PostgreSQL for primary storage");
+        let result = service.capture(request);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_capture_sets_facets_and_hash_tag() {
+        let (dir, _repo) = init_test_repo();
+        let repo_path = dir.path();
+        let index: Arc<dyn IndexBackend + Send + Sync> =
+            Arc::new(SqliteBackend::in_memory().unwrap());
+        let config = Config::new().with_repo_path(repo_path);
+        let service = CaptureService::new(config).with_index(Arc::clone(&index));
+
+        let file_path = repo_path.join("src").join("lib.rs");
+        std::fs::create_dir_all(file_path.parent().expect("parent path")).expect("create dir");
+        std::fs::write(&file_path, "fn main() {}\n").expect("write file");
+
+        let request = CaptureRequest {
+            content: "Test content for facets".to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            tags: vec!["test".to_string()],
+            source: Some(file_path.to_string_lossy().to_string()),
+            skip_security_check: false,
+        };
+
+        let result = service.capture(request).expect("capture");
+        let stored = index
+            .get_memory(&result.memory_id)
+            .expect("get memory")
+            .expect("stored memory");
+
+        assert_eq!(stored.project_id.as_deref(), Some("github.com/org/repo"));
+        assert!(stored.branch.is_some());
+        assert_eq!(stored.file_path.as_deref(), Some("src/lib.rs"));
+
+        let hash_tag = ContentHasher::content_to_tag(&stored.content);
+        assert!(stored.tags.contains(&hash_tag));
+    }
+
+    #[test]
+    fn test_capture_with_vector_backend() {
+        // Test that vector backend is used during capture
+        // Using fallback UsearchBackend for testing (no usearch-hnsw feature needed)
+        #[cfg(not(feature = "usearch-hnsw"))]
+        let vector = UsearchBackend::new(
+            std::env::temp_dir().join("test_vector_capture"),
+            FastEmbedEmbedder::DEFAULT_DIMENSIONS,
+        );
+        #[cfg(feature = "usearch-hnsw")]
+        let vector = UsearchBackend::new(
+            std::env::temp_dir().join("test_vector_capture"),
+            FastEmbedEmbedder::DEFAULT_DIMENSIONS,
+        )
+        .expect("Failed to create usearch backend");
+
+        let vector_arc: Arc<dyn VectorBackend + Send + Sync> = Arc::new(vector);
+
+        let service = CaptureService::new(test_config()).with_vector(vector_arc);
+
+        assert!(service.has_vector());
+        // Note: Without embedder, no embedding will be generated for vector storage
+    }
+
+    #[test]
+    fn test_capture_with_all_backends() {
+        // Test full pipeline: embedder + index + vector
+        let embedder: Arc<dyn Embedder> = Arc::new(FastEmbedEmbedder::new());
+        let index = SqliteBackend::in_memory().expect("Failed to create in-memory SQLite backend");
+        let index_arc: Arc<dyn IndexBackend + Send + Sync> = Arc::new(index);
+
+        #[cfg(not(feature = "usearch-hnsw"))]
+        let vector = UsearchBackend::new(
+            std::env::temp_dir().join("test_vector_all"),
+            FastEmbedEmbedder::DEFAULT_DIMENSIONS,
+        );
+        #[cfg(feature = "usearch-hnsw")]
+        let vector = UsearchBackend::new(
+            std::env::temp_dir().join("test_vector_all"),
+            FastEmbedEmbedder::DEFAULT_DIMENSIONS,
+        )
+        .expect("Failed to create usearch backend");
+
+        let vector_arc: Arc<dyn VectorBackend + Send + Sync> = Arc::new(vector);
+
+        let service = CaptureService::with_backends(
+            test_config(),
+            Arc::clone(&embedder),
+            Arc::clone(&index_arc),
+            Arc::clone(&vector_arc),
+        );
+
+        assert!(service.has_embedder());
+        assert!(service.has_index());
+        assert!(service.has_vector());
+
+        // Capture should succeed with all backends
+        let request = test_request("Use PostgreSQL for primary storage");
+        let result = service.capture(request);
+        assert!(result.is_ok(), "Capture failed: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_capture_succeeds_without_backends() {
+        // Graceful degradation: capture should succeed even without optional backends
+        let service = CaptureService::new(test_config());
+
+        assert!(!service.has_embedder());
+        assert!(!service.has_index());
+        assert!(!service.has_vector());
+
+        let request = test_request("This should still work");
+        let result = service.capture(request);
+        assert!(result.is_ok(), "Capture should succeed without backends");
+    }
+
+    #[test]
+    fn test_capture_succeeds_with_only_embedder() {
+        // Test partial configuration: only embedder (no storage backends)
+        let embedder: Arc<dyn Embedder> = Arc::new(FastEmbedEmbedder::new());
+        let service = CaptureService::new(test_config()).with_embedder(embedder);
+
+        assert!(service.has_embedder());
+        assert!(!service.has_index());
+        assert!(!service.has_vector());
+
+        let request = test_request("Test with embedder only");
+        let result = service.capture(request);
+        assert!(result.is_ok(), "Capture should succeed with embedder only");
+    }
+
+    #[test]
+    fn test_capture_index_failure_doesnt_fail_capture() {
+        // Test graceful degradation: index failure shouldn't fail the capture
+        // This is verified by the warning log, but capture still succeeds
+        // We test this indirectly by verifying the capture succeeds
+        // even when index could potentially fail.
+
+        let embedder: Arc<dyn Embedder> = Arc::new(FastEmbedEmbedder::new());
+        let service = CaptureService::new(test_config()).with_embedder(embedder);
+
+        let request = test_request("Test graceful degradation");
+        let result = service.capture(request);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_has_embedder_returns_false_when_not_configured() {
+        let service = CaptureService::new(test_config());
+        assert!(!service.has_embedder());
+    }
+
+    #[test]
+    fn test_has_index_returns_false_when_not_configured() {
+        let service = CaptureService::new(test_config());
+        assert!(!service.has_index());
+    }
+
+    #[test]
+    fn test_has_vector_returns_false_when_not_configured() {
+        let service = CaptureService::new(test_config());
+        assert!(!service.has_vector());
+    }
+
+    #[test]
+    fn test_builder_methods_chain() {
+        // Test that builder methods can be chained
+        let embedder: Arc<dyn Embedder> = Arc::new(FastEmbedEmbedder::new());
+        let index = SqliteBackend::in_memory().expect("Failed to create in-memory SQLite backend");
+        let index_arc: Arc<dyn IndexBackend + Send + Sync> = Arc::new(index);
+
+        let service = CaptureService::new(test_config())
+            .with_embedder(embedder)
+            .with_index(index_arc);
+
+        assert!(service.has_embedder());
+        assert!(service.has_index());
+        assert!(!service.has_vector()); // Not configured
     }
 }

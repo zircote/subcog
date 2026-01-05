@@ -5,13 +5,45 @@
 
 use crate::Result;
 use crate::embedding::Embedder;
-use crate::models::{MemoryId, Namespace, SearchFilter};
-use crate::storage::traits::VectorBackend;
+use crate::models::{MemoryId, Namespace};
+use crate::storage::traits::{VectorBackend, VectorFilter};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::instrument;
 
 use super::config::DeduplicationConfig;
+
+// ============================================================================
+// Trait Aliases (RUST-M1)
+// ============================================================================
+// These trait aliases reduce repetition of bounds throughout the module.
+// They document the intent: backends must be thread-safe for concurrent access.
+
+/// Thread-safe embedder backend.
+///
+/// Trait alias for embedders that can be shared across threads.
+/// All embedders used with `SemanticSimilarityChecker` must implement this.
+///
+/// Note: This trait is used as a bound on generic parameters. The `dead_code`
+/// lint doesn't recognize trait bound usage, hence the allow attribute.
+#[allow(dead_code)]
+pub trait ThreadSafeEmbedder: Embedder + Send + Sync {}
+
+/// Blanket implementation for all thread-safe embedders.
+impl<T: Embedder + Send + Sync> ThreadSafeEmbedder for T {}
+
+/// Thread-safe vector backend.
+///
+/// Trait alias for vector backends that can be shared across threads.
+/// All vector backends used with `SemanticSimilarityChecker` must implement this.
+///
+/// Note: This trait is used as a bound on generic parameters. The `dead_code`
+/// lint doesn't recognize trait bound usage, hence the allow attribute.
+#[allow(dead_code)]
+pub trait ThreadSafeVectorBackend: VectorBackend + Send + Sync {}
+
+/// Blanket implementation for all thread-safe vector backends.
+impl<T: VectorBackend + Send + Sync> ThreadSafeVectorBackend for T {}
 
 /// Checker for semantic similarity using embeddings.
 ///
@@ -43,12 +75,12 @@ use super::config::DeduplicationConfig;
 /// let config = DeduplicationConfig::default();
 /// let checker = SemanticSimilarityChecker::new(embedder, vector, config);
 ///
-/// let result = checker.check("Use PostgreSQL for storage", Namespace::Decisions, "global")?;
+/// let result = checker.check("Use PostgreSQL for storage", Namespace::Decisions, "project")?;
 /// if let Some((memory_id, urn, score)) = result {
 ///     println!("Semantic match found: {} (score: {:.2})", urn, score);
 /// }
 /// ```
-pub struct SemanticSimilarityChecker<E: Embedder, V: VectorBackend> {
+pub struct SemanticSimilarityChecker<E: ThreadSafeEmbedder, V: ThreadSafeVectorBackend> {
     /// Embedder for generating vectors.
     embedder: Arc<E>,
     /// Vector backend for similarity search.
@@ -57,7 +89,7 @@ pub struct SemanticSimilarityChecker<E: Embedder, V: VectorBackend> {
     config: DeduplicationConfig,
 }
 
-impl<E: Embedder, V: VectorBackend> SemanticSimilarityChecker<E, V> {
+impl<E: ThreadSafeEmbedder, V: ThreadSafeVectorBackend> SemanticSimilarityChecker<E, V> {
     /// Creates a new semantic similarity checker.
     ///
     /// # Arguments
@@ -96,7 +128,7 @@ impl<E: Embedder, V: VectorBackend> SemanticSimilarityChecker<E, V> {
     /// # Example
     ///
     /// ```rust,ignore
-    /// let result = checker.check("content", Namespace::Decisions, "global")?;
+    /// let result = checker.check("content", Namespace::Decisions, "project")?;
     /// match result {
     ///     Some((id, urn, score)) => println!("Similar: {} ({:.2})", urn, score),
     ///     None => println!("No similar content found"),
@@ -141,11 +173,12 @@ impl<E: Embedder, V: VectorBackend> SemanticSimilarityChecker<E, V> {
         let embedding = self.embedder.embed(content)?;
 
         // Build filter for namespace
-        let filter = SearchFilter::new().with_namespace(namespace);
+        let filter = VectorFilter::new().with_namespace(namespace);
 
         // Search for similar vectors
-        // We request more results than needed to find one above threshold
-        let results = self.vector.search(&embedding, &filter, 10)?;
+        // Request only 3 results - we only need to find one above threshold (PERF-H2)
+        // Reducing from 10 to 3 improves performance while maintaining effectiveness
+        let results = self.vector.search(&embedding, &filter, 3)?;
 
         // Record metrics
         let duration_ms = start.elapsed().as_millis();
@@ -207,6 +240,7 @@ impl<E: Embedder, V: VectorBackend> SemanticSimilarityChecker<E, V> {
     /// # Errors
     ///
     /// Returns an error if embedding generation fails.
+    #[cfg(test)]
     pub fn embed(&self, content: &str) -> Result<Vec<f32>> {
         self.embedder.embed(content)
     }
@@ -216,39 +250,11 @@ impl<E: Embedder, V: VectorBackend> SemanticSimilarityChecker<E, V> {
     /// # Arguments
     ///
     /// * `namespace` - The namespace to get threshold for
+    #[cfg(test)]
     #[must_use]
     pub fn get_threshold(&self, namespace: Namespace) -> f32 {
         self.config.get_threshold(namespace)
     }
-}
-
-/// Computes cosine similarity between two vectors.
-///
-/// # Arguments
-///
-/// * `a` - First vector
-/// * `b` - Second vector
-///
-/// # Returns
-///
-/// Cosine similarity normalized to [0, 1] range.
-/// Returns 0.0 if vectors have different dimensions or zero magnitude.
-#[must_use]
-pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    if a.len() != b.len() {
-        return 0.0;
-    }
-
-    let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-
-    if norm_a == 0.0 || norm_b == 0.0 {
-        return 0.0;
-    }
-
-    // Cosine similarity ranges from -1 to 1, normalize to 0 to 1
-    f32::midpoint(dot_product / (norm_a * norm_b), 1.0)
 }
 
 #[cfg(test)]
@@ -257,6 +263,36 @@ mod tests {
     use crate::embedding::FastEmbedEmbedder;
     use crate::storage::vector::UsearchBackend;
     use std::sync::RwLock;
+
+    /// Computes cosine similarity between two vectors.
+    ///
+    /// Used only for testing similarity calculations.
+    ///
+    /// # Arguments
+    ///
+    /// * `a` - First vector
+    /// * `b` - Second vector
+    ///
+    /// # Returns
+    ///
+    /// Cosine similarity normalized to [0, 1] range.
+    /// Returns 0.0 if vectors have different dimensions or zero magnitude.
+    fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+        if a.len() != b.len() {
+            return 0.0;
+        }
+
+        let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+        let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+
+        if norm_a == 0.0 || norm_b == 0.0 {
+            return 0.0;
+        }
+
+        // Cosine similarity ranges from -1 to 1, normalize to 0 to 1
+        f32::midpoint(dot_product / (norm_a * norm_b), 1.0)
+    }
 
     /// Creates a usearch backend for tests.
     /// Handles the Result return type when usearch-hnsw feature is enabled.
@@ -293,10 +329,6 @@ mod tests {
                 inner: RwLock::new(backend),
             }
         }
-
-        fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
-            self.inner.write().unwrap().upsert(id, embedding)
-        }
     }
 
     impl VectorBackend for RwLockWrapper {
@@ -304,18 +336,18 @@ mod tests {
             self.inner.read().unwrap().dimensions()
         }
 
-        fn upsert(&mut self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
+        fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
             self.inner.write().unwrap().upsert(id, embedding)
         }
 
-        fn remove(&mut self, id: &MemoryId) -> Result<bool> {
+        fn remove(&self, id: &MemoryId) -> Result<bool> {
             self.inner.write().unwrap().remove(id)
         }
 
         fn search(
             &self,
             query_embedding: &[f32],
-            filter: &SearchFilter,
+            filter: &VectorFilter,
             limit: usize,
         ) -> Result<Vec<(MemoryId, f32)>> {
             self.inner
@@ -328,7 +360,7 @@ mod tests {
             self.inner.read().unwrap().count()
         }
 
-        fn clear(&mut self) -> Result<()> {
+        fn clear(&self) -> Result<()> {
             self.inner.write().unwrap().clear()
         }
     }
@@ -380,7 +412,7 @@ mod tests {
 
         // Content shorter than min_semantic_length (50) should be skipped
         let result = checker
-            .check("short", Namespace::Decisions, "global")
+            .check("short", Namespace::Decisions, "project")
             .unwrap();
         assert!(result.is_none());
     }
@@ -392,7 +424,7 @@ mod tests {
         // Content long enough but no vectors in the index
         let content = "This is a sufficiently long piece of content that should trigger semantic similarity checking in the deduplication system.";
         let result = checker
-            .check(content, Namespace::Decisions, "global")
+            .check(content, Namespace::Decisions, "project")
             .unwrap();
         assert!(result.is_none());
     }
@@ -417,13 +449,13 @@ mod tests {
 
         // Check with identical content (should match with very high score)
         let result = checker
-            .check(existing_content, Namespace::Decisions, "global")
+            .check(existing_content, Namespace::Decisions, "project")
             .unwrap();
 
         assert!(result.is_some());
         let (id, urn, score) = result.unwrap();
         assert_eq!(id.as_str(), "existing-memory-123");
-        assert_eq!(urn, "subcog://global/decisions/existing-memory-123");
+        assert_eq!(urn, "subcog://project/decisions/existing-memory-123");
         assert!(score > 0.99); // Near-identical content
     }
 
@@ -450,7 +482,7 @@ mod tests {
         let new_content =
             "Use MongoDB for document storage in the application for maximum flexibility.";
         let result = checker
-            .check(new_content, Namespace::Decisions, "global")
+            .check(new_content, Namespace::Decisions, "project")
             .unwrap();
 
         // May or may not match depending on pseudo-embedding behavior

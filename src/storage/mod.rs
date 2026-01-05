@@ -1,7 +1,7 @@
 //! Storage layer abstraction.
 //!
 //! This module provides a three-layer storage architecture:
-//! - **Persistence**: Authoritative storage (Git Notes, PostgreSQL, Filesystem)
+//! - **Persistence**: Authoritative storage (`SQLite`, PostgreSQL, Filesystem)
 //! - **Index**: Full-text search (`SQLite` + FTS5, PostgreSQL, `RediSearch`)
 //! - **Vector**: Embedding similarity search (usearch, pgvector, Redis)
 
@@ -26,9 +26,10 @@ pub mod prompt;
 pub mod traits;
 pub mod vector;
 
+pub use index::get_user_data_dir;
 pub use prompt::{
-    FilesystemPromptStorage, GitNotesPromptStorage, PostgresPromptStorage, PromptBackendType,
-    PromptStorage, PromptStorageFactory, RedisPromptStorage, SqlitePromptStorage,
+    FilesystemPromptStorage, PostgresPromptStorage, PromptBackendType, PromptStorage,
+    PromptStorageFactory, RedisPromptStorage, SqlitePromptStorage,
 };
 pub use traits::{IndexBackend, PersistenceBackend, VectorBackend};
 

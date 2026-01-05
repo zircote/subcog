@@ -2,9 +2,16 @@
 //!
 //! Stores prompts in PostgreSQL with full-text search support.
 //! Includes embedded migrations that auto-upgrade the schema on startup.
+//!
+//! # Code Structure
+//!
+//! The nesting in this module is inherent to the async PostgreSQL pattern:
+//! `impl PromptStorage` → method body → `block_on(async { ... })` → query logic.
+//! This results in 4+ levels of nesting which is unavoidable without fundamentally
+//! changing the sync-to-async bridge approach.
 
 #[cfg(feature = "postgres")]
-#[allow(clippy::excessive_nesting)]
+#[allow(clippy::excessive_nesting)] // See module docs for rationale
 mod implementation {
     use crate::models::PromptTemplate;
     use crate::storage::prompt::PromptStorage;
@@ -74,6 +81,42 @@ mod implementation {
     }
 
     impl PostgresPromptStorage {
+        /// Validates that a table name is a safe PostgreSQL identifier.
+        ///
+        /// Valid identifiers:
+        /// - Start with a letter or underscore
+        /// - Contain only letters, digits, and underscores
+        /// - Maximum 63 characters (PostgreSQL limit)
+        fn validate_table_name(name: &str) -> Result<()> {
+            if name.is_empty() {
+                return Err(Error::InvalidInput(
+                    "table_name: table name cannot be empty".to_string(),
+                ));
+            }
+
+            if name.len() > 63 {
+                return Err(Error::InvalidInput(
+                    "table_name: table name exceeds PostgreSQL limit of 63 characters".to_string(),
+                ));
+            }
+
+            let first_char = name.chars().next().unwrap_or('0');
+            if !first_char.is_ascii_alphabetic() && first_char != '_' {
+                return Err(Error::InvalidInput(
+                    "table_name: table name must start with a letter or underscore".to_string(),
+                ));
+            }
+
+            if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                return Err(Error::InvalidInput(
+                    "table_name: table name must contain only letters, digits, and underscores"
+                        .to_string(),
+                ));
+            }
+
+            Ok(())
+        }
+
         /// Creates a new PostgreSQL prompt storage.
         ///
         /// Automatically runs any pending migrations on startup.
@@ -81,13 +124,17 @@ mod implementation {
         /// # Arguments
         ///
         /// * `connection_url` - PostgreSQL connection URL
-        /// * `table_name` - Table name for prompts
+        /// * `table_name` - Table name for prompts (must be a valid PostgreSQL identifier)
         ///
         /// # Errors
         ///
-        /// Returns an error if the connection pool cannot be created or migrations fail.
+        /// Returns an error if the table name is invalid, connection pool cannot be created,
+        /// or migrations fail.
         pub fn new(connection_url: &str, table_name: impl Into<String>) -> Result<Self> {
             let table_name = table_name.into();
+
+            // Validate table name to prevent SQL injection
+            Self::validate_table_name(&table_name)?;
 
             // Create tokio runtime for blocking
             let runtime = TokioRuntime::new().map_err(|e| Error::OperationFailed {

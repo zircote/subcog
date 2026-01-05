@@ -1,5 +1,18 @@
 # cargo-deny configuration
 # https://embarkstudios.github.io/cargo-deny/
+#
+# Audit Schedule: See CLAUDE.md "Dependency Audit Schedule" section
+# - Every PR: `cargo deny check` (CI)
+# - Quarterly: Full audit review (January, April, July, October)
+#
+# Pre-release Dependency Monitoring:
+# cargo-deny doesn't natively detect pre-release versions. Use:
+#   cargo tree | grep -E '(rc|alpha|beta)'
+#
+# Known Pre-release Dependencies (as of 2026-01-04):
+# - ort v2.0.0-rc.9 (transitive via fastembed → ort)
+#   Status: Monitoring for stable v2.0.0 release
+#   Tracking: https://github.com/pykeio/ort/releases
 
 [graph]
 # Target platforms to check
@@ -29,7 +42,12 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 unmaintained = "workspace"
 
 # Ignore specific advisories
-ignore = []
+# RUSTSEC-2023-0071: RSA timing sidechannel (Marvin Attack)
+# - Transitive dependency: jsonwebtoken -> rsa
+# - No fix available upstream
+# - Mitigated: JWT auth uses HTTPS, timing not observable over network
+# - Tracked: https://github.com/RustCrypto/RSA/issues/19
+ignore = ["RUSTSEC-2023-0071"]
 
 #==============================================================================
 # Licenses - Allowed licenses

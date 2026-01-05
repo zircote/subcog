@@ -397,3 +397,21 @@ fn apply_push_gateway_env_overrides(config: &mut MetricsConfig) {
 
     config.push_gateway = Some(current);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_metrics_registry_smoke() {
+        let recorder = PrometheusBuilder::new().build_recorder();
+        let handle = recorder.handle();
+        if metrics::set_global_recorder(recorder).is_err() {
+            return;
+        }
+
+        metrics::counter!("test_metrics_registry_total").increment(1);
+        let rendered = handle.render();
+        assert!(rendered.contains("test_metrics_registry_total"));
+    }
+}

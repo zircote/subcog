@@ -51,3 +51,9 @@ All changes must pass:
 - Git: `git revert <commit>`
 - Database: Restore from backup
 - Config: Redeploy previous version
+
+### SQLite Index Rollback (Migration)
+1. Create a consistent backup: `sqlite3 .subcog/index.db ".backup '/tmp/subcog-index-backup.db'"`
+2. Restore on failure: `cp /tmp/subcog-index-backup.db .subcog/index.db`
+3. Remove any WAL files if present: `rm -f .subcog/index.db-wal .subcog/index.db-shm`
+4. Validate with `subcog recall <query> --limit 1`

@@ -1,64 +1,6 @@
 //! Integration tests for subcog.
 
-use subcog::{Config, Error, Result, add, divide};
-
-#[test]
-fn test_add_integration() {
-    // Test basic addition
-    assert_eq!(add(1, 2), 3);
-    assert_eq!(add(-5, 5), 0);
-
-    // Test boundary conditions
-    assert_eq!(add(i64::MAX, 0), i64::MAX);
-    assert_eq!(add(i64::MIN, 0), i64::MIN);
-}
-
-#[test]
-fn test_divide_integration() {
-    // Test successful division
-    assert_eq!(divide(100, 10).unwrap(), 10);
-    assert_eq!(divide(-100, 10).unwrap(), -10);
-    assert_eq!(divide(100, -10).unwrap(), -10);
-    assert_eq!(divide(-100, -10).unwrap(), 10);
-
-    // Test integer division truncation
-    assert_eq!(divide(7, 3).unwrap(), 2);
-    assert_eq!(divide(-7, 3).unwrap(), -2);
-}
-
-#[test]
-fn test_divide_by_zero() {
-    let result = divide(42, 0);
-    assert!(result.is_err());
-
-    if let Err(Error::InvalidInput(msg)) = result {
-        assert!(msg.contains("zero"), "Error message should mention zero");
-    } else {
-        unreachable!("Expected InvalidInput error");
-    }
-}
-
-#[test]
-fn test_config_builder_pattern() {
-    let config = Config::new()
-        .with_verbose(true)
-        .with_max_retries(10)
-        .with_timeout(120);
-
-    assert!(config.verbose);
-    assert_eq!(config.max_retries, 10);
-    assert_eq!(config.timeout_secs, 120);
-}
-
-#[test]
-fn test_config_clone() {
-    let config1 = Config::new().with_verbose(true);
-    let config2 = config1.clone();
-
-    assert_eq!(config1.verbose, config2.verbose);
-    assert_eq!(config1.max_retries, config2.max_retries);
-    assert_eq!(config1.timeout_secs, config2.timeout_secs);
-}
+use subcog::Error;
 
 #[test]
 fn test_error_types() {
@@ -76,51 +18,26 @@ fn test_error_types() {
     let display = format!("{err}");
     assert!(display.contains("read"));
     assert!(display.contains("file not found"));
-}
 
-/// Helper function demonstrating Result handling patterns.
-fn process_numbers(a: i64, b: i64) -> Result<i64> {
-    let sum = add(a, b);
-    divide(sum, 2)
-}
+    // Test ContentBlocked error
+    let err = Error::ContentBlocked {
+        reason: "secrets detected".to_string(),
+    };
+    let display = format!("{err}");
+    assert!(display.contains("content blocked"));
+    assert!(display.contains("secrets detected"));
 
-#[test]
-fn test_result_chaining() {
-    // Successful case
-    let result = process_numbers(10, 6);
-    assert_eq!(result.unwrap(), 8);
+    // Test FeatureNotEnabled error
+    let err = Error::FeatureNotEnabled("vector-search".to_string());
+    let display = format!("{err}");
+    assert!(display.contains("not enabled"));
+    assert!(display.contains("vector-search"));
 
-    // Error case (would need different logic to trigger)
-}
-
-mod property_tests {
-    use super::*;
-    use proptest::prelude::*;
-
-    proptest! {
-        #[test]
-        fn add_is_commutative(a in any::<i32>(), b in any::<i32>()) {
-            let a = i64::from(a);
-            let b = i64::from(b);
-            prop_assert_eq!(add(a, b), add(b, a));
-        }
-
-        #[test]
-        fn add_zero_is_identity(n in any::<i64>()) {
-            prop_assert_eq!(add(n, 0), n);
-            prop_assert_eq!(add(0, n), n);
-        }
-
-        #[test]
-        fn divide_by_one_is_identity(n in any::<i64>()) {
-            prop_assert_eq!(divide(n, 1).unwrap(), n);
-        }
-
-        #[test]
-        fn divide_by_nonzero_succeeds(dividend in any::<i64>(), divisor in any::<i64>().prop_filter("non-zero", |&x| x != 0)) {
-            prop_assert!(divide(dividend, divisor).is_ok());
-        }
-    }
+    // Test NotImplemented error
+    let err = Error::NotImplemented("sync feature".to_string());
+    let display = format!("{err}");
+    assert!(display.contains("not implemented"));
+    assert!(display.contains("sync feature"));
 }
 
 /// Graceful degradation tests for proactive memory surfacing.
@@ -261,11 +178,14 @@ mod graceful_degradation_tests {
     #[test]
     fn test_no_recall_service_skips_memory_injection() {
         // When no RecallService is provided, should skip memory injection
-        let intent = SearchIntent::new(SearchIntentType::HowTo, 0.9)
+        let intent = SearchIntent::new(SearchIntentType::HowTo)
+            .with_confidence(0.9)
             .with_topics(vec!["authentication".to_string()]);
 
         let builder = SearchContextBuilder::new();
-        let context = builder.build_context(&intent).unwrap();
+        let context = builder
+            .build_context(&intent)
+            .expect("SearchContextBuilder should build context for HowTo intent");
 
         // Should have context but no injected memories
         assert!(context.search_intent_detected);
@@ -277,12 +197,14 @@ mod graceful_degradation_tests {
     #[test]
     fn test_low_confidence_returns_empty_context() {
         // Low confidence should skip injection entirely
-        let intent = SearchIntent::new(SearchIntentType::General, 0.3); // Below min_confidence
+        let intent = SearchIntent::new(SearchIntentType::General).with_confidence(0.3); // Below min_confidence
 
         let builder = SearchContextBuilder::new()
             .with_config(AdaptiveContextConfig::new().with_min_confidence(0.5));
 
-        let context = builder.build_context(&intent).unwrap();
+        let context = builder
+            .build_context(&intent)
+            .expect("SearchContextBuilder should handle low confidence intents");
 
         // Should return empty context
         assert!(!context.search_intent_detected);
@@ -346,7 +268,8 @@ mod graceful_degradation_tests {
 
     #[test]
     fn test_memory_context_from_intent_preserves_topics() {
-        let intent = SearchIntent::new(SearchIntentType::Explanation, 0.75)
+        let intent = SearchIntent::new(SearchIntentType::Explanation)
+            .with_confidence(0.75)
             .with_topics(vec!["topic1".to_string(), "topic2".to_string()]);
 
         let context = MemoryContext::from_intent(&intent);
@@ -373,8 +296,7 @@ mod hook_handler_tests {
         let handler = SessionStartHandler::new();
         let result = handler.handle("");
 
-        assert!(result.is_ok(), "SessionStart hook should succeed");
-        let output = result.unwrap();
+        let output = result.expect("SessionStart hook should succeed");
         assert!(
             output.contains("hookSpecificOutput"),
             "Should have hook output"
@@ -391,8 +313,7 @@ mod hook_handler_tests {
         let input = r#"{"prompt": "How do I implement authentication?"}"#;
         let result = handler.handle(input);
 
-        assert!(result.is_ok(), "UserPromptSubmit hook should succeed");
-        let output = result.unwrap();
+        let output = result.expect("UserPromptSubmit hook should succeed");
         assert!(
             output.contains("hookSpecificOutput"),
             "Should have hook output"
@@ -434,11 +355,7 @@ mod hook_handler_tests {
         }"#;
         let result = handler.handle(input);
 
-        assert!(
-            result.is_ok(),
-            "PreCompact hook with decisions should succeed"
-        );
-        let output = result.unwrap();
+        let output = result.expect("PreCompact hook with decisions should succeed");
         // May or may not capture depending on LLM availability
         assert!(
             output.contains("hookSpecificOutput") || output == "{}",
@@ -452,8 +369,7 @@ mod hook_handler_tests {
         let input = r#"{"session_duration_seconds": 120}"#;
         let result = handler.handle(input);
 
-        assert!(result.is_ok(), "Stop hook should succeed");
-        let output = result.unwrap();
+        let output = result.expect("Stop hook should succeed");
         assert!(
             output.contains("hookSpecificOutput"),
             "Should have hook output"
@@ -465,45 +381,43 @@ mod hook_handler_tests {
     fn test_all_hooks_return_valid_json() {
         // SessionStart
         let session_handler = SessionStartHandler::new();
-        let session_output = session_handler.handle("").unwrap();
-        assert!(
-            serde_json::from_str::<serde_json::Value>(&session_output).is_ok(),
-            "SessionStart should return valid JSON"
-        );
+        let session_output = session_handler
+            .handle("")
+            .expect("SessionStart hook should execute");
+        serde_json::from_str::<serde_json::Value>(&session_output)
+            .expect("SessionStart should return valid JSON");
 
         // UserPromptSubmit
         let prompt_handler = UserPromptHandler::new();
-        let prompt_output = prompt_handler.handle(r#"{"prompt": "test"}"#).unwrap();
-        assert!(
-            serde_json::from_str::<serde_json::Value>(&prompt_output).is_ok(),
-            "UserPromptSubmit should return valid JSON"
-        );
+        let prompt_output = prompt_handler
+            .handle(r#"{"prompt": "test"}"#)
+            .expect("UserPromptSubmit hook should execute");
+        serde_json::from_str::<serde_json::Value>(&prompt_output)
+            .expect("UserPromptSubmit should return valid JSON");
 
         // PostToolUse
         let tool_handler = PostToolUseHandler::new();
         let tool_output = tool_handler
             .handle(r#"{"tool_name": "Test", "tool_input": {}, "tool_output": ""}"#)
-            .unwrap();
-        assert!(
-            serde_json::from_str::<serde_json::Value>(&tool_output).is_ok(),
-            "PostToolUse should return valid JSON"
-        );
+            .expect("PostToolUse hook should execute");
+        serde_json::from_str::<serde_json::Value>(&tool_output)
+            .expect("PostToolUse should return valid JSON");
 
         // PreCompact
         let compact_handler = PreCompactHandler::new();
-        let compact_output = compact_handler.handle(r#"{"sections": []}"#).unwrap();
-        assert!(
-            serde_json::from_str::<serde_json::Value>(&compact_output).is_ok(),
-            "PreCompact should return valid JSON"
-        );
+        let compact_output = compact_handler
+            .handle(r#"{"sections": []}"#)
+            .expect("PreCompact hook should execute");
+        serde_json::from_str::<serde_json::Value>(&compact_output)
+            .expect("PreCompact should return valid JSON");
 
         // Stop
         let stop_handler = StopHandler::new();
-        let stop_output = stop_handler.handle(r"{}").unwrap();
-        assert!(
-            serde_json::from_str::<serde_json::Value>(&stop_output).is_ok(),
-            "Stop should return valid JSON"
-        );
+        let stop_output = stop_handler
+            .handle(r"{}")
+            .expect("Stop hook should execute");
+        serde_json::from_str::<serde_json::Value>(&stop_output)
+            .expect("Stop should return valid JSON");
     }
 
     #[test]

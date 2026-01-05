@@ -225,6 +225,35 @@ Input:  Template syntax is \{\{variable\}\}
 Output: Template syntax is {{variable}}
 ```
 
+## Code Block Exclusion
+
+Variables inside fenced code blocks are treated as documentation examples and **not** extracted as template variables:
+
+````markdown
+This prompt uses {{active_variable}} which will be extracted.
+
+```python
+# Code example showing syntax
+template = "Hello {{example_variable}}"
+```
+
+The {{another_variable}} after the block is also extracted.
+````
+
+**Extracted variables:** `active_variable`, `another_variable`
+
+**Excluded (in code block):** `example_variable`
+
+### Supported Code Block Syntaxes
+
+| Syntax | Example |
+|--------|---------|
+| Triple backticks | ` ```language ... ``` ` |
+| Triple tildes | `~~~ language ... ~~~` |
+| Nested (tildes around backticks) | `~~~ ... ``` ... ``` ... ~~~` |
+
+This allows prompts to include code examples with `{{variable}}` syntax without accidentally treating them as template variables.
+
 ## Validation
 
 Templates are validated when saved:

@@ -1,8 +1,8 @@
 [package]
 name = "subcog"
-version = "0.1.2"
+version = "0.5.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "A persistent memory system for AI coding assistants"
 license = "MIT"
 authors = ["zircote"]
@@ -34,7 +34,8 @@ clap_complete = "4.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
-toml = "0.8"
+toml = "0.9"
+rmcp = { version = "0.12.0", features = ["transport-io", "transport-streamable-http-server"] }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
@@ -54,7 +55,7 @@ metrics-exporter-prometheus = "0.18"
 git2 = { version = "0.20", features = ["vendored-openssl", "vendored-libgit2"] }
 
 # SQLite for FTS5 index
-rusqlite = { version = "0.32", features = ["bundled", "modern-full"] }
+rusqlite = { version = "0.38", features = ["bundled", "modern-full"] }
 
 # UUID generation
 uuid = { version = "1.11", features = ["v4", "v7"] }
@@ -70,8 +71,20 @@ once_cell = "1.20"
 sha2 = "0.10"
 hex = "0.4"
 
+# Secret management with zeroization
+secrecy = { version = "0.10", features = ["serde"] }
+
+# Encryption at rest (optional)
+aes-gcm = { version = "0.10", optional = true }
+rand = { version = "0.9", optional = true }
+base64 = { version = "0.22", optional = true }
+
 # LRU cache for recent capture tracking
-lru = "0.12"
+lru = "0.16"
+
+# FastEmbed for semantic embeddings (optional - fallback to pseudo-embeddings if not available)
+# Use rustls instead of native-tls (openssl) for TLS
+fastembed = { version = "5", optional = true, default-features = false, features = ["ort-download-binaries", "hf-hub-rustls-tls"] }
 
 # usearch HNSW vector search (optional - pure Rust fallback if not available)
 usearch = { version = "2.21", optional = true }
@@ -80,11 +93,11 @@ usearch = { version = "2.21", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
 
 # JWT authentication for MCP HTTP transport
-jsonwebtoken = "9.3"
+jsonwebtoken = { version = "10.2", features = ["rust_crypto"] }
 
 # HTTP server for MCP HTTP transport (optional)
 axum = { version = "0.8", optional = true }
-tower-http = { version = "0.6", features = ["cors", "trace"], optional = true }
+tower-http = { version = "0.6", features = ["cors", "trace", "set-header"], optional = true }
 
 # Directories for config/data paths
 directories = "6.0"
@@ -93,14 +106,16 @@ directories = "6.0"
 dotenvy = "0.15"
 
 # Redis client (optional)
-redis = { version = "0.28", features = ["tokio-comp", "connection-manager"], optional = true }
+redis = { version = "1.0", features = ["tokio-comp", "connection-manager"], optional = true }
 
 # PostgreSQL client (optional)
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1"], optional = true }
 deadpool-postgres = { version = "0.14", optional = true }
 tokio-postgres-rustls = { version = "0.13", optional = true }
 rustls = { version = "0.23", optional = true }
-webpki-roots = { version = "0.26", optional = true }
+webpki-roots = { version = "1.0", optional = true }
+hmac = "0.12.1"
+ctrlc = "3.5.1"
 
 [dev-dependencies]
 # Testing
@@ -112,10 +127,22 @@ tempfile = "3.14"
 tokio-test = "0.4"
 
 # Benchmarking
-criterion = { version = "0.6", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [[bench]]
 name = "search_intent"
+harness = false
+
+[[bench]]
+name = "embedding"
+harness = false
+
+[[bench]]
+name = "search"
+harness = false
+
+[[bench]]
+name = "query_parser"
 harness = false
 
 [profile.dev]
@@ -174,7 +201,14 @@ postgres-tls = ["postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:webp
 redis = ["dep:redis"]
 # usearch HNSW vector search (native implementation)
 usearch-hnsw = ["dep:usearch"]
+# FastEmbed semantic embeddings (ONNX-based)
+fastembed-embeddings = ["dep:fastembed"]
 # HTTP transport with JWT authentication
 http = ["dep:axum", "dep:tower-http"]
+# Encryption at rest for filesystem backend (AES-256-GCM)
+encryption = ["dep:aes-gcm", "dep:rand", "dep:base64"]
+# Organization-scoped storage (requires PostgreSQL, optionally Redis)
+# Feature-gated stub for future implementation
+org-scope = []
 # All features enabled
-full = ["postgres", "postgres-tls", "redis", "usearch-hnsw", "http"]
+full = ["postgres", "postgres-tls", "redis", "usearch-hnsw", "fastembed-embeddings", "http", "encryption"]

@@ -2,6 +2,7 @@
 //!
 //! Redacts sensitive content (secrets and PII) from text.
 
+use super::audit::global_logger;
 use super::{PiiDetector, SecretDetector};
 
 /// Redaction mode.
@@ -126,7 +127,12 @@ impl ContentRedactor {
         }
 
         if self.config.redact_pii {
-            for m in self.pii_detector.detect(content) {
+            let pii_matches = self.pii_detector.detect(content);
+
+            // Log PII detection for audit (GDPR/SOC2 compliance)
+            self.log_pii_detection_if_any(&pii_matches);
+
+            for m in pii_matches {
                 let replacement = self.get_replacement(&m.pii_type, m.end - m.start);
                 ranges.push((m.start, m.end, replacement));
             }
@@ -186,6 +192,23 @@ impl ContentRedactor {
         }
 
         types
+    }
+
+    /// Logs PII detection events for audit compliance (GDPR/SOC2).
+    ///
+    /// Only logs when matches are found to avoid noise.
+    fn log_pii_detection_if_any(&self, pii_matches: &[super::PiiMatch]) {
+        if !pii_matches.is_empty()
+            && let Some(logger) = global_logger()
+        {
+            let pii_types: Vec<&str> = pii_matches.iter().map(|m| m.pii_type.as_str()).collect();
+            let mut entry = super::audit::AuditEntry::new("security", "pii_detected");
+            entry.metadata = serde_json::json!({
+                "pii_count": pii_matches.len(),
+                "pii_types": pii_types,
+            });
+            logger.log_entry(entry);
+        }
     }
 
     /// Gets the replacement string based on mode.

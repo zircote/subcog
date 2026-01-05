@@ -127,3 +127,127 @@ pub fn build_hook_llm_provider(
 
     Some(provider)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{LlmConfig, LlmProvider as Provider, SubcogConfig};
+
+    #[test]
+    fn test_build_http_config_with_defaults() {
+        let llm_config = LlmConfig::default();
+        let http_config = build_http_config(&llm_config);
+
+        // Verify we get a valid config (defaults are applied)
+        assert!(http_config.connect_timeout_ms > 0);
+        assert!(http_config.timeout_ms > 0);
+    }
+
+    #[test]
+    fn test_build_resilience_config_with_defaults() {
+        let llm_config = LlmConfig::default();
+        let resilience_config = build_resilience_config(&llm_config);
+
+        // Verify we get valid defaults (max_retries is u32, so always >= 0)
+        assert!(resilience_config.breaker_failure_threshold > 0);
+    }
+
+    #[test]
+    fn test_build_openai_client_with_config() {
+        let llm_config = LlmConfig {
+            api_key: Some("test-api-key".to_string()),
+            model: Some("gpt-4".to_string()),
+            base_url: Some("https://custom.openai.com".to_string()),
+            ..Default::default()
+        };
+
+        let client = build_openai_client(&llm_config);
+        assert_eq!(client.name(), "openai");
+    }
+
+    #[test]
+    fn test_build_anthropic_client_with_config() {
+        let llm_config = LlmConfig {
+            api_key: Some("sk-ant-test-key".to_string()),
+            model: Some("claude-3-opus".to_string()),
+            ..Default::default()
+        };
+
+        let client = build_anthropic_client(&llm_config);
+        assert_eq!(client.name(), "anthropic");
+    }
+
+    #[test]
+    fn test_build_ollama_client_with_config() {
+        let llm_config = LlmConfig {
+            model: Some("llama2".to_string()),
+            base_url: Some("http://localhost:11434".to_string()),
+            ..Default::default()
+        };
+
+        let client = build_ollama_client(&llm_config);
+        assert_eq!(client.name(), "ollama");
+    }
+
+    #[test]
+    fn test_build_lmstudio_client_with_config() {
+        let llm_config = LlmConfig {
+            model: Some("local-model".to_string()),
+            base_url: Some("http://localhost:1234".to_string()),
+            ..Default::default()
+        };
+
+        let client = build_lmstudio_client(&llm_config);
+        assert_eq!(client.name(), "lmstudio");
+    }
+
+    #[test]
+    fn test_build_hook_llm_provider_disabled() {
+        let mut config = SubcogConfig::default();
+        config.search_intent.use_llm = false;
+
+        let provider = build_hook_llm_provider(&config);
+        assert!(provider.is_none());
+    }
+
+    #[test]
+    fn test_build_hook_llm_provider_openai() {
+        let mut config = SubcogConfig::default();
+        config.search_intent.use_llm = true;
+        config.llm.provider = Provider::OpenAi;
+        config.llm.api_key = Some("test-key".to_string());
+
+        let provider = build_hook_llm_provider(&config);
+        assert!(provider.is_some());
+    }
+
+    #[test]
+    fn test_build_hook_llm_provider_anthropic() {
+        let mut config = SubcogConfig::default();
+        config.search_intent.use_llm = true;
+        config.llm.provider = Provider::Anthropic;
+
+        let provider = build_hook_llm_provider(&config);
+        assert!(provider.is_some());
+    }
+
+    #[test]
+    fn test_build_hook_llm_provider_ollama() {
+        let mut config = SubcogConfig::default();
+        config.search_intent.use_llm = true;
+        config.llm.provider = Provider::Ollama;
+
+        let provider = build_hook_llm_provider(&config);
+        assert!(provider.is_some());
+    }
+
+    #[test]
+    fn test_build_hook_llm_provider_lmstudio() {
+        let mut config = SubcogConfig::default();
+        config.search_intent.use_llm = true;
+        config.llm.provider = Provider::LmStudio;
+
+        let provider = build_hook_llm_provider(&config);
+        assert!(provider.is_some());
+    }
+}

@@ -316,6 +316,139 @@ impl TopicIndexService {
             .map(|guard| guard.values().map(Vec::len).sum())
             .unwrap_or(0)
     }
+
+    /// Removes a memory from the topic index (PERF-M1: incremental updates).
+    ///
+    /// Call this when a memory is deleted to keep the index up to date
+    /// without requiring a full rebuild.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the lock is poisoned.
+    pub fn remove_memory(&self, memory_id: &MemoryId) -> Result<()> {
+        let mut topics_guard = self.topics.write().map_err(|_| Error::OperationFailed {
+            operation: "remove_memory".to_string(),
+            cause: "Lock poisoned".to_string(),
+        })?;
+
+        // Remove the memory ID from all topic entries
+        for ids in topics_guard.values_mut() {
+            ids.retain(|id| id.as_str() != memory_id.as_str());
+        }
+
+        // Remove empty topics
+        topics_guard.retain(|_, ids| !ids.is_empty());
+
+        // Note: We don't remove from topic_namespaces since other memories
+        // with that namespace may still exist. Namespace cleanup happens
+        // during full rebuild or can be done separately if needed.
+
+        Ok(())
+    }
+
+    /// Updates a memory in the topic index (PERF-M1: incremental updates).
+    ///
+    /// This is a convenience method that removes the old entry and adds
+    /// the new one. Use this when tags or namespace change.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the lock is poisoned.
+    pub fn update_memory(
+        &self,
+        memory_id: &MemoryId,
+        new_tags: &[String],
+        new_namespace: Namespace,
+    ) -> Result<()> {
+        self.remove_memory(memory_id)?;
+        self.add_memory(memory_id, new_tags, new_namespace)?;
+        Ok(())
+    }
+
+    /// Adds content-based keywords to the topic index (PERF-M1: incremental updates).
+    ///
+    /// Call this after `add_memory()` to also index keywords from the memory content.
+    /// This is separated to allow callers to control whether content keywords are indexed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the lock is poisoned.
+    pub fn add_content_keywords(
+        &self,
+        memory_id: &MemoryId,
+        content: &str,
+        namespace: Namespace,
+    ) -> Result<()> {
+        let mut topics_guard = self.topics.write().map_err(|_| Error::OperationFailed {
+            operation: "add_content_keywords".to_string(),
+            cause: "Lock poisoned".to_string(),
+        })?;
+
+        let mut ns_guard = self
+            .topic_namespaces
+            .write()
+            .map_err(|_| Error::OperationFailed {
+                operation: "add_content_keywords".to_string(),
+                cause: "Lock poisoned".to_string(),
+            })?;
+
+        let keywords = extract_content_keywords(content);
+        for keyword in keywords.into_iter().take(5) {
+            let topic = normalize_topic(&keyword);
+            if topic.len() >= 3 {
+                add_topic_entry_guarded(
+                    &topic,
+                    memory_id,
+                    namespace,
+                    &mut topics_guard,
+                    &mut ns_guard,
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Clears the entire topic index.
+    ///
+    /// Use before a full rebuild or when resetting state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the lock is poisoned.
+    pub fn clear(&self) -> Result<()> {
+        {
+            let mut guard = self.topics.write().map_err(|_| Error::OperationFailed {
+                operation: "clear".to_string(),
+                cause: "Lock poisoned".to_string(),
+            })?;
+            guard.clear();
+        }
+
+        {
+            let mut guard = self
+                .topic_namespaces
+                .write()
+                .map_err(|_| Error::OperationFailed {
+                    operation: "clear".to_string(),
+                    cause: "Lock poisoned".to_string(),
+                })?;
+            guard.clear();
+        }
+
+        {
+            let mut guard = self
+                .last_refresh
+                .write()
+                .map_err(|_| Error::OperationFailed {
+                    operation: "clear".to_string(),
+                    cause: "Lock poisoned".to_string(),
+                })?;
+            *guard = None;
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for TopicIndexService {
@@ -550,5 +683,196 @@ mod tests {
             *guard = Some(Instant::now());
         }
         assert!(!service.needs_refresh());
+    }
+
+    // Tests for incremental update methods (PERF-M1)
+
+    #[test]
+    fn test_remove_memory() {
+        let service = TopicIndexService::new();
+        let id1 = MemoryId::new("test-1");
+        let id2 = MemoryId::new("test-2");
+
+        service
+            .add_memory(&id1, &["rust".to_string()], Namespace::Decisions)
+            .unwrap();
+        service
+            .add_memory(&id2, &["rust".to_string()], Namespace::Patterns)
+            .unwrap();
+
+        assert_eq!(service.get_topic_memories("rust").unwrap().len(), 2);
+
+        // Remove one memory
+        service.remove_memory(&id1).unwrap();
+
+        // Should only have one memory left
+        let rust_memories = service.get_topic_memories("rust").unwrap();
+        assert_eq!(rust_memories.len(), 1);
+        assert_eq!(rust_memories[0].as_str(), "test-2");
+    }
+
+    #[test]
+    fn test_remove_memory_cleans_empty_topics() {
+        let service = TopicIndexService::new();
+        let id = MemoryId::new("test-1");
+
+        service
+            .add_memory(&id, &["unique-topic".to_string()], Namespace::Decisions)
+            .unwrap();
+
+        assert_eq!(service.get_topic_memories("unique-topic").unwrap().len(), 1);
+
+        // Remove the only memory with this topic
+        service.remove_memory(&id).unwrap();
+
+        // Topic should be empty and removed
+        assert!(
+            service
+                .get_topic_memories("unique-topic")
+                .unwrap()
+                .is_empty()
+        );
+
+        // Topic count should reflect removal
+        let topics = service.list_topics().unwrap();
+        assert!(!topics.iter().any(|t| t.name == "unique-topic"));
+    }
+
+    #[test]
+    fn test_remove_nonexistent_memory() {
+        let service = TopicIndexService::new();
+        let id = MemoryId::new("nonexistent");
+
+        // Should not error when removing a memory that doesn't exist
+        assert!(service.remove_memory(&id).is_ok());
+    }
+
+    #[test]
+    fn test_update_memory() {
+        let service = TopicIndexService::new();
+        let id = MemoryId::new("test-1");
+
+        // Add with initial tags
+        service
+            .add_memory(&id, &["old-tag".to_string()], Namespace::Decisions)
+            .unwrap();
+        assert_eq!(service.get_topic_memories("old-tag").unwrap().len(), 1);
+
+        // Update with new tags
+        service
+            .update_memory(&id, &["new-tag".to_string()], Namespace::Patterns)
+            .unwrap();
+
+        // Old tag should be gone (topic removed since empty)
+        assert!(service.get_topic_memories("old-tag").unwrap().is_empty());
+
+        // New tag should exist
+        assert_eq!(service.get_topic_memories("new-tag").unwrap().len(), 1);
+        assert_eq!(service.get_topic_memories("patterns").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_add_content_keywords() {
+        let service = TopicIndexService::new();
+        let id = MemoryId::new("test-1");
+
+        // Add memory first (for namespace)
+        service.add_memory(&id, &[], Namespace::Learnings).unwrap();
+
+        // Add content keywords - use "rust" multiple times to ensure it's in top 5
+        // (extract_content_keywords takes top 5 by frequency, HashMap order is non-deterministic)
+        let content = "Rust rust RUST programming systems";
+        service
+            .add_content_keywords(&id, content, Namespace::Learnings)
+            .unwrap();
+
+        // "rust" appears 3 times, so it should be in top 5 keywords
+        let rust_memories = service.get_topic_memories("rust").unwrap();
+        assert!(!rust_memories.is_empty());
+        assert!(rust_memories.iter().any(|m| m.as_str() == "test-1"));
+    }
+
+    #[test]
+    fn test_add_content_keywords_filters_short_words() {
+        let service = TopicIndexService::new();
+        let id = MemoryId::new("test-1");
+
+        let content = "A is to be or not to be";
+        service
+            .add_content_keywords(&id, content, Namespace::Learnings)
+            .unwrap();
+
+        // Short words should not be indexed
+        assert!(service.get_topic_memories("a").unwrap().is_empty());
+        assert!(service.get_topic_memories("is").unwrap().is_empty());
+        assert!(service.get_topic_memories("to").unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_clear() {
+        let service = TopicIndexService::new();
+        let id1 = MemoryId::new("test-1");
+        let id2 = MemoryId::new("test-2");
+
+        service
+            .add_memory(&id1, &["rust".to_string()], Namespace::Decisions)
+            .unwrap();
+        service
+            .add_memory(&id2, &["python".to_string()], Namespace::Patterns)
+            .unwrap();
+
+        // Set last_refresh
+        {
+            let mut guard = service.last_refresh.write().unwrap();
+            *guard = Some(Instant::now());
+        }
+
+        assert_eq!(service.topic_count(), 4); // rust, python, decisions, patterns
+        assert!(!service.needs_refresh());
+
+        // Clear the index
+        service.clear().unwrap();
+
+        assert_eq!(service.topic_count(), 0);
+        assert_eq!(service.association_count(), 0);
+        assert!(service.needs_refresh()); // last_refresh cleared
+    }
+
+    #[test]
+    fn test_incremental_vs_full_rebuild_equivalence() {
+        // Verify that incremental add/remove produces same result as full rebuild would
+        let service = TopicIndexService::new();
+        let id1 = MemoryId::new("test-1");
+        let id2 = MemoryId::new("test-2");
+        let id3 = MemoryId::new("test-3");
+
+        // Add memories incrementally
+        service
+            .add_memory(
+                &id1,
+                &["rust".to_string(), "async".to_string()],
+                Namespace::Decisions,
+            )
+            .unwrap();
+        service
+            .add_memory(&id2, &["rust".to_string()], Namespace::Patterns)
+            .unwrap();
+        service
+            .add_memory(&id3, &["python".to_string()], Namespace::Learnings)
+            .unwrap();
+
+        // Remove one
+        service.remove_memory(&id2).unwrap();
+
+        // Verify final state
+        let rust_memories = service.get_topic_memories("rust").unwrap();
+        assert_eq!(rust_memories.len(), 1);
+        assert_eq!(rust_memories[0].as_str(), "test-1");
+
+        let async_memories = service.get_topic_memories("async").unwrap();
+        assert_eq!(async_memories.len(), 1);
+
+        let python_memories = service.get_topic_memories("python").unwrap();
+        assert_eq!(python_memories.len(), 1);
     }
 }

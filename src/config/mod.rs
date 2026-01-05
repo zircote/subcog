@@ -5,12 +5,49 @@ mod features;
 pub use features::FeatureFlags;
 
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::borrow::Cow;
+use std::path::{Path, PathBuf};
+
+/// Warns if a config file has world-readable permissions (SEC-M4).
+///
+/// Config files may contain API keys or other sensitive data. World-readable
+/// permissions (mode 0o004 on Unix) pose a security risk in multi-user systems.
+///
+/// This function logs a warning but does not prevent loading - the user may
+/// have intentionally set these permissions.
+#[cfg(unix)]
+fn warn_if_world_readable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    if let Ok(metadata) = std::fs::metadata(path) {
+        let mode = metadata.permissions().mode();
+        // Check if "others" have read permission (0o004)
+        if mode & 0o004 != 0 {
+            tracing::warn!(
+                path = %path.display(),
+                mode = format!("{mode:04o}"),
+                "Config file is world-readable. Consider restricting permissions with: chmod 600 {}",
+                path.display()
+            );
+        }
+    }
+}
+
+/// No-op on non-Unix platforms.
+#[cfg(not(unix))]
+fn warn_if_world_readable(_path: &Path) {
+    // Windows has a different permission model; skip this check
+}
 
 /// Expands environment variable references in a string.
 ///
 /// Supports `${VAR_NAME}` syntax. If the variable is not set, the original
 /// reference is preserved (e.g., `${MISSING_VAR}` stays as-is).
+///
+/// # Performance
+///
+/// Uses `Cow<str>` to avoid allocation when no expansion is needed.
+/// Only allocates when at least one environment variable is found and expanded.
 ///
 /// # Examples
 ///
@@ -18,13 +55,33 @@ use std::path::PathBuf;
 /// // If OPENAI_API_KEY=sk-xxx in environment
 /// expand_env_vars("${OPENAI_API_KEY}") // Returns "sk-xxx"
 /// expand_env_vars("prefix-${VAR}-suffix") // Expands VAR in the middle
-/// expand_env_vars("no vars here") // Returns unchanged
+/// expand_env_vars("no vars here") // Returns unchanged (no allocation)
 /// ```
-fn expand_env_vars(input: &str) -> String {
+/// Maximum number of environment variable expansions per string (SEC-M5).
+/// Prevents `DoS` attacks from strings with many `${VAR}` patterns.
+const MAX_ENV_VAR_EXPANSIONS: usize = 100;
+
+fn expand_env_vars(input: &str) -> Cow<'_, str> {
+    // Fast path: no ${} pattern at all
+    if !input.contains("${") {
+        return Cow::Borrowed(input);
+    }
+
     let mut result = input.to_string();
     let mut start = 0;
+    let mut expansion_count = 0;
 
     while let Some(var_start) = result[start..].find("${") {
+        // SEC-M5: Limit expansions to prevent DoS from many ${} patterns
+        expansion_count += 1;
+        if expansion_count > MAX_ENV_VAR_EXPANSIONS {
+            tracing::warn!(
+                count = expansion_count,
+                "Environment variable expansion limit reached"
+            );
+            break;
+        }
+
         let var_start = start + var_start;
         if let Some(var_end) = result[var_start..].find('}') {
             let var_end = var_start + var_end;
@@ -32,6 +89,9 @@ fn expand_env_vars(input: &str) -> String {
             if let Ok(value) = std::env::var(var_name) {
                 result.replace_range(var_start..=var_end, &value);
                 // Continue from where we inserted the value
+                // Note: We intentionally skip past the inserted value to prevent
+                // recursive expansion if the value contains ${} patterns.
+                // This is a security feature, not a limitation.
                 start = var_start + value.len();
             } else {
                 // Skip past this ${...} if var not found
@@ -43,7 +103,40 @@ fn expand_env_vars(input: &str) -> String {
         }
     }
 
-    result
+    // We always return owned in the slow path since we've allocated.
+    // This is acceptable since we only enter this path if the input
+    // contained "${" pattern.
+    Cow::Owned(result)
+}
+
+fn expand_config_path(input: &str) -> String {
+    let expanded = expand_env_vars(input);
+    let expanded_ref = expanded.as_ref();
+    let is_tilde_home =
+        expanded_ref == "~" || expanded_ref.starts_with("~/") || expanded_ref.starts_with("~\\");
+
+    if is_tilde_home && let Some(base_dirs) = directories::BaseDirs::new() {
+        let mut path = base_dirs.home_dir().to_path_buf();
+        let suffix = expanded_ref
+            .strip_prefix("~/")
+            .or_else(|| expanded_ref.strip_prefix("~\\"));
+        if let Some(suffix) = suffix
+            && !suffix.is_empty()
+        {
+            path.push(suffix);
+        }
+        return path.to_string_lossy().into_owned();
+    }
+
+    expanded.into_owned()
+}
+
+fn parse_bool_env(value: &str) -> Option<bool> {
+    match value.trim().to_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Some(true),
+        "false" | "0" | "no" | "off" => Some(false),
+        _ => None,
+    }
 }
 
 /// Main configuration for subcog.
@@ -398,15 +491,17 @@ impl SearchIntentConfig {
         if let Ok(v) = std::env::var("SUBCOG_SEARCH_INTENT_USE_LLM") {
             self.use_llm = v.to_lowercase() == "true" || v == "1";
         }
-        if let Ok(v) = std::env::var("SUBCOG_SEARCH_INTENT_LLM_TIMEOUT_MS") {
-            if let Ok(ms) = v.parse::<u64>() {
-                self.llm_timeout_ms = ms;
-            }
+        if let Some(ms) = std::env::var("SUBCOG_SEARCH_INTENT_LLM_TIMEOUT_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            self.llm_timeout_ms = ms;
         }
-        if let Ok(v) = std::env::var("SUBCOG_SEARCH_INTENT_MIN_CONFIDENCE") {
-            if let Ok(conf) = v.parse::<f32>() {
-                self.min_confidence = conf.clamp(0.0, 1.0);
-            }
+        if let Some(conf) = std::env::var("SUBCOG_SEARCH_INTENT_MIN_CONFIDENCE")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+        {
+            self.min_confidence = conf.clamp(0.0, 1.0);
         }
 
         self
@@ -445,6 +540,13 @@ impl SearchIntentConfig {
         settings
     }
 
+    /// Sets whether search intent detection is enabled.
+    #[must_use]
+    pub const fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
     /// Sets whether LLM is enabled.
     #[must_use]
     pub const fn with_use_llm(mut self, use_llm: bool) -> Self {
@@ -460,11 +562,98 @@ impl SearchIntentConfig {
     }
 
     /// Sets the minimum confidence threshold.
+    ///
+    /// Value is clamped to the range [0.0, 1.0].
     #[must_use]
     pub const fn with_min_confidence(mut self, confidence: f32) -> Self {
-        self.min_confidence = confidence;
+        self.min_confidence = confidence.clamp(0.0, 1.0);
         self
     }
+
+    /// Sets the base memory count for adaptive injection.
+    #[must_use]
+    pub const fn with_base_count(mut self, count: usize) -> Self {
+        self.base_count = count;
+        self
+    }
+
+    /// Sets the maximum memory count for adaptive injection.
+    #[must_use]
+    pub const fn with_max_count(mut self, count: usize) -> Self {
+        self.max_count = count;
+        self
+    }
+
+    /// Sets the maximum tokens for injected memories.
+    #[must_use]
+    pub const fn with_max_tokens(mut self, tokens: usize) -> Self {
+        self.max_tokens = tokens;
+        self
+    }
+
+    /// Sets the namespace weights configuration.
+    #[must_use]
+    pub fn with_weights(mut self, weights: NamespaceWeightsConfig) -> Self {
+        self.weights = weights;
+        self
+    }
+
+    /// Validates and builds the configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - `base_count` is greater than `max_count`
+    /// - `max_tokens` is zero
+    /// - `llm_timeout_ms` is zero when LLM is enabled
+    pub fn build(self) -> Result<Self, ConfigValidationError> {
+        if self.base_count > self.max_count {
+            return Err(ConfigValidationError::InvalidRange {
+                field: "base_count/max_count".to_string(),
+                message: format!(
+                    "base_count ({}) cannot be greater than max_count ({})",
+                    self.base_count, self.max_count
+                ),
+            });
+        }
+
+        if self.max_tokens == 0 {
+            return Err(ConfigValidationError::InvalidValue {
+                field: "max_tokens".to_string(),
+                message: "max_tokens must be greater than 0".to_string(),
+            });
+        }
+
+        if self.use_llm && self.llm_timeout_ms == 0 {
+            return Err(ConfigValidationError::InvalidValue {
+                field: "llm_timeout_ms".to_string(),
+                message: "llm_timeout_ms must be greater than 0 when LLM is enabled".to_string(),
+            });
+        }
+
+        Ok(self)
+    }
+}
+
+/// Errors that can occur during configuration validation.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ConfigValidationError {
+    /// Invalid range between two related fields.
+    #[error("Invalid range for {field}: {message}")]
+    InvalidRange {
+        /// The field name(s) with invalid range.
+        field: String,
+        /// Description of the issue.
+        message: String,
+    },
+    /// Invalid value for a field.
+    #[error("Invalid value for {field}: {message}")]
+    InvalidValue {
+        /// The field name with invalid value.
+        field: String,
+        /// Description of the issue.
+        message: String,
+    },
 }
 
 /// Available LLM providers.
@@ -536,6 +725,8 @@ pub struct ConfigFileFeatures {
     pub auto_capture: Option<bool>,
     /// Consolidation feature.
     pub consolidation: Option<bool>,
+    /// Enable org-scope storage.
+    pub org_scope_enabled: Option<bool>,
 }
 
 /// LLM section in config file.
@@ -687,7 +878,7 @@ pub struct ConfigFileStorage {
 /// Storage backend configuration.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ConfigFileStorageBackend {
-    /// Backend type: sqlite, filesystem, git\_notes, postgresql, redis.
+    /// Backend type: sqlite, filesystem, postgresql, redis.
     pub backend: Option<String>,
     /// Path for file-based backends (sqlite, filesystem).
     pub path: Option<String>,
@@ -717,17 +908,18 @@ pub struct StorageBackendConfig {
     pub path: Option<String>,
     /// Connection string for database backends.
     pub connection_string: Option<String>,
+    /// Maximum connection pool size for database backends (PostgreSQL).
+    /// Defaults to 20 if not specified.
+    pub pool_max_size: Option<usize>,
 }
 
 /// Storage backend types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StorageBackendType {
-    /// Git notes (default for project).
-    GitNotes,
-    /// `SQLite` database (default for user).
+    /// `SQLite` database (default, authoritative storage).
     #[default]
     Sqlite,
-    /// Filesystem.
+    /// Filesystem (fallback).
     Filesystem,
     /// PostgreSQL.
     PostgreSQL,
@@ -742,7 +934,6 @@ impl StorageBackendType {
     #[must_use]
     pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
-            "git_notes" | "gitnotes" | "git-notes" => Self::GitNotes,
             "filesystem" | "fs" | "file" => Self::Filesystem,
             "postgresql" | "postgres" | "pg" => Self::PostgreSQL,
             "redis" => Self::Redis,
@@ -762,7 +953,7 @@ impl StorageConfig {
             if let Some(ref backend) = project.backend {
                 config.project.backend = StorageBackendType::parse(backend);
             }
-            config.project.path.clone_from(&project.path);
+            config.project.path = project.path.as_ref().map(|path| expand_config_path(path));
             config
                 .project
                 .connection_string
@@ -773,7 +964,7 @@ impl StorageConfig {
             if let Some(ref backend) = user.backend {
                 config.user.backend = StorageBackendType::parse(backend);
             }
-            config.user.path.clone_from(&user.path);
+            config.user.path = user.path.as_ref().map(|path| expand_config_path(path));
             config
                 .user
                 .connection_string
@@ -784,7 +975,7 @@ impl StorageConfig {
             if let Some(ref backend) = org.backend {
                 config.org.backend = StorageBackendType::parse(backend);
             }
-            config.org.path.clone_from(&org.path);
+            config.org.path = org.path.as_ref().map(|path| expand_config_path(path));
             config
                 .org
                 .connection_string
@@ -903,6 +1094,9 @@ impl SubcogConfig {
     ///
     /// Returns an error if the file cannot be read or parsed.
     pub fn load_from_file(path: &std::path::Path) -> crate::Result<Self> {
+        // SEC-M4: Warn if config file is world-readable (may contain API keys)
+        warn_if_world_readable(path);
+
         let contents =
             std::fs::read_to_string(path).map_err(|e| crate::Error::OperationFailed {
                 operation: "read_config_file".to_string(),
@@ -954,6 +1148,20 @@ impl SubcogConfig {
     }
 
     fn apply_env_overrides(&mut self) {
+        if let Ok(value) = std::env::var("SUBCOG_ORG_SCOPE_ENABLED") {
+            let Some(enabled) = parse_bool_env(&value) else {
+                self.features.org_scope_enabled = false;
+                tracing::warn!(
+                    value = %value,
+                    "Invalid SUBCOG_ORG_SCOPE_ENABLED value, defaulting to false"
+                );
+                return;
+            };
+            self.features.org_scope_enabled = enabled;
+            if enabled {
+                tracing::info!("Org-scope enabled via SUBCOG_ORG_SCOPE_ENABLED");
+            }
+        }
         self.search_intent = self.search_intent.clone().with_env_overrides();
         self.prompt = self.prompt.clone().with_env_overrides();
     }
@@ -961,10 +1169,10 @@ impl SubcogConfig {
     /// Applies a `ConfigFile` to the current configuration.
     fn apply_config_file(&mut self, file: ConfigFile) {
         if let Some(repo_path) = file.repo_path {
-            self.repo_path = PathBuf::from(repo_path);
+            self.repo_path = PathBuf::from(expand_config_path(&repo_path));
         }
         if let Some(data_dir) = file.data_dir {
-            self.data_dir = PathBuf::from(data_dir);
+            self.data_dir = PathBuf::from(expand_config_path(&data_dir));
         }
         if let Some(max_results) = file.max_results {
             self.max_results = max_results;
@@ -998,6 +1206,9 @@ impl SubcogConfig {
             if let Some(v) = features.consolidation {
                 self.features.consolidation = v;
             }
+            if let Some(v) = features.org_scope_enabled {
+                self.features.org_scope_enabled = v;
+            }
         }
         if let Some(llm) = file.llm {
             if let Some(provider) = llm.provider {
@@ -1008,7 +1219,7 @@ impl SubcogConfig {
             }
             if let Some(api_key) = llm.api_key.filter(|value| !value.trim().is_empty()) {
                 // Expand environment variable references like ${OPENAI_API_KEY}
-                self.llm.api_key = Some(expand_env_vars(&api_key));
+                self.llm.api_key = Some(expand_env_vars(&api_key).into_owned());
             }
             if let Some(base_url) = llm.base_url.filter(|value| !value.trim().is_empty()) {
                 self.llm.base_url = Some(base_url);
@@ -1089,6 +1300,9 @@ fn apply_config_path(config: &mut SubcogConfig, path: &std::path::Path) -> bool 
 }
 
 fn load_config_file(path: &std::path::Path) -> crate::Result<ConfigFile> {
+    // SEC-M4: Warn if config file is world-readable (may contain API keys)
+    warn_if_world_readable(path);
+
     let contents = std::fs::read_to_string(path).map_err(|e| crate::Error::OperationFailed {
         operation: "read_config_file".to_string(),
         cause: e.to_string(),
@@ -1237,5 +1451,75 @@ mod tests {
         let result = expand_env_vars("${${INNER}}");
         // First finds ${${INNER} - var name is "${INNER", which won't exist
         assert_eq!(result, "${${INNER}}");
+    }
+
+    #[test]
+    fn test_expand_config_path_tilde_home() {
+        if let Some(base_dirs) = directories::BaseDirs::new() {
+            let expected = base_dirs.home_dir().to_path_buf();
+            let result = expand_config_path("~");
+            assert_eq!(PathBuf::from(result), expected);
+        }
+    }
+
+    #[test]
+    fn test_expand_config_path_tilde_suffix() {
+        if let Some(base_dirs) = directories::BaseDirs::new() {
+            let expected = base_dirs.home_dir().join(".config/subcog");
+            let result = expand_config_path("~/.config/subcog");
+            assert_eq!(PathBuf::from(result), expected);
+        }
+    }
+
+    #[test]
+    fn test_expand_config_path_env_var() {
+        let var_name = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+        if let Ok(home) = std::env::var(var_name) {
+            let input = format!("${{{var_name}}}/data");
+            let result = expand_config_path(&input);
+            assert_eq!(PathBuf::from(result), PathBuf::from(home).join("data"));
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_warn_if_world_readable_does_not_panic() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        // Create a temp file with world-readable permissions
+        let dir = tempfile::tempdir().ok();
+        if let Some(ref dir) = dir {
+            let path = dir.path().join("test_config.toml");
+            let mut file = std::fs::File::create(&path).ok();
+            if let Some(ref mut f) = file {
+                let _ = f.write_all(b"[llm]\nprovider = \"anthropic\"\n");
+            }
+
+            // Set world-readable permission (0o644)
+            if let Ok(metadata) = std::fs::metadata(&path) {
+                let mut perms = metadata.permissions();
+                perms.set_mode(0o644);
+                let _ = std::fs::set_permissions(&path, perms);
+            }
+
+            // Function should not panic
+            warn_if_world_readable(&path);
+
+            // Also test with restrictive permissions (0o600)
+            if let Ok(metadata) = std::fs::metadata(&path) {
+                let mut perms = metadata.permissions();
+                perms.set_mode(0o600);
+                let _ = std::fs::set_permissions(&path, perms);
+            }
+            warn_if_world_readable(&path);
+        }
+    }
+
+    #[test]
+    fn test_warn_if_world_readable_nonexistent_file() {
+        // Should not panic on non-existent file
+        let path = Path::new("/nonexistent/path/to/config.toml");
+        warn_if_world_readable(path);
     }
 }

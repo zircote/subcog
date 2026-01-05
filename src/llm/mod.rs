@@ -78,6 +78,76 @@
 //! timeout_ms = 30000
 //! max_retries = 3
 //! ```
+//!
+//! # Implementing a New Provider
+//!
+//! To add a new LLM provider:
+//!
+//! 1. Create a new module (e.g., `src/llm/newprovider.rs`)
+//! 2. Implement the [`LlmProvider`] trait
+//! 3. Export the client from this module
+//!
+//! ## Required Trait Methods
+//!
+//! | Method | Purpose |
+//! |--------|---------|
+//! | [`LlmProvider::name`] | Return provider identifier (e.g., "anthropic") |
+//! | [`LlmProvider::complete`] | Generate completion for a prompt |
+//! | [`LlmProvider::analyze_for_capture`] | Analyze content for memory capture |
+//!
+//! ## Optional Methods (with defaults)
+//!
+//! | Method | Default Behavior |
+//! |--------|------------------|
+//! | `complete_with_system` | Concatenates system and user prompts |
+//! | `analyze_for_capture_extended` | Uses unified system prompt |
+//! | `classify_search_intent` | Uses unified system prompt |
+//! | `analyze_for_consolidation` | Uses unified system prompt |
+//!
+//! ## Example Implementation
+//!
+//! ```rust,ignore
+//! use subcog::llm::{LlmProvider, CaptureAnalysis};
+//! use subcog::Result;
+//!
+//! pub struct MyProvider {
+//!     api_key: String,
+//!     model: String,
+//! }
+//!
+//! impl LlmProvider for MyProvider {
+//!     fn name(&self) -> &'static str {
+//!         "myprovider"
+//!     }
+//!
+//!     fn complete(&self, prompt: &str) -> Result<String> {
+//!         // Make API call to your provider
+//!         todo!()
+//!     }
+//!
+//!     fn analyze_for_capture(&self, content: &str) -> Result<CaptureAnalysis> {
+//!         // Use CAPTURE_ANALYSIS_PROMPT or custom prompt
+//!         let prompt = format!(
+//!             "{}\n\nContent: {content}",
+//!             subcog::llm::CAPTURE_ANALYSIS_PROMPT
+//!         );
+//!         let response = self.complete(&prompt)?;
+//!         // Parse JSON response into CaptureAnalysis
+//!         todo!()
+//!     }
+//! }
+//! ```
+//!
+//! ## HTTP Client Guidelines
+//!
+//! Use [`build_http_client`] with [`LlmHttpConfig`] for consistent timeout handling:
+//!
+//! ```rust,ignore
+//! use subcog::llm::{build_http_client, LlmHttpConfig};
+//!
+//! let config = LlmHttpConfig::from_env();
+//! let client = build_http_client(config);
+//! ```
 
 mod anthropic;
 mod lmstudio;
@@ -248,15 +318,17 @@ impl LlmHttpConfig {
     /// Applies environment variable overrides.
     #[must_use]
     pub fn with_env_overrides(mut self) -> Self {
-        if let Ok(v) = std::env::var("SUBCOG_LLM_TIMEOUT_MS") {
-            if let Ok(timeout_ms) = v.parse::<u64>() {
-                self.timeout_ms = timeout_ms;
-            }
+        if let Some(timeout_ms) = std::env::var("SUBCOG_LLM_TIMEOUT_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            self.timeout_ms = timeout_ms;
         }
-        if let Ok(v) = std::env::var("SUBCOG_LLM_CONNECT_TIMEOUT_MS") {
-            if let Ok(connect_timeout_ms) = v.parse::<u64>() {
-                self.connect_timeout_ms = connect_timeout_ms;
-            }
+        if let Some(connect_timeout_ms) = std::env::var("SUBCOG_LLM_CONNECT_TIMEOUT_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            self.connect_timeout_ms = connect_timeout_ms;
         }
         self
     }
@@ -332,38 +404,38 @@ pub fn extract_json_from_response(response: &str) -> &str {
     let trimmed = response.trim();
 
     // Handle ```json ... ``` blocks
-    if let Some(start) = trimmed.find("```json") {
+    if let Some((json_start, end)) = trimmed.find("```json").and_then(|start| {
         let json_start = start + 7;
-        if let Some(end) = trimmed[json_start..].find("```") {
-            return trimmed[json_start..json_start + end].trim();
-        }
+        trimmed[json_start..]
+            .find("```")
+            .map(|end| (json_start, end))
+    }) {
+        return trimmed[json_start..json_start + end].trim();
     }
 
     // Handle ``` ... ``` blocks (without json marker)
-    if let Some(start) = trimmed.find("```") {
+    if let Some((json_start, end)) = trimmed.find("```").and_then(|start| {
         let content_start = start + 3;
         // Skip language identifier if present (e.g., "json\n")
         let after_marker = &trimmed[content_start..];
         let json_start = after_marker
             .find('{')
             .map_or(content_start, |pos| content_start + pos);
-        if let Some(end) = trimmed[json_start..].find("```") {
-            return trimmed[json_start..json_start + end].trim();
-        }
+        trimmed[json_start..]
+            .find("```")
+            .map(|end| (json_start, end))
+    }) {
+        return trimmed[json_start..json_start + end].trim();
     }
 
     // Handle raw JSON (find first { to last })
-    if let Some(start) = trimmed.find('{') {
-        if let Some(end) = trimmed.rfind('}') {
-            return &trimmed[start..=end];
-        }
+    if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}')) {
+        return &trimmed[start..=end];
     }
 
     // Handle JSON array (for enrichment responses)
-    if let Some(start) = trimmed.find('[') {
-        if let Some(end) = trimmed.rfind(']') {
-            return &trimmed[start..=end];
-        }
+    if let (Some(start), Some(end)) = (trimmed.find('['), trimmed.rfind(']')) {
+        return &trimmed[start..=end];
     }
 
     trimmed

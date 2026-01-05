@@ -5,6 +5,7 @@
 use crate::Result;
 use crate::models::{Memory, Namespace, SearchFilter, SearchMode};
 use crate::services::RecallService;
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 // Context building limits - tunable parameters for memory selection
@@ -81,35 +82,32 @@ impl ContextBuilderService {
         // Add recent decisions (high priority)
         if let Some(decisions) =
             self.get_relevant_memories(Namespace::Decisions, CONTEXT_DECISIONS_LIMIT)?
+            && !decisions.is_empty()
         {
-            if !decisions.is_empty() {
-                context_parts.push(format_section("Recent Decisions", &decisions));
-            }
+            context_parts.push(format_section("Recent Decisions", &decisions));
         }
 
         // Add active patterns
         if let Some(patterns) =
             self.get_relevant_memories(Namespace::Patterns, CONTEXT_PATTERNS_LIMIT)?
+            && !patterns.is_empty()
         {
-            if !patterns.is_empty() {
-                context_parts.push(format_section("Active Patterns", &patterns));
-            }
+            context_parts.push(format_section("Active Patterns", &patterns));
         }
 
         // Add relevant context
-        if let Some(ctx) = self.get_relevant_memories(Namespace::Context, CONTEXT_PROJECT_LIMIT)? {
-            if !ctx.is_empty() {
-                context_parts.push(format_section("Project Context", &ctx));
-            }
+        if let Some(ctx) = self.get_relevant_memories(Namespace::Context, CONTEXT_PROJECT_LIMIT)?
+            && !ctx.is_empty()
+        {
+            context_parts.push(format_section("Project Context", &ctx));
         }
 
         // Add known tech debt
         if let Some(debt) =
             self.get_relevant_memories(Namespace::TechDebt, CONTEXT_TECH_DEBT_LIMIT)?
+            && !debt.is_empty()
         {
-            if !debt.is_empty() {
-                context_parts.push(format_section("Known Tech Debt", &debt));
-            }
+            context_parts.push(format_section("Known Tech Debt", &debt));
         }
 
         // Combine and truncate to fit token budget
@@ -174,6 +172,10 @@ impl ContextBuilderService {
     }
 
     /// Gets relevant memories for a namespace.
+    ///
+    /// Returns `None` if recall service is not configured, otherwise returns
+    /// an empty vector (placeholder for full storage integration).
+    #[allow(clippy::unnecessary_wraps)] // Returns Result for API consistency with other methods
     const fn get_relevant_memories(
         &self,
         _namespace: Namespace,
@@ -201,9 +203,8 @@ impl ContextBuilderService {
     ///
     /// Returns an error if statistics gathering fails.
     pub fn get_statistics(&self) -> Result<MemoryStatistics> {
-        let recall = match &self.recall {
-            Some(r) => r,
-            None => return Ok(MemoryStatistics::default()),
+        let Some(recall) = &self.recall else {
+            return Ok(MemoryStatistics::default());
         };
 
         // Search for all memories (broad query)
@@ -274,11 +275,16 @@ fn format_section(title: &str, memories: &[Memory]) -> String {
 }
 
 /// Truncates content to a maximum length.
-fn truncate_content(content: &str, max_len: usize) -> String {
+///
+/// # Performance
+///
+/// Returns `Cow::Borrowed` when no truncation is needed (zero allocation).
+/// Only allocates when truncation is required.
+fn truncate_content(content: &str, max_len: usize) -> Cow<'_, str> {
     if content.len() <= max_len {
-        content.to_string()
+        Cow::Borrowed(content)
     } else {
-        format!("{}...", &content[..max_len - 3])
+        Cow::Owned(format!("{}...", &content[..max_len - 3]))
     }
 }
 
@@ -311,6 +317,7 @@ fn extract_topic(content: &str) -> Option<String> {
 }
 
 /// Truncates context to fit within a character limit.
+#[allow(clippy::option_if_let_else)] // if-let chain is clearer than nested map_or_else
 fn truncate_context(context: &str, max_chars: usize) -> String {
     if context.len() <= max_chars {
         return context.to_string();
@@ -387,9 +394,13 @@ mod tests {
             content: "Test content".to_string(),
             namespace: Namespace::Decisions,
             domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
             status: MemoryStatus::Active,
             created_at: 0,
             updated_at: 0,
+            tombstoned_at: None,
             embedding: None,
             tags: vec![],
             source: None,

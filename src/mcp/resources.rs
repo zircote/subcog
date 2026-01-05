@@ -1,27 +1,64 @@
 //! MCP resource handlers.
 //!
 //! Provides resource access for the Model Context Protocol.
-//! Resources are accessed via URN scheme:
+//! Resources are accessed via URN scheme.
+//!
+//! # URN Format Specification
+//!
+//! ```text
+//! subcog://{domain}/{resource-type}[/{resource-id}]
+//! ```
+//!
+//! ## Components
+//!
+//! | Component | Format | Description |
+//! |-----------|--------|-------------|
+//! | `domain` | `_` \| `project` \| `user` \| `org/{name}` | Scope for resolution |
+//! | `resource-type` | `help` \| `memory` \| `search` \| `topics` \| `namespaces` | Type of resource |
+//! | `resource-id` | alphanumeric with `-`, `_` | Optional identifier |
+//!
+//! ## Domain Scopes
+//!
+//! | Domain | Description |
+//! |--------|-------------|
+//! | `_` | Wildcard - all domains combined |
+//! | `project` | Current project/repository (default) |
+//! | `user` | User-specific (e.g., `~/.subcog/`) |
+//! | `org/{name}` | Organization namespace |
+//!
+//! # Resource Types
 //!
 //! ## Help Resources
-//! - `subcog://help` - Help index
-//! - `subcog://help/{topic}` - Topic-specific help
+//! - `subcog://help` - Help index with all available topics
+//! - `subcog://help/{topic}` - Topic-specific help (setup, concepts, capture, recall, etc.)
 //!
 //! ## Memory Resources
 //! - `subcog://_` - All memories across all domains
 //! - `subcog://_/{namespace}` - All memories in a namespace (e.g., `subcog://_/learnings`)
-//! - `subcog://memory/{id}` - Get a specific memory by ID
+//! - `subcog://memory/{id}` - Get a specific memory by its unique ID
+//! - `subcog://project/decisions/{id}` - Fully-qualified memory URN
 //!
 //! ## Search & Topic Resources
-//! - `subcog://search/{query}` - Search memories with a query
-//! - `subcog://topics` - List all indexed topics
+//! - `subcog://search/{query}` - Search memories with a query (URL-encoded)
+//! - `subcog://topics` - List all indexed topics with memory counts
 //! - `subcog://topics/{topic}` - Get memories for a specific topic
 //! - `subcog://namespaces` - List all namespaces with descriptions and signal words
 //!
-//! ## Domain-Scoped Resources (future)
+//! ## Domain-Scoped Resources
 //! - `subcog://project/_` - Project-scoped memories only
 //! - `subcog://org/{org}/_` - Organization-scoped memories
-//! - `subcog://global/_` - Global memories
+//! - `subcog://user/_` - User-scoped memories
+//!
+//! # Examples
+//!
+//! ```text
+//! subcog://help/capture          # Get capture help
+//! subcog://_/decisions           # All decisions across domains
+//! subcog://project/learnings     # Project learnings only
+//! subcog://memory/abc123         # Specific memory by ID
+//! subcog://search/postgres       # Search for "postgres"
+//! subcog://topics/authentication # Memories about authentication
+//! ```
 //!
 //! For advanced filtering and discovery, use the `subcog_browse` prompt
 //! which supports filtering by namespace, tags, time, source, and status.
@@ -194,109 +231,216 @@ impl ResourceHandler {
     /// For advanced filtering, use the `subcog_browse` prompt.
     #[must_use]
     pub fn list_resources(&self) -> Vec<ResourceDefinition> {
-        let mut resources: Vec<ResourceDefinition> = self
-            .help_content
-            .values()
-            .map(|cat| ResourceDefinition {
-                uri: format!("subcog://help/{}", cat.name),
-                name: cat.title.clone(),
-                description: Some(cat.description.clone()),
-                mime_type: Some("text/markdown".to_string()),
-            })
-            .collect();
+        let mut resources = Vec::new();
+        resources.extend(self.help_resource_definitions());
+        resources.extend(self.memory_resource_definitions());
+        resources.extend(Self::domain_resource_definitions());
+        resources.extend(Self::search_topic_resource_definitions());
+        resources.extend(Self::prompt_resource_definitions());
+        resources
+    }
 
-        // All memories across all domains
-        resources.push(ResourceDefinition {
-            uri: "subcog://_".to_string(),
-            name: "All Memories".to_string(),
-            description: Some("All memories across all domains".to_string()),
-            mime_type: Some("application/json".to_string()),
-        });
-
-        // Namespace-scoped patterns
-        for ns in Namespace::user_namespaces() {
-            let ns_str = ns.as_str();
-            resources.push(ResourceDefinition {
-                uri: format!("subcog://_/{ns_str}"),
-                name: format!("{ns_str} memories"),
-                description: Some(format!("All memories in {ns_str} namespace")),
-                mime_type: Some("application/json".to_string()),
-            });
+    fn build_resource(
+        uri: &str,
+        name: &str,
+        description: &str,
+        mime_type: &str,
+    ) -> ResourceDefinition {
+        ResourceDefinition {
+            uri: uri.to_string(),
+            name: name.to_string(),
+            description: Some(description.to_string()),
+            mime_type: Some(mime_type.to_string()),
         }
+    }
 
-        // Search resource (template)
-        resources.push(ResourceDefinition {
-            uri: "subcog://search/{query}".to_string(),
-            name: "Search Memories".to_string(),
-            description: Some("Search memories with a query (replace {query})".to_string()),
-            mime_type: Some("application/json".to_string()),
-        });
+    fn help_resource_definitions(&self) -> Vec<ResourceDefinition> {
+        let mut resources = vec![Self::build_resource(
+            "subcog://help",
+            "Help Index",
+            "Help index with all available topics",
+            "text/markdown",
+        )];
 
-        // Topics resources
-        resources.push(ResourceDefinition {
-            uri: "subcog://topics".to_string(),
-            name: "All Topics".to_string(),
-            description: Some("List all indexed topics with memory counts".to_string()),
-            mime_type: Some("application/json".to_string()),
-        });
-
-        resources.push(ResourceDefinition {
-            uri: "subcog://topics/{topic}".to_string(),
-            name: "Topic Memories".to_string(),
-            description: Some("Get memories for a specific topic (replace {topic})".to_string()),
-            mime_type: Some("application/json".to_string()),
-        });
-
-        // Namespaces resource
-        resources.push(ResourceDefinition {
-            uri: "subcog://namespaces".to_string(),
-            name: "All Namespaces".to_string(),
-            description: Some(
-                "List all memory namespaces with descriptions and signal words".to_string(),
-            ),
-            mime_type: Some("application/json".to_string()),
-        });
-
-        // Aggregate prompts resource (all domains)
-        resources.push(ResourceDefinition {
-            uri: "subcog://_prompts".to_string(),
-            name: "All Prompts".to_string(),
-            description: Some(
-                "Aggregate prompts from all domains (project, user, org)".to_string(),
-            ),
-            mime_type: Some("application/json".to_string()),
-        });
-
-        // Prompt resources
-        resources.push(ResourceDefinition {
-            uri: "subcog://project/_prompts".to_string(),
-            name: "Project Prompts".to_string(),
-            description: Some("List all prompts in the project scope".to_string()),
-            mime_type: Some("application/json".to_string()),
-        });
-
-        resources.push(ResourceDefinition {
-            uri: "subcog://user/_prompts".to_string(),
-            name: "User Prompts".to_string(),
-            description: Some("List all prompts in the user scope".to_string()),
-            mime_type: Some("application/json".to_string()),
-        });
-
-        resources.push(ResourceDefinition {
-            uri: "subcog://project/_prompts/{name}".to_string(),
-            name: "Project Prompt".to_string(),
-            description: Some("Get a specific prompt by name from project scope".to_string()),
-            mime_type: Some("application/json".to_string()),
-        });
-
-        resources.push(ResourceDefinition {
-            uri: "subcog://user/_prompts/{name}".to_string(),
-            name: "User Prompt".to_string(),
-            description: Some("Get a specific prompt by name from user scope".to_string()),
-            mime_type: Some("application/json".to_string()),
-        });
+        resources.extend(self.help_content.values().map(|cat| ResourceDefinition {
+            uri: format!("subcog://help/{}", cat.name),
+            name: cat.title.clone(),
+            description: Some(cat.description.clone()),
+            mime_type: Some("text/markdown".to_string()),
+        }));
 
         resources
+    }
+
+    fn memory_resource_definitions(&self) -> Vec<ResourceDefinition> {
+        let mut resources = vec![Self::build_resource(
+            "subcog://_",
+            "All Memories",
+            "All memories across all domains",
+            "application/json",
+        )];
+
+        for ns in Namespace::user_namespaces() {
+            let ns_str = ns.as_str();
+            resources.push(Self::build_resource(
+                &format!("subcog://_/{ns_str}"),
+                &format!("{ns_str} memories"),
+                &format!("All memories in {ns_str} namespace"),
+                "application/json",
+            ));
+        }
+
+        resources.push(Self::build_resource(
+            "subcog://memory/{id}",
+            "Memory by ID",
+            "Fetch a specific memory by ID",
+            "application/json",
+        ));
+
+        resources
+    }
+
+    fn domain_resource_definitions() -> Vec<ResourceDefinition> {
+        let items = [
+            (
+                "subcog://project",
+                "Project Memories",
+                "Project-scoped memories",
+            ),
+            (
+                "subcog://project/_",
+                "Project Memories (All Namespaces)",
+                "Project memories, all namespaces",
+            ),
+            (
+                "subcog://project/{namespace}",
+                "Project Namespace",
+                "Project memories by namespace",
+            ),
+            (
+                "subcog://project/{namespace}/{id}",
+                "Project Memory",
+                "Fetch a project memory by ID",
+            ),
+            ("subcog://user", "User Memories", "User-scoped memories"),
+            (
+                "subcog://user/_",
+                "User Memories (All Namespaces)",
+                "User memories, all namespaces",
+            ),
+            (
+                "subcog://user/{namespace}",
+                "User Namespace",
+                "User memories by namespace",
+            ),
+            (
+                "subcog://user/{namespace}/{id}",
+                "User Memory",
+                "Fetch a user memory by ID",
+            ),
+            (
+                "subcog://org",
+                "Org Memories",
+                "Organization-scoped memories",
+            ),
+            (
+                "subcog://org/_",
+                "Org Memories (All Namespaces)",
+                "Org memories, all namespaces",
+            ),
+            (
+                "subcog://org/{namespace}",
+                "Org Namespace",
+                "Org memories by namespace",
+            ),
+            (
+                "subcog://org/{namespace}/{id}",
+                "Org Memory",
+                "Fetch an org memory by ID",
+            ),
+        ];
+
+        items
+            .iter()
+            .map(|(uri, name, desc)| Self::build_resource(uri, name, desc, "application/json"))
+            .collect()
+    }
+
+    fn search_topic_resource_definitions() -> Vec<ResourceDefinition> {
+        let mut resources = vec![
+            Self::build_resource(
+                "subcog://search/{query}",
+                "Search Memories",
+                "Search memories with a query (replace {query})",
+                "application/json",
+            ),
+            Self::build_resource(
+                "subcog://topics",
+                "All Topics",
+                "List all indexed topics with memory counts",
+                "application/json",
+            ),
+            Self::build_resource(
+                "subcog://topics/{topic}",
+                "Topic Memories",
+                "Get memories for a specific topic (replace {topic})",
+                "application/json",
+            ),
+        ];
+
+        resources.push(Self::build_resource(
+            "subcog://namespaces",
+            "All Namespaces",
+            "List all memory namespaces with descriptions and signal words",
+            "application/json",
+        ));
+
+        resources
+    }
+
+    fn prompt_resource_definitions() -> Vec<ResourceDefinition> {
+        let items = [
+            (
+                "subcog://_prompts",
+                "All Prompts",
+                "Aggregate prompts from all domains (project, user, org)",
+            ),
+            (
+                "subcog://project/_prompts",
+                "Project Prompts",
+                "List all prompts in the project scope",
+            ),
+            (
+                "subcog://user/_prompts",
+                "User Prompts",
+                "List all prompts in the user scope",
+            ),
+            (
+                "subcog://project/_prompts/{name}",
+                "Project Prompt",
+                "Get a specific prompt by name from project scope",
+            ),
+            (
+                "subcog://user/_prompts/{name}",
+                "User Prompt",
+                "Get a specific prompt by name from user scope",
+            ),
+            (
+                "subcog://org/_prompts",
+                "Org Prompts",
+                "List all prompts in the org scope",
+            ),
+            (
+                "subcog://org/_prompts/{name}",
+                "Org Prompt",
+                "Get a specific prompt by name from org scope",
+            ),
+        ];
+
+        items
+            .iter()
+            .map(|(uri, name, desc)| Self::build_resource(uri, name, desc, "application/json"))
+            .collect()
     }
 
     /// Gets a resource by URI.
@@ -1046,16 +1190,20 @@ mod tests {
     use crate::storage::traits::IndexBackend;
 
     fn build_handler_with_memories() -> ResourceHandler {
-        let mut index = SqliteBackend::in_memory().expect("in-memory index");
+        let index = SqliteBackend::in_memory().expect("in-memory index");
         let now = 1_700_000_000;
         let memory = Memory {
             id: MemoryId::new("decisions-1"),
             content: "Decision content".to_string(),
             namespace: Namespace::Decisions,
             domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
             status: MemoryStatus::Active,
             created_at: now,
             updated_at: now,
+            tombstoned_at: None,
             embedding: None,
             tags: vec!["alpha".to_string()],
             source: None,
@@ -1065,9 +1213,13 @@ mod tests {
             content: "Pattern content".to_string(),
             namespace: Namespace::Patterns,
             domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
             status: MemoryStatus::Active,
             created_at: now,
             updated_at: now,
+            tombstoned_at: None,
             embedding: None,
             tags: vec!["beta".to_string()],
             source: None,
@@ -1183,6 +1335,21 @@ mod tests {
 
         assert!(resources.iter().any(|r| r.uri.contains("search")));
         assert!(resources.iter().any(|r| r.uri.contains("topics")));
+    }
+
+    #[test]
+    fn test_list_resources_includes_help_and_domain_templates() {
+        let handler = ResourceHandler::new();
+        let resources = handler.list_resources();
+
+        assert!(resources.iter().any(|r| r.uri == "subcog://help"));
+        assert!(resources.iter().any(|r| r.uri == "subcog://memory/{id}"));
+        assert!(
+            resources
+                .iter()
+                .any(|r| r.uri == "subcog://project/{namespace}")
+        );
+        assert!(resources.iter().any(|r| r.uri == "subcog://org/_prompts"));
     }
 
     #[test]

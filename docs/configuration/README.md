@@ -45,6 +45,7 @@ default_search_mode = "hybrid"
 secrets_filter = true
 pii_filter = true
 llm_features = true
+org_scope_enabled = false
 
 audit_log = false
 

@@ -8,6 +8,7 @@ mod implementation {
     use crate::storage::migrations::{Migration, MigrationRunner};
     use crate::storage::traits::PersistenceBackend;
     use crate::{Error, Result};
+    use chrono::{TimeZone, Utc};
     use deadpool_postgres::{Config, Pool, Runtime};
     use tokio::runtime::Handle;
     use tokio_postgres::NoTls;
@@ -52,6 +53,26 @@ mod implementation {
                 CREATE INDEX IF NOT EXISTS idx_{table}_domain ON {table} (domain_org, domain_project, domain_repo);
             ",
         },
+        Migration {
+            version: 4,
+            description: "Add tombstoned_at column (ADR-0053)",
+            sql: r"
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tombstoned_at BIGINT;
+                CREATE INDEX IF NOT EXISTS idx_{table}_tombstoned ON {table} (tombstoned_at) WHERE tombstoned_at IS NOT NULL;
+            ",
+        },
+        Migration {
+            version: 5,
+            description: "Add facet columns (ADR-0048/0049)",
+            sql: r"
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS project_id TEXT;
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS branch TEXT;
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS file_path TEXT;
+                CREATE INDEX IF NOT EXISTS idx_{table}_project_id ON {table} (project_id);
+                CREATE INDEX IF NOT EXISTS idx_{table}_project_branch ON {table} (project_id, branch);
+                CREATE INDEX IF NOT EXISTS idx_{table}_file_path ON {table} (file_path);
+            ",
+        },
     ];
 
     /// PostgreSQL-based persistence backend.
@@ -85,9 +106,28 @@ mod implementation {
         ///
         /// Returns an error if the connection pool fails to initialize.
         pub fn new(connection_url: &str, table_name: impl Into<String>) -> Result<Self> {
+            Self::with_pool_size(connection_url, table_name, None)
+        }
+
+        /// Creates a new PostgreSQL backend with configurable pool size.
+        ///
+        /// # Arguments
+        ///
+        /// * `connection_url` - PostgreSQL connection URL
+        /// * `table_name` - Name of the table for storing memories
+        /// * `pool_max_size` - Maximum connections in pool (defaults to 20)
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the connection pool fails to initialize.
+        pub fn with_pool_size(
+            connection_url: &str,
+            table_name: impl Into<String>,
+            pool_max_size: Option<usize>,
+        ) -> Result<Self> {
             let table_name = table_name.into();
             let config = Self::parse_connection_url(connection_url)?;
-            let cfg = Self::build_pool_config(&config);
+            let cfg = Self::build_pool_config(&config, pool_max_size);
 
             let pool = cfg.create_pool(Some(Runtime::Tokio1), NoTls).map_err(|e| {
                 Error::OperationFailed {
@@ -126,8 +166,22 @@ mod implementation {
             s.clone()
         }
 
+        /// Default maximum connections in pool.
+        const DEFAULT_POOL_MAX_SIZE: usize = 20;
+
         /// Builds a deadpool config from tokio-postgres config.
-        fn build_pool_config(config: &tokio_postgres::Config) -> Config {
+        ///
+        /// # Pool Configuration (HIGH-010, DB-M2)
+        ///
+        /// Configures connection pool with safety limits:
+        /// - Configurable max connections (defaults to 20, prevents pool exhaustion)
+        /// - 5 second acquire timeout (prevents hanging on pool exhaustion)
+        ///
+        /// Pool size can be configured via `StorageBackendConfig.pool_max_size`.
+        fn build_pool_config(
+            config: &tokio_postgres::Config,
+            pool_max_size: Option<usize>,
+        ) -> Config {
             let mut cfg = Config::new();
             cfg.host = config.get_hosts().first().map(Self::host_to_string);
             cfg.port = config.get_ports().first().copied();
@@ -136,6 +190,24 @@ mod implementation {
                 .get_password()
                 .map(|p| String::from_utf8_lossy(p).to_string());
             cfg.dbname = config.get_dbname().map(String::from);
+
+            // Pool configuration with timeout (HIGH-010, DB-M2)
+            let max_size = pool_max_size.unwrap_or(Self::DEFAULT_POOL_MAX_SIZE);
+            cfg.pool = Some(deadpool_postgres::PoolConfig {
+                max_size,
+                timeouts: deadpool_postgres::Timeouts {
+                    wait: Some(std::time::Duration::from_secs(5)),
+                    create: Some(std::time::Duration::from_secs(5)),
+                    recycle: Some(std::time::Duration::from_secs(5)),
+                },
+                ..Default::default()
+            });
+
+            // Configure manager with fast recycling for connection reuse
+            cfg.manager = Some(deadpool_postgres::ManagerConfig {
+                recycling_method: deadpool_postgres::RecyclingMethod::Fast,
+            });
+
             cfg
         }
 
@@ -182,25 +254,32 @@ mod implementation {
 
             let upsert = format!(
                 r"INSERT INTO {} (id, content, namespace, domain_org, domain_project, domain_repo,
-                    status, tags, source, embedding, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    project_id, branch, file_path,
+                    status, tags, source, embedding, created_at, updated_at, tombstoned_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                 ON CONFLICT (id) DO UPDATE SET
                     content = EXCLUDED.content,
                     namespace = EXCLUDED.namespace,
                     domain_org = EXCLUDED.domain_org,
                     domain_project = EXCLUDED.domain_project,
                     domain_repo = EXCLUDED.domain_repo,
+                    project_id = EXCLUDED.project_id,
+                    branch = EXCLUDED.branch,
+                    file_path = EXCLUDED.file_path,
                     status = EXCLUDED.status,
                     tags = EXCLUDED.tags,
                     source = EXCLUDED.source,
                     embedding = EXCLUDED.embedding,
-                    updated_at = EXCLUDED.updated_at",
+                    updated_at = EXCLUDED.updated_at,
+                    tombstoned_at = EXCLUDED.tombstoned_at",
                 self.table_name
             );
 
             let tags: Vec<&str> = memory.tags.iter().map(String::as_str).collect();
             let embedding_json: Option<serde_json::Value> =
                 memory.embedding.as_ref().map(|e| serde_json::json!(e));
+
+            let tombstoned_at = memory.tombstoned_at.map(|ts| ts.timestamp());
 
             client
                 .execute(
@@ -212,12 +291,16 @@ mod implementation {
                         &memory.domain.organization,
                         &memory.domain.project,
                         &memory.domain.repository,
+                        &memory.project_id,
+                        &memory.branch,
+                        &memory.file_path,
                         &memory.status.as_str(),
                         &tags,
                         &memory.source,
                         &embedding_json,
                         &(memory.created_at as i64),
                         &(memory.updated_at as i64),
+                        &tombstoned_at,
                     ],
                 )
                 .await
@@ -233,7 +316,8 @@ mod implementation {
 
             let query = format!(
                 r"SELECT id, content, namespace, domain_org, domain_project, domain_repo,
-                    status, tags, source, embedding, created_at, updated_at
+                    project_id, branch, file_path,
+                    status, tags, source, embedding, created_at, updated_at, tombstoned_at
                 FROM {}
                 WHERE id = $1",
                 self.table_name
@@ -256,12 +340,16 @@ mod implementation {
             let domain_org: Option<String> = row.get("domain_org");
             let domain_project: Option<String> = row.get("domain_project");
             let domain_repo: Option<String> = row.get("domain_repo");
+            let project_id: Option<String> = row.get("project_id");
+            let branch: Option<String> = row.get("branch");
+            let file_path: Option<String> = row.get("file_path");
             let status_str: String = row.get("status");
             let tags: Vec<String> = row.get("tags");
             let source: Option<String> = row.get("source");
             let embedding_json: Option<serde_json::Value> = row.get("embedding");
             let created_at: i64 = row.get("created_at");
             let updated_at: i64 = row.get("updated_at");
+            let tombstoned_at: Option<i64> = row.get("tombstoned_at");
 
             let namespace = Namespace::parse(&namespace_str).unwrap_or_default();
             let status = match status_str.as_str() {
@@ -270,11 +358,14 @@ mod implementation {
                 "superseded" => MemoryStatus::Superseded,
                 "pending" => MemoryStatus::Pending,
                 "deleted" => MemoryStatus::Deleted,
+                "tombstoned" => MemoryStatus::Tombstoned,
                 _ => MemoryStatus::Active,
             };
 
             let embedding: Option<Vec<f32>> =
                 embedding_json.and_then(|v| serde_json::from_value(v).ok());
+
+            let tombstoned_at = tombstoned_at.and_then(|ts| Utc.timestamp_opt(ts, 0).single());
 
             Memory {
                 id: MemoryId::new(id),
@@ -285,12 +376,16 @@ mod implementation {
                     project: domain_project,
                     repository: domain_repo,
                 },
+                project_id,
+                branch,
+                file_path,
                 status,
                 tags,
                 source,
                 embedding,
                 created_at: created_at as u64,
                 updated_at: updated_at as u64,
+                tombstoned_at,
             }
         }
 
@@ -327,10 +422,44 @@ mod implementation {
                 })
                 .collect())
         }
+
+        /// Async implementation of `get_batch` operation using single IN query.
+        ///
+        /// Avoids N+1 queries by fetching all IDs in a single round-trip.
+        #[allow(clippy::cast_sign_loss)]
+        async fn get_batch_async(&self, ids: &[MemoryId]) -> Result<Vec<Memory>> {
+            if ids.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let client = self.pool.get().await.map_err(pool_error)?;
+
+            // Build parameterized IN clause: $1, $2, $3, ...
+            let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("${i}")).collect();
+            let query = format!(
+                r"SELECT id, content, namespace, domain_org, domain_project, domain_repo,
+                    status, tags, source, embedding, created_at, updated_at, tombstoned_at
+                FROM {} WHERE id IN ({})",
+                self.table_name,
+                placeholders.join(", ")
+            );
+
+            // Build params array
+            let id_strs: Vec<&str> = ids.iter().map(MemoryId::as_str).collect();
+            let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
+                id_strs.iter().map(|s| s as _).collect();
+
+            let rows = client
+                .query(&query, &params)
+                .await
+                .map_err(|e| query_error("postgres_persistence_get_batch", e))?;
+
+            Ok(rows.iter().map(Self::row_to_memory).collect())
+        }
     }
 
     impl PersistenceBackend for PostgresBackend {
-        fn store(&mut self, memory: &Memory) -> Result<()> {
+        fn store(&self, memory: &Memory) -> Result<()> {
             self.block_on(self.store_async(memory))
         }
 
@@ -338,12 +467,17 @@ mod implementation {
             self.block_on(self.get_async(id))
         }
 
-        fn delete(&mut self, id: &MemoryId) -> Result<bool> {
+        fn delete(&self, id: &MemoryId) -> Result<bool> {
             self.block_on(self.delete_async(id))
         }
 
         fn list_ids(&self) -> Result<Vec<MemoryId>> {
             self.block_on(self.list_ids_async())
+        }
+
+        /// Optimized batch retrieval using a single IN query (HIGH-PERF-002).
+        fn get_batch(&self, ids: &[MemoryId]) -> Result<Vec<Memory>> {
+            self.block_on(self.get_batch_async(ids))
         }
     }
 }
@@ -373,6 +507,18 @@ mod stub {
             }
         }
 
+        /// Creates a new PostgreSQL backend with configurable pool size (stub).
+        ///
+        /// The pool size is ignored in the stub - requires `postgres` feature.
+        #[must_use]
+        pub fn with_pool_size(
+            connection_url: impl Into<String>,
+            table_name: impl Into<String>,
+            _pool_max_size: Option<usize>,
+        ) -> Self {
+            Self::new(connection_url, table_name)
+        }
+
         /// Creates a backend with default settings (stub).
         #[must_use]
         pub fn with_defaults() -> Self {
@@ -381,7 +527,7 @@ mod stub {
     }
 
     impl PersistenceBackend for PostgresBackend {
-        fn store(&mut self, _memory: &Memory) -> Result<()> {
+        fn store(&self, _memory: &Memory) -> Result<()> {
             Err(Error::NotImplemented(format!(
                 "PostgresBackend::store to {} on {}",
                 self.table_name, self.connection_url
@@ -395,7 +541,7 @@ mod stub {
             )))
         }
 
-        fn delete(&mut self, _id: &MemoryId) -> Result<bool> {
+        fn delete(&self, _id: &MemoryId) -> Result<bool> {
             Err(Error::NotImplemented(format!(
                 "PostgresBackend::delete from {} on {}",
                 self.table_name, self.connection_url
@@ -413,3 +559,331 @@ mod stub {
 
 #[cfg(not(feature = "postgres"))]
 pub use stub::PostgresBackend;
+
+#[cfg(all(test, feature = "postgres"))]
+mod tests {
+    use super::*;
+    use crate::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace};
+    use crate::storage::traits::PersistenceBackend;
+    use std::env;
+
+    /// Gets test database URL from environment or skips test.
+    fn get_test_db_url() -> Option<String> {
+        env::var("SUBCOG_TEST_POSTGRES_URL").ok()
+    }
+
+    /// Creates a test memory with given ID.
+    fn create_test_memory(id: &str) -> Memory {
+        Memory {
+            id: MemoryId::new(id),
+            content: format!("Test content for {id}"),
+            namespace: Namespace::Decisions,
+            domain: Domain {
+                organization: Some("test-org".to_string()),
+                project: Some("test-project".to_string()),
+                repository: Some("test-repo".to_string()),
+            },
+            project_id: Some("github.com/test-org/test-repo".to_string()),
+            branch: Some("main".to_string()),
+            file_path: Some("src/lib.rs".to_string()),
+            status: MemoryStatus::Active,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            tombstoned_at: None,
+            embedding: None,
+            tags: vec!["test".to_string(), "integration".to_string()],
+            source: Some("test.rs".to_string()),
+        }
+    }
+
+    /// Creates a unique table name for test isolation.
+    fn unique_table_name() -> String {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        format!("test_memories_{ts}")
+    }
+
+    #[test]
+    fn test_store_and_retrieve_memory() {
+        let Some(url) = get_test_db_url() else {
+            eprintln!("Skipping: SUBCOG_TEST_POSTGRES_URL not set");
+            return;
+        };
+
+        let table = unique_table_name();
+        let backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+
+        let memory = create_test_memory("test-store-retrieve");
+        backend.store(&memory).expect("Failed to store memory");
+
+        let retrieved = backend
+            .get(&MemoryId::new("test-store-retrieve"))
+            .expect("Failed to get memory");
+
+        assert!(retrieved.is_some());
+        let retrieved = retrieved.unwrap();
+        assert_eq!(retrieved.id.as_str(), "test-store-retrieve");
+        assert_eq!(retrieved.namespace, Namespace::Decisions);
+        assert_eq!(retrieved.status, MemoryStatus::Active);
+        assert!(retrieved.content.contains("test-store-retrieve"));
+    }
+
+    #[test]
+    fn test_get_nonexistent_memory() {
+        let Some(url) = get_test_db_url() else {
+            eprintln!("Skipping: SUBCOG_TEST_POSTGRES_URL not set");
+            return;
+        };
+
+        let table = unique_table_name();
+        let backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+
+        let result = backend
+            .get(&MemoryId::new("nonexistent-id"))
+            .expect("Failed to query");
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_update_existing_memory() {
+        let Some(url) = get_test_db_url() else {
+            eprintln!("Skipping: SUBCOG_TEST_POSTGRES_URL not set");
+            return;
+        };
+
+        let table = unique_table_name();
+        let backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+
+        let mut memory = create_test_memory("test-update");
+        backend.store(&memory).expect("Failed to store initial");
+
+        // Update the memory
+        memory.content = "Updated content".to_string();
+        memory.status = MemoryStatus::Archived;
+        memory.updated_at = 1_700_001_000;
+        backend.store(&memory).expect("Failed to store update");
+
+        let retrieved = backend
+            .get(&MemoryId::new("test-update"))
+            .expect("Failed to get")
+            .expect("Memory not found");
+
+        assert_eq!(retrieved.content, "Updated content");
+        assert_eq!(retrieved.status, MemoryStatus::Archived);
+        assert_eq!(retrieved.updated_at, 1_700_001_000);
+    }
+
+    #[test]
+    fn test_delete_memory() {
+        let Some(url) = get_test_db_url() else {
+            eprintln!("Skipping: SUBCOG_TEST_POSTGRES_URL not set");
+            return;
+        };
+
+        let table = unique_table_name();
+        let backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+
+        let memory = create_test_memory("test-delete");
+        backend.store(&memory).expect("Failed to store");
+
+        let deleted = backend
+            .delete(&MemoryId::new("test-delete"))
+            .expect("Failed to delete");
+        assert!(deleted);
+
+        let retrieved = backend
+            .get(&MemoryId::new("test-delete"))
+            .expect("Failed to get");
+        assert!(retrieved.is_none());
+    }
+
+    #[test]
+    fn test_delete_nonexistent_memory() {
+        let Some(url) = get_test_db_url() else {
+            eprintln!("Skipping: SUBCOG_TEST_POSTGRES_URL not set");
+            return;
+        };
+
+        let table = unique_table_name();
+        let backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+
+        let deleted = backend
+            .delete(&MemoryId::new("never-existed"))
+            .expect("Failed to delete");
+        assert!(!deleted);
+    }
+
+    #[test]
+    fn test_list_ids() {
+        let Some(url) = get_test_db_url() else {
+            eprintln!("Skipping: SUBCOG_TEST_POSTGRES_URL not set");
+            return;
+        };
+
+        let table = unique_table_name();
+        let backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+
+        // Initially empty
+        let ids = backend.list_ids().expect("Failed to list");
+        assert!(ids.is_empty());
+
+        // Add some memories
+        for i in 1..=3 {
+            let memory = create_test_memory(&format!("list-test-{i}"));
+            backend.store(&memory).expect("Failed to store");
+        }
+
+        let ids = backend.list_ids().expect("Failed to list");
+        assert_eq!(ids.len(), 3);
+    }
+
+    #[test]
+    fn test_memory_with_embedding() {
+        let Some(url) = get_test_db_url() else {
+            eprintln!("Skipping: SUBCOG_TEST_POSTGRES_URL not set");
+            return;
+        };
+
+        let table = unique_table_name();
+        let backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+
+        let mut memory = create_test_memory("test-embedding");
+        memory.embedding = Some(vec![0.1, 0.2, 0.3, 0.4, 0.5]);
+
+        backend.store(&memory).expect("Failed to store");
+
+        let retrieved = backend
+            .get(&MemoryId::new("test-embedding"))
+            .expect("Failed to get")
+            .expect("Memory not found");
+
+        assert!(retrieved.embedding.is_some());
+        let emb = retrieved.embedding.unwrap();
+        assert_eq!(emb.len(), 5);
+        assert!((emb[0] - 0.1).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_all_namespaces() {
+        let Some(url) = get_test_db_url() else {
+            eprintln!("Skipping: SUBCOG_TEST_POSTGRES_URL not set");
+            return;
+        };
+
+        let table = unique_table_name();
+        let backend = PostgresBackend::new(&url, &table).expect("Failed to create backend");
+
+        let namespaces = [
+            Namespace::Decisions,
+            Namespace::Patterns,
+            Namespace::Learnings,
+            Namespace::Context,
+            Namespace::TechDebt,
+            Namespace::Apis,
+            Namespace::Config,
+            Namespace::Security,
+            Namespace::Performance,
+            Namespace::Testing,
+        ];
+
+        for (i, ns) in namespaces.iter().enumerate() {
+            let mut memory = create_test_memory(&format!("ns-test-{i}"));
+            memory.namespace = *ns;
+            backend.store(&memory).expect("Failed to store");
+
+            let retrieved = backend
+                .get(&MemoryId::new(format!("ns-test-{i}")))
+                .expect("Failed to get")
+                .expect("Memory not found");
+
+            assert_eq!(retrieved.namespace, *ns);
+        }
+    }
+}
+
+#[cfg(all(test, not(feature = "postgres")))]
+mod stub_tests {
+    use super::*;
+    use crate::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace};
+    use crate::storage::traits::PersistenceBackend;
+
+    fn create_test_memory() -> Memory {
+        Memory {
+            id: MemoryId::new("test-id"),
+            content: "Test content".to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
+            status: MemoryStatus::Active,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            tombstoned_at: None,
+            embedding: None,
+            tags: vec![],
+            source: None,
+        }
+    }
+
+    #[test]
+    fn test_stub_store_returns_not_implemented() {
+        let backend = PostgresBackend::with_defaults();
+        let memory = create_test_memory();
+        let result = backend.store(&memory);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::Error::NotImplemented(_)
+        ));
+    }
+
+    #[test]
+    fn test_stub_get_returns_not_implemented() {
+        let backend = PostgresBackend::with_defaults();
+        let result = backend.get(&MemoryId::new("test"));
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::Error::NotImplemented(_)
+        ));
+    }
+
+    #[test]
+    fn test_stub_delete_returns_not_implemented() {
+        let backend = PostgresBackend::with_defaults();
+        let result = backend.delete(&MemoryId::new("test"));
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::Error::NotImplemented(_)
+        ));
+    }
+
+    #[test]
+    fn test_stub_list_ids_returns_not_implemented() {
+        let backend = PostgresBackend::with_defaults();
+        let result = backend.list_ids();
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::Error::NotImplemented(_)
+        ));
+    }
+
+    #[test]
+    fn test_stub_new_creates_instance() {
+        // Stub constructor always succeeds (returns stub, not Result)
+        let _backend = PostgresBackend::new("postgresql://custom", "custom_table");
+    }
+
+    #[test]
+    fn test_stub_with_defaults_creates_instance() {
+        // with_defaults() always succeeds (returns stub, not Result)
+        let _backend = PostgresBackend::with_defaults();
+    }
+}

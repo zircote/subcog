@@ -46,6 +46,29 @@ subcog prompt save <NAME> [OPTIONS]
 | `--description` | `-d` | Description | None |
 | `--tags` | `-t` | Comma-separated tags | None |
 | `--domain` | | Domain scope | `project` |
+| `--no-enrich` | | Skip LLM-powered metadata enrichment | `false` |
+| `--dry-run` | | Show enriched template without saving | `false` |
+
+### LLM Enrichment
+
+By default, `prompt save` uses an LLM (if configured) to enhance the template metadata:
+
+- **Description**: Generated from content if not provided
+- **Tags**: Inferred from content (e.g., "security", "review")
+- **Variables**: Descriptions and defaults for extracted variables
+
+User-provided values take precedence over LLM suggestions.
+
+```bash
+# Default: enrichment enabled
+subcog prompt save my-prompt --content "Review {{file}}"
+
+# Skip enrichment
+subcog prompt save my-prompt --content "Review {{file}}" --no-enrich
+
+# Preview what would be saved
+subcog prompt save my-prompt --content "Review {{file}}" --dry-run
+```
 
 ### Variable Syntax
 

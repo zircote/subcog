@@ -38,6 +38,7 @@ audit_log = false
 llm_features = true
 auto_capture = false
 consolidation = false
+org_scope_enabled = false
 ```
 
 ## LLM
@@ -133,6 +134,7 @@ default_search_mode = "hybrid"
 secrets_filter = true
 llm_features = true
 auto_capture = true
+org_scope_enabled = false
 
 [observability.logging]
 level = "debug"
@@ -149,6 +151,7 @@ default_search_mode = "hybrid"
 secrets_filter = true
 pii_filter = true
 audit_log = true
+org_scope_enabled = false
 
 [observability.metrics]
 enabled = true
@@ -177,6 +180,7 @@ audit_log = false
 llm_features = false
 auto_capture = false
 consolidation = false
+org_scope_enabled = false
 
 [llm]
 provider = "anthropic" # anthropic, openai, ollama, lmstudio

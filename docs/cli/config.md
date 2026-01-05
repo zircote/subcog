@@ -51,7 +51,7 @@ subcog config show
 
 Output:
 ```toml
-repo_path = \".\"
+repo_path = "."
 
 [features]
 secrets_filter = true
@@ -59,8 +59,8 @@ pii_filter = true
 multi_domain = false
 
 [llm]
-provider = \"anthropic\"
-model = \"claude-sonnet-4-20250514\"
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
 ```
 
 ### Get Specific Value
@@ -132,16 +132,16 @@ domain: project  # project, user, or org
 # Log level
 log_level: info  # trace, debug, info, warn, error
 
-# Git directory
-git_dir: .git
+# Data directory
+data_dir: ~/.local/share/subcog
 ```
 
 ### Storage Settings
 
 ```yaml
 storage:
-  # Persistence layer
-  persistence: git_notes  # git_notes, postgresql, filesystem
+  # Persistence layer (SQLite is default and recommended)
+  persistence: sqlite  # sqlite, postgresql, filesystem
 
   # Index layer
   index: sqlite  # sqlite, postgresql, redis
@@ -149,11 +149,8 @@ storage:
   # Vector layer
   vector: usearch  # usearch, pgvector, redis
 
-  # SQLite path
-  sqlite_path: ~/.subcog/index.db
-
-  # Vector path
-  vector_path: ~/.subcog/vectors.usearch
+  # Data directory
+  data_dir: ~/.local/share/subcog
 ```
 
 ### Feature Flags

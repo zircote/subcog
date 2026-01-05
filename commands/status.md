@@ -32,7 +32,7 @@ The status command returns:
 - Active backends (persistence, index, vector)
 
 **Storage Backends:**
-- Persistence: git-notes | postgresql | filesystem
+- Persistence: sqlite | postgresql | filesystem
 - Index: sqlite-fts5 | postgresql | redis
 - Vector: usearch | pgvector | redis
 

@@ -51,7 +51,7 @@ The memory system exposes its functionality through multiple access interfaces, 
 
 1. **Single Source of Truth**: All interfaces call the same service layer
 2. **Consistent Data Models**: Same Memory, MemoryResult types across all interfaces
-3. **Resource URNs**: All interfaces return URNs in the `subcog://mem/{domain}/{namespace}/{id}` format
+3. **Resource URNs**: All interfaces return URNs in the `subcog://{domain}/{namespace}/{id}` format
 4. **Error Handling**: Consistent error codes and messages
 5. **Observability**: All interfaces emit metrics and traces
 
@@ -184,7 +184,7 @@ pub struct CaptureArgs {
 ```
 ✓ Captured memory: decisions:abc1234:0
   Domain: project
-  URI: subcog://mem/project:my-app/decisions/abc1234:0
+  URI: subcog://project:my-app/decisions/abc1234:0
 ```
 
 **Output (JSON)**:
@@ -192,7 +192,7 @@ pub struct CaptureArgs {
 {
   "success": true,
   "memory_id": "decisions:abc1234:0",
-  "uri": "subcog://mem/project:my-app/decisions/abc1234:0",
+  "uri": "subcog://project:my-app/decisions/abc1234:0",
   "indexed": true,
   "warning": null
 }
@@ -297,17 +297,17 @@ Found 3 memories:
 [1] decisions:abc1234:0 (0.92 similarity)
     Use PostgreSQL for data layer
     Domain: project | Tags: database, architecture
-    URI: subcog://mem/project:my-app/decisions/abc1234:0
+    URI: subcog://project:my-app/decisions/abc1234:0
 
 [2] learnings:def5678:1 (0.85 similarity)
     PostgreSQL JSONB performs well for our use case
     Domain: user | Tags: database, performance
-    URI: subcog://mem/user/learnings/def5678:1
+    URI: subcog://user/learnings/def5678:1
 
 [3] decisions:ghi9012:0 (0.78 similarity)
     Use SQLite for local development
     Domain: project | Tags: database, development
-    URI: subcog://mem/project:my-app/decisions/ghi9012:0
+    URI: subcog://project:my-app/decisions/ghi9012:0
 ```
 
 #### 2.2.3 memory status
@@ -554,19 +554,19 @@ impl MemoryMcpServer {
     fn resource_templates(&self) -> Vec<ResourceTemplate> {
         vec![
             ResourceTemplate {
-                uri_template: "subcog://mem/{domain}/{namespace}/{memory_id}".to_string(),
+                uri_template: "subcog://{domain}/{namespace}/{memory_id}".to_string(),
                 name: "Memory Resource".to_string(),
                 description: Some("Access a specific memory".to_string()),
                 mime_type: Some("application/json".to_string()),
             },
             ResourceTemplate {
-                uri_template: "subcog://mem/{domain}/{namespace}".to_string(),
+                uri_template: "subcog://{domain}/{namespace}".to_string(),
                 name: "Namespace Listing".to_string(),
                 description: Some("List memories in a namespace".to_string()),
                 mime_type: Some("application/json".to_string()),
             },
             ResourceTemplate {
-                uri_template: "subcog://mem/{domain}".to_string(),
+                uri_template: "subcog://{domain}".to_string(),
                 name: "Domain Listing".to_string(),
                 description: Some("List namespaces in a domain".to_string()),
                 mime_type: Some("application/json".to_string()),
@@ -873,7 +873,7 @@ pub enum HookType {
 **Output (stdout)**:
 ```json
 {
-  "additionalContext": "<memory_context>\n  <project>my-project</project>\n  <branch>feature/auth</branch>\n  <resources>\n    <resource uri=\"subcog://mem/project:my-project/decisions/abc1234:0\" relevance=\"0.95\">\n      <summary>Use JWT for authentication</summary>\n    </resource>\n  </resources>\n</memory_context>",
+  "additionalContext": "<memory_context>\n  <project>my-project</project>\n  <branch>feature/auth</branch>\n  <resources>\n    <resource uri=\"subcog://project:my-project/decisions/abc1234:0\" relevance=\"0.95\">\n      <summary>Use JWT for authentication</summary>\n    </resource>\n  </resources>\n</memory_context>",
   "suppressSystemPrompt": false
 }
 ```
@@ -968,7 +968,7 @@ pub async fn handle_user_prompt(input: UserPromptInput) -> Result<UserPromptOutp
 **Output (stdout)**:
 ```json
 {
-  "additionalContext": "<related_memories>\n  <memory uri=\"subcog://mem/project:my-project/decisions/auth-jwt:0\" relevance=\"0.88\">\n    <summary>Use JWT tokens for authentication</summary>\n  </memory>\n  <memory uri=\"subcog://mem/user/learnings/rust-auth:0\" relevance=\"0.75\">\n    <summary>Rust authentication patterns</summary>\n  </memory>\n</related_memories>",
+  "additionalContext": "<related_memories>\n  <memory uri=\"subcog://project:my-project/decisions/auth-jwt:0\" relevance=\"0.88\">\n    <summary>Use JWT tokens for authentication</summary>\n  </memory>\n  <memory uri=\"subcog://user/learnings/rust-auth:0\" relevance=\"0.75\">\n    <summary>Rust authentication patterns</summary>\n  </memory>\n</related_memories>",
   "suppressSystemPrompt": false
 }
 ```
@@ -989,7 +989,7 @@ pub async fn handle_user_prompt(input: UserPromptInput) -> Result<UserPromptOutp
 **Output (stdout)**:
 ```json
 {
-  "additionalContext": "<auto_captured>\n  <memory uri=\"subcog://mem/project:my-project/progress/session-abc:0\">\n    <summary>Authentication implementation progress</summary>\n    <captured>2 decisions auto-saved before context compaction</captured>\n  </memory>\n</auto_captured>",
+  "additionalContext": "<auto_captured>\n  <memory uri=\"subcog://project:my-project/progress/session-abc:0\">\n    <summary>Authentication implementation progress</summary>\n    <captured>2 decisions auto-saved before context compaction</captured>\n  </memory>\n</auto_captured>",
   "suppressSystemPrompt": false
 }
 ```

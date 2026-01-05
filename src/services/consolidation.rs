@@ -5,13 +5,16 @@
 use crate::Result;
 use crate::current_timestamp;
 use crate::models::{
-    EdgeType, Memory, MemoryEvent, MemoryStatus, MemoryTier, Namespace, RetentionScore,
+    EdgeType, EventMeta, Memory, MemoryEvent, MemoryStatus, MemoryTier, Namespace, RetentionScore,
 };
+use crate::observability::current_request_id;
 use crate::security::record_event;
 use crate::storage::traits::PersistenceBackend;
+use lru::LruCache;
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::time::Instant;
-use tracing::instrument;
+use tracing::{info_span, instrument};
 
 // Retention score calculation constants
 /// Seconds per day for age calculation.
@@ -22,15 +25,26 @@ const RECENCY_DECAY_DAYS: f32 = 30.0;
 const DEFAULT_IMPORTANCE: f32 = 0.5;
 /// Minimum memories in namespace before flagging contradictions.
 const CONTRADICTION_THRESHOLD: usize = 10;
+/// Maximum entries in access tracking caches (HIGH-PERF-001).
+/// Using `NonZeroUsize` directly to avoid runtime `expect()` calls.
+// SAFETY: 10_000 is a non-zero constant, verified at compile time
+#[allow(clippy::expect_used)]
+const ACCESS_CACHE_CAPACITY: NonZeroUsize = {
+    // This unwrap is safe: 10_000 is non-zero
+    match NonZeroUsize::new(10_000) {
+        Some(n) => n,
+        None => panic!("ACCESS_CACHE_CAPACITY must be non-zero"),
+    }
+};
 
 /// Service for consolidating and managing memory lifecycle.
 pub struct ConsolidationService<P: PersistenceBackend> {
     /// Persistence backend for memory storage.
     persistence: P,
-    /// Access counts for memories (`memory_id` -> count).
-    access_counts: HashMap<String, u32>,
-    /// Last access times (`memory_id` -> timestamp).
-    last_access: HashMap<String, u64>,
+    /// Access counts for memories (`memory_id` -> count), bounded LRU (HIGH-PERF-001).
+    access_counts: LruCache<String, u32>,
+    /// Last access times (`memory_id` -> timestamp), bounded LRU (HIGH-PERF-001).
+    last_access: LruCache<String, u64>,
 }
 
 impl<P: PersistenceBackend> ConsolidationService<P> {
@@ -39,16 +53,18 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     pub fn new(persistence: P) -> Self {
         Self {
             persistence,
-            access_counts: HashMap::new(),
-            last_access: HashMap::new(),
+            access_counts: LruCache::new(ACCESS_CACHE_CAPACITY),
+            last_access: LruCache::new(ACCESS_CACHE_CAPACITY),
         }
     }
 
     /// Records an access to a memory.
     pub fn record_access(&mut self, memory_id: &str) {
         let now = current_timestamp();
-        *self.access_counts.entry(memory_id.to_string()).or_insert(0) += 1;
-        self.last_access.insert(memory_id.to_string(), now);
+        let key = memory_id.to_string();
+        let count = self.access_counts.get(&key).copied().unwrap_or(0) + 1;
+        self.access_counts.put(key.clone(), count);
+        self.last_access.put(key, now);
     }
 
     /// Runs consolidation on all memories.
@@ -56,9 +72,20 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     /// # Errors
     ///
     /// Returns an error if consolidation fails.
-    #[instrument(skip(self), fields(operation = "consolidate"))]
+    #[instrument(
+        name = "subcog.memory.consolidate",
+        skip(self),
+        fields(
+            request_id = tracing::field::Empty,
+            component = "memory",
+            operation = "consolidate"
+        )
+    )]
     pub fn consolidate(&mut self) -> Result<ConsolidationStats> {
         let start = Instant::now();
+        if let Some(request_id) = current_request_id() {
+            tracing::Span::current().record("request_id", request_id.as_str());
+        }
         let result = (|| {
             let mut stats = ConsolidationStats::default();
 
@@ -81,22 +108,37 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             }
 
             // Archive identified memories
-            for id in to_archive {
-                if let Some(mut memory) = self.persistence.get(&id)? {
-                    memory.status = MemoryStatus::Archived;
-                    self.persistence.store(&memory)?;
-                    stats.archived += 1;
+            {
+                let _span = info_span!("subcog.memory.consolidate.archive").entered();
+                for id in to_archive {
+                    if let Some(mut memory) = self.persistence.get(&id)? {
+                        memory.status = MemoryStatus::Archived;
+                        self.persistence.store(&memory)?;
+                        record_event(MemoryEvent::Archived {
+                            meta: EventMeta::with_timestamp(
+                                "consolidation",
+                                current_request_id(),
+                                now,
+                            ),
+                            memory_id: memory.id.clone(),
+                            reason: "consolidation_archive".to_string(),
+                        });
+                        stats.archived += 1;
+                    }
                 }
             }
 
             // Detect contradictions (simple heuristic: same namespace, similar timestamps)
-            stats.contradictions = self.detect_contradictions(&memory_ids)?;
+            {
+                let _span = info_span!("subcog.memory.consolidate.contradictions").entered();
+                stats.contradictions = self.detect_contradictions(&memory_ids)?;
+            }
 
             record_event(MemoryEvent::Consolidated {
+                meta: EventMeta::new("consolidation", current_request_id()),
                 processed: stats.processed,
                 archived: stats.archived,
                 merged: stats.merged,
-                timestamp: current_timestamp(),
             });
 
             Ok(stats)
@@ -117,25 +159,37 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             "namespace" => "mixed"
         )
         .record(start.elapsed().as_secs_f64() * 1000.0);
+        metrics::histogram!(
+            "memory_lifecycle_duration_ms",
+            "component" => "memory",
+            "operation" => "consolidate"
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
 
         result
     }
 
     /// Calculates the retention score for a memory.
+    ///
+    /// # Precision Notes
+    /// The u32 and u64 to f32 casts are acceptable here as exact precision
+    /// is not required for retention score calculations (values are normalized 0.0-1.0).
+    #[allow(clippy::cast_precision_loss)]
     fn calculate_retention_score(&self, memory_id: &str, now: u64) -> RetentionScore {
         // Access frequency: normalized by max observed accesses
-        let access_count = self.access_counts.get(memory_id).copied().unwrap_or(0);
+        // Use peek() to avoid modifying LRU order during read-only operation
+        let access_count = self.access_counts.peek(memory_id).copied().unwrap_or(0);
         let max_accesses = self
             .access_counts
-            .values()
+            .iter()
+            .map(|(_, v)| *v)
             .max()
-            .copied()
             .unwrap_or(1)
             .max(1);
         let access_frequency = (access_count as f32) / (max_accesses as f32);
 
         // Recency: decay over time (RECENCY_DECAY_DAYS days = 0.5 score)
-        let last_access = self.last_access.get(memory_id).copied().unwrap_or(0);
+        let last_access = self.last_access.peek(memory_id).copied().unwrap_or(0);
         let age_days = (now.saturating_sub(last_access)) as f32 / SECONDS_PER_DAY;
         let recency = (-age_days / RECENCY_DECAY_DAYS).exp().clamp(0.0, 1.0);
 
@@ -220,9 +274,19 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             content: merged_content,
             namespace: target.namespace,
             domain: target.domain,
+            project_id: target
+                .project_id
+                .clone()
+                .or_else(|| source.project_id.clone()),
+            branch: target.branch.clone().or_else(|| source.branch.clone()),
+            file_path: target
+                .file_path
+                .clone()
+                .or_else(|| source.file_path.clone()),
             status: MemoryStatus::Active,
             created_at: target.created_at.min(source_created_at),
             updated_at: now,
+            tombstoned_at: None,
             embedding: None, // Will need re-embedding
             tags: merged_tags,
             source: target.source.or(source_source),
@@ -310,9 +374,13 @@ mod tests {
             content: content.to_string(),
             namespace: Namespace::Decisions,
             domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
             status: MemoryStatus::Active,
             created_at: current_timestamp(),
             updated_at: current_timestamp(),
+            tombstoned_at: None,
             embedding: None,
             tags: vec!["test".to_string()],
             source: None,
@@ -353,8 +421,9 @@ mod tests {
         service.record_access("memory_1");
         service.record_access("memory_2");
 
-        assert_eq!(service.access_counts.get("memory_1"), Some(&2));
-        assert_eq!(service.access_counts.get("memory_2"), Some(&1));
+        // Use peek() to avoid modifying LRU order during assertions
+        assert_eq!(service.access_counts.peek("memory_1"), Some(&2));
+        assert_eq!(service.access_counts.peek("memory_2"), Some(&1));
     }
 
     #[test]
@@ -407,7 +476,7 @@ mod tests {
             || std::path::PathBuf::from("/tmp/test_consolidate_with"),
             |d| d.path().to_path_buf(),
         );
-        let mut backend = FilesystemBackend::new(&path);
+        let backend = FilesystemBackend::new(&path);
 
         // Add some test memories
         let memory1 = create_test_memory("mem_1", "First memory");

@@ -8,6 +8,9 @@
 //! - `since:7d` - Filter by time
 //! - `source:src/*` - Filter by source pattern
 //! - `status:active` - Filter by status
+//! - `project:github.com/org/repo` - Filter by project identifier
+//! - `branch:main` - Filter by branch name
+//! - `path:src/main.rs` - Filter by file path
 
 use crate::models::{MemoryStatus, Namespace, SearchFilter};
 
@@ -70,6 +73,15 @@ fn parse_token(token: &str, filter: &mut SearchFilter) {
         },
         "source" | "src" => {
             filter.source_pattern = Some(value.to_string());
+        },
+        "project" | "proj" | "repo" => {
+            filter.project_id = Some(value.to_string());
+        },
+        "branch" => {
+            filter.branch = Some(value.to_string());
+        },
+        "path" | "file" | "file_path" => {
+            filter.file_path = Some(value.to_string());
         },
         "status" => {
             if let Some(status) = parse_status(value) {
@@ -136,10 +148,10 @@ fn parse_duration_to_timestamp(duration: &str) -> Option<u64> {
     let num: u64 = num_str.parse().ok()?;
 
     let seconds = match unit {
-        "h" => num * 3600,
-        "w" => num * 604_800,
+        "h" => num.checked_mul(3600)?,
+        "w" => num.checked_mul(604_800)?,
         // Default to days for "d" and unknown units
-        _ => num * 86400,
+        _ => num.checked_mul(86400)?,
     };
 
     // Get current time and subtract duration
@@ -239,6 +251,14 @@ mod tests {
     fn test_parse_source_pattern() {
         let filter = parse_filter_query("source:src/*");
         assert_eq!(filter.source_pattern, Some("src/*".to_string()));
+    }
+
+    #[test]
+    fn test_parse_project_branch_path() {
+        let filter = parse_filter_query("project:github.com/org/repo branch:main path:src/lib.rs");
+        assert_eq!(filter.project_id.as_deref(), Some("github.com/org/repo"));
+        assert_eq!(filter.branch.as_deref(), Some("main"));
+        assert_eq!(filter.file_path.as_deref(), Some("src/lib.rs"));
     }
 
     #[test]

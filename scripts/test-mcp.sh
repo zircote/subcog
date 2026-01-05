@@ -20,6 +20,10 @@ trap "rm -f $OUTFILE" EXIT
   echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"e2e-test","version":"1.0.0"}}}'
   sleep 0.3
 
+  # Initialized notification (required by rmcp handshake)
+  echo '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+  sleep 0.3
+
   # List resources
   echo '{"jsonrpc":"2.0","id":2,"method":"resources/list"}'
   sleep 0.3
@@ -57,17 +61,17 @@ echo ""
 echo "=== MCP Test Results ==="
 
 # Count responses
-RESPONSES=$(grep -c '"jsonrpc"' "$OUTFILE" || echo "0")
+RESPONSES=$(grep -c '"jsonrpc"' "$OUTFILE" || true)
 echo "Received $RESPONSES JSON-RPC responses"
 
 # Check for errors
-ERRORS=$(grep -c '"error"' "$OUTFILE" || echo "0")
+ERRORS=$(grep -c '"error"' "$OUTFILE" || true)
 if [ "$ERRORS" -gt 0 ]; then
     echo "Warning: $ERRORS responses contained errors"
 fi
 
 # Check metrics were pushed
-METRICS_PUSHED=$(grep -c "Metrics pushed successfully" "$OUTFILE" || echo "0")
+METRICS_PUSHED=$(grep -c "Metrics pushed successfully" "$OUTFILE" || true)
 echo "Metrics pushed: $METRICS_PUSHED times"
 
 echo ""

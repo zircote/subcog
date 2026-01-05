@@ -8,10 +8,28 @@
 //! This module includes protections against filesystem-based attacks:
 //! - **Path traversal**: Memory IDs are validated to prevent directory escape
 //! - **File size limits**: Maximum file size enforced to prevent memory exhaustion
+//! - **Encryption at rest**: Optional AES-256-GCM encryption (CRIT-005)
+//!
+//! # Encryption
+//!
+//! When the `encryption` feature is enabled and `SUBCOG_ENCRYPTION_KEY` is set,
+//! all memory files are encrypted with AES-256-GCM before writing to disk.
+//!
+//! ```bash
+//! # Generate a key
+//! openssl rand -base64 32
+//!
+//! # Enable encryption
+//! export SUBCOG_ENCRYPTION_KEY="your-base64-encoded-key"
+//! ```
 
 use crate::models::{Memory, MemoryId};
+use crate::security::encryption::is_encrypted;
+#[cfg(feature = "encryption")]
+use crate::security::encryption::{EncryptionConfig, Encryptor};
 use crate::storage::traits::PersistenceBackend;
 use crate::{Error, Result};
+use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -29,9 +47,14 @@ struct StoredMemory {
     domain_org: Option<String>,
     domain_project: Option<String>,
     domain_repo: Option<String>,
+    project_id: Option<String>,
+    branch: Option<String>,
+    file_path: Option<String>,
     status: String,
     created_at: u64,
     updated_at: u64,
+    #[serde(default)]
+    tombstoned_at: Option<u64>,
     embedding: Option<Vec<f32>>,
     tags: Vec<String>,
     source: Option<String>,
@@ -46,9 +69,15 @@ impl From<&Memory> for StoredMemory {
             domain_org: m.domain.organization.clone(),
             domain_project: m.domain.project.clone(),
             domain_repo: m.domain.repository.clone(),
+            project_id: m.project_id.clone(),
+            branch: m.branch.clone(),
+            file_path: m.file_path.clone(),
             status: m.status.as_str().to_string(),
             created_at: m.created_at,
             updated_at: m.updated_at,
+            tombstoned_at: m
+                .tombstoned_at
+                .and_then(|ts| u64::try_from(ts.timestamp()).ok()),
             embedding: m.embedding.clone(),
             tags: m.tags.clone(),
             source: m.source.clone(),
@@ -80,6 +109,7 @@ impl StoredMemory {
             "superseded" => MemoryStatus::Superseded,
             "pending" => MemoryStatus::Pending,
             "deleted" => MemoryStatus::Deleted,
+            "tombstoned" => MemoryStatus::Tombstoned,
             _ => MemoryStatus::Active,
         };
 
@@ -92,9 +122,16 @@ impl StoredMemory {
                 project: self.domain_project.clone(),
                 repository: self.domain_repo.clone(),
             },
+            project_id: self.project_id.clone(),
+            branch: self.branch.clone(),
+            file_path: self.file_path.clone(),
             status,
             created_at: self.created_at,
             updated_at: self.updated_at,
+            tombstoned_at: self.tombstoned_at.and_then(|ts| {
+                let ts_i64 = i64::try_from(ts).unwrap_or(i64::MAX);
+                Utc.timestamp_opt(ts_i64, 0).single()
+            }),
             embedding: self.embedding.clone(),
             tags: self.tags.clone(),
             source: self.source.clone(),
@@ -106,10 +143,16 @@ impl StoredMemory {
 pub struct FilesystemBackend {
     /// Base directory for storage.
     base_path: PathBuf,
+    /// Optional encryptor for encryption at rest.
+    #[cfg(feature = "encryption")]
+    encryptor: Option<Encryptor>,
 }
 
 impl FilesystemBackend {
     /// Creates a new filesystem backend.
+    ///
+    /// If the `encryption` feature is enabled and `SUBCOG_ENCRYPTION_KEY` is set,
+    /// encryption at rest is automatically enabled.
     ///
     /// # Errors
     ///
@@ -120,7 +163,14 @@ impl FilesystemBackend {
         // Try to create directory, ignore errors for now
         let _ = fs::create_dir_all(&path);
 
-        Self { base_path: path }
+        #[cfg(feature = "encryption")]
+        let encryptor = Self::try_create_encryptor();
+
+        Self {
+            base_path: path,
+            #[cfg(feature = "encryption")]
+            encryptor,
+        }
     }
 
     /// Creates a new filesystem backend with checked directory creation.
@@ -137,7 +187,82 @@ impl FilesystemBackend {
             cause: e.to_string(),
         })?;
 
-        Ok(Self { base_path })
+        #[cfg(feature = "encryption")]
+        let encryptor = Self::try_create_encryptor();
+
+        Ok(Self {
+            base_path,
+            #[cfg(feature = "encryption")]
+            encryptor,
+        })
+    }
+
+    /// Tries to create an encryptor from environment configuration.
+    #[cfg(feature = "encryption")]
+    fn try_create_encryptor() -> Option<Encryptor> {
+        EncryptionConfig::try_from_env().map_or_else(
+            || {
+                tracing::debug!("Encryption key not configured, storing files unencrypted");
+                None
+            },
+            |config| match Encryptor::new(config) {
+                Ok(enc) => {
+                    tracing::info!("Encryption at rest enabled for filesystem backend");
+                    Some(enc)
+                },
+                Err(e) => {
+                    tracing::warn!("Failed to create encryptor: {e}");
+                    None
+                },
+            },
+        )
+    }
+
+    /// Decrypts data if it's encrypted, returns as-is otherwise.
+    ///
+    /// This helper reduces nesting in the `get` method (`clippy::excessive_nesting` fix).
+    #[cfg(feature = "encryption")]
+    fn decrypt_if_needed(&self, raw_data: Vec<u8>) -> Result<Vec<u8>> {
+        if !is_encrypted(&raw_data) {
+            return Ok(raw_data);
+        }
+        self.encryptor.as_ref().map_or_else(
+            || {
+                Err(Error::OperationFailed {
+                    operation: "decrypt_memory".to_string(),
+                    cause: "File is encrypted but no encryption key configured".to_string(),
+                })
+            },
+            |encryptor| encryptor.decrypt(&raw_data),
+        )
+    }
+
+    /// Decrypts data if it's encrypted, returns as-is otherwise.
+    ///
+    /// Non-encryption version - returns error if data is encrypted.
+    #[cfg(not(feature = "encryption"))]
+    fn decrypt_if_needed(&self, raw_data: Vec<u8>) -> Result<Vec<u8>> {
+        if is_encrypted(&raw_data) {
+            return Err(Error::OperationFailed {
+                operation: "decrypt_memory".to_string(),
+                cause: "File is encrypted but encryption feature not enabled".to_string(),
+            });
+        }
+        Ok(raw_data)
+    }
+
+    /// Returns whether encryption is enabled.
+    #[cfg(feature = "encryption")]
+    #[must_use]
+    pub const fn encryption_enabled(&self) -> bool {
+        self.encryptor.is_some()
+    }
+
+    /// Returns whether encryption is enabled.
+    #[cfg(not(feature = "encryption"))]
+    #[must_use]
+    pub const fn encryption_enabled(&self) -> bool {
+        false
     }
 
     /// Returns the path for a memory file.
@@ -192,7 +317,7 @@ impl FilesystemBackend {
 }
 
 impl PersistenceBackend for FilesystemBackend {
-    fn store(&mut self, memory: &Memory) -> Result<()> {
+    fn store(&self, memory: &Memory) -> Result<()> {
         // Ensure directory exists before storing
         let _ = fs::create_dir_all(&self.base_path);
 
@@ -204,7 +329,18 @@ impl PersistenceBackend for FilesystemBackend {
             cause: e.to_string(),
         })?;
 
-        fs::write(&path, json).map_err(|e| Error::OperationFailed {
+        // CRIT-005: Encrypt if encryption is enabled
+        #[cfg(feature = "encryption")]
+        let data = if let Some(ref encryptor) = self.encryptor {
+            encryptor.encrypt(json.as_bytes())?
+        } else {
+            json.into_bytes()
+        };
+
+        #[cfg(not(feature = "encryption"))]
+        let data = json.into_bytes();
+
+        fs::write(&path, data).map_err(|e| Error::OperationFailed {
             operation: "write_memory_file".to_string(),
             cause: e.to_string(),
         })?;
@@ -235,8 +371,17 @@ impl PersistenceBackend for FilesystemBackend {
             )));
         }
 
-        let json = fs::read_to_string(&path).map_err(|e| Error::OperationFailed {
+        // Read raw bytes first to detect encryption
+        let raw_data = fs::read(&path).map_err(|e| Error::OperationFailed {
             operation: "read_memory_file".to_string(),
+            cause: e.to_string(),
+        })?;
+
+        // CRIT-005: Decrypt if file is encrypted (uses helper to reduce nesting)
+        let json_bytes = self.decrypt_if_needed(raw_data)?;
+
+        let json = String::from_utf8(json_bytes).map_err(|e| Error::OperationFailed {
+            operation: "decode_memory_file".to_string(),
             cause: e.to_string(),
         })?;
 
@@ -249,7 +394,7 @@ impl PersistenceBackend for FilesystemBackend {
         Ok(Some(stored.to_memory()))
     }
 
-    fn delete(&mut self, id: &MemoryId) -> Result<bool> {
+    fn delete(&self, id: &MemoryId) -> Result<bool> {
         let path = match self.memory_path(id) {
             Ok(p) => p,
             Err(_) => return Ok(false), // Invalid ID means nothing to delete
@@ -313,6 +458,7 @@ fn extract_memory_id_from_path(path: &Path) -> Option<MemoryId> {
 mod tests {
     use super::*;
     use crate::models::{Domain, MemoryStatus, Namespace};
+    use serde_json;
     use tempfile::TempDir;
 
     fn create_test_memory(id: &str) -> Memory {
@@ -321,9 +467,13 @@ mod tests {
             content: "Test content".to_string(),
             namespace: Namespace::Decisions,
             domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
             status: MemoryStatus::Active,
             created_at: 1_234_567_890,
             updated_at: 1_234_567_890,
+            tombstoned_at: None,
             embedding: None,
             tags: vec!["test".to_string()],
             source: Some("test.rs".to_string()),
@@ -333,7 +483,7 @@ mod tests {
     #[test]
     fn test_store_and_get() {
         let dir = TempDir::new().unwrap();
-        let mut backend = FilesystemBackend::new(dir.path());
+        let backend = FilesystemBackend::new(dir.path());
 
         let memory = create_test_memory("test_id");
         backend.store(&memory).unwrap();
@@ -359,7 +509,7 @@ mod tests {
     #[test]
     fn test_delete() {
         let dir = TempDir::new().unwrap();
-        let mut backend = FilesystemBackend::new(dir.path());
+        let backend = FilesystemBackend::new(dir.path());
 
         let memory = create_test_memory("to_delete");
         backend.store(&memory).unwrap();
@@ -372,9 +522,34 @@ mod tests {
     }
 
     #[test]
+    fn test_deserialize_without_tombstoned_at() {
+        let json = r#"{
+            "id": "legacy-id",
+            "content": "Legacy content",
+            "namespace": "decisions",
+            "domain_org": null,
+            "domain_project": null,
+            "domain_repo": null,
+            "project_id": null,
+            "branch": null,
+            "file_path": null,
+            "status": "active",
+            "created_at": 123,
+            "updated_at": 123,
+            "embedding": null,
+            "tags": [],
+            "source": null
+        }"#;
+
+        let stored: StoredMemory = serde_json::from_str(json).unwrap();
+        let memory = stored.to_memory();
+        assert!(memory.tombstoned_at.is_none());
+    }
+
+    #[test]
     fn test_delete_nonexistent() {
         let dir = TempDir::new().unwrap();
-        let mut backend = FilesystemBackend::new(dir.path());
+        let backend = FilesystemBackend::new(dir.path());
 
         let deleted = backend.delete(&MemoryId::new("nonexistent")).unwrap();
         assert!(!deleted);
@@ -383,7 +558,7 @@ mod tests {
     #[test]
     fn test_list_ids() {
         let dir = TempDir::new().unwrap();
-        let mut backend = FilesystemBackend::new(dir.path());
+        let backend = FilesystemBackend::new(dir.path());
 
         backend.store(&create_test_memory("id1")).unwrap();
         backend.store(&create_test_memory("id2")).unwrap();
@@ -396,7 +571,7 @@ mod tests {
     #[test]
     fn test_count() {
         let dir = TempDir::new().unwrap();
-        let mut backend = FilesystemBackend::new(dir.path());
+        let backend = FilesystemBackend::new(dir.path());
 
         assert_eq!(backend.count().unwrap(), 0);
 
@@ -409,7 +584,7 @@ mod tests {
     #[test]
     fn test_exists() {
         let dir = TempDir::new().unwrap();
-        let mut backend = FilesystemBackend::new(dir.path());
+        let backend = FilesystemBackend::new(dir.path());
 
         backend.store(&create_test_memory("exists")).unwrap();
 
@@ -420,7 +595,7 @@ mod tests {
     #[test]
     fn test_update_memory() {
         let dir = TempDir::new().unwrap();
-        let mut backend = FilesystemBackend::new(dir.path());
+        let backend = FilesystemBackend::new(dir.path());
 
         let mut memory = create_test_memory("update_test");
         backend.store(&memory).unwrap();
@@ -432,5 +607,87 @@ mod tests {
         let retrieved = backend.get(&MemoryId::new("update_test")).unwrap().unwrap();
         assert_eq!(retrieved.content, "Updated content");
         assert_eq!(retrieved.updated_at, 9_999_999_999);
+    }
+
+    #[test]
+    fn test_path_traversal_protection() {
+        let dir = TempDir::new().unwrap();
+        let backend = FilesystemBackend::new(dir.path());
+
+        // Attempt path traversal with ".."
+        let result = backend.memory_path(&MemoryId::new("../../../etc/passwd"));
+        assert!(result.is_err());
+
+        // Attempt with forward slash
+        let result = backend.memory_path(&MemoryId::new("dir/subdir/file"));
+        assert!(result.is_err());
+
+        // Attempt with backslash
+        let result = backend.memory_path(&MemoryId::new("dir\\subdir\\file"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_safe_filename_validation() {
+        // Valid filenames
+        assert!(FilesystemBackend::is_safe_filename("valid_id"));
+        assert!(FilesystemBackend::is_safe_filename("valid-id-123"));
+        assert!(FilesystemBackend::is_safe_filename("abc123"));
+        assert!(FilesystemBackend::is_safe_filename("UPPERCASE"));
+
+        // Invalid filenames
+        assert!(!FilesystemBackend::is_safe_filename(""));
+        assert!(!FilesystemBackend::is_safe_filename("../path"));
+        assert!(!FilesystemBackend::is_safe_filename("path/to/file"));
+        assert!(!FilesystemBackend::is_safe_filename("path\\to\\file"));
+        assert!(!FilesystemBackend::is_safe_filename("file.json"));
+        assert!(!FilesystemBackend::is_safe_filename("file with space"));
+    }
+
+    #[test]
+    fn test_with_create_success() {
+        let dir = TempDir::new().unwrap();
+        let subdir = dir.path().join("subdir");
+
+        let backend = FilesystemBackend::with_create(&subdir);
+        assert!(backend.is_ok());
+        assert!(subdir.exists());
+    }
+
+    #[test]
+    fn test_base_path_accessor() {
+        let dir = TempDir::new().unwrap();
+        let backend = FilesystemBackend::new(dir.path());
+
+        assert_eq!(backend.base_path(), dir.path());
+    }
+
+    #[test]
+    fn test_memory_roundtrip_all_namespaces() {
+        let dir = TempDir::new().unwrap();
+        let backend = FilesystemBackend::new(dir.path());
+
+        let namespaces = [
+            Namespace::Decisions,
+            Namespace::Patterns,
+            Namespace::Learnings,
+            Namespace::Context,
+            Namespace::TechDebt,
+            Namespace::Apis,
+            Namespace::Config,
+            Namespace::Security,
+            Namespace::Performance,
+            Namespace::Testing,
+        ];
+
+        for (i, ns) in namespaces.iter().enumerate() {
+            let id = format!("ns_test_{i}");
+            let mut memory = create_test_memory(&id);
+            memory.namespace = *ns;
+
+            backend.store(&memory).unwrap();
+            let retrieved = backend.get(&MemoryId::new(&id)).unwrap().unwrap();
+            assert_eq!(retrieved.namespace, *ns);
+        }
     }
 }

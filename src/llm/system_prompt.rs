@@ -399,13 +399,16 @@ pub fn build_system_prompt_with_config(
     let mut prompt = String::from(BASE_SYSTEM_PROMPT);
 
     // Apply identity addendum if provided
-    if let Some(cfg) = config {
-        if let Some(identity_addendum) = &cfg.identity_addendum {
-            // Insert after the </identity> tag
-            if let Some(pos) = prompt.find("</identity>") {
-                let insert_pos = pos;
-                prompt.insert_str(insert_pos, &format!("\n\n<user_identity_context>\n{identity_addendum}\n</user_identity_context>\n"));
-            }
+    if let Some(identity_addendum) = config.and_then(|cfg| cfg.identity_addendum.as_deref()) {
+        // Insert after the </identity> tag
+        if let Some(pos) = prompt.find("</identity>") {
+            let insert_pos = pos;
+            prompt.insert_str(
+                insert_pos,
+                &format!(
+                    "\n\n<user_identity_context>\n{identity_addendum}\n</user_identity_context>\n"
+                ),
+            );
         }
     }
 
@@ -414,19 +417,18 @@ pub fn build_system_prompt_with_config(
     prompt.push_str(operation_prompt);
 
     // Apply global additional guidance
-    if let Some(cfg) = config {
-        if let Some(guidance) = &cfg.additional_guidance {
-            prompt.push_str("\n\n<user_guidance>\n");
-            prompt.push_str(guidance);
-            prompt.push_str("\n</user_guidance>");
-        }
+    if let Some(guidance) = config.and_then(|cfg| cfg.additional_guidance.as_deref()) {
+        prompt.push_str("\n\n<user_guidance>\n");
+        prompt.push_str(guidance);
+        prompt.push_str("\n</user_guidance>");
+    }
 
-        // Apply operation-specific guidance
-        if let Some(op_guidance) = cfg.get_operation_guidance(operation.as_str()) {
-            prompt.push_str("\n\n<user_operation_guidance>\n");
-            prompt.push_str(op_guidance);
-            prompt.push_str("\n</user_operation_guidance>");
-        }
+    // Apply operation-specific guidance
+    if let Some(op_guidance) = config.and_then(|cfg| cfg.get_operation_guidance(operation.as_str()))
+    {
+        prompt.push_str("\n\n<user_operation_guidance>\n");
+        prompt.push_str(op_guidance);
+        prompt.push_str("\n</user_operation_guidance>");
     }
 
     // Add context if provided

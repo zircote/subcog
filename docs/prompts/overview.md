@@ -113,8 +113,8 @@ Create          Store           Retrieve        Execute
 └─────────┘  └──────────┘    └──────────┘   └──────────┘
      │            │               │              │
      ▼            ▼               ▼              ▼
-  Variables    Git Notes      Domain         Rendered
-  Defined      or SQLite      Cascade         Output
+  Variables    SQLite         Domain         Rendered
+  Defined      Storage        Cascade         Output
 ```
 
 ## Quick Examples
@@ -169,7 +169,7 @@ subcog prompt save --from-file review.yaml
 | Feature | User Templates | Built-in MCP Prompts |
 |---------|----------------|---------------------|
 | Customizable | Yes | No |
-| Stored | Git Notes | Hardcoded |
+| Stored | SQLite | Hardcoded |
 | Variables | User-defined | Fixed |
 | Shareable | Yes | No |
 | Domain-scoped | Yes | No |

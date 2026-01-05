@@ -16,6 +16,8 @@ use tracing_subscriber::Registry;
 
 use super::otlp::{OtlpConfig, OtlpProtocol, endpoint_from_env};
 
+const DEFAULT_TRACE_SAMPLE_RATIO: f64 = 1.0;
+
 /// Tracing configuration.
 #[derive(Debug, Clone)]
 pub struct TracingConfig {
@@ -51,7 +53,7 @@ impl TracingConfig {
             .unwrap_or(endpoint_present);
         let sample_ratio = settings
             .and_then(|config| config.sample_ratio)
-            .unwrap_or(1.0);
+            .unwrap_or(DEFAULT_TRACE_SAMPLE_RATIO);
         let service_name = settings
             .and_then(|config| config.service_name.clone())
             .unwrap_or_else(|| env!("CARGO_PKG_NAME").to_string());
@@ -264,7 +266,9 @@ fn parse_sample_ratio() -> Option<f64> {
 }
 
 fn build_sampler(sample_ratio: f64) -> Sampler {
-    let sampler_env = std::env::var("OTEL_TRACES_SAMPLER").ok();
+    let sampler_env = std::env::var("SUBCOG_TRACING_SAMPLER")
+        .ok()
+        .or_else(|| std::env::var("OTEL_TRACES_SAMPLER").ok());
     match sampler_env.as_deref() {
         Some("always_on") => Sampler::AlwaysOn,
         Some("always_off") => Sampler::AlwaysOff,
@@ -302,5 +306,31 @@ fn apply_env_overrides(config: &mut TracingConfig) {
 
     if std::env::var("OTEL_RESOURCE_ATTRIBUTES").is_ok() {
         config.resource_attributes = parse_resource_attributes();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_otlp_tracing_init_smoke() {
+        let config = TracingConfig {
+            enabled: true,
+            otlp: OtlpConfig {
+                endpoint: Some("http://localhost:4318".to_string()),
+                protocol: OtlpProtocol::Http,
+            },
+            sample_ratio: 1.0,
+            service_name: "subcog-test".to_string(),
+            service_version: "0.0.0".to_string(),
+            resource_attributes: Vec::new(),
+        };
+
+        let init = build_tracing(&config)
+            .expect("build tracing")
+            .expect("init tracing");
+        let _ = init.provider.shutdown();
+        let _ = init.logger_provider.shutdown();
     }
 }

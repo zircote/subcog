@@ -8,7 +8,7 @@ receivers:
   filelog:
     include:
       - /var/log/subcog/*.log
-    start_at: beginning
+    start_at: end
     operators:
       - type: json_parser
         timestamp:
@@ -33,9 +33,15 @@ processors:
       - key: job
         value: subcog
         action: upsert
-  transform:
-    traces:
-      - set(attributes["traceID"], trace_id)
+  # Transform processor to ensure OTLP logs have proper level attribute for Loki
+  # See: https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/18742
+  transform/logs:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          # Copy severity_text to level attribute for Loki compatibility
+          - set(attributes["level"], severity_text) where severity_text != ""
 
 connectors:
   spanmetrics:
@@ -52,27 +58,10 @@ exporters:
     endpoint: tempo:4317
     tls:
       insecure: true
-  loki:
-    endpoint: http://loki:3100/loki/api/v1/push
-    default_labels_enabled:
-      exporter: false
-      job: true
-      instance: true
-      level: true
-    labels:
-      attributes:
-        - action: insert
-          key: traceID
-          from_attribute: trace_id
-        - action: insert
-          key: spanId
-          from_attribute: span_id
-        - action: insert
-          key: severity
-          from_attribute: severity
-        - action: insert
-          key: service_name
-          from_attribute: service.name
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
   prometheus:
     endpoint: 0.0.0.0:8889
     send_timestamps: true
@@ -83,7 +72,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, transform, batch]
+      processors: [memory_limiter, batch]
       exporters: [otlp, spanmetrics]
     metrics:
       receivers: [spanmetrics]
@@ -91,5 +80,5 @@ service:
       exporters: [prometheus]
     logs:
       receivers: [otlp, filelog]
-      processors: [memory_limiter, resource, batch]
-      exporters: [loki]
+      processors: [memory_limiter, resource, transform/logs, batch]
+      exporters: [otlphttp/loki]

@@ -2,6 +2,8 @@
 
 Subcog uses feature flags to enable optional functionality. This allows the system to run in minimal mode while providing advanced features when configured.
 
+Feature flags are configured in `config.toml`. The only environment override currently supported is `SUBCOG_ORG_SCOPE_ENABLED`.
+
 ## Feature Tiers
 
 | Tier | Features | Requirements |
@@ -32,8 +34,6 @@ features:
 - `true`: Block capture, return error
 - `false`: Allow capture (not recommended)
 
-**Environment:** `SUBCOG_FEATURES_SECRETS_FILTER`
-
 ---
 
 ### pii_filter
@@ -56,8 +56,6 @@ features:
 - `true`: Redact PII with `[REDACTED]`
 - `false`: Store as-is
 
-**Environment:** `SUBCOG_FEATURES_PII_FILTER`
-
 ## Scoping Features
 
 ### multi_domain
@@ -79,7 +77,25 @@ features:
 - Simpler storage model
 - Lower resource usage
 
-**Environment:** `SUBCOG_FEATURES_MULTI_DOMAIN`
+### org_scope_enabled
+
+Enables org-scoped storage (shared PostgreSQL persistence).
+
+```yaml
+features:
+  org_scope_enabled: false
+```
+
+**When enabled:**
+- Org-scoped storage is allowed when org configuration is provided
+- Shared memories can be stored in PostgreSQL
+- Requires org-scope initialization at runtime
+
+**When disabled:**
+- Org-scoped storage is rejected
+- Project/user scopes only
+
+**Environment:** `SUBCOG_ORG_SCOPE_ENABLED`
 
 ## Observability Features
 
@@ -110,8 +126,6 @@ features:
 }
 ```
 
-**Environment:** `SUBCOG_FEATURES_AUDIT_LOG`
-
 ## LLM Features
 
 ### llm_features
@@ -133,8 +147,6 @@ features:
 - LLM provider configuration
 - Valid API key
 
-**Environment:** `SUBCOG_FEATURES_LLM_FEATURES`
-
 ---
 
 ### auto_capture
@@ -152,8 +164,6 @@ features:
 - Deduplicates against existing memories
 
 **Requires:** `llm_features: true`
-
-**Environment:** `SUBCOG_FEATURES_AUTO_CAPTURE`
 
 ---
 
@@ -173,7 +183,86 @@ features:
 
 **Requires:** `llm_features: true`
 
-**Environment:** `SUBCOG_FEATURES_CONSOLIDATION`
+## Search Intent Configuration
+
+The search intent system detects user intent from prompts and injects relevant memories. Configure it under `[search_intent]`.
+
+### Basic Settings
+
+```toml
+[search_intent]
+enabled = true          # Enable search intent detection
+use_llm = true          # Use LLM for enhanced classification
+llm_timeout_ms = 200    # LLM classification timeout
+min_confidence = 0.5    # Minimum confidence to inject memories
+base_count = 5          # Memories for low-confidence matches
+max_count = 15          # Memories for high-confidence matches
+max_tokens = 4000       # Token budget for injected context
+```
+
+**Environment Variables:**
+- `SUBCOG_SEARCH_INTENT_ENABLED`
+- `SUBCOG_SEARCH_INTENT_USE_LLM`
+- `SUBCOG_SEARCH_INTENT_LLM_TIMEOUT_MS`
+- `SUBCOG_SEARCH_INTENT_MIN_CONFIDENCE`
+
+### Namespace Weights
+
+Namespace weights are multipliers applied to relevance scores during search. Higher values prioritize that namespace for the given intent type. Default is 1.0.
+
+**Intent Types:**
+| Intent | Trigger Examples | Default Priority |
+|--------|------------------|------------------|
+| `HowTo` | "how do I...", "implement..." | patterns > learnings > decisions |
+| `Troubleshoot` | "error...", "fix...", "debug..." | blockers > learnings > decisions |
+| `Location` | "where is...", "find..." | decisions > context > patterns |
+| `Explanation` | "what is...", "explain..." | decisions > context > patterns |
+| `Comparison` | "X vs Y", "difference between..." | decisions > patterns > learnings |
+| `General` | "search...", "show me..." | balanced weights |
+
+**Configuration Example:**
+
+```toml
+# Boost blockers heavily for troubleshooting
+[search_intent.weights.troubleshoot]
+blockers = 2.0
+learnings = 1.5
+tech-debt = 1.2
+decisions = 1.0
+
+# Prioritize patterns for how-to questions
+[search_intent.weights.howto]
+patterns = 2.0
+learnings = 1.5
+decisions = 1.0
+
+# Custom weights for location queries
+[search_intent.weights.location]
+decisions = 1.8
+context = 1.5
+apis = 1.3
+config = 1.2
+```
+
+**Available Namespaces:**
+- `decisions` - Architectural and design decisions
+- `patterns` - Discovered patterns and conventions
+- `learnings` - Lessons from debugging or issues
+- `context` - Important contextual information
+- `tech-debt` - Technical debts and improvements
+- `blockers` - Blockers and impediments
+- `progress` - Work progress and milestones
+- `apis` - API endpoints and contracts
+- `config` - Configuration and environment
+- `security` - Security-related information
+- `performance` - Performance optimizations
+- `testing` - Testing strategies and edge cases
+
+**Behavior:**
+- Weights are multipliers (1.0 = no change, 2.0 = double priority)
+- Unspecified namespaces default to 1.0
+- Config values override hard-coded defaults
+- Works with both keyword and LLM detection modes
 
 ## Search Intent Configuration
 

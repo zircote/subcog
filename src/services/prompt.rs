@@ -6,21 +6,25 @@
 //! # Domain Hierarchy
 //!
 //! Prompts are searched in priority order:
-//! 1. **Project** - Repository-specific prompts (git notes at `refs/notes/_prompts`)
-//! 2. **User** - User-wide prompts (`~/.config/subcog/_prompts/`)
+//! 1. **Project** - Repository-specific prompts (faceted by repo/branch)
+//! 2. **User** - User-wide prompts (`~/.config/subcog/prompts.db`)
 //! 3. **Org** - Organization-wide prompts (deferred)
 //!
 //! # Storage Backends
 //!
 //! | Domain | Backend | Location |
 //! |--------|---------|----------|
-//! | Project | Git Notes | `.git/refs/notes/_prompts` |
-//! | User | SQLite | `~/.config/subcog/_prompts/prompts.db` |
+//! | Project | `SQLite` | `~/.config/subcog/prompts.db` (with repo/branch facets) |
+//! | User | `SQLite` | `~/.config/subcog/prompts.db` |
 //! | User | Filesystem | `~/.config/subcog/_prompts/` (fallback) |
 //! | Org | Deferred | Not yet implemented |
 
 use crate::config::{Config, SubcogConfig};
 use crate::models::PromptTemplate;
+use crate::services::prompt_enrichment::{
+    EnrichmentRequest, EnrichmentStatus, PartialMetadata, PromptEnrichmentResult,
+    PromptEnrichmentService,
+};
 use crate::storage::index::DomainScope;
 use crate::storage::prompt::{PromptStorage, PromptStorageFactory};
 use crate::{Error, Result};
@@ -68,7 +72,54 @@ impl PromptFilter {
             limit: None,
         }
     }
+}
 
+/// Options for saving a prompt with enrichment.
+#[derive(Debug, Clone, Default)]
+pub struct SaveOptions {
+    /// Skip LLM enrichment (use basic metadata extraction only).
+    pub skip_enrichment: bool,
+    /// Dry run - return enriched template without saving.
+    pub dry_run: bool,
+}
+
+impl SaveOptions {
+    /// Creates new default save options.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            skip_enrichment: false,
+            dry_run: false,
+        }
+    }
+
+    /// Sets the `skip_enrichment` flag.
+    #[must_use]
+    pub const fn with_skip_enrichment(mut self, skip: bool) -> Self {
+        self.skip_enrichment = skip;
+        self
+    }
+
+    /// Sets the `dry_run` flag.
+    #[must_use]
+    pub const fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
+}
+
+/// Result of a save operation with enrichment.
+#[derive(Debug, Clone)]
+pub struct SaveResult {
+    /// The saved template (with enriched metadata).
+    pub template: PromptTemplate,
+    /// The ID of the saved prompt (empty for dry-run).
+    pub id: String,
+    /// The enrichment status.
+    pub enrichment_status: EnrichmentStatus,
+}
+
+impl PromptFilter {
     /// Filters by domain scope.
     #[must_use]
     pub const fn with_domain(mut self, domain: DomainScope) -> Self {
@@ -206,6 +257,92 @@ impl PromptService {
 
         // Delegate to storage backend
         storage.save(template)
+    }
+
+    /// Saves a prompt with LLM-powered enrichment.
+    ///
+    /// This method extracts variables from the content, optionally enriches
+    /// with LLM-generated metadata (descriptions, tags, variable info), and
+    /// saves the template.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Prompt name (kebab-case).
+    /// * `content` - The prompt template content.
+    /// * `domain` - Domain scope to save in.
+    /// * `options` - Save options (skip enrichment, dry run).
+    /// * `llm` - Optional LLM provider for enrichment.
+    /// * `existing` - Optional existing metadata to preserve.
+    ///
+    /// # Returns
+    ///
+    /// A [`SaveResult`] containing the saved template and enrichment status.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the name is invalid or storage fails.
+    /// Enrichment failures are gracefully handled with fallback.
+    pub fn save_with_enrichment<P: crate::llm::LlmProvider>(
+        &mut self,
+        name: &str,
+        content: &str,
+        domain: DomainScope,
+        options: &SaveOptions,
+        llm: Option<P>,
+        existing: Option<PartialMetadata>,
+    ) -> Result<SaveResult> {
+        // Validate name
+        validate_prompt_name(name)?;
+
+        // Extract variables from content (returns ExtractedVariable with name and position)
+        let extracted = crate::models::extract_variables(content);
+        let variable_names: Vec<String> = extracted.iter().map(|v| v.name.clone()).collect();
+
+        // Helper to apply basic fallback with optional user metadata merge
+        let apply_fallback = |vars: &[String], user: Option<&PartialMetadata>| {
+            let mut result = PromptEnrichmentResult::basic_from_variables(vars);
+            if let Some(user_meta) = user {
+                result = result.merge_with_user(user_meta);
+            }
+            result
+        };
+
+        // Perform enrichment or use fallback
+        let enrichment = match (options.skip_enrichment, llm) {
+            // LLM available and enrichment not skipped
+            (false, Some(llm_provider)) => {
+                let service = PromptEnrichmentService::new(llm_provider);
+                let request = EnrichmentRequest::new(content, variable_names)
+                    .with_optional_existing(existing);
+                service.enrich_with_fallback(&request)
+            },
+            // Enrichment skipped or no LLM provider: use basic fallback
+            (true, _) | (false, None) => apply_fallback(&variable_names, existing.as_ref()),
+        };
+
+        // Build the template with enriched metadata
+        let template = PromptTemplate {
+            name: name.to_string(),
+            content: content.to_string(),
+            description: enrichment.description.clone(),
+            tags: enrichment.tags.clone(),
+            variables: enrichment.variables.clone(),
+            ..Default::default()
+        };
+
+        // Save unless dry-run
+        let id = if options.dry_run {
+            String::new()
+        } else {
+            let storage = self.get_storage(domain)?;
+            storage.save(&template)?
+        };
+
+        Ok(SaveResult {
+            template,
+            id,
+            enrichment_status: enrichment.status,
+        })
     }
 
     /// Gets a prompt by name, searching domain hierarchy.
@@ -387,10 +524,10 @@ impl PromptService {
         }
 
         // Check name pattern (simple glob with * wildcard)
-        if let Some(ref pattern) = filter.name_pattern {
-            if !matches_glob(pattern, &template.name) {
-                return false;
-            }
+        if let Some(pattern) = filter.name_pattern.as_deref()
+            && !matches_glob(pattern, &template.name)
+        {
+            return false;
         }
 
         true
@@ -661,5 +798,28 @@ mod tests {
         assert!(exact_score > partial_score);
         assert!(partial_score > desc_score);
         assert!(no_match_score == 0.0);
+    }
+
+    #[test]
+    fn test_save_options_default() {
+        let options = SaveOptions::new();
+        assert!(!options.skip_enrichment);
+        assert!(!options.dry_run);
+    }
+
+    #[test]
+    fn test_save_options_builder() {
+        let options = SaveOptions::new()
+            .with_skip_enrichment(true)
+            .with_dry_run(true);
+        assert!(options.skip_enrichment);
+        assert!(options.dry_run);
+    }
+
+    #[test]
+    fn test_save_options_default_trait() {
+        let options = SaveOptions::default();
+        assert!(!options.skip_enrichment);
+        assert!(!options.dry_run);
     }
 }

@@ -43,6 +43,7 @@
 #![allow(clippy::match_same_arms)]
 
 mod auth;
+mod dispatch;
 mod help_content;
 mod prompts;
 mod resources;

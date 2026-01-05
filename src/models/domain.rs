@@ -168,6 +168,40 @@ impl Domain {
         }
     }
 
+    /// Creates a domain based on the current working directory context.
+    ///
+    /// - If in a git repository: returns a project-scoped domain
+    /// - If NOT in a git repository: returns a user-scoped domain
+    ///
+    /// This ensures memories are routed to the appropriate storage backend:
+    /// - Project domains use `SQLite` storage with project faceting
+    /// - User domains use sqlite storage
+    #[must_use]
+    pub fn default_for_context() -> Self {
+        use crate::storage::index::is_in_git_repo;
+
+        if is_in_git_repo() {
+            // In a git repo - use project scope (empty domain = project-local)
+            Self::new()
+        } else {
+            // Not in a git repo - use user scope
+            Self::for_user()
+        }
+    }
+
+    /// Creates a user-scoped domain.
+    ///
+    /// User-scoped memories are stored in the user's personal sqlite database
+    /// and are accessible across all projects.
+    #[must_use]
+    pub fn for_user() -> Self {
+        Self {
+            organization: None,
+            project: Some("user".to_string()),
+            repository: None,
+        }
+    }
+
     /// Creates a domain for a specific repository.
     #[must_use]
     pub fn for_repository(org: impl Into<String>, repo: impl Into<String>) -> Self {
@@ -178,17 +212,23 @@ impl Domain {
         }
     }
 
-    /// Returns true if this is a global domain (no restrictions).
+    /// Returns true if this is a project-scoped domain (no org/repo restrictions).
     #[must_use]
-    pub const fn is_global(&self) -> bool {
+    pub const fn is_project_scoped(&self) -> bool {
         self.organization.is_none() && self.project.is_none() && self.repository.is_none()
+    }
+
+    /// Returns true if this is a user-scoped domain.
+    #[must_use]
+    pub fn is_user(&self) -> bool {
+        self.project.as_deref() == Some("user") && self.organization.is_none()
     }
 
     /// Returns the scope string for URN construction.
     ///
-    /// - `"project"` for project-scoped (org + repo)
+    /// - `"project"` for project-scoped (no org/repo restrictions)
     /// - `"org/{name}"` for organization-scoped
-    /// - `"global"` for global domain
+    /// - `"{org}/{repo}"` for repository-scoped
     #[must_use]
     pub fn to_scope_string(&self) -> String {
         match (&self.organization, &self.repository) {
@@ -207,15 +247,18 @@ impl fmt::Display for Domain {
             (Some(org), None, Some(repo)) => write!(f, "{org}/{repo}"),
             (Some(org), Some(proj), None) => write!(f, "{org}/{proj}"),
             (Some(org), None, None) => write!(f, "{org}"),
+            // User-scoped domain shows as "user"
+            (None, Some(proj), _) if proj == "user" => write!(f, "user"),
             (None, Some(proj), _) => write!(f, "{proj}"),
             (None, None, Some(repo)) => write!(f, "{repo}"),
-            (None, None, None) => write!(f, "global"),
+            // Project-scoped domain (no org/repo restrictions)
+            (None, None, None) => write!(f, "project"),
         }
     }
 }
 
 /// Status of a memory entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum MemoryStatus {
     /// Active and searchable.
     #[default]
@@ -228,6 +271,8 @@ pub enum MemoryStatus {
     Pending,
     /// Marked for deletion.
     Deleted,
+    /// Soft-deleted, hidden by default.
+    Tombstoned,
 }
 
 impl MemoryStatus {
@@ -240,6 +285,7 @@ impl MemoryStatus {
             Self::Superseded => "superseded",
             Self::Pending => "pending",
             Self::Deleted => "deleted",
+            Self::Tombstoned => "tombstoned",
         }
     }
 }

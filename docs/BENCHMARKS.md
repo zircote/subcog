@@ -35,8 +35,8 @@ Subcog achieves **96-98% accuracy** on long-term factual recall tasks, compared 
 
 ### Trial 1: n=50 Questions per Benchmark
 
-| Benchmark | With Memory | Without Memory | Δ Accuracy |
-|-----------|-------------|----------------|------------|
+| Benchmark | With Memory | Without Memory | Delta |
+|-----------|-------------|----------------|-------|
 | locomo | 50% | 0% | +50% |
 | longmemeval | 98% | 0% | +98% |
 | contextbench | 28% | 0% | +28% |
@@ -45,8 +45,8 @@ Subcog achieves **96-98% accuracy** on long-term factual recall tasks, compared 
 
 ### Trial 2: n=25 Questions per Benchmark
 
-| Benchmark | With Memory | Without Memory | Δ Accuracy |
-|-----------|-------------|----------------|------------|
+| Benchmark | With Memory | Without Memory | Delta |
+|-----------|-------------|----------------|-------|
 | locomo | 64% | 0% | +64% |
 | longmemeval | 96% | 0% | +96% |
 | contextbench | 20% | 0% | +20% |

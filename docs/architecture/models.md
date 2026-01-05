@@ -344,7 +344,9 @@ pub struct Memory {
 }
 ```
 
-### YAML Format (Git Notes)
+### Legacy YAML Format (deprecated)
+
+This format is retained for historical reference only; legacy persistence is removed.
 
 ```yaml
 ---

@@ -6,70 +6,70 @@ The persistence layer is the authoritative source of truth for all memories.
 
 | Backend | Description | Use Case |
 |---------|-------------|----------|
-| Git Notes | Git-based storage | Default, distributed teams |
+| SQLite | Local database | Default, single-machine |
 | PostgreSQL | Relational database | High-performance, enterprise |
 | Filesystem | Local file storage | Development, offline |
 
-## Git Notes (Default)
+## SQLite (Default)
 
-Stores memories as Git notes attached to the repository.
+Stores memories in a local SQLite database with ACID guarantees.
 
 ### Configuration
 
 ```yaml
 storage:
-  persistence: git_notes
+  persistence: sqlite
+  data_dir: ~/.local/share/subcog
 ```
 
 ### How It Works
 
-Memories are stored in:
-- `refs/notes/subcog` - Memory storage
-- `refs/notes/_prompts` - Prompt templates
+Memories are stored in `~/.local/share/subcog/subcog.db` with:
+- Full ACID compliance
+- Faceted storage (project_id, branch, file_path)
+- Tombstone support for soft deletes
+- Automatic schema migrations
 
-Each memory is stored as a blob with YAML frontmatter:
+### Schema
 
-```yaml
----
-id: dc58d23a35876f5a59426e81aaa81d796efa7fc1
-namespace: decisions
-tags: [database, postgresql]
-source: ARCHITECTURE.md
-created_at: 2024-01-15T10:30:00Z
-updated_at: 2024-01-15T10:30:00Z
-status: active
----
-Use PostgreSQL for primary storage because of JSONB support
-and excellent performance characteristics.
-```
+```sql
+CREATE TABLE memories (
+    id TEXT PRIMARY KEY,
+    namespace TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    content TEXT NOT NULL,
+    tags TEXT DEFAULT '[]',
+    source TEXT,
+    status TEXT DEFAULT 'active',
+    project_id TEXT,
+    branch TEXT,
+    file_path TEXT,
+    tombstoned_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
 
-### Sync
-
-Sync with remote:
-
-```bash
-subcog sync
-```
-
-Equivalent git commands:
-```bash
-git fetch origin refs/notes/subcog:refs/notes/subcog
-git push origin refs/notes/subcog
+CREATE INDEX idx_memories_namespace ON memories(namespace);
+CREATE INDEX idx_memories_domain ON memories(domain);
+CREATE INDEX idx_memories_project ON memories(project_id);
+CREATE INDEX idx_memories_branch ON memories(branch);
+CREATE INDEX idx_memories_project_branch ON memories(project_id, branch);
+CREATE INDEX idx_memories_active ON memories(status) WHERE status = 'active';
 ```
 
 ### Advantages
 
 - No external dependencies
+- ACID transactions
 - Works offline
-- Distributed via Git
-- Version history built-in
-- Works with existing Git infrastructure
+- Fast local queries
+- Automatic migrations
 
 ### Limitations
 
-- Large repositories may slow down
-- Binary-unfriendly (text-based)
-- Eventual consistency with remotes
+- Single-machine only
+- No built-in replication
+- Manual backup needed
 
 ---
 
@@ -109,6 +109,10 @@ CREATE TABLE memories (
     tags TEXT[] DEFAULT '{}',
     source VARCHAR(255),
     status VARCHAR(20) DEFAULT 'active',
+    project_id VARCHAR(255),
+    branch VARCHAR(255),
+    file_path VARCHAR(1024),
+    tombstoned_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -116,6 +120,10 @@ CREATE TABLE memories (
 CREATE INDEX idx_memories_namespace ON memories(namespace);
 CREATE INDEX idx_memories_domain ON memories(domain);
 CREATE INDEX idx_memories_tags ON memories USING GIN(tags);
+CREATE INDEX idx_memories_project ON memories(project_id);
+CREATE INDEX idx_memories_branch ON memories(branch);
+CREATE INDEX idx_memories_project_branch ON memories(project_id, branch);
+CREATE INDEX idx_memories_active ON memories(status) WHERE status = 'active';
 CREATE INDEX idx_memories_created ON memories(created_at DESC);
 ```
 
@@ -125,6 +133,7 @@ CREATE INDEX idx_memories_created ON memories(created_at DESC);
 - Concurrent access
 - Complex queries
 - Scalable
+- Built-in replication
 
 ### Limitations
 
@@ -169,13 +178,15 @@ storage:
 
 ### File Format
 
-Same YAML format as Git Notes:
+YAML format with frontmatter:
 
 ```yaml
 ---
 id: dc58d23a35876f5a59426e81aaa81d796efa7fc1
 namespace: decisions
 tags: [database]
+project_id: github.com/zircote/subcog
+branch: main
 created_at: 2024-01-15T10:30:00Z
 ---
 Content here
@@ -193,6 +204,45 @@ Content here
 - No built-in sync
 - Single machine only
 - Manual backup needed
+- No ACID guarantees
+
+---
+
+## Faceted Storage
+
+All persistence backends support faceted storage:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `project_id` | String | Git remote URL (sanitized) |
+| `branch` | String | Git branch name |
+| `file_path` | String | Source file path |
+| `tombstoned_at` | Timestamp | Soft delete marker |
+
+### Auto-Detection
+
+When capturing memories, facets are auto-detected from git context:
+
+```rust
+let context = GitContext::from_cwd()?;
+// context.project_id = "github.com/zircote/subcog"
+// context.branch = "feature/storage-simplification"
+```
+
+### Tombstoning
+
+Memories are soft-deleted by setting `tombstoned_at`:
+
+```rust
+memory.status = MemoryStatus::Tombstoned;
+memory.tombstoned_at = Some(Utc::now().timestamp() as u64);
+```
+
+Tombstoned memories are excluded from search by default but can be included:
+
+```bash
+subcog recall "old decision" --include-tombstoned
+```
 
 ---
 
@@ -213,16 +263,16 @@ pub trait PersistenceBackend: Send + Sync {
 
 ## Choosing a Backend
 
-| Criteria | Git Notes | PostgreSQL | Filesystem |
-|----------|-----------|------------|------------|
+| Criteria | SQLite | PostgreSQL | Filesystem |
+|----------|--------|------------|------------|
 | Setup | Minimal | Complex | Minimal |
-| Sync | Git push/pull | Replication | Manual |
+| ACID | Yes | Yes | No |
 | Scale | Small-Medium | Large | Small |
-| Team | Distributed | Centralized | Single |
+| Team | Single | Centralized | Single |
 | Offline | Yes | No | Yes |
 
 ## See Also
 
 - [Index Layer](index.md) - Searchable index
 - [Vector Layer](vector.md) - Vector embeddings
-- [sync command](../cli/sync.md) - Git sync
+- [gc command](../cli/gc.md) - Garbage collection

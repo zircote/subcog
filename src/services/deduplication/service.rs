@@ -53,7 +53,7 @@ use super::types::{Deduplicator, DuplicateCheckResult};
 ///     println!("Duplicate found: {:?} - {}", result.reason, result.matched_urn.unwrap());
 /// }
 /// ```
-pub struct DeduplicationService<E: Embedder, V: VectorBackend> {
+pub struct DeduplicationService<E: Embedder + Send + Sync, V: VectorBackend + Send + Sync> {
     /// Configuration.
     config: DeduplicationConfig,
     /// Exact match checker.
@@ -66,7 +66,7 @@ pub struct DeduplicationService<E: Embedder, V: VectorBackend> {
     domain: Domain,
 }
 
-impl<E: Embedder, V: VectorBackend> DeduplicationService<E, V> {
+impl<E: Embedder + Send + Sync, V: VectorBackend + Send + Sync> DeduplicationService<E, V> {
     /// Creates a new deduplication service with all checkers.
     ///
     /// # Arguments
@@ -407,7 +407,9 @@ impl<E: Embedder, V: VectorBackend> DeduplicationService<E, V> {
 }
 
 /// Implementation of the Deduplicator trait.
-impl<E: Embedder, V: VectorBackend> Deduplicator for DeduplicationService<E, V> {
+impl<E: Embedder + Send + Sync, V: VectorBackend + Send + Sync> Deduplicator
+    for DeduplicationService<E, V>
+{
     fn check_duplicate(&self, content: &str, namespace: Namespace) -> Result<DuplicateCheckResult> {
         self.check(content, namespace)
     }
@@ -440,10 +442,6 @@ mod tests {
                 inner: RwLock::new(backend),
             }
         }
-
-        fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
-            self.inner.write().unwrap().upsert(id, embedding)
-        }
     }
 
     impl VectorBackend for RwLockVectorWrapper {
@@ -451,18 +449,18 @@ mod tests {
             self.inner.read().unwrap().dimensions()
         }
 
-        fn upsert(&mut self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
+        fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
             self.inner.write().unwrap().upsert(id, embedding)
         }
 
-        fn remove(&mut self, id: &MemoryId) -> Result<bool> {
+        fn remove(&self, id: &MemoryId) -> Result<bool> {
             self.inner.write().unwrap().remove(id)
         }
 
         fn search(
             &self,
             query_embedding: &[f32],
-            filter: &crate::models::SearchFilter,
+            filter: &crate::storage::traits::VectorFilter,
             limit: usize,
         ) -> Result<Vec<(MemoryId, f32)>> {
             self.inner
@@ -475,7 +473,7 @@ mod tests {
             self.inner.read().unwrap().count()
         }
 
-        fn clear(&mut self) -> Result<()> {
+        fn clear(&self) -> Result<()> {
             self.inner.write().unwrap().clear()
         }
     }
@@ -517,9 +515,13 @@ mod tests {
             content: content.to_string(),
             namespace,
             domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
             status: MemoryStatus::Active,
             created_at: 1_234_567_890,
             updated_at: 1_234_567_890,
+            tombstoned_at: None,
             embedding: None,
             tags,
             source: None,
@@ -590,7 +592,7 @@ mod tests {
 
     #[test]
     fn test_check_exact_match() {
-        let mut index = SqliteBackend::in_memory().unwrap();
+        let index = SqliteBackend::in_memory().unwrap();
 
         // Create memory with hash tag
         let content = "Use PostgreSQL for the primary database storage.";

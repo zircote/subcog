@@ -76,6 +76,18 @@ mod implementation {
                 CREATE INDEX IF NOT EXISTS {table}_created_idx ON {table} (created_at DESC);
             ",
         },
+        Migration {
+            version: 5,
+            description: "Add facet columns (ADR-0048/0049)",
+            sql: r"
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS project_id TEXT;
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS branch TEXT;
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS file_path TEXT;
+                CREATE INDEX IF NOT EXISTS {table}_project_idx ON {table} (project_id);
+                CREATE INDEX IF NOT EXISTS {table}_project_branch_idx ON {table} (project_id, branch);
+                CREATE INDEX IF NOT EXISTS {table}_file_path_idx ON {table} (file_path);
+            ",
+        },
     ];
 
     /// Allowed table names for SQL injection prevention.
@@ -97,9 +109,86 @@ mod implementation {
         }
     }
 
+    /// Validates PostgreSQL connection URL format (SEC-M2).
+    ///
+    /// Prevents connection string injection by validating:
+    /// - URL scheme is `postgresql://` or `postgres://`
+    /// - Host contains only valid characters (alphanumeric, `.`, `-`, `_`)
+    /// - Database name contains only valid characters
+    /// - No dangerous URL parameters that could alter connection behavior
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::InvalidInput` if the connection URL is invalid or contains
+    /// potentially dangerous parameters.
+    fn validate_connection_url(url_str: &str) -> Result<()> {
+        // Check scheme
+        if !url_str.starts_with("postgresql://") && !url_str.starts_with("postgres://") {
+            return Err(Error::InvalidInput(
+                "Connection URL must start with postgresql:// or postgres://".to_string(),
+            ));
+        }
+
+        // Parse URL to validate components using reqwest's re-exported url crate
+        let parsed = reqwest::Url::parse(url_str)
+            .map_err(|e| Error::InvalidInput(format!("Invalid connection URL format: {e}")))?;
+
+        // Validate host (prevent injection via malformed hostnames)
+        if let Some(host) = parsed.host_str() {
+            let is_valid_host = host
+                .chars()
+                .all(|c: char| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_');
+            if !is_valid_host {
+                tracing::warn!(
+                    host = host,
+                    "PostgreSQL connection URL contains suspicious host characters"
+                );
+                return Err(Error::InvalidInput(
+                    "Connection URL host contains invalid characters".to_string(),
+                ));
+            }
+        }
+
+        // Validate database name if present
+        if let Some(path) = parsed.path().strip_prefix('/') {
+            let is_valid_db = path.is_empty()
+                || path
+                    .chars()
+                    .all(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+            if !is_valid_db {
+                tracing::warn!(
+                    database = path,
+                    "PostgreSQL connection URL contains suspicious database name"
+                );
+                return Err(Error::InvalidInput(
+                    "Connection URL database name contains invalid characters".to_string(),
+                ));
+            }
+        }
+
+        // Block dangerous connection parameters that could alter behavior
+        let dangerous_params = ["host", "hostaddr", "client_encoding", "options"];
+        for (key, _) in parsed.query_pairs() {
+            if dangerous_params.contains(&key.as_ref()) {
+                tracing::warn!(
+                    param = key.as_ref(),
+                    "PostgreSQL connection URL contains blocked parameter"
+                );
+                return Err(Error::InvalidInput(format!(
+                    "Connection URL parameter '{key}' is not allowed in query string"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
     /// PostgreSQL-based index backend.
+    ///
+    /// Uses `deadpool_postgres::Pool` for thread-safe connection pooling,
+    /// enabling `&self` methods without interior mutability wrappers.
     pub struct PostgresIndexBackend {
-        /// Connection pool.
+        /// Connection pool (thread-safe via internal `Arc`).
         pool: Pool,
         /// Table name for memories (validated against whitelist).
         table_name: String,
@@ -211,8 +300,13 @@ mod implementation {
             roots
         }
 
-        /// Parses the connection URL into a tokio-postgres config.
+        /// Parses the connection URL into a tokio-postgres config (SEC-M2).
+        ///
+        /// Validates the URL for security before parsing to prevent injection attacks.
         fn parse_connection_url(url: &str) -> Result<tokio_postgres::Config> {
+            // Validate URL format and block dangerous parameters (SEC-M2)
+            validate_connection_url(url)?;
+
             url.parse::<tokio_postgres::Config>()
                 .map_err(|e| Error::OperationFailed {
                     operation: "postgres_parse_url".to_string(),
@@ -322,6 +416,9 @@ mod implementation {
 
             Self::add_namespace_filter(filter, &mut clauses, &mut params, &mut param_num);
             Self::add_domain_filter(filter, &mut clauses, &mut params, &mut param_num);
+            Self::add_project_filter(filter, &mut clauses, &mut params, &mut param_num);
+            Self::add_branch_filter(filter, &mut clauses, &mut params, &mut param_num);
+            Self::add_file_path_filter(filter, &mut clauses, &mut params, &mut param_num);
             Self::add_status_filter(filter, &mut clauses, &mut params, &mut param_num);
 
             let clause = if clauses.is_empty() {
@@ -408,18 +505,63 @@ mod implementation {
             }
         }
 
+        fn add_project_filter(
+            filter: &SearchFilter,
+            clauses: &mut Vec<String>,
+            params: &mut Vec<String>,
+            param_num: &mut i32,
+        ) {
+            let Some(project_id) = filter.project_id.as_ref() else {
+                return;
+            };
+            clauses.push(format!("project_id = ${param_num}"));
+            *param_num += 1;
+            params.push(project_id.clone());
+        }
+
+        fn add_branch_filter(
+            filter: &SearchFilter,
+            clauses: &mut Vec<String>,
+            params: &mut Vec<String>,
+            param_num: &mut i32,
+        ) {
+            let Some(branch) = filter.branch.as_ref() else {
+                return;
+            };
+            clauses.push(format!("branch = ${param_num}"));
+            *param_num += 1;
+            params.push(branch.clone());
+        }
+
+        fn add_file_path_filter(
+            filter: &SearchFilter,
+            clauses: &mut Vec<String>,
+            params: &mut Vec<String>,
+            param_num: &mut i32,
+        ) {
+            let Some(file_path) = filter.file_path.as_ref() else {
+                return;
+            };
+            clauses.push(format!("file_path = ${param_num}"));
+            *param_num += 1;
+            params.push(file_path.clone());
+        }
+
         /// Async implementation of index operation.
         #[allow(clippy::cast_possible_wrap)]
         async fn index_async(&self, memory: &Memory) -> Result<()> {
             let client = self.pool.get().await.map_err(pool_error)?;
 
             let upsert = format!(
-                r"INSERT INTO {} (id, content, namespace, domain, status, tags, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                r"INSERT INTO {} (id, content, namespace, domain, project_id, branch, file_path, status, tags, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 ON CONFLICT (id) DO UPDATE SET
                     content = EXCLUDED.content,
                     namespace = EXCLUDED.namespace,
                     domain = EXCLUDED.domain,
+                    project_id = EXCLUDED.project_id,
+                    branch = EXCLUDED.branch,
+                    file_path = EXCLUDED.file_path,
                     status = EXCLUDED.status,
                     tags = EXCLUDED.tags,
                     updated_at = EXCLUDED.updated_at",
@@ -439,6 +581,9 @@ mod implementation {
                         &memory.content,
                         &namespace_str,
                         &domain_str,
+                        &memory.project_id,
+                        &memory.branch,
+                        &memory.file_path,
                         &status_str,
                         &tags,
                         &(memory.created_at as i64),
@@ -558,11 +703,11 @@ mod implementation {
     }
 
     impl IndexBackend for PostgresIndexBackend {
-        fn index(&mut self, memory: &Memory) -> Result<()> {
+        fn index(&self, memory: &Memory) -> Result<()> {
             self.block_on(self.index_async(memory))
         }
 
-        fn remove(&mut self, id: &MemoryId) -> Result<bool> {
+        fn remove(&self, id: &MemoryId) -> Result<bool> {
             self.block_on(self.remove_async(id))
         }
 
@@ -584,8 +729,89 @@ mod implementation {
             Ok(None)
         }
 
-        fn clear(&mut self) -> Result<()> {
+        fn clear(&self) -> Result<()> {
             self.block_on(self.clear_async())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_validate_connection_url_valid() {
+            // Valid PostgreSQL URLs
+            assert!(validate_connection_url("postgresql://localhost/mydb").is_ok());
+            assert!(validate_connection_url("postgres://user:pass@localhost:5432/mydb").is_ok());
+            assert!(
+                validate_connection_url(
+                    "postgresql://user:pass@db.example.com:5432/mydb?sslmode=require"
+                )
+                .is_ok()
+            );
+            assert!(validate_connection_url("postgresql://localhost/my_db-test").is_ok());
+        }
+
+        #[test]
+        fn test_validate_connection_url_invalid_scheme() {
+            // Invalid scheme
+            assert!(validate_connection_url("mysql://localhost/mydb").is_err());
+            assert!(validate_connection_url("http://localhost/mydb").is_err());
+            assert!(validate_connection_url("localhost/mydb").is_err());
+        }
+
+        #[test]
+        fn test_validate_connection_url_invalid_host() {
+            // Invalid host characters (injection attempts)
+            assert!(validate_connection_url("postgresql://local<script>host/mydb").is_err());
+            assert!(validate_connection_url("postgresql://host;drop table/mydb").is_err());
+        }
+
+        #[test]
+        fn test_validate_connection_url_invalid_database() {
+            // Invalid database name characters
+            assert!(validate_connection_url("postgresql://localhost/my;db").is_err());
+            assert!(validate_connection_url("postgresql://localhost/db<script>").is_err());
+        }
+
+        #[test]
+        fn test_validate_connection_url_blocked_params() {
+            // Blocked dangerous parameters
+            assert!(validate_connection_url("postgresql://localhost/mydb?host=evil.com").is_err());
+            assert!(
+                validate_connection_url("postgresql://localhost/mydb?hostaddr=1.2.3.4").is_err()
+            );
+            assert!(
+                validate_connection_url("postgresql://localhost/mydb?options=-c log_statement=all")
+                    .is_err()
+            );
+            assert!(
+                validate_connection_url("postgresql://localhost/mydb?client_encoding=SQL_ASCII")
+                    .is_err()
+            );
+        }
+
+        #[test]
+        fn test_validate_connection_url_allowed_params() {
+            // Allowed parameters should pass
+            assert!(validate_connection_url("postgresql://localhost/mydb?sslmode=require").is_ok());
+            assert!(
+                validate_connection_url(
+                    "postgresql://localhost/mydb?connect_timeout=10&application_name=subcog"
+                )
+                .is_ok()
+            );
+        }
+
+        #[test]
+        fn test_validate_table_name() {
+            // Valid table names
+            assert!(validate_table_name("memories_index").is_ok());
+            assert!(validate_table_name("subcog_memories").is_ok());
+
+            // Invalid table names
+            assert!(validate_table_name("users").is_err());
+            assert!(validate_table_name("memories_index; DROP TABLE users").is_err());
         }
     }
 }
@@ -623,11 +849,11 @@ mod stub {
     }
 
     impl IndexBackend for PostgresIndexBackend {
-        fn index(&mut self, _memory: &Memory) -> Result<()> {
+        fn index(&self, _memory: &Memory) -> Result<()> {
             Err(Error::FeatureNotEnabled("postgres".to_string()))
         }
 
-        fn remove(&mut self, _id: &MemoryId) -> Result<bool> {
+        fn remove(&self, _id: &MemoryId) -> Result<bool> {
             Err(Error::FeatureNotEnabled("postgres".to_string()))
         }
 
@@ -648,7 +874,7 @@ mod stub {
             Err(Error::FeatureNotEnabled("postgres".to_string()))
         }
 
-        fn clear(&mut self) -> Result<()> {
+        fn clear(&self) -> Result<()> {
             Err(Error::FeatureNotEnabled("postgres".to_string()))
         }
     }

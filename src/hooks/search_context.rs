@@ -6,7 +6,7 @@ use crate::Result;
 use crate::config::{NamespaceWeightsConfig, SearchIntentConfig};
 use crate::hooks::search_intent::{SearchIntent, SearchIntentType};
 use crate::models::{Namespace, SearchFilter, SearchMode};
-use crate::services::RecallService;
+use crate::services::{ContextBuilderService, RecallService};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -26,6 +26,9 @@ pub struct AdaptiveContextConfig {
     /// Namespace weights configuration.
     pub weights: NamespaceWeightsConfig,
 }
+
+/// Tokens per character approximation (consistent with `ContextBuilderService`).
+const TOKENS_PER_CHAR: usize = 4;
 
 impl Default for AdaptiveContextConfig {
     fn default() -> Self {
@@ -406,21 +409,29 @@ impl<'a> SearchContextBuilder<'a> {
         weighted_memories
             .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Take top results and convert to InjectedMemory
-        let injected: Vec<InjectedMemory> = weighted_memories
-            .into_iter()
-            .take(limit)
-            .map(|(hit, score)| {
-                let preview = truncate_content(&hit.memory.content, self.config.preview_length);
-                InjectedMemory {
-                    id: format!("subcog://memories/{}", hit.memory.id.as_str()),
-                    namespace: hit.memory.namespace.as_str().to_string(),
-                    content_preview: preview,
-                    score,
-                    tags: hit.memory.tags.clone(),
-                }
-            })
-            .collect();
+        // Take top results and convert to InjectedMemory with token budget enforcement.
+        let mut injected = Vec::new();
+        let mut remaining_tokens = self.config.max_tokens;
+
+        for (hit, score) in weighted_memories.into_iter().take(limit) {
+            let Some((content_preview, tokens_used)) = build_preview(
+                &hit.memory.content,
+                remaining_tokens,
+                self.config.preview_length,
+            ) else {
+                break;
+            };
+
+            remaining_tokens = remaining_tokens.saturating_sub(tokens_used);
+
+            injected.push(InjectedMemory {
+                id: format!("subcog://memories/{}", hit.memory.id.as_str()),
+                namespace: hit.memory.namespace.as_str().to_string(),
+                content_preview,
+                score,
+                tags: hit.memory.tags.clone(),
+            });
+        }
 
         Ok(injected)
     }
@@ -496,10 +507,40 @@ fn truncate_content(content: &str, max_len: usize) -> String {
     }
 }
 
+fn build_preview(
+    content: &str,
+    remaining_tokens: usize,
+    preview_len: usize,
+) -> Option<(String, usize)> {
+    if remaining_tokens == 0 {
+        return None;
+    }
+
+    let preview = truncate_content(content, preview_len);
+    let preview_tokens = ContextBuilderService::estimate_tokens(&preview);
+    if preview_tokens <= remaining_tokens {
+        return Some((preview, preview_tokens));
+    }
+
+    let max_chars = remaining_tokens.saturating_mul(TOKENS_PER_CHAR);
+    let truncated = truncate_content(content, max_chars);
+    let truncated_tokens = ContextBuilderService::estimate_tokens(&truncated);
+    let tokens_used = truncated_tokens.min(remaining_tokens);
+    if tokens_used == 0 {
+        return None;
+    }
+
+    Some((truncated, tokens_used))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::hooks::search_intent::DetectionSource;
+    use crate::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace};
+    use crate::services::RecallService;
+    use crate::storage::index::SqliteBackend;
+    use crate::storage::traits::IndexBackend;
 
     fn create_test_intent() -> SearchIntent {
         SearchIntent {
@@ -711,5 +752,63 @@ mod tests {
         assert!(json.contains("test-123"));
         assert!(json.contains("decisions"));
         assert!(json.contains("PostgreSQL"));
+    }
+
+    fn create_test_memory(id: &str, content: &str, now: u64) -> Memory {
+        Memory {
+            id: MemoryId::new(id),
+            content: content.to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
+            status: MemoryStatus::Active,
+            created_at: now,
+            updated_at: now,
+            tombstoned_at: None,
+            embedding: None,
+            tags: vec![],
+            source: None,
+        }
+    }
+
+    #[test]
+    fn test_injected_memories_respect_token_budget() {
+        let index = SqliteBackend::in_memory().unwrap();
+        let now = 1_700_000_000;
+        let content = "authentication ".repeat(40);
+
+        let memory1 = create_test_memory("mem1", &content, now);
+        let memory2 = create_test_memory("mem2", &content, now);
+        index.index(&memory1).unwrap();
+        index.index(&memory2).unwrap();
+
+        let recall = RecallService::with_index(index);
+        let config = AdaptiveContextConfig::new()
+            .with_base_count(2)
+            .with_max_count(2)
+            .with_max_tokens(20)
+            .with_min_confidence(0.0);
+        let builder = SearchContextBuilder::new()
+            .with_config(config)
+            .with_recall_service(&recall);
+
+        let intent = SearchIntent {
+            intent_type: SearchIntentType::General,
+            confidence: 0.9,
+            keywords: vec!["authentication".to_string()],
+            topics: vec!["authentication".to_string()],
+            source: DetectionSource::Keyword,
+        };
+
+        let ctx = builder.build_context(&intent).unwrap();
+        let total_tokens: usize = ctx
+            .injected_memories
+            .iter()
+            .map(|memory| ContextBuilderService::estimate_tokens(&memory.content_preview))
+            .sum();
+
+        assert!(total_tokens <= 20);
     }
 }

@@ -1,5 +1,6 @@
 //! Memory types and identifiers.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -51,12 +52,23 @@ pub struct Memory {
     pub namespace: super::Namespace,
     /// The domain this memory is associated with.
     pub domain: super::Domain,
+    /// Optional project identifier (normalized git remote URL).
+    pub project_id: Option<String>,
+    /// Optional branch name for project-scoped memories.
+    pub branch: Option<String>,
+    /// Optional file path relative to repository root.
+    pub file_path: Option<String>,
     /// Current status of the memory.
     pub status: super::MemoryStatus,
     /// Creation timestamp (Unix epoch seconds).
     pub created_at: u64,
     /// Last update timestamp (Unix epoch seconds).
     pub updated_at: u64,
+    /// Tombstone timestamp (UTC) when soft-deleted.
+    ///
+    /// Compatibility is handled in storage adapters, so explicit versioning
+    /// of the Memory struct is not required at this time.
+    pub tombstoned_at: Option<DateTime<Utc>>,
     /// Optional embedding vector.
     pub embedding: Option<Vec<f32>>,
     /// Optional tags for categorization.

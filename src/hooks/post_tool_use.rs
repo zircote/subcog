@@ -3,6 +3,7 @@
 use super::HookHandler;
 use crate::Result;
 use crate::models::{IssueSeverity, SearchFilter, SearchMode, validate_prompt_content};
+use crate::observability::current_request_id;
 use crate::services::RecallService;
 use std::time::Instant;
 use tracing::instrument;
@@ -188,8 +189,8 @@ impl PostToolUseHandler {
             .filter(|hit| hit.score >= self.min_relevance)
             .map(|hit| {
                 // Build full URN: subcog://{domain}/{namespace}/{id}
-                let domain_part = if hit.memory.domain.is_global() {
-                    "global".to_string()
+                let domain_part = if hit.memory.domain.is_project_scoped() {
+                    "project".to_string()
                 } else {
                     hit.memory.domain.to_string()
                 };
@@ -349,8 +350,12 @@ impl HookHandler for PostToolUseHandler {
     }
 
     #[instrument(
+        name = "subcog.hook.post_tool_use",
         skip(self, input),
         fields(
+            request_id = tracing::field::Empty,
+            component = "hooks",
+            operation = "post_tool_use",
             hook = "PostToolUse",
             tool_name = tracing::field::Empty,
             lookup_performed = tracing::field::Empty,
@@ -361,6 +366,9 @@ impl HookHandler for PostToolUseHandler {
         let start = Instant::now();
         let mut lookup_performed = false;
         let mut memories_found = 0usize;
+        if let Some(request_id) = current_request_id() {
+            tracing::Span::current().record("request_id", request_id.as_str());
+        }
 
         let result = self.handle_inner(input, &mut lookup_performed, &mut memories_found);
 

@@ -10,7 +10,7 @@ Subcog is a persistent memory system for AI coding assistants, written in Rust. 
 
 - **Single-binary distribution** (<100MB, <10ms cold start)
 - **Three-layer storage architecture** (Persistence, Index, Vector)
-- **Pluggable backends** (Git Notes, SQLite+usearch, PostgreSQL+pgvector)
+- **Pluggable backends** (`SQLite`+usearch, PostgreSQL+pgvector)
 - **MCP server integration** for AI agent interoperability
 - **Claude Code hooks** for seamless IDE integration
 - **Semantic search** with hybrid vector + BM25 ranking (RRF fusion)
@@ -39,7 +39,7 @@ src/
 │   │   ├── index.rs         # IndexBackend trait
 │   │   └── vector.rs        # VectorBackend trait
 │   ├── persistence/
-│   │   ├── git_notes.rs     # Git notes implementation (primary)
+│   │   ├── sqlite.rs        # SQLite implementation (primary)
 │   │   ├── postgresql.rs    # PostgreSQL implementation
 │   │   └── filesystem.rs    # Fallback filesystem storage
 │   ├── index/
@@ -61,6 +61,7 @@ src/
 │   ├── topic_index.rs       # TopicIndexService (topic → memory map)
 │   ├── prompt.rs            # PromptService (CRUD for prompts)
 │   ├── prompt_parser.rs     # Multi-format parsing (MD, YAML, JSON)
+│   ├── prompt_enrichment.rs # LLM-assisted metadata enrichment
 │   └── deduplication/       # Deduplication service
 │       ├── mod.rs           # Module exports, Deduplicator trait
 │       ├── types.rs         # DuplicateCheckResult, DuplicateReason
@@ -72,8 +73,7 @@ src/
 │       └── service.rs       # DeduplicationService orchestrator
 │
 ├── git/                      # Git operations
-│   ├── notes.rs             # Git notes CRUD
-│   ├── remote.rs            # Fetch/push operations
+│   ├── remote.rs            # Git context detection (branch, remote, repo root)
 │   └── parser.rs            # YAML front matter parsing
 │
 ├── embedding/                # Embedding generation
@@ -256,11 +256,75 @@ tags: [review, quality]
 **MCP Tools**:
 | Tool | Description |
 |------|-------------|
-| `prompt_save` | Save a new prompt template |
+| `prompt_save` | Save a new prompt template (with optional LLM enrichment) |
 | `prompt_list` | List prompts with optional filtering |
 | `prompt_get` | Get a specific prompt by name |
 | `prompt_run` | Execute a prompt with variable substitution |
 | `prompt_delete` | Delete a prompt |
+
+### Context-Aware Variable Extraction
+
+Variable extraction is context-aware and skips `{{variable}}` patterns inside fenced code blocks:
+
+```markdown
+This prompt uses {{active_variable}} which will be extracted.
+
+```python
+# This is a code example showing syntax
+template = "Hello {{code_example_variable}}"
+```
+
+The {{another_active_variable}} after the code block is also extracted.
+```
+
+In the above example, only `active_variable` and `another_active_variable` are extracted as template variables. The `code_example_variable` inside the fenced code block is treated as literal documentation.
+
+**Supported Code Block Syntaxes**:
+- Triple backticks: ` ```language ... ``` `
+- Triple tildes: `~~~ language ... ~~~`
+- Nested code blocks (backticks within tildes)
+
+### LLM-Assisted Metadata Enrichment
+
+When saving prompts, Subcog can automatically generate or enhance metadata using an LLM:
+
+**CLI Usage**:
+```bash
+# Default: LLM enrichment enabled (if provider configured)
+subcog prompt save my-prompt --content "Review {{file}} for issues"
+
+# Skip enrichment
+subcog prompt save my-prompt --content "..." --no-enrich
+
+# Preview enrichment without saving
+subcog prompt save my-prompt --content "..." --dry-run
+```
+
+**MCP Tool**:
+```json
+{
+  "name": "subcog_prompt_save",
+  "arguments": {
+    "name": "my-prompt",
+    "content": "Review {{file}} for issues",
+    "skip_enrichment": false
+  }
+}
+```
+
+**Enrichment Behavior**:
+| Status | Description |
+|--------|-------------|
+| `Full` | LLM successfully generated/enhanced metadata |
+| `Fallback` | LLM unavailable; used extracted variables only |
+| `Skipped` | Enrichment explicitly disabled via `--no-enrich` |
+
+**What Gets Enriched**:
+- **Description**: Generated if missing, based on prompt content
+- **Tags**: Inferred from content (e.g., "security", "review", "debugging")
+- **Variables**: Descriptions and defaults for extracted variables
+
+**User Values Preserved**: Explicitly provided metadata (description, tags, variables) is preserved and merged with LLM suggestions.
 
 ## Proactive Memory Surfacing
 
@@ -678,11 +742,31 @@ This project uses `cargo-deny` to audit dependencies:
 - **Bans**: Block specific problematic crates
 - **Sources**: Only allow crates.io
 
+### Dependency Audit Schedule
+
+| Frequency | Task | Command |
+|-----------|------|---------|
+| **Every PR** | CI runs cargo-deny | `cargo deny check` |
+| **Weekly** | Dependabot updates | Automated via GitHub |
+| **Quarterly** | Full audit review | See checklist below |
+
+**Quarterly Audit Checklist** (January, April, July, October):
+1. `cargo update --dry-run` - Review available updates
+2. `cargo outdated` - Check for major version bumps
+3. `cargo deny check advisories` - Review any new advisories
+4. Review `deny.toml` ignored advisories - Remove resolved, document ongoing
+5. Check pre-release dependencies: `cargo tree | grep -E '(rc|alpha|beta)'`
+6. Review transitive dependency tree: `cargo tree --duplicates`
+7. Update MSRV if Rust stable has new features we need
+
+**Pre-release Dependencies** (monitored, not blocked):
+- `ort v2.0.0-rc.9` - Transitive via fastembed. Tracking stable v2.0.0 release
+
 ## Architecture Guidelines
 
 ### Three-Layer Storage
 
-1. **Persistence Layer** (Authoritative): Git Notes (primary), PostgreSQL, Filesystem
+1. **Persistence Layer** (Authoritative): `SQLite` (primary), PostgreSQL, Filesystem
 2. **Index Layer** (Searchable): SQLite + FTS5, PostgreSQL full-text, RediSearch
 3. **Vector Layer** (Embeddings): usearch HNSW, pgvector, Redis vector
 
@@ -690,7 +774,7 @@ This project uses `cargo-deny` to audit dependencies:
 
 | Tier | Features | Requirements |
 |------|----------|--------------|
-| **Core** | Capture, search, git notes, CLI | None |
+| **Core** | Capture, search, `SQLite`, CLI | None |
 | **Enhanced** | Secrets filtering, multi-domain, audit | Configuration |
 | **LLM-Powered** | Auto-capture, consolidation, temporal | LLM provider |
 
@@ -776,29 +860,73 @@ The following hooks run automatically on file save:
 
 ### Active Specifications
 
-**Subcog Rust Rewrite** - `docs/spec/active/2025-12-28-subcog-rust-rewrite/`:
-
-- [REQUIREMENTS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/REQUIREMENTS.md) - Product requirements
-- [ARCHITECTURE.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/ARCHITECTURE.md) - Technical architecture
-- [IMPLEMENTATION_PLAN.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/IMPLEMENTATION_PLAN.md) - Phased implementation
-- [DECISIONS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/DECISIONS.md) - Architecture decision records
-- [PROGRESS.md](docs/spec/active/2025-12-28-subcog-rust-rewrite/PROGRESS.md) - Implementation progress
-- always run `make ci` before commiting or declaring success ensuring all gates pass
-
-**Pre-Compact Deduplication** - `docs/spec/active/2026-01-01-pre-compact-deduplication/`:
-
-- **Status**: Implementation complete, pending PR
-- **Summary**: Three-tier deduplication for pre-compact hook auto-capture
-  - Exact match (SHA256 hash tag lookup)
-  - Semantic similarity (configurable per-namespace thresholds)
-  - Recent capture (5-minute LRU cache with TTL)
-- [REQUIREMENTS.md](docs/spec/active/2026-01-01-pre-compact-deduplication/REQUIREMENTS.md) - 13 functional requirements
-- [ARCHITECTURE.md](docs/spec/active/2026-01-01-pre-compact-deduplication/ARCHITECTURE.md) - DeduplicationService design
-- [IMPLEMENTATION_PLAN.md](docs/spec/active/2026-01-01-pre-compact-deduplication/IMPLEMENTATION_PLAN.md) - 7 phases, 26 tasks
-- [DECISIONS.md](docs/spec/active/2026-01-01-pre-compact-deduplication/DECISIONS.md) - 8 ADRs
-- [PROGRESS.md](docs/spec/active/2026-01-01-pre-compact-deduplication/PROGRESS.md) - Implementation progress
+**Issue #45: Storage Config Fix** - `docs/spec/active/2026-01-03-issue-45-storage-config/`:
+- Active remediation for GitNotes removal and SQLite consolidation
+- always run `make ci` before committing or declaring success ensuring all gates pass
 
 ### Completed Specifications
+
+- **[MCP Server JSON-RPC Notification Compliance](docs/spec/completed/2026-01-04-issue-46-mcp-notification-fix/)** (2026-01-04)
+  - **GitHub Issue**: [#46](https://github.com/zircote/subcog/issues/46)
+  - **PR**: [#47](https://github.com/zircote/subcog/pull/47)
+  - **Completed**: 2026-01-04
+  - **Outcome**: Success - All 7 tasks delivered (100% scope completion)
+  - **Effort**: ~1.5 hours (planned 2-4 hours, 38-63% under budget)
+  - **Features**:
+    - Added `is_notification()` const fn to `JsonRpcRequest` for notification detection
+    - Updated stdio transport to skip responses for notifications (empty string + skip writeln)
+    - Updated HTTP transport to return 204 No Content for notifications
+    - Fixed `format_error()` to always include `id` field (null for parse errors)
+    - 12 new unit tests for JSON-RPC 2.0 compliance
+  - **Quality**: 1019+ tests passing, `make ci` clean
+  - **Key learnings**: Serde deserializes `"id": null` as `None` (not `Some(Value::Null)`), JSON-RPC 2.0 spec treatment of `"id": null` is ambiguous (treated as notification for safety), clippy enforces `const fn` for simple methods
+  - **Key docs**: REQUIREMENTS.md, ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, DECISIONS.md, PROGRESS.md, RETROSPECTIVE.md
+
+- **[Storage Architecture Simplification](docs/spec/completed/2026-01-03-storage-simplification/)** (2026-01-03)
+  - **Completed**: 2026-01-03
+  - **Outcome**: Success - All 32 tasks + 176 code review fixes delivered
+  - **Effort**: ~10 hours (planned 24-40 hours, 60-75% under budget)
+  - **Features**:
+    - Removed git-notes storage layer (fixes critical CaptureService HEAD overwrite bug)
+    - User-level SQLite/PostgreSQL storage with project/branch/path faceting
+    - Context detection from git remote, branch, and cwd
+    - Branch garbage collection with lazy/explicit modes
+    - Tombstone pattern for soft deletes
+    - 7 CRITICAL security fixes (CRIT-001 to CRIT-007)
+    - 30 HIGH priority fixes (security, performance, testing, database)
+    - 77 MEDIUM priority fixes (quality, architecture, compliance)
+  - **Quality**: 896+ tests passing, all clippy lints resolved, make ci passes
+  - **PR**: https://github.com/zircote/subcog/pull/44
+  - **Satisfaction**: Very satisfied
+  - **Key learnings**: Bottom-up development prevents rework, code review timing matters (176 findings post-implementation), LRU caches require careful const handling, rustdoc link resolution is strict
+  - **Key docs**: REQUIREMENTS.md, ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, DECISIONS.md, PROGRESS.md, RETROSPECTIVE.md
+
+- **[Pre-Compact Deduplication](docs/spec/completed/2026-01-01-pre-compact-deduplication/)** (2026-01-02)
+  - **Completed**: 2026-01-02
+  - **Outcome**: Success - All 7 phases delivered (25/26 tasks, 1 deferred)
+  - **Effort**: 8 hours (planned 20-32 hours, 67% under budget)
+  - **Features**:
+    - Three-tier deduplication: exact match (SHA256 hash tag lookup), semantic similarity (configurable per-namespace thresholds), recent capture (5-minute LRU cache with TTL)
+    - DeduplicationService with short-circuit evaluation (exact → semantic → recent)
+    - Graceful degradation when embeddings/recall unavailable
+    - 64+ deduplication tests + 10 property-based tests (619 total tests)
+    - Comprehensive observability (5 metrics, tracing, debug logging)
+  - **Key docs**: REQUIREMENTS.md, ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, DECISIONS.md, PROGRESS.md, RETROSPECTIVE.md
+
+- **[Prompt Variable Context-Aware Extraction](docs/spec/completed/2026-01-01-prompt-variable-context-awareness/)** (2026-01-02)
+  - **GitHub Issue**: [#29](https://github.com/zircote/subcog/issues/29)
+  - **Completed**: 2026-01-02
+  - **Outcome**: Success - All 4 phases delivered (20/20 tasks)
+  - **Effort**: 8 hours (planned 16-24 hours, ~50% under budget)
+  - **Features**:
+    - Code block detection (triple backticks and tildes) with regex pattern
+    - Context-aware variable extraction skipping code blocks (fixes Issue #29)
+    - LLM-assisted metadata enrichment (description, tags, variable definitions)
+    - Graceful fallback when LLM unavailable (EnrichmentStatus::Fallback)
+    - CLI `--no-enrich` and `--dry-run` flags
+    - MCP `skip_enrichment` parameter
+    - 685 tests passing, clippy clean
+  - **Key docs**: REQUIREMENTS.md, ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, DECISIONS.md, PROGRESS.md, RETROSPECTIVE.md
 
 - **[User Prompt Management](docs/spec/completed/2025-12-30-prompt-management/)** (2025-12-30)
   - **Issues**: [#6](https://github.com/zircote/subcog/issues/6), [#8](https://github.com/zircote/subcog/issues/8), [#9](https://github.com/zircote/subcog/issues/9), [#10](https://github.com/zircote/subcog/issues/10), [#11](https://github.com/zircote/subcog/issues/11), [#12](https://github.com/zircote/subcog/issues/12), [#13](https://github.com/zircote/subcog/issues/13), [#14](https://github.com/zircote/subcog/issues/14)

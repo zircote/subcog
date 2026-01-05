@@ -1,6 +1,6 @@
 # MCP Tools
 
-Subcog provides 13 MCP tools for memory operations and prompt management.
+Subcog provides 14 MCP tools for memory operations, garbage collection, and prompt management.
 
 ## Claude Code Invocation
 
@@ -12,6 +12,7 @@ All subcog MCP tools are accessible using the `subcog:` prefix in Claude Code:
 | `subcog_recall` | `subcog:recall` |
 | `subcog_status` | `subcog:status` |
 | `subcog_sync` | `subcog:sync` |
+| `subcog_gc` | `subcog:gc` |
 | `subcog_namespaces` | `subcog:namespaces` |
 | `subcog_reindex` | `subcog:reindex` |
 | `subcog_enrich` | `subcog:enrich` |
@@ -159,11 +160,11 @@ Get memory system status and statistics.
 {
   "repository": {
     "path": "/path/to/project",
-    "domain": "project",
-    "scope": "zircote/subcog"
+    "project_id": "github.com/zircote/subcog",
+    "branch": "main"
   },
   "storage": {
-    "persistence": "git_notes",
+    "persistence": "sqlite",
     "index": "sqlite",
     "vector": "usearch"
   },
@@ -180,6 +181,43 @@ Get memory system status and statistics.
       {"tag": "database", "count": 8}
     ]
   }
+}
+```
+
+---
+
+### subcog_gc
+
+Garbage collect memories from deleted branches.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `dry_run` | boolean | No | Preview without changes (default: false) |
+| `branch` | string | No | Target specific branch |
+| `purge` | boolean | No | Permanently delete tombstoned memories |
+| `older_than` | string | No | Only purge tombstones older than duration (e.g., "30d") |
+
+**Example:**
+
+```json
+{
+  "name": "subcog_gc",
+  "arguments": {
+    "dry_run": true
+  }
+}
+```
+
+**Response:**
+
+```json
+{
+  "stale_branches": ["feature/old-auth", "bugfix/issue-42"],
+  "memories_affected": 17,
+  "dry_run": true,
+  "status": "preview"
 }
 ```
 
@@ -343,7 +381,7 @@ Sync memories with git remote.
 
 ### subcog_reindex
 
-Rebuild the search index from git notes.
+Rebuild the search index from the persistence layer.
 
 **Parameters:**
 

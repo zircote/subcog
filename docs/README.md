@@ -60,7 +60,7 @@ Configuration reference:
 
 Three-layer storage system:
 
-- [Persistence Layer](storage/persistence.md) - Git Notes, PostgreSQL, Filesystem
+- [Persistence Layer](storage/persistence.md) - SQLite, PostgreSQL, Filesystem
 - [Index Layer](storage/index.md) - SQLite, PostgreSQL FTS, RediSearch
 - [Vector Layer](storage/vector.md) - usearch, pgvector, Redis Vector
 - [Domains](storage/domains.md) - Project, User, Org scoping
@@ -144,7 +144,7 @@ Add to your Claude Code configuration:
 ## Version Information
 
 - **Language**: Rust (Edition 2024)
-- **MSRV**: 1.85
+- **MSRV**: 1.88
 - **Repository**: [github.com/zircote/subcog](https://github.com/zircote/subcog)
 
 ## Specifications

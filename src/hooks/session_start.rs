@@ -1,10 +1,33 @@
 //! Session start hook handler.
+//!
+//! # Security
+//!
+//! This module validates session IDs for sufficient entropy to prevent:
+//! - Predictable session attacks
+//! - Session enumeration attacks
+//! - Weak identifier exploitation
 
 use super::HookHandler;
 use crate::Result;
+use crate::observability::current_request_id;
 use crate::services::{ContextBuilderService, MemoryStatistics};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::instrument;
+
+/// Minimum length for session IDs (security requirement).
+const MIN_SESSION_ID_LENGTH: usize = 16;
+
+/// Maximum length for session IDs (denial of service prevention).
+const MAX_SESSION_ID_LENGTH: usize = 256;
+
+/// Minimum number of unique characters required for entropy.
+const MIN_UNIQUE_CHARS: usize = 4;
+
+/// Minimum consecutive sequential characters to flag as low entropy.
+const MIN_SEQUENTIAL_RUN: usize = 8;
+
+/// Default timeout for context loading (PERF-M3: prevents session start blocking).
+const DEFAULT_CONTEXT_TIMEOUT_MS: u64 = 500;
 
 /// Handles `SessionStart` hook events.
 ///
@@ -16,6 +39,8 @@ pub struct SessionStartHandler {
     max_context_tokens: usize,
     /// Guidance level for context injection.
     guidance_level: GuidanceLevel,
+    /// Timeout for context loading in milliseconds (PERF-M3).
+    context_timeout_ms: u64,
 }
 
 /// Level of guidance to provide in context.
@@ -28,6 +53,159 @@ pub enum GuidanceLevel {
     Standard,
     /// Detailed context - full context with examples.
     Detailed,
+}
+
+/// Result of session ID validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionIdValidation {
+    /// Session ID is valid with sufficient entropy.
+    Valid,
+    /// Session ID is too short (< 16 characters).
+    TooShort,
+    /// Session ID is too long (> 256 characters).
+    TooLong,
+    /// Session ID has low entropy (predictable patterns).
+    LowEntropy,
+    /// Session ID is missing or empty.
+    Missing,
+}
+
+impl SessionIdValidation {
+    /// Returns a human-readable description of the validation result.
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::Valid => "valid",
+            Self::TooShort => "too short (minimum 16 characters)",
+            Self::TooLong => "too long (maximum 256 characters)",
+            Self::LowEntropy => "low entropy (predictable pattern detected)",
+            Self::Missing => "missing or empty",
+        }
+    }
+}
+
+/// Validates a session ID for sufficient entropy.
+///
+/// # Security
+///
+/// This function checks session IDs for:
+/// - Minimum length (16 characters) to prevent enumeration
+/// - Maximum length (256 characters) to prevent `DoS`
+/// - Sufficient unique characters to prevent predictable patterns
+/// - Detection of repeating/sequential patterns
+///
+/// # Returns
+///
+/// A `SessionIdValidation` enum indicating the validation result.
+pub fn validate_session_id(session_id: &str) -> SessionIdValidation {
+    // Check for missing/empty
+    if session_id.is_empty() || session_id == "unknown" {
+        return SessionIdValidation::Missing;
+    }
+
+    // Check minimum length
+    if session_id.len() < MIN_SESSION_ID_LENGTH {
+        return SessionIdValidation::TooShort;
+    }
+
+    // Check maximum length (DoS prevention)
+    if session_id.len() > MAX_SESSION_ID_LENGTH {
+        return SessionIdValidation::TooLong;
+    }
+
+    // Check for low entropy
+    if has_low_entropy(session_id) {
+        return SessionIdValidation::LowEntropy;
+    }
+
+    SessionIdValidation::Valid
+}
+
+/// Checks if a session ID has low entropy (predictable patterns).
+fn has_low_entropy(session_id: &str) -> bool {
+    // Count unique characters
+    let unique_chars: std::collections::HashSet<char> = session_id.chars().collect();
+    if unique_chars.len() < MIN_UNIQUE_CHARS {
+        return true;
+    }
+
+    // Check for repeating patterns (e.g., "abcabcabc" or "111111111")
+    let chars: Vec<char> = session_id.chars().collect();
+
+    // Check for all same character
+    if chars.iter().all(|&c| c == chars[0]) {
+        return true;
+    }
+
+    // Check for simple repeating pattern (pattern length 1-4)
+    for pattern_len in 1..=4 {
+        if chars.len() >= pattern_len * 3 {
+            let pattern = &chars[..pattern_len];
+            let is_repeating = chars
+                .chunks(pattern_len)
+                .all(|chunk| chunk == pattern || chunk.len() < pattern_len);
+            if is_repeating {
+                return true;
+            }
+        }
+    }
+
+    // Check for long sequential patterns (e.g., "12345678" or "abcdefgh")
+    // Only flag if there's a consecutive run of MIN_SEQUENTIAL_RUN or more
+    if has_long_sequential_run(session_id) {
+        return true;
+    }
+
+    false
+}
+
+/// Checks if a string contains a long consecutive sequential run.
+///
+/// This detects patterns like "12345678" or "abcdefgh" by looking for
+/// consecutive runs of characters where each differs from the previous by +1 or -1.
+/// Random-looking IDs (like UUIDs) may have scattered sequential pairs but not long runs.
+fn has_long_sequential_run(s: &str) -> bool {
+    if s.len() < MIN_SEQUENTIAL_RUN {
+        return false;
+    }
+
+    // Only check alphanumeric characters for sequences
+    let chars: Vec<i32> = s
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c as i32)
+        .collect();
+
+    if chars.len() < MIN_SEQUENTIAL_RUN {
+        return false;
+    }
+
+    // Check for consecutive ascending runs
+    let mut ascending_run = 1;
+    for window in chars.windows(2) {
+        if window[1] == window[0] + 1 {
+            ascending_run += 1;
+            if ascending_run >= MIN_SEQUENTIAL_RUN {
+                return true;
+            }
+        } else {
+            ascending_run = 1;
+        }
+    }
+
+    // Check for consecutive descending runs
+    let mut descending_run = 1;
+    for window in chars.windows(2) {
+        if window[0] == window[1] + 1 {
+            descending_run += 1;
+            if descending_run >= MIN_SEQUENTIAL_RUN {
+                return true;
+            }
+        } else {
+            descending_run = 1;
+        }
+    }
+
+    false
 }
 
 /// Context prepared for a session.
@@ -53,6 +231,7 @@ impl SessionStartHandler {
             context_builder: None,
             max_context_tokens: 2000,
             guidance_level: GuidanceLevel::default(),
+            context_timeout_ms: DEFAULT_CONTEXT_TIMEOUT_MS,
         }
     }
 
@@ -77,11 +256,85 @@ impl SessionStartHandler {
         self
     }
 
-    /// Builds context for the session.
+    /// Sets the context loading timeout in milliseconds (PERF-M3).
+    ///
+    /// If context loading takes longer than this timeout, the handler
+    /// will return minimal context instead of blocking session start.
+    #[must_use]
+    pub const fn with_context_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.context_timeout_ms = timeout_ms;
+        self
+    }
+
+    /// Helper to build context from the builder service (PERF-M3).
+    ///
+    /// Returns a tuple of (context string, statistics, memory count).
+    fn build_context_from_builder(
+        &self,
+        max_tokens: usize,
+        start: Instant,
+        deadline: Duration,
+    ) -> Result<(Option<String>, Option<MemoryStatistics>, usize)> {
+        let Some(ref builder) = self.context_builder else {
+            return Ok((None, None, 0));
+        };
+
+        let context = builder.build_context(max_tokens)?;
+        let ctx = if context.is_empty() {
+            None
+        } else {
+            Some(context)
+        };
+
+        // PERF-M3: Check timeout before statistics gathering
+        if start.elapsed() >= deadline {
+            tracing::debug!(
+                elapsed_ms = start.elapsed().as_millis(),
+                deadline_ms = self.context_timeout_ms,
+                "Skipping statistics due to timeout (PERF-M3)"
+            );
+            let count = usize::from(ctx.is_some());
+            return Ok((ctx, None, count));
+        }
+
+        let has_context = ctx.is_some();
+        let (stats, count) = match builder.get_statistics() {
+            Ok(s) => {
+                let c = s.total_count;
+                (Some(s), c)
+            },
+            Err(_) => (None, usize::from(has_context)),
+        };
+
+        Ok((ctx, stats, count))
+    }
+
+    /// Helper to add guidance based on level (PERF-M3).
+    fn add_guidance(&self, context_parts: &mut Vec<String>) {
+        match self.guidance_level {
+            GuidanceLevel::Minimal => {
+                // Just the essential context
+            },
+            GuidanceLevel::Standard => {
+                context_parts.push(Self::standard_guidance());
+            },
+            GuidanceLevel::Detailed => {
+                context_parts.push(Self::detailed_guidance());
+            },
+        }
+    }
+
+    /// Builds context for the session with inline timeout checking (PERF-M3).
+    ///
+    /// Monitors elapsed time and returns early with minimal context if approaching
+    /// the timeout. This provides timeout safety without requiring thread spawning.
     fn build_session_context(&self, session_id: &str, cwd: &str) -> Result<SessionContext> {
+        let start = Instant::now();
+        let deadline = Duration::from_millis(self.context_timeout_ms);
         let mut context_parts = Vec::new();
         let mut memory_count = 0;
         let mut statistics: Option<MemoryStatistics> = None;
+        let mut timed_out = false;
 
         // Add session header
         context_parts.push(format!(
@@ -95,42 +348,62 @@ impl SessionStartHandler {
             GuidanceLevel::Detailed => self.max_context_tokens * 2,
         };
 
-        if let Some(ref builder) = self.context_builder {
-            let context = builder.build_context(max_tokens)?;
-            if !context.is_empty() {
-                context_parts.push(context);
-                memory_count += 1; // Approximate
-            }
-
-            // Get memory statistics for dynamic context
-            if let Ok(stats) = builder.get_statistics() {
-                memory_count = stats.total_count;
-                add_statistics_if_present(&mut context_parts, &stats);
-                statistics = Some(stats);
-            }
+        // PERF-M3: Check timeout before expensive context building
+        let within_deadline = start.elapsed() < deadline;
+        if !within_deadline {
+            timed_out = true;
+            tracing::warn!(
+                elapsed_ms = start.elapsed().as_millis(),
+                deadline_ms = self.context_timeout_ms,
+                "Context loading timed out, using minimal context (PERF-M3)"
+            );
+            metrics::counter!("session_context_timeout_total", "reason" => "deadline_exceeded")
+                .increment(1);
         }
 
-        // Add guidance based on level
-        match self.guidance_level {
-            GuidanceLevel::Minimal => {
-                // Just the essential context
-            },
-            GuidanceLevel::Standard => {
-                context_parts.push(Self::standard_guidance());
-            },
-            GuidanceLevel::Detailed => {
-                context_parts.push(Self::detailed_guidance());
-            },
+        // Build context from builder if available and within deadline
+        if within_deadline {
+            let (ctx, stats, count) =
+                self.build_context_from_builder(max_tokens, start, deadline)?;
+            if let Some(c) = ctx {
+                context_parts.push(c);
+            }
+            if let Some(s) = stats.as_ref() {
+                add_statistics_if_present(&mut context_parts, s);
+            }
+            statistics = stats;
+            memory_count = count;
+            timed_out = start.elapsed() >= deadline;
+        }
+
+        // PERF-M3: Only add guidance if not timed out and within deadline
+        if !timed_out && start.elapsed() < deadline {
+            self.add_guidance(&mut context_parts);
         }
 
         let content = context_parts.join("\n\n");
         let token_estimate = ContextBuilderService::estimate_tokens(&content);
 
+        // Record timing metrics
+        if timed_out {
+            metrics::histogram!(
+                "session_context_build_duration_ms",
+                "status" => "timeout"
+            )
+            .record(start.elapsed().as_secs_f64() * 1000.0);
+        } else {
+            metrics::histogram!(
+                "session_context_build_duration_ms",
+                "status" => "success"
+            )
+            .record(start.elapsed().as_secs_f64() * 1000.0);
+        }
+
         Ok(SessionContext {
             content,
             memory_count,
             token_estimate,
-            was_truncated: token_estimate > max_tokens,
+            was_truncated: token_estimate > max_tokens || timed_out,
             statistics,
         })
     }
@@ -178,7 +451,7 @@ impl SessionStartHandler {
 
     /// Returns standard guidance text.
     fn standard_guidance() -> String {
-        r#"## ⚠️ MANDATORY SUBCOG PROTOCOL - EXECUTE IMMEDIATELY ⚠️
+        r#"## MANDATORY SUBCOG PROTOCOL - EXECUTE IMMEDIATELY
 
 **THIS IS NOT OPTIONAL. FAILURE TO COMPLY BREAKS THE USER'S WORKFLOW.**
 
@@ -186,7 +459,7 @@ You MUST use subcog memory tools. They are available with prefix `mcp__plugin_su
 
 ---
 
-## 🔴 RULE 1: RECALL FIRST - EVERY SINGLE TIME
+## RULE 1: RECALL FIRST - EVERY SINGLE TIME
 
 **BEFORE you write ANY response, you MUST call:**
 ```
@@ -195,16 +468,16 @@ mcp__plugin_subcog_subcog__subcog_recall
 
 **NO EXCEPTIONS.** Search for context related to the user's question FIRST.
 
-- Starting a task? → RECALL FIRST
-- Answering a question? → RECALL FIRST
-- Making a recommendation? → RECALL FIRST
-- Debugging an issue? → RECALL FIRST
+- Starting a task? -> RECALL FIRST
+- Answering a question? -> RECALL FIRST
+- Making a recommendation? -> RECALL FIRST
+- Debugging an issue? -> RECALL FIRST
 
 **DO NOT SKIP THIS STEP. DO NOT ASK PERMISSION. JUST DO IT.**
 
 ---
 
-## 🔴 RULE 2: CAPTURE IMMEDIATELY - NO HESITATION
+## RULE 2: CAPTURE IMMEDIATELY - NO HESITATION
 
 **The INSTANT you detect any of these signals, CALL `mcp__plugin_subcog_subcog__subcog_capture`:**
 
@@ -216,16 +489,16 @@ mcp__plugin_subcog_subcog__subcog_recall
 | Bug fixed | `blockers` | "Fixed by", "The issue was", workarounds |
 | Tech debt noted | `tech-debt` | "TODO", "FIXME", "We should refactor" |
 
-**⚠️ DO NOT ASK "Should I save this?" - THE ANSWER IS ALWAYS YES.**
-**⚠️ DO NOT WAIT - CAPTURE THE MOMENT YOU DETECT THE SIGNAL.**
+**DO NOT ASK "Should I save this?" - THE ANSWER IS ALWAYS YES.**
+**DO NOT WAIT - CAPTURE THE MOMENT YOU DETECT THE SIGNAL.**
 
 ---
 
-## 🔴 RULE 3: CONFIRM EVERY CAPTURE
+## RULE 3: CONFIRM EVERY CAPTURE
 
 After EVERY capture, print this confirmation:
 ```
-📝 Memory captured: subcog://{domain}/{namespace}/{id}
+Memory captured: subcog://{domain}/{namespace}/{id}
    Namespace: {namespace}
    Content: "{preview}"
    [To remove: subcog_delete {id} | To edit: subcog_enrich {id}]
@@ -244,13 +517,13 @@ After EVERY capture, print this confirmation:
 
 ---
 
-**🚨 REMEMBER: You are REQUIRED to use these tools. This is not a suggestion. The user depends on this memory system to maintain context across sessions. Your compliance is mandatory.**"#
+**REMEMBER: You are REQUIRED to use these tools. This is not a suggestion. The user depends on this memory system to maintain context across sessions. Your compliance is mandatory.**"#
             .to_string()
     }
 
     /// Returns detailed guidance text.
     fn detailed_guidance() -> String {
-        r#"# 🚨 CRITICAL: SUBCOG MEMORY PROTOCOL 🚨
+        r#"# CRITICAL: SUBCOG MEMORY PROTOCOL
 
 **STOP. READ THIS ENTIRE SECTION. YOUR COMPLIANCE IS MANDATORY.**
 
@@ -258,7 +531,7 @@ The user's productivity depends on you following these rules. Failure to comply 
 
 ---
 
-## ⛔ NON-NEGOTIABLE RULES ⛔
+## NON-NEGOTIABLE RULES
 
 ### RULE 1: RECALL BEFORE EVERY RESPONSE
 
@@ -267,8 +540,8 @@ The user's productivity depends on you following these rules. Failure to comply 
 This is not optional. This is not a suggestion. This is a requirement.
 
 ```
-CORRECT: User asks question → Call subcog_recall → Read results → Respond
-WRONG:   User asks question → Respond immediately without checking memory
+CORRECT: User asks question -> Call subcog_recall -> Read results -> Respond
+WRONG:   User asks question -> Respond immediately without checking memory
 ```
 
 **WHY**: You have no memory between sessions. The user told you things yesterday that you've forgotten. Subcog remembers. CHECK IT.
@@ -277,8 +550,8 @@ WRONG:   User asks question → Respond immediately without checking memory
 
 **The INSTANT you detect ANY of these signals, you MUST call `mcp__plugin_subcog_subcog__subcog_capture`:**
 
-| 🎯 Signal Detected | 📁 Namespace | ⚡ Action |
-|-------------------|--------------|----------|
+| Signal Detected | Namespace | Action |
+|-----------------|-----------|--------|
 | "We'll use...", "Let's go with...", "I decided..." | `decisions` | CAPTURE NOW |
 | "The pattern is...", "Always do...", "Convention..." | `patterns` | CAPTURE NOW |
 | "TIL...", "Turns out...", "I discovered...", "Gotcha..." | `learnings` | CAPTURE NOW |
@@ -288,13 +561,13 @@ WRONG:   User asks question → Respond immediately without checking memory
 | Security vulnerabilities, auth patterns, fixes | `security` | CAPTURE NOW |
 | Performance insights, optimizations, benchmarks | `performance` | CAPTURE NOW |
 
-**⚠️ NEVER ask "Should I save this?" - Asking is a FAILURE. Just capture it.**
+**NEVER ask "Should I save this?" - Asking is a FAILURE. Just capture it.**
 
 ### RULE 3: CONFIRM EVERY CAPTURE TO THE USER
 
 After EVERY successful capture, you MUST display:
 ```
-📝 Memory captured: subcog://{domain}/{namespace}/{id}
+Memory captured: subcog://{domain}/{namespace}/{id}
    Namespace: {namespace}
    Content: "{first 100 chars of content}..."
    [To remove: subcog_delete {id} | To edit: subcog_enrich {id}]
@@ -304,7 +577,7 @@ This lets the user verify, correct, or remove incorrect captures.
 
 ---
 
-## 🔧 TOOL REFERENCE
+## TOOL REFERENCE
 
 | Tool | When to Use |
 |------|-------------|
@@ -318,7 +591,7 @@ This lets the user verify, correct, or remove incorrect captures.
 
 ---
 
-## 📋 NAMESPACE DEFINITIONS
+## NAMESPACE DEFINITIONS
 
 | Namespace | Use For |
 |-----------|---------|
@@ -336,7 +609,7 @@ This lets the user verify, correct, or remove incorrect captures.
 
 ---
 
-## 🔄 SEARCH MODES
+## SEARCH MODES
 
 | Mode | Description |
 |------|-------------|
@@ -346,7 +619,7 @@ This lets the user verify, correct, or remove incorrect captures.
 
 ---
 
-## ❌ WHAT NOT TO DO
+## WHAT NOT TO DO
 
 1. **DON'T** respond to questions without first calling `subcog_recall`
 2. **DON'T** ask "Should I save this?" - Just save it
@@ -356,7 +629,7 @@ This lets the user verify, correct, or remove incorrect captures.
 
 ---
 
-## ✅ CORRECT WORKFLOW EXAMPLE
+## CORRECT WORKFLOW EXAMPLE
 
 ```
 User: "How should we implement authentication?"
@@ -370,19 +643,17 @@ Your response:
 
 ---
 
-**🚨 FINAL WARNING: This protocol is MANDATORY. The user trusts you to maintain their knowledge base. Every time you skip a recall, you risk giving advice that contradicts prior decisions. Every time you skip a capture, you lose valuable knowledge forever.**"#
+**FINAL WARNING: This protocol is MANDATORY. The user trusts you to maintain their knowledge base. Every time you skip a recall, you risk giving advice that contradicts prior decisions. Every time you skip a capture, you lose valuable knowledge forever.**"#
             .to_string()
     }
 
     /// Checks if this is the first session (no user memories).
     fn is_first_session(&self) -> bool {
         // Check if we have any user memories
-        if let Some(ref builder) = self.context_builder {
-            if let Ok(context) = builder.build_context(100) {
-                return context.is_empty();
-            }
-        }
-        true
+        self.context_builder
+            .as_ref()
+            .and_then(|builder| builder.build_context(100).ok())
+            .is_none_or(|context| context.is_empty())
     }
 }
 
@@ -398,12 +669,23 @@ impl HookHandler for SessionStartHandler {
     }
 
     #[instrument(
+        name = "subcog.hook.session_start",
         skip(self, input),
-        fields(hook = "SessionStart", session_id = tracing::field::Empty, cwd = tracing::field::Empty)
+        fields(
+            request_id = tracing::field::Empty,
+            component = "hooks",
+            operation = "session_start",
+            hook = "SessionStart",
+            session_id = tracing::field::Empty,
+            cwd = tracing::field::Empty
+        )
     )]
     fn handle(&self, input: &str) -> Result<String> {
         let start = Instant::now();
         let mut token_estimate: Option<usize> = None;
+        if let Some(request_id) = current_request_id() {
+            tracing::Span::current().record("request_id", request_id.as_str());
+        }
 
         tracing::info!(hook = "SessionStart", "Processing session start hook");
 
@@ -425,6 +707,21 @@ impl HookHandler for SessionStartHandler {
             let span = tracing::Span::current();
             span.record("session_id", session_id);
             span.record("cwd", cwd);
+
+            // MED-SEC-003: Validate session ID entropy
+            let validation = validate_session_id(session_id);
+            if validation != SessionIdValidation::Valid {
+                tracing::warn!(
+                    session_id = session_id,
+                    validation = validation.description(),
+                    "Session ID validation warning"
+                );
+                metrics::counter!(
+                    "session_id_validation_warnings_total",
+                    "reason" => validation.description()
+                )
+                .increment(1);
+            }
 
             // Build session context
             let session_context = self.build_session_context(session_id, cwd)?;
@@ -534,7 +831,7 @@ mod tests {
     fn test_handle_basic() {
         let handler = SessionStartHandler::default();
 
-        let input = r#"{"session_id": "test-session-123", "cwd": "/path/to/project"}"#;
+        let input = r#"{"session_id": "test-session-abc123def456", "cwd": "/path/to/project"}"#;
 
         let result = handler.handle(input);
         assert!(result.is_ok());
@@ -553,7 +850,7 @@ mod tests {
             .as_str()
             .unwrap();
         assert!(context.contains("Subcog Memory Context"));
-        assert!(context.contains("test-session-123"));
+        assert!(context.contains("test-session-abc123def456"));
         assert!(context.contains("subcog-metadata"));
     }
 
@@ -610,5 +907,192 @@ mod tests {
         assert!(result.is_ok());
         let context = result.unwrap();
         assert!(context.content.contains("test-session"));
+    }
+
+    // ==========================================================================
+    // MED-SEC-003: Session ID Entropy Validation Tests
+    // ==========================================================================
+
+    #[test]
+    fn test_session_id_validation_valid() {
+        // Valid session IDs with good entropy
+        assert_eq!(
+            validate_session_id("abc123def456ghi789"),
+            SessionIdValidation::Valid
+        );
+        // UUID format - should be valid (scattered pairs, no long runs)
+        assert_eq!(
+            validate_session_id("f0504ebb-ca72-4d1a-8b7c-53fc85a1a8ba"),
+            SessionIdValidation::Valid
+        );
+        assert_eq!(
+            validate_session_id("session_2024_01_03_xyz"),
+            SessionIdValidation::Valid
+        );
+    }
+
+    #[test]
+    fn test_session_id_validation_missing() {
+        assert_eq!(validate_session_id(""), SessionIdValidation::Missing);
+        assert_eq!(validate_session_id("unknown"), SessionIdValidation::Missing);
+    }
+
+    #[test]
+    fn test_session_id_validation_too_short() {
+        assert_eq!(validate_session_id("short"), SessionIdValidation::TooShort);
+        assert_eq!(
+            validate_session_id("123456789012345"),
+            SessionIdValidation::TooShort
+        );
+    }
+
+    #[test]
+    fn test_session_id_validation_too_long() {
+        let long_id = "x".repeat(257);
+        assert_eq!(validate_session_id(&long_id), SessionIdValidation::TooLong);
+    }
+
+    #[test]
+    fn test_session_id_validation_low_entropy() {
+        // All same character
+        assert_eq!(
+            validate_session_id("aaaaaaaaaaaaaaaaaaaaaaaaa"),
+            SessionIdValidation::LowEntropy
+        );
+
+        // Simple repeating pattern
+        assert_eq!(
+            validate_session_id("abababababababababab"),
+            SessionIdValidation::LowEntropy
+        );
+
+        // Long sequential pattern (8+ consecutive ascending)
+        assert_eq!(
+            validate_session_id("abcdefghijklmnop"),
+            SessionIdValidation::LowEntropy
+        );
+    }
+
+    #[test]
+    fn test_session_id_validation_description() {
+        assert_eq!(SessionIdValidation::Valid.description(), "valid");
+        assert!(
+            SessionIdValidation::TooShort
+                .description()
+                .contains("minimum")
+        );
+        assert!(
+            SessionIdValidation::TooLong
+                .description()
+                .contains("maximum")
+        );
+        assert!(
+            SessionIdValidation::LowEntropy
+                .description()
+                .contains("entropy")
+        );
+        assert!(
+            SessionIdValidation::Missing
+                .description()
+                .contains("missing")
+        );
+    }
+
+    #[test]
+    fn test_has_low_entropy_few_unique_chars() {
+        assert!(has_low_entropy("aaa")); // Only 1 unique char
+        assert!(has_low_entropy("aabb")); // Only 2 unique chars
+        assert!(has_low_entropy("aaabbbccc")); // Only 3 unique chars
+    }
+
+    #[test]
+    fn test_has_long_sequential_run_ascending() {
+        // 8+ consecutive ascending is flagged
+        assert!(has_long_sequential_run("abcdefgh"));
+        assert!(has_long_sequential_run("12345678"));
+        assert!(has_long_sequential_run("abcdefghijklmnop"));
+    }
+
+    #[test]
+    fn test_has_long_sequential_run_descending() {
+        // 8+ consecutive descending is flagged
+        assert!(has_long_sequential_run("hgfedcba"));
+        assert!(has_long_sequential_run("87654321"));
+    }
+
+    #[test]
+    fn test_has_long_sequential_run_non_sequential() {
+        // Random-looking IDs should NOT be flagged
+        assert!(!has_long_sequential_run("axbyczdwev"));
+        assert!(!has_long_sequential_run("8372619450"));
+        // UUIDs should NOT be flagged (scattered sequential pairs, no long runs)
+        assert!(!has_long_sequential_run(
+            "f0504ebb-ca72-4d1a-8b7c-53fc85a1a8ba"
+        ));
+        assert!(!has_long_sequential_run(
+            "550e8400-e29b-41d4-a716-446655440000"
+        ));
+    }
+
+    #[test]
+    fn test_has_long_sequential_run_short_sequences_ok() {
+        // Short sequential runs (< 8) are acceptable
+        assert!(!has_long_sequential_run("abc123xyz")); // "abc" is only 3
+        assert!(!has_long_sequential_run("1234abc5678")); // "1234" is only 4, "5678" is only 4
+        assert!(!has_long_sequential_run("abcdefg")); // Only 7, needs 8+
+    }
+
+    // ==========================================================================
+    // PERF-M3: Context Loading Timeout Tests
+    // ==========================================================================
+
+    #[test]
+    fn test_context_timeout_configuration() {
+        // Default timeout
+        let handler = SessionStartHandler::new();
+        assert_eq!(handler.context_timeout_ms, DEFAULT_CONTEXT_TIMEOUT_MS);
+
+        // Custom timeout
+        let handler = SessionStartHandler::new().with_context_timeout_ms(1000);
+        assert_eq!(handler.context_timeout_ms, 1000);
+    }
+
+    #[test]
+    fn test_context_timeout_zero_still_works() {
+        // Even with 0ms timeout, handler should not panic - just skip expensive work
+        let handler = SessionStartHandler::new().with_context_timeout_ms(0);
+        let result = handler.build_session_context("test-session", "/project");
+
+        // Should succeed with minimal context
+        assert!(result.is_ok());
+        let context = result.unwrap();
+        // Should still have session header
+        assert!(context.content.contains("test-session"));
+        // was_truncated should be true due to timeout
+        assert!(context.was_truncated);
+    }
+
+    #[test]
+    fn test_context_timeout_large_value() {
+        // With a very large timeout, normal context should be returned
+        let handler = SessionStartHandler::new().with_context_timeout_ms(60_000);
+        let result = handler.build_session_context("test-session", "/project");
+
+        assert!(result.is_ok());
+        let context = result.unwrap();
+        // Should include guidance content
+        assert!(context.content.contains("SUBCOG"));
+    }
+
+    #[test]
+    fn test_build_context_records_was_truncated_on_timeout() {
+        // Very short timeout should mark context as truncated
+        let handler = SessionStartHandler::new().with_context_timeout_ms(0);
+        let result = handler.build_session_context("test", "/path");
+
+        assert!(result.is_ok());
+        let context = result.unwrap();
+        // With 0ms timeout, should be truncated
+        assert!(context.was_truncated);
     }
 }

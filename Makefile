@@ -1,7 +1,7 @@
 # Subcog Makefile
 # Common build, test, and development tasks
 
-.PHONY: all build release test test-verbose test-lib lint lint-strict format format-check deny doc-check check check-strict dev quick install clean doc bench ci help
+.PHONY: all build release test test-verbose test-lib lint lint-strict format format-check deny doc-check check check-strict dev quick install clean doc bench ci msrv help
 
 # Default target
 all: check
@@ -74,12 +74,25 @@ clean:
 doc:
 	cargo doc --no-deps --open
 
-# Run benchmarks
+# Run benchmarks (quick validation mode for CI)
 bench:
+	cargo bench --bench search_intent -- --test
+	cargo bench --bench embedding --features fastembed-embeddings -- --test
+
+# Run full benchmarks (for performance analysis)
+bench-full:
 	cargo bench
 
+# MSRV check - verify builds with minimum supported Rust version
+msrv:
+	@MSRV=$$(grep '^rust-version' Cargo.toml | cut -d'"' -f2); \
+	echo "Checking MSRV: $$MSRV"; \
+	rustup run $$MSRV cargo check --all-features
+
 # CI-style full check (all gates must pass)
-ci: format-check lint-strict test doc-check deny
+# Matches GitHub Actions: fmt, clippy, test, doc, deny, msrv, bench
+# (coverage requires tarpaulin, skip locally)
+ci: format-check lint-strict test doc-check deny msrv bench
 
 # Show help
 help:
@@ -95,7 +108,8 @@ help:
 	@echo "    test           Run all tests"
 	@echo "    test-verbose   Run tests with output"
 	@echo "    test-lib       Run library tests only"
-	@echo "    bench          Run benchmarks"
+	@echo "    bench          Run benchmarks (quick validation)"
+	@echo "    bench-full     Run full benchmarks (performance analysis)"
 	@echo ""
 	@echo "  Quality:"
 	@echo "    lint           Run clippy linting (warnings allowed)"
@@ -104,6 +118,7 @@ help:
 	@echo "    format-check   Check formatting"
 	@echo "    deny           Run supply chain security audit"
 	@echo "    doc-check      Build documentation"
+	@echo "    msrv           Check MSRV (minimum supported Rust version)"
 	@echo "    check          Full check (format + lint + test)"
 	@echo "    check-strict   Strict check (format + lint-strict + test + doc + deny)"
 	@echo "    ci             CI-style full check (all gates must pass)"
@@ -119,3 +134,5 @@ help:
 	@echo "    3. cargo test --all-features"
 	@echo "    4. cargo doc --no-deps"
 	@echo "    5. cargo deny check"
+	@echo "    6. rustup run \$$MSRV cargo check --all-features"
+	@echo "    7. cargo bench"

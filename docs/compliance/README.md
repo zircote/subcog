@@ -18,6 +18,7 @@ This directory contains policy templates and procedures for SOC 2 / GDPR complia
 | COMP-H10 | [SECURITY_AWARENESS.md](SECURITY_AWARENESS.md) | Security awareness training | Template |
 | COMP-H11 | [MONITORING_ALERTING.md](MONITORING_ALERTING.md) | Monitoring and alerting | Template |
 | COMP-H12 | [VULNERABILITY_MANAGEMENT.md](VULNERABILITY_MANAGEMENT.md) | Vulnerability management | Template |
+| COMP-H13 | [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.md) | Production deployment plan | Template |
 
 ## Technical Controls Already Implemented
 

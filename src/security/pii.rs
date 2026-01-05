@@ -75,6 +75,46 @@ static PASSPORT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
         .expect("static regex: passport pattern")
 });
 
+// HIGH-SEC: International tax/ID patterns
+
+/// UK National Insurance Number: 2 letters + 6 digits + 1 letter (e.g., AB123456C)
+/// Letters may be separated by spaces or dashes
+static UK_NIN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b[A-CEGHJ-PR-TW-Z]{2}[\s\-]?\d{2}[\s\-]?\d{2}[\s\-]?\d{2}[\s\-]?[A-D]\b")
+        .expect("static regex: UK NIN pattern")
+});
+
+/// Canada Social Insurance Number: 9 digits, often XXX-XXX-XXX or XXX XXX XXX
+static CA_SIN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b\d{3}[\s\-]?\d{3}[\s\-]?\d{3}\b").expect("static regex: Canada SIN pattern")
+});
+
+/// EU VAT Number: Country prefix (2 letters) + country-specific format
+/// Common formats: AT + U + 8 digits, BE + 10 digits, DE + 9 digits, etc.
+static EU_VAT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)\b(?:ATU\d{8}|BE[01]\d{9}|DE\d{9}|DK\d{8}|EE\d{9}|EL\d{9}|ES[A-Z]\d{7}[A-Z0-9]|FI\d{8}|FR[A-Z0-9]{2}\d{9}|HR\d{11}|HU\d{8}|IE\d{7}[A-Z]{1,2}|IT\d{11}|LT\d{9,12}|LU\d{8}|LV\d{11}|MT\d{8}|NL\d{9}B\d{2}|PL\d{10}|PT\d{9}|RO\d{2,10}|SE\d{12}|SI\d{8}|SK\d{10}|CY\d{8}[A-Z]|CZ\d{8,10}|BG\d{9,10})\b",
+    )
+    .expect("static regex: EU VAT pattern")
+});
+
+/// Australian Tax File Number (TFN): 8-9 digits
+static AU_TFN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:tfn|tax\s*file\s*number)\s*[:=]?\s*\d{3}[\s\-]?\d{3}[\s\-]?\d{2,3}\b")
+        .expect("static regex: Australia TFN pattern")
+});
+
+/// Indian Aadhaar Number: 12 digits, often formatted as XXXX XXXX XXXX
+static IN_AADHAAR_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b[2-9]\d{3}[\s\-]?\d{4}[\s\-]?\d{4}\b")
+        .expect("static regex: India Aadhaar pattern")
+});
+
+/// Indian PAN (Permanent Account Number): 5 letters + 4 digits + 1 letter
+static IN_PAN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b[A-Z]{5}\d{4}[A-Z]\b").expect("static regex: India PAN pattern")
+});
+
 /// Returns the list of PII patterns to check.
 fn pii_patterns() -> Vec<PiiPattern> {
     vec![
@@ -113,6 +153,31 @@ fn pii_patterns() -> Vec<PiiPattern> {
         PiiPattern {
             name: "Passport Number",
             regex: &PASSPORT_REGEX,
+        },
+        // International tax/ID patterns
+        PiiPattern {
+            name: "UK National Insurance Number",
+            regex: &UK_NIN_REGEX,
+        },
+        PiiPattern {
+            name: "Canada SIN",
+            regex: &CA_SIN_REGEX,
+        },
+        PiiPattern {
+            name: "EU VAT Number",
+            regex: &EU_VAT_REGEX,
+        },
+        PiiPattern {
+            name: "Australia TFN",
+            regex: &AU_TFN_REGEX,
+        },
+        PiiPattern {
+            name: "India Aadhaar",
+            regex: &IN_AADHAAR_REGEX,
+        },
+        PiiPattern {
+            name: "India PAN",
+            regex: &IN_PAN_REGEX,
         },
     ]
 }
@@ -358,5 +423,135 @@ mod tests {
         let types = detector.detect_types(content);
 
         assert!(types.contains(&"Email Address".to_string()));
+    }
+
+    // ============================================================================
+    // International Tax/ID Pattern Tests
+    // ============================================================================
+
+    #[test]
+    fn test_detect_uk_nin() {
+        let detector = PiiDetector::new();
+        // Valid UK NIN format: 2 letters + 6 digits + 1 letter
+        let content = "NIN: AB123456C";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(
+            matches
+                .iter()
+                .any(|m| m.pii_type == "UK National Insurance Number")
+        );
+    }
+
+    #[test]
+    fn test_detect_uk_nin_with_spaces() {
+        let detector = PiiDetector::new();
+        let content = "National Insurance: AB 12 34 56 C";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(
+            matches
+                .iter()
+                .any(|m| m.pii_type == "UK National Insurance Number")
+        );
+    }
+
+    #[test]
+    fn test_detect_canada_sin() {
+        let detector = PiiDetector::new();
+        // Canadian SIN: 9 digits, often XXX-XXX-XXX
+        let content = "SIN: 123-456-789";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|m| m.pii_type == "Canada SIN"));
+    }
+
+    #[test]
+    fn test_detect_canada_sin_no_dashes() {
+        let detector = PiiDetector::new();
+        let content = "SIN: 123456789";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|m| m.pii_type == "Canada SIN"));
+    }
+
+    #[test]
+    fn test_detect_eu_vat_german() {
+        let detector = PiiDetector::new();
+        // German VAT: DE + 9 digits
+        let content = "VAT: DE123456789";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|m| m.pii_type == "EU VAT Number"));
+    }
+
+    #[test]
+    fn test_detect_eu_vat_french() {
+        let detector = PiiDetector::new();
+        // French VAT: FR + 2 chars + 9 digits
+        let content = "VAT: FR12123456789";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|m| m.pii_type == "EU VAT Number"));
+    }
+
+    #[test]
+    fn test_detect_eu_vat_dutch() {
+        let detector = PiiDetector::new();
+        // Dutch VAT: NL + 9 digits + B + 2 digits
+        let content = "VAT: NL123456789B01";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|m| m.pii_type == "EU VAT Number"));
+    }
+
+    #[test]
+    fn test_detect_australia_tfn() {
+        let detector = PiiDetector::new();
+        // Australian TFN: 8-9 digits with context
+        let content = "TFN: 123-456-789";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|m| m.pii_type == "Australia TFN"));
+    }
+
+    #[test]
+    fn test_detect_india_aadhaar() {
+        let detector = PiiDetector::new();
+        // Aadhaar: 12 digits, first digit 2-9
+        let content = "Aadhaar: 2345 6789 0123";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|m| m.pii_type == "India Aadhaar"));
+    }
+
+    #[test]
+    fn test_detect_india_pan() {
+        let detector = PiiDetector::new();
+        // PAN: 5 letters + 4 digits + 1 letter
+        let content = "PAN: ABCDE1234F";
+        let matches = detector.detect(content);
+
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|m| m.pii_type == "India PAN"));
+    }
+
+    #[test]
+    fn test_international_ids_case_insensitive() {
+        let detector = PiiDetector::new();
+
+        // EU VAT lowercase
+        let content = "vat: de123456789";
+        let matches = detector.detect(content);
+        assert!(matches.iter().any(|m| m.pii_type == "EU VAT Number"));
     }
 }

@@ -187,6 +187,12 @@ mod implementation {
                 .arg("TAG")
                 .arg("tags")
                 .arg("TAG")
+                .arg("project_id")
+                .arg("TAG")
+                .arg("branch")
+                .arg("TAG")
+                .arg("file_path")
+                .arg("TAG")
                 .arg("created_at")
                 .arg("NUMERIC")
                 .arg("SORTABLE")
@@ -234,6 +240,18 @@ mod implementation {
                 clauses.push(format!("@status:{{{}}}", status_strs.join("|")));
             }
 
+            if let Some(ref project_id) = filter.project_id {
+                clauses.push(format!("@project_id:{{{project_id}}}"));
+            }
+
+            if let Some(ref branch) = filter.branch {
+                clauses.push(format!("@branch:{{{branch}}}"));
+            }
+
+            if let Some(ref file_path) = filter.file_path {
+                clauses.push(format!("@file_path:{{{file_path}}}"));
+            }
+
             if clauses.is_empty() {
                 String::new()
             } else {
@@ -248,7 +266,7 @@ mod implementation {
     }
 
     impl IndexBackend for RedisBackend {
-        fn index(&mut self, memory: &Memory) -> Result<()> {
+        fn index(&self, memory: &Memory) -> Result<()> {
             let mut conn = self.get_connection()?;
             let key = format!("mem:{}", memory.id.as_str());
 
@@ -257,6 +275,9 @@ mod implementation {
             let domain_str = memory.domain.to_string();
             let status_str = memory.status.as_str();
             let namespace_str = memory.namespace.as_str();
+            let project_id = memory.project_id.as_deref().unwrap_or("");
+            let branch = memory.branch.as_deref().unwrap_or("");
+            let file_path = memory.file_path.as_deref().unwrap_or("");
 
             let result: redis::RedisResult<()> = conn.hset_multiple(
                 &key,
@@ -266,6 +287,9 @@ mod implementation {
                     ("domain", &domain_str),
                     ("status", status_str),
                     ("tags", &tags_str),
+                    ("project_id", project_id),
+                    ("branch", branch),
+                    ("file_path", file_path),
                 ],
             );
 
@@ -300,7 +324,7 @@ mod implementation {
             Ok(())
         }
 
-        fn remove(&mut self, id: &MemoryId) -> Result<bool> {
+        fn remove(&self, id: &MemoryId) -> Result<bool> {
             let mut conn = self.get_connection()?;
             let key = format!("mem:{}", id.as_str());
 
@@ -409,6 +433,18 @@ mod implementation {
                     let domain_str = fields.get("domain").cloned();
                     let status_str = fields.get("status").cloned().unwrap_or_default();
                     let tags_str = fields.get("tags").cloned();
+                    let project_id = fields
+                        .get("project_id")
+                        .cloned()
+                        .filter(|value| !value.is_empty());
+                    let branch = fields
+                        .get("branch")
+                        .cloned()
+                        .filter(|value| !value.is_empty());
+                    let file_path = fields
+                        .get("file_path")
+                        .cloned()
+                        .filter(|value| !value.is_empty());
                     let created_at: u64 = fields
                         .get("created_at")
                         .and_then(|s| s.parse().ok())
@@ -428,9 +464,13 @@ mod implementation {
                         content,
                         namespace,
                         domain,
+                        project_id,
+                        branch,
+                        file_path,
                         status,
                         created_at,
                         updated_at,
+                        tombstoned_at: None,
                         embedding: None,
                         tags,
                         source: None,
@@ -445,7 +485,7 @@ mod implementation {
             output
         }
 
-        fn clear(&mut self) -> Result<()> {
+        fn clear(&self) -> Result<()> {
             let mut conn = self.get_connection()?;
 
             // Drop and recreate the index
@@ -581,11 +621,11 @@ mod stub {
     }
 
     impl IndexBackend for RedisBackend {
-        fn index(&mut self, _memory: &Memory) -> Result<()> {
+        fn index(&self, _memory: &Memory) -> Result<()> {
             Err(Error::FeatureNotEnabled("redis".to_string()))
         }
 
-        fn remove(&mut self, _id: &MemoryId) -> Result<bool> {
+        fn remove(&self, _id: &MemoryId) -> Result<bool> {
             Err(Error::FeatureNotEnabled("redis".to_string()))
         }
 
@@ -606,7 +646,7 @@ mod stub {
             Err(Error::FeatureNotEnabled("redis".to_string()))
         }
 
-        fn clear(&mut self) -> Result<()> {
+        fn clear(&self) -> Result<()> {
             Err(Error::FeatureNotEnabled("redis".to_string()))
         }
     }

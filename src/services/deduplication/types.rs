@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 ///     reason: Some(DuplicateReason::ExactMatch),
 ///     similarity_score: None,
 ///     matched_memory_id: Some(MemoryId::new("abc123")),
-///     matched_urn: Some("subcog://global/decisions/abc123".to_string()),
+///     matched_urn: Some("subcog://project/decisions/abc123".to_string()),
 ///     check_duration_ms: 5,
 /// };
 ///
@@ -97,7 +97,7 @@ impl DuplicateCheckResult {
     ///
     /// let result = DuplicateCheckResult::exact_match(
     ///     MemoryId::new("abc123"),
-    ///     "subcog://global/decisions/abc123".to_string(),
+    ///     "subcog://project/decisions/abc123".to_string(),
     ///     5,
     /// );
     /// assert!(result.is_duplicate);
@@ -131,7 +131,7 @@ impl DuplicateCheckResult {
     ///
     /// let result = DuplicateCheckResult::semantic_match(
     ///     MemoryId::new("abc123"),
-    ///     "subcog://global/decisions/abc123".to_string(),
+    ///     "subcog://project/decisions/abc123".to_string(),
     ///     0.94,
     ///     20,
     /// );
@@ -171,7 +171,7 @@ impl DuplicateCheckResult {
     ///
     /// let result = DuplicateCheckResult::recent_capture(
     ///     MemoryId::new("abc123"),
-    ///     "subcog://global/decisions/abc123".to_string(),
+    ///     "subcog://project/decisions/abc123".to_string(),
     ///     1,
     /// );
     /// assert!(result.is_duplicate);
@@ -276,7 +276,7 @@ mod tests {
     fn test_exact_match_result() {
         let result = DuplicateCheckResult::exact_match(
             MemoryId::new("test123"),
-            "subcog://global/decisions/test123".to_string(),
+            "subcog://project/decisions/test123".to_string(),
             5,
         );
         assert!(result.is_duplicate);
@@ -285,7 +285,7 @@ mod tests {
         assert_eq!(result.matched_memory_id, Some(MemoryId::new("test123")));
         assert_eq!(
             result.matched_urn,
-            Some("subcog://global/decisions/test123".to_string())
+            Some("subcog://project/decisions/test123".to_string())
         );
     }
 
@@ -293,7 +293,7 @@ mod tests {
     fn test_semantic_match_result() {
         let result = DuplicateCheckResult::semantic_match(
             MemoryId::new("test456"),
-            "subcog://global/patterns/test456".to_string(),
+            "subcog://project/patterns/test456".to_string(),
             0.94,
             20,
         );
@@ -306,7 +306,7 @@ mod tests {
     fn test_recent_capture_result() {
         let result = DuplicateCheckResult::recent_capture(
             MemoryId::new("test789"),
-            "subcog://global/learnings/test789".to_string(),
+            "subcog://project/learnings/test789".to_string(),
             1,
         );
         assert!(result.is_duplicate);

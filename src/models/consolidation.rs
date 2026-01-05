@@ -1,4 +1,49 @@
-//! Memory consolidation types.
+//! Memory consolidation types for lifecycle management.
+//!
+//! This module provides types for managing memory retention, tiering, and
+//! relationships between memories during consolidation operations.
+//!
+//! # Memory Tiers
+//!
+//! Memories are organized into tiers based on access patterns and importance:
+//!
+//! | Tier | Score Range | Behavior |
+//! |------|-------------|----------|
+//! | Hot | ≥ 0.7 | Frequently accessed, high priority |
+//! | Warm | 0.4 - 0.7 | Moderately accessed (default) |
+//! | Cold | 0.2 - 0.4 | Rarely accessed, low priority |
+//! | Archive | < 0.2 | Long-term storage only |
+//!
+//! # Edge Types
+//!
+//! Relationships between memories are modeled as directed edges:
+//!
+//! - `Contradicts` - Memory A conflicts with memory B
+//! - `Supersedes` - Memory A replaces memory B
+//! - `RelatedTo` - Memory A is contextually related to memory B
+//! - `Refines` - Memory A adds detail to memory B
+//! - `ParentOf` / `ChildOf` - Hierarchical relationships
+//!
+//! # Retention Scoring
+//!
+//! [`RetentionScore`] calculates a composite score from:
+//! - **Access frequency** (20% weight) - How often the memory is retrieved
+//! - **Recency** (30% weight) - When the memory was last accessed
+//! - **Importance** (50% weight) - LLM-assessed significance
+//!
+//! # Example
+//!
+//! ```rust
+//! use subcog::models::{MemoryTier, RetentionScore};
+//!
+//! // Create a retention score for a frequently-accessed, recent, important memory
+//! let score = RetentionScore::new(0.8, 0.9, 0.95);
+//! assert_eq!(score.suggested_tier(), MemoryTier::Hot);
+//!
+//! // A rarely-accessed, old, low-importance memory
+//! let cold_score = RetentionScore::new(0.1, 0.2, 0.1);
+//! assert_eq!(cold_score.suggested_tier(), MemoryTier::Archive);
+//! ```
 
 use std::fmt;
 

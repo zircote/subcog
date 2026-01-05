@@ -30,6 +30,7 @@ The `recall` command searches the memory index using hybrid search (combining ve
 | `--detail` | `-d` | Detail level (light, medium, everything) | `medium` |
 | `--format` | | Output format (table, json, markdown) | `table` |
 | `--namespace` | `-n` | Filter by namespace | None |
+| `--include-tombstoned` | | Include tombstoned memories | `false` |
 
 ## Search Modes
 
@@ -87,6 +88,14 @@ subcog recall -f "source:src/*" "implementation"
 subcog recall -f "source:*.rs" "rust code"
 ```
 
+### Project/Branch/Path Filters
+
+```bash
+subcog recall -f "project:github.com/org/repo" "storage"
+subcog recall -f "branch:main" "release"
+subcog recall -f "path:src/services/*" "context"
+```
+
 ### Combined Filters
 
 ```bash
@@ -123,6 +132,12 @@ subcog recall -m text "Result<T, E>"
 
 ```bash
 subcog recall -d everything "specific decision"
+```
+
+### Include Tombstoned Memories
+
+```bash
+subcog recall "old decision" --include-tombstoned
 ```
 
 ### JSON Output

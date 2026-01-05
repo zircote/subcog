@@ -1855,7 +1855,7 @@ This PRD is part of a comprehensive specification suite. **All documents are man
 │     │   └── Metrics, tracing, logging, OTLP export              │
 │     │                                                           │
 │     ├── MCP_RESOURCES_AND_LLM.md                                │
-│     │   └── subcog://mem/{domain}/{namespace}/{id} URNs         │
+│     │   └── subcog://{domain}/{namespace}/{id} URNs         │
 │     │   └── Anthropic, OpenAI, Ollama, LMStudio providers       │
 │     │                                                           │
 │     ├── ACCESS_INTERFACES.md                                    │

@@ -104,12 +104,20 @@ pub struct SearchFilter {
     pub excluded_tags: Vec<String>,
     /// Filter by source pattern (glob-style).
     pub source_pattern: Option<String>,
+    /// Filter by project identifier (normalized git remote URL).
+    pub project_id: Option<String>,
+    /// Filter by branch name.
+    pub branch: Option<String>,
+    /// Filter by file path (relative to repo root).
+    pub file_path: Option<String>,
     /// Minimum creation timestamp.
     pub created_after: Option<u64>,
     /// Maximum creation timestamp.
     pub created_before: Option<u64>,
     /// Minimum similarity score (0.0 to 1.0).
     pub min_score: Option<f32>,
+    /// Include tombstoned memories (default: false).
+    pub include_tombstoned: bool,
 }
 
 impl SearchFilter {
@@ -124,9 +132,13 @@ impl SearchFilter {
             tags_any: Vec::new(),
             excluded_tags: Vec::new(),
             source_pattern: None,
+            project_id: None,
+            branch: None,
+            file_path: None,
             created_after: None,
             created_before: None,
             min_score: None,
+            include_tombstoned: false,
         }
     }
 
@@ -179,6 +191,27 @@ impl SearchFilter {
         self
     }
 
+    /// Sets the project identifier filter.
+    #[must_use]
+    pub fn with_project_id(mut self, project_id: impl Into<String>) -> Self {
+        self.project_id = Some(project_id.into());
+        self
+    }
+
+    /// Sets the branch filter.
+    #[must_use]
+    pub fn with_branch(mut self, branch: impl Into<String>) -> Self {
+        self.branch = Some(branch.into());
+        self
+    }
+
+    /// Sets the file path filter.
+    #[must_use]
+    pub fn with_file_path(mut self, file_path: impl Into<String>) -> Self {
+        self.file_path = Some(file_path.into());
+        self
+    }
+
     /// Sets the minimum score threshold.
     #[must_use]
     pub const fn with_min_score(mut self, score: f32) -> Self {
@@ -200,9 +233,16 @@ impl SearchFilter {
         self
     }
 
+    /// Includes tombstoned memories in results.
+    #[must_use]
+    pub const fn with_include_tombstoned(mut self, include: bool) -> Self {
+        self.include_tombstoned = include;
+        self
+    }
+
     /// Returns true if the filter is empty (matches all).
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.namespaces.is_empty()
             && self.domains.is_empty()
             && self.statuses.is_empty()
@@ -210,6 +250,9 @@ impl SearchFilter {
             && self.tags_any.is_empty()
             && self.excluded_tags.is_empty()
             && self.source_pattern.is_none()
+            && self.project_id.is_none()
+            && self.branch.is_none()
+            && self.file_path.is_none()
             && self.created_after.is_none()
             && self.created_before.is_none()
             && self.min_score.is_none()
@@ -234,8 +277,14 @@ pub struct SearchResult {
 pub struct SearchHit {
     /// The matched memory.
     pub memory: Memory,
-    /// Combined score (0.0 to 1.0).
+    /// Normalized combined score (0.0 to 1.0).
+    /// This is the primary score for display to users.
+    /// The max score in a result set is always 1.0.
     pub score: f32,
+    /// Raw combined score before normalization.
+    /// Useful for debugging RRF fusion behavior.
+    /// This is the sum of RRF contributions from text and vector search.
+    pub raw_score: f32,
     /// Vector similarity score if applicable.
     pub vector_score: Option<f32>,
     /// BM25 text score if applicable.
