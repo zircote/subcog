@@ -61,7 +61,7 @@
 - [x] Add smoke tests for metrics registry and OTLP initialization ✓
 
 ### Phase 5: Documentation & Rollout
-- [ ] Update user-facing docs for observability configuration
+- [x] Update user-facing docs for observability configuration ✓
 - [ ] Add troubleshooting steps for tracing/logging/metrics
 - [ ] Add deployment checklist for OTLP endpoints and log sinks
 - [ ] Provide a minimal “observability quickstart” example

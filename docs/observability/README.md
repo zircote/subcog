@@ -1,0 +1,33 @@
+# Observability Configuration
+
+## Logging
+
+Environment variables:
+
+- `SUBCOG_LOG_FORMAT` (`json` or `pretty`)
+- `SUBCOG_LOG_LEVEL` (e.g., `info`, `debug`)
+- `SUBCOG_LOG_FILTER` (advanced filters)
+- `SUBCOG_LOG_FILE` (optional path)
+
+## Tracing
+
+Environment variables:
+
+- `SUBCOG_TRACING_ENABLED`
+- `SUBCOG_TRACE_SAMPLE_RATIO`
+- `SUBCOG_TRACING_SAMPLER`
+- `SUBCOG_OTLP_ENDPOINT`
+- `SUBCOG_OTLP_PROTOCOL`
+- `OTEL_SERVICE_NAME`
+- `OTEL_RESOURCE_ATTRIBUTES`
+
+## Metrics
+
+Environment variables:
+
+- `SUBCOG_METRICS_ENABLED`
+- `SUBCOG_METRICS_PORT`
+- `SUBCOG_METRICS_PUSH_GATEWAY_ENDPOINT`
+- `SUBCOG_METRICS_PUSH_GATEWAY_USERNAME`
+- `SUBCOG_METRICS_PUSH_GATEWAY_PASSWORD`
+- `SUBCOG_METRICS_PUSH_GATEWAY_USE_POST`
