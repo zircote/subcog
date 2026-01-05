@@ -84,7 +84,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     pub fn consolidate(&mut self) -> Result<ConsolidationStats> {
         let start = Instant::now();
         if let Some(request_id) = current_request_id() {
-            tracing::Span::current().record("request_id", &request_id.as_str());
+            tracing::Span::current().record("request_id", request_id.as_str());
         }
         let result = (|| {
             let mut stats = ConsolidationStats::default();

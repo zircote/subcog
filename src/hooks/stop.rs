@@ -403,7 +403,7 @@ impl HookHandler for StopHandler {
         let deadline = Duration::from_millis(self.timeout_ms);
         let mut timed_out = false;
         if let Some(request_id) = current_request_id() {
-            tracing::Span::current().record("request_id", &request_id.as_str());
+            tracing::Span::current().record("request_id", request_id.as_str());
         }
 
         tracing::info!(

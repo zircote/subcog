@@ -8,8 +8,8 @@ mod request_context;
 mod tracing;
 
 pub use event_bus::{EventBus, global_event_bus};
-pub use logging::{LogFormat, Logger, LoggingConfig};
 use logging::RedactingJsonFields;
+pub use logging::{LogFormat, Logger, LoggingConfig};
 pub use metrics::{Metrics, MetricsConfig, flush_global as flush_metrics, set_instance_label};
 pub use otlp::{OtlpConfig, OtlpExporter, OtlpProtocol};
 pub use request_context::{
@@ -255,16 +255,18 @@ pub fn init(config: ObservabilityConfig) -> Result<ObservabilityHandle> {
     match (&config.logging.file, config.logging.format) {
         (Some(log_file), LogFormat::Json) => {
             let writer = open_log_file(log_file)?;
+            let json_format = tracing_subscriber::fmt::format()
+                .json()
+                .with_current_span(true)
+                .with_span_list(true);
             tracing_subscriber::registry()
                 .with(tracing_layer)
                 .with(logs_layer)
                 .with(
                     tracing_subscriber::fmt::layer()
-                        .json()
+                        .event_format(json_format)
                         .fmt_fields(RedactingJsonFields::default())
                         .with_writer(writer)
-                        .with_current_span(true)
-                        .with_span_list(true)
                         .with_target(true)
                         .with_thread_ids(true)
                         .with_thread_names(true),
@@ -282,8 +284,6 @@ pub fn init(config: ObservabilityConfig) -> Result<ObservabilityHandle> {
                     tracing_subscriber::fmt::layer()
                         .with_writer(writer)
                         .with_ansi(false)
-                        .with_current_span(true)
-                        .with_span_list(true)
                         .with_target(true)
                         .with_thread_ids(true)
                         .with_thread_names(true),
@@ -293,15 +293,17 @@ pub fn init(config: ObservabilityConfig) -> Result<ObservabilityHandle> {
                 .map_err(init_error)?;
         },
         (None, LogFormat::Json) => {
+            let json_format = tracing_subscriber::fmt::format()
+                .json()
+                .with_current_span(true)
+                .with_span_list(true);
             tracing_subscriber::registry()
                 .with(tracing_layer)
                 .with(logs_layer)
                 .with(
                     tracing_subscriber::fmt::layer()
-                        .json()
+                        .event_format(json_format)
                         .fmt_fields(RedactingJsonFields::default())
-                        .with_current_span(true)
-                        .with_span_list(true)
                         .with_target(true)
                         .with_thread_ids(true)
                         .with_thread_names(true),
@@ -317,8 +319,6 @@ pub fn init(config: ObservabilityConfig) -> Result<ObservabilityHandle> {
                 .with(
                     tracing_subscriber::fmt::layer()
                         .pretty()
-                        .with_current_span(true)
-                        .with_span_list(true)
                         .with_target(true)
                         .with_thread_ids(true)
                         .with_thread_names(true),

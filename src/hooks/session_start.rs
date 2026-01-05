@@ -9,10 +9,10 @@
 
 use super::HookHandler;
 use crate::Result;
+use crate::observability::current_request_id;
 use crate::services::{ContextBuilderService, MemoryStatistics};
 use std::time::{Duration, Instant};
 use tracing::instrument;
-use crate::observability::current_request_id;
 
 /// Minimum length for session IDs (security requirement).
 const MIN_SESSION_ID_LENGTH: usize = 16;
@@ -686,7 +686,7 @@ impl HookHandler for SessionStartHandler {
         let start = Instant::now();
         let mut token_estimate: Option<usize> = None;
         if let Some(request_id) = current_request_id() {
-            tracing::Span::current().record("request_id", &request_id.as_str());
+            tracing::Span::current().record("request_id", request_id.as_str());
         }
 
         tracing::info!(hook = "SessionStart", "Processing session start hook");

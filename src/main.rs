@@ -244,7 +244,7 @@ async fn main() -> ExitCode {
         },
     };
 
-    let result = run_command(cli, config).await;
+    let result = Box::pin(run_command(cli, config)).await;
 
     // Explicitly shutdown observability before async runtime exits
     observability_handle.shutdown();
@@ -287,7 +287,7 @@ async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::
     let request_context = RequestContext::new();
     let request_id = request_context.request_id().to_string();
 
-    scope_request_context(request_context, async move {
+    Box::pin(scope_request_context(request_context, async move {
         let span = info_span!(
             "subcog.cli.command",
             request_id = %request_id,
@@ -297,76 +297,76 @@ async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::
         let _span_guard = span.enter();
 
         match cli.command {
-        Commands::Capture {
-            content,
-            namespace,
-            tags,
-            source,
-        } => commands::cmd_capture(&config, content, namespace, tags, source),
+            Commands::Capture {
+                content,
+                namespace,
+                tags,
+                source,
+            } => commands::cmd_capture(&config, content, namespace, tags, source),
 
-        Commands::Recall {
-            query,
-            mode,
-            namespace,
-            limit,
-            raw,
-            include_tombstoned,
-        } => commands::cmd_recall(query, mode, namespace, limit, raw, include_tombstoned),
+            Commands::Recall {
+                query,
+                mode,
+                namespace,
+                limit,
+                raw,
+                include_tombstoned,
+            } => commands::cmd_recall(query, mode, namespace, limit, raw, include_tombstoned),
 
-        Commands::Status => commands::cmd_status(&config),
+            Commands::Status => commands::cmd_status(&config),
 
-        Commands::Sync { push, fetch } => commands::cmd_sync(&config, push, fetch),
+            Commands::Sync { push, fetch } => commands::cmd_sync(&config, push, fetch),
 
-        Commands::Consolidate => commands::cmd_consolidate(&config),
+            Commands::Consolidate => commands::cmd_consolidate(&config),
 
-        Commands::Reindex { repo } => commands::cmd_reindex(repo),
+            Commands::Reindex { repo } => commands::cmd_reindex(repo),
 
-        Commands::Enrich {
-            all,
-            update_all,
-            id,
-            dry_run,
-        } => commands::cmd_enrich(&config, all, update_all, id, dry_run),
-
-        Commands::Config { show, set } => commands::cmd_config(config, show, set),
-
-        Commands::Serve { transport, port } => cmd_serve(transport, port).await,
-
-        Commands::Hook { event } => commands::cmd_hook(event, &config),
-
-        Commands::Prompt { action } => commands::cmd_prompt(action),
-
-        Commands::Namespaces { format, verbose } => {
-            use std::str::FromStr;
-            use subcog::cli::{NamespacesOutputFormat, cmd_namespaces};
-            let format = NamespacesOutputFormat::from_str(&format).unwrap_or_default();
-            cmd_namespaces(format, verbose)
-        },
-
-        Commands::Migrate { action } => match action {
-            MigrateAction::Embeddings {
-                repo,
+            Commands::Enrich {
+                all,
+                update_all,
+                id,
                 dry_run,
-                force,
-            } => commands::cmd_migrate_embeddings(repo, dry_run, force),
-        },
+            } => commands::cmd_enrich(&config, all, update_all, id, dry_run),
 
-        Commands::Completions { shell } => {
-            use clap::CommandFactory;
-            use clap_complete::generate;
-            use std::io;
-            let mut cmd = Cli::command();
-            generate(shell, &mut cmd, "subcog", &mut io::stdout());
-            Ok(())
-        },
+            Commands::Config { show, set } => commands::cmd_config(config, show, set),
 
-        Commands::Gc {
-            dry_run,
-            purge,
-            older_than,
-        } => subcog::cli::gc::execute(dry_run, purge, older_than).map_err(Into::into),
+            Commands::Serve { transport, port } => cmd_serve(transport, port).await,
+
+            Commands::Hook { event } => commands::cmd_hook(event, &config),
+
+            Commands::Prompt { action } => commands::cmd_prompt(action),
+
+            Commands::Namespaces { format, verbose } => {
+                use std::str::FromStr;
+                use subcog::cli::{NamespacesOutputFormat, cmd_namespaces};
+                let format = NamespacesOutputFormat::from_str(&format).unwrap_or_default();
+                cmd_namespaces(format, verbose)
+            },
+
+            Commands::Migrate { action } => match action {
+                MigrateAction::Embeddings {
+                    repo,
+                    dry_run,
+                    force,
+                } => commands::cmd_migrate_embeddings(repo, dry_run, force),
+            },
+
+            Commands::Completions { shell } => {
+                use clap::CommandFactory;
+                use clap_complete::generate;
+                use std::io;
+                let mut cmd = Cli::command();
+                generate(shell, &mut cmd, "subcog", &mut io::stdout());
+                Ok(())
+            },
+
+            Commands::Gc {
+                dry_run,
+                purge,
+                older_than,
+            } => subcog::cli::gc::execute(dry_run, purge, older_than).map_err(Into::into),
         }
-    })
+    }))
     .await
 }
 

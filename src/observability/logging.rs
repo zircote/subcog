@@ -7,6 +7,7 @@ use serde_json::{Map, Number, Value};
 use tracing::field::{Field, Visit};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::field::RecordFields;
+use tracing_subscriber::fmt::FormattedFields;
 use tracing_subscriber::fmt::format::{FormatFields, Writer};
 
 use crate::config::LoggingSettings;
@@ -52,7 +53,7 @@ impl LoggingConfig {
             .or_else(|| {
                 settings
                     .and_then(|config| config.level.as_ref())
-                    .map(|level| EnvFilter::new(normalize_level(level.clone())))
+                    .map(|level| EnvFilter::new(normalize_level(level)))
             })
             .unwrap_or_else(|| default_filter(verbose));
 
@@ -145,28 +146,39 @@ pub struct RedactingJsonFields {
     redactor: LogRedactor,
 }
 
-impl RedactingJsonFields {
-    /// Creates a redacting JSON field formatter.
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            redactor: LogRedactor::new(),
-        }
-    }
-}
-
-impl Default for RedactingJsonFields {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl FormatFields for RedactingJsonFields {
-    fn format_fields<R: RecordFields>(&self, writer: Writer<'_>, fields: R) -> fmt::Result {
+impl<'writer> FormatFields<'writer> for RedactingJsonFields {
+    fn format_fields<R: RecordFields>(
+        &self,
+        mut writer: Writer<'writer>,
+        fields: R,
+    ) -> fmt::Result {
         let mut visitor = RedactingVisitor::new(&self.redactor);
         fields.record(&mut visitor);
         let json = serde_json::to_string(&visitor.values).map_err(|_| fmt::Error)?;
         writer.write_str(&json)
+    }
+
+    fn add_fields(
+        &self,
+        current: &'writer mut FormattedFields<Self>,
+        fields: &tracing::span::Record<'_>,
+    ) -> fmt::Result {
+        if current.is_empty() {
+            let mut writer = current.as_writer();
+            let mut visitor = RedactingVisitor::new(&self.redactor);
+            fields.record(&mut visitor);
+            let json = serde_json::to_string(&visitor.values).map_err(|_| fmt::Error)?;
+            writer.write_str(&json)?;
+            return Ok(());
+        }
+
+        let map: Map<String, Value> = serde_json::from_str(current).map_err(|_| fmt::Error)?;
+        let mut visitor = RedactingVisitor::new(&self.redactor);
+        visitor.values = map;
+        fields.record(&mut visitor);
+        let json = serde_json::to_string(&visitor.values).map_err(|_| fmt::Error)?;
+        current.fields = json;
+        Ok(())
     }
 }
 
@@ -228,82 +240,6 @@ impl Visit for RedactingVisitor<'_> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::RedactingJsonFields;
-    use std::sync::{Arc, Mutex};
-    use tracing_subscriber::prelude::*;
-
-    #[derive(Clone)]
-    struct SharedWriter(Arc<Mutex<Vec<u8>>>);
-
-    impl std::io::Write for SharedWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedWriter {
-        type Writer = SharedWriter;
-
-        fn make_writer(&'a self) -> Self::Writer {
-            self.clone()
-        }
-    }
-
-    #[test]
-    fn test_json_log_format_includes_required_fields() {
-        let buffer = Arc::new(Mutex::new(Vec::new()));
-        let writer = SharedWriter(buffer.clone());
-        let subscriber = tracing_subscriber::registry().with(
-            tracing_subscriber::fmt::layer()
-                .json()
-                .fmt_fields(RedactingJsonFields::default())
-                .with_writer(writer)
-                .with_current_span(true)
-                .with_span_list(true),
-        );
-
-        let _guard = tracing::subscriber::set_default(subscriber);
-        let span = tracing::info_span!(
-            "subcog.test",
-            request_id = "req-test",
-            component = "test",
-            operation = "unit"
-        );
-        let _span_guard = span.enter();
-
-        tracing::info!(event = "test_event", memory_id = "mem-1", domain = "project", "hello");
-
-        let output = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
-        let line = output.lines().next().expect("log line");
-        let value: serde_json::Value = serde_json::from_str(line).unwrap();
-
-        assert!(value.get("level").is_some(), "level missing");
-        let fields = value
-            .get("fields")
-            .and_then(|v| v.as_object())
-            .expect("fields missing");
-        assert_eq!(fields.get("event").and_then(|v| v.as_str()), Some("test_event"));
-        assert!(fields.get("message").is_some(), "message missing");
-
-        let span_fields = value
-            .get("span")
-            .and_then(|span| span.get("fields"))
-            .and_then(|f| f.as_object())
-            .expect("span fields missing");
-        assert_eq!(
-            span_fields.get("request_id").and_then(|v| v.as_str()),
-            Some("req-test")
-        );
-    }
-}
-
 fn parse_log_format(value: &str) -> Option<LogFormat> {
     match value.to_lowercase().as_str() {
         "pretty" => Some(LogFormat::Pretty),
@@ -323,7 +259,7 @@ fn filter_from_env_override(default_filter: EnvFilter) -> EnvFilter {
     }
 
     if let Ok(level) = std::env::var("SUBCOG_LOG_LEVEL") {
-        return EnvFilter::new(normalize_level(level));
+        return EnvFilter::new(normalize_level(&level));
     }
 
     if let Ok(filter) = EnvFilter::try_from_default_env() {
@@ -333,7 +269,7 @@ fn filter_from_env_override(default_filter: EnvFilter) -> EnvFilter {
     default_filter
 }
 
-fn normalize_level(level: String) -> String {
+fn normalize_level(level: &str) -> String {
     let normalized = level.trim().to_lowercase();
     if normalized.contains('=') || normalized.contains(',') {
         normalized
@@ -358,4 +294,101 @@ fn log_file_from_env_override(default: Option<PathBuf>) -> Option<PathBuf> {
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .or(default)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RedactingJsonFields;
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::prelude::*;
+
+    #[derive(Clone)]
+    struct SharedWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for SharedWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedWriter {
+        type Writer = Self;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    #[test]
+    fn test_json_log_format_includes_required_fields() {
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let writer = SharedWriter(buffer.clone());
+        let json_format = tracing_subscriber::fmt::format()
+            .json()
+            .with_current_span(true)
+            .with_span_list(true);
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .event_format(json_format)
+                .fmt_fields(RedactingJsonFields::default())
+                .with_writer(writer),
+        );
+
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let span = tracing::info_span!(
+            "subcog.test",
+            request_id = "req-test",
+            component = "test",
+            operation = "unit"
+        );
+        let _span_guard = span.enter();
+
+        tracing::info!(
+            event = "test_event",
+            memory_id = "mem-1",
+            domain = "project",
+            "hello"
+        );
+
+        let output = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+        let line = output.lines().next().expect("log line");
+        let value: serde_json::Value = serde_json::from_str(line).unwrap();
+
+        assert!(value.get("level").is_some(), "level missing");
+        let fields = value
+            .get("fields")
+            .and_then(|v| v.as_object())
+            .expect("fields missing");
+        assert_eq!(
+            fields.get("event").and_then(|v| v.as_str()),
+            Some("test_event")
+        );
+        assert!(fields.get("message").is_some(), "message missing");
+
+        let span_request_id = value
+            .get("span")
+            .and_then(|span| span.as_object())
+            .and_then(|span| {
+                span.get("request_id").and_then(|v| v.as_str()).or_else(|| {
+                    span.get("fields")
+                        .and_then(|f| f.as_object())
+                        .and_then(|f| f.get("request_id"))
+                        .and_then(|v| v.as_str())
+                })
+            })
+            .or_else(|| {
+                value
+                    .get("spans")
+                    .and_then(|spans| spans.as_array())
+                    .and_then(|spans| spans.last())
+                    .and_then(|span| span.get("request_id"))
+                    .and_then(|v| v.as_str())
+            });
+        assert_eq!(span_request_id, Some("req-test"));
+    }
 }

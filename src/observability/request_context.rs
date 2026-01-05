@@ -34,12 +34,18 @@ impl RequestContext {
     }
 }
 
+impl Default for RequestContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 tokio::task_local! {
     static TASK_CONTEXT: RequestContext;
 }
 
 thread_local! {
-    static THREAD_CONTEXT: RefCell<Option<RequestContext>> = RefCell::new(None);
+    static THREAD_CONTEXT: RefCell<Option<RequestContext>> = const { RefCell::new(None) };
 }
 
 /// Guard that restores the previous thread-local context on drop.

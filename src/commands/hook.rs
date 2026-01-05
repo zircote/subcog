@@ -9,7 +9,9 @@ use subcog::hooks::{
     StopHandler, UserPromptHandler,
 };
 use subcog::models::{EventMeta, MemoryEvent};
-use subcog::observability::{RequestContext, current_request_id, enter_request_context, flush_metrics};
+use subcog::observability::{
+    RequestContext, current_request_id, enter_request_context, flush_metrics,
+};
 use subcog::security::record_event;
 use subcog::services::ContextBuilderService;
 use subcog::storage::index::SqliteBackend;

@@ -181,7 +181,7 @@ impl RecallService {
         let domain_label = domain_label(filter);
         let mode_label = mode.as_str();
         if let Some(request_id) = current_request_id() {
-            tracing::Span::current().record("request_id", &request_id.as_str());
+            tracing::Span::current().record("request_id", request_id.as_str());
         }
 
         tracing::info!(mode = %mode_label, query_length = query.len(), limit = limit, timeout_ms = self.timeout_ms, "Searching memories");
@@ -385,7 +385,7 @@ impl RecallService {
         let start = Instant::now();
         let domain_label = domain_label(filter);
         if let Some(request_id) = current_request_id() {
-            tracing::Span::current().record("request_id", &request_id.as_str());
+            tracing::Span::current().record("request_id", request_id.as_str());
         }
 
         let result = (|| {

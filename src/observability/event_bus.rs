@@ -18,6 +18,11 @@ pub struct FilteredReceiver<F> {
     predicate: F,
 }
 
+fn usize_to_f64(value: usize) -> f64 {
+    let capped = u32::try_from(value).unwrap_or(u32::MAX);
+    f64::from(capped)
+}
+
 impl EventBus {
     /// Creates a new event bus with the given buffer capacity.
     #[must_use]
@@ -30,10 +35,10 @@ impl EventBus {
     pub fn publish(&self, event: MemoryEvent) {
         metrics::counter!("event_bus_publish_total").increment(1);
         let receivers = self.sender.receiver_count();
-        metrics::gauge!("event_bus_receivers").set(receivers as f64);
+        metrics::gauge!("event_bus_receivers").set(usize_to_f64(receivers));
         match self.sender.send(event) {
             Ok(_) => {
-                metrics::gauge!("event_bus_queue_depth").set(self.sender.len() as f64);
+                metrics::gauge!("event_bus_queue_depth").set(usize_to_f64(self.sender.len()));
             },
             Err(_) => {
                 metrics::counter!("event_bus_publish_failed_total").increment(1);
@@ -45,7 +50,7 @@ impl EventBus {
     #[must_use]
     pub fn subscribe(&self) -> broadcast::Receiver<MemoryEvent> {
         metrics::counter!("event_bus_subscriptions_total").increment(1);
-        metrics::gauge!("event_bus_receivers").set(self.sender.receiver_count() as f64);
+        metrics::gauge!("event_bus_receivers").set(usize_to_f64(self.sender.receiver_count()));
         self.sender.subscribe()
     }
 
@@ -56,7 +61,7 @@ impl EventBus {
         F: Fn(&MemoryEvent) -> bool,
     {
         metrics::counter!("event_bus_subscriptions_total").increment(1);
-        metrics::gauge!("event_bus_receivers").set(self.sender.receiver_count() as f64);
+        metrics::gauge!("event_bus_receivers").set(usize_to_f64(self.sender.receiver_count()));
         FilteredReceiver {
             receiver: self.sender.subscribe(),
             predicate,
@@ -81,13 +86,10 @@ where
     pub async fn recv(&mut self) -> Result<MemoryEvent, broadcast::error::RecvError> {
         loop {
             match self.receiver.recv().await {
-                Ok(event) => {
-                    if (self.predicate)(&event) {
-                        return Ok(event);
-                    }
-                }
+                Ok(event) if (self.predicate)(&event) => return Ok(event),
+                Ok(_) => {},
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    metrics::counter!("event_bus_lagged_total").increment(skipped as u64);
+                    metrics::counter!("event_bus_lagged_total").increment(skipped);
                 },
                 Err(err) => return Err(err),
             }
@@ -106,7 +108,7 @@ pub fn global_event_bus() -> &'static EventBus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Domain, EventMeta, MemoryId, MemoryEvent, Namespace};
+    use crate::models::{Domain, EventMeta, MemoryEvent, MemoryId, Namespace};
 
     #[tokio::test]
     async fn test_subscribe_filtered_skips_non_matching() {

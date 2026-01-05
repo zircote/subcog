@@ -57,7 +57,7 @@ impl TombstoneService {
 
         record_event(MemoryEvent::Updated {
             meta: EventMeta::with_timestamp("tombstone", current_request_id(), now),
-            memory_id: memory.id.clone(),
+            memory_id: memory.id,
             modified_fields: vec!["status".to_string(), "tombstoned_at".to_string()],
         });
 
@@ -97,9 +97,10 @@ impl TombstoneService {
         // Update in persistence
         self.persistence.store(&memory)?;
 
+        let updated_at = memory.updated_at;
         record_event(MemoryEvent::Updated {
-            meta: EventMeta::with_timestamp("tombstone", current_request_id(), memory.updated_at),
-            memory_id: memory.id.clone(),
+            meta: EventMeta::with_timestamp("tombstone", current_request_id(), updated_at),
+            memory_id: memory.id,
             modified_fields: vec!["status".to_string(), "tombstoned_at".to_string()],
         });
 
@@ -134,10 +135,11 @@ impl TombstoneService {
                 if memory.status == MemoryStatus::Tombstoned {
                     if let Some(ts) = memory.tombstoned_at {
                         if ts.timestamp() < threshold_i64 {
-                            self.persistence.delete(&memory.id)?;
+                            let memory_id = memory.id;
+                            self.persistence.delete(&memory_id)?;
                             record_event(MemoryEvent::Deleted {
                                 meta: EventMeta::new("tombstone", current_request_id()),
-                                memory_id: memory.id.clone(),
+                                memory_id,
                                 reason: "purge_tombstoned".to_string(),
                             });
                             purged += 1;

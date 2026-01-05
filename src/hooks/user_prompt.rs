@@ -511,8 +511,12 @@ impl UserPromptHandler {
             meta: EventMeta::new("hooks", current_request_id()),
             hook: "UserPromptSubmit".to_string(),
             decision: decision.to_string(),
-            namespace: signals.first().map(|signal| signal.namespace.as_str().to_string()),
-            memory_id: capture_result.as_ref().map(|result| result.memory_id.clone()),
+            namespace: signals
+                .first()
+                .map(|signal| signal.namespace.as_str().to_string()),
+            memory_id: capture_result
+                .as_ref()
+                .map(|result| result.memory_id.clone()),
         });
 
         // Detect search intent for proactive memory surfacing
@@ -630,7 +634,7 @@ impl HookHandler for UserPromptHandler {
         let mut prompt_len = 0usize;
         let mut intent_detected = false;
         if let Some(request_id) = current_request_id() {
-            tracing::Span::current().record("request_id", &request_id.as_str());
+            tracing::Span::current().record("request_id", request_id.as_str());
         }
 
         tracing::info!(

@@ -26,13 +26,13 @@ use crate::Result;
 use crate::hooks::HookHandler;
 use crate::llm::LlmProvider;
 use crate::models::Namespace;
+use crate::observability::current_request_id;
 use crate::services::CaptureService;
 use crate::services::deduplication::Deduplicator;
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::instrument;
-use crate::observability::current_request_id;
 
 // Content analysis thresholds
 //
@@ -360,7 +360,7 @@ impl HookHandler for PreCompactHandler {
     fn handle(&self, input: &str) -> Result<String> {
         let start = Instant::now();
         if let Some(request_id) = current_request_id() {
-            tracing::Span::current().record("request_id", &request_id.as_str());
+            tracing::Span::current().record("request_id", request_id.as_str());
         }
 
         // Parse input

@@ -350,7 +350,7 @@ impl<I: IndexBackend> RetentionGarbageCollector<I> {
     pub fn gc_expired_memories(&self, dry_run: bool) -> Result<RetentionGcResult> {
         let start = Instant::now();
         if let Some(request_id) = crate::observability::current_request_id() {
-            tracing::Span::current().record("request_id", &request_id.as_str());
+            tracing::Span::current().record("request_id", request_id.as_str());
         }
         let mut result = RetentionGcResult {
             dry_run,

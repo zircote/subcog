@@ -155,7 +155,7 @@ impl CaptureService {
         let namespace_label = request.namespace.as_str().to_string();
         let domain_label = request.domain.to_string();
         if let Some(request_id) = current_request_id() {
-            tracing::Span::current().record("request_id", &request_id.as_str());
+            tracing::Span::current().record("request_id", request_id.as_str());
         }
 
         tracing::info!(namespace = %namespace_label, domain = %domain_label, "Capturing memory");
@@ -180,9 +180,7 @@ impl CaptureService {
 
                 // Check for secrets
                 let has_secrets = self.secret_detector.contains_secrets(&request.content);
-                if has_secrets
-                    && self.config.features.block_secrets
-                    && !request.skip_security_check
+                if has_secrets && self.config.features.block_secrets && !request.skip_security_check
                 {
                     return Err(Error::ContentBlocked {
                         reason: "Content contains detected secrets".to_string(),

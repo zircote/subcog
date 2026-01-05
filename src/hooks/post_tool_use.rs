@@ -367,7 +367,7 @@ impl HookHandler for PostToolUseHandler {
         let mut lookup_performed = false;
         let mut memories_found = 0usize;
         if let Some(request_id) = current_request_id() {
-            tracing::Span::current().record("request_id", &request_id.as_str());
+            tracing::Span::current().record("request_id", request_id.as_str());
         }
 
         let result = self.handle_inner(input, &mut lookup_performed, &mut memories_found);

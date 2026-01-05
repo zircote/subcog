@@ -11,7 +11,9 @@
 //! To verify chain integrity, use [`AuditLogger::verify_chain`].
 
 use crate::models::{EventMeta, MemoryEvent};
-use crate::observability::{RequestContext, current_request_id, global_event_bus, scope_request_context};
+use crate::observability::{
+    RequestContext, current_request_id, global_event_bus, scope_request_context,
+};
 use crate::{Error, Result};
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
@@ -497,16 +499,19 @@ impl AuditLogger {
     }
 
     /// Converts a `MemoryEvent` to an `AuditEntry`.
+    #[allow(clippy::too_many_lines)]
     fn event_to_entry(&self, event: &MemoryEvent) -> AuditEntry {
         fn base_metadata(meta: &EventMeta) -> serde_json::Map<String, serde_json::Value> {
             let mut metadata = serde_json::Map::new();
-            metadata.insert("event_id".to_string(), serde_json::Value::String(meta.event_id.clone()));
+            metadata.insert(
+                "event_id".to_string(),
+                serde_json::Value::String(meta.event_id.clone()),
+            );
             metadata.insert(
                 "correlation_id".to_string(),
                 meta.correlation_id
                     .clone()
-                    .map(serde_json::Value::String)
-                    .unwrap_or(serde_json::Value::Null),
+                    .map_or(serde_json::Value::Null, serde_json::Value::String),
             );
             metadata.insert(
                 "source".to_string(),
@@ -700,7 +705,9 @@ impl AuditLogger {
                 );
                 metadata.insert(
                     "port".to_string(),
-                    port.map_or(serde_json::Value::Null, |p| serde_json::Value::Number(p.into())),
+                    port.map_or(serde_json::Value::Null, |p| {
+                        serde_json::Value::Number(p.into())
+                    }),
                 );
 
                 AuditEntry::new("mcp.started", "start")
@@ -717,8 +724,7 @@ impl AuditLogger {
                     "client_id".to_string(),
                     client_id
                         .clone()
-                        .map(serde_json::Value::String)
-                        .unwrap_or(serde_json::Value::Null),
+                        .map_or(serde_json::Value::Null, serde_json::Value::String),
                 );
                 metadata.insert(
                     "reason".to_string(),
@@ -754,8 +760,7 @@ impl AuditLogger {
                     "error".to_string(),
                     error
                         .clone()
-                        .map(serde_json::Value::String)
-                        .unwrap_or(serde_json::Value::Null),
+                        .map_or(serde_json::Value::Null, serde_json::Value::String),
                 );
 
                 let outcome = if status == "success" {
@@ -843,15 +848,13 @@ impl AuditLogger {
                     "namespace".to_string(),
                     namespace
                         .clone()
-                        .map(serde_json::Value::String)
-                        .unwrap_or(serde_json::Value::Null),
+                        .map_or(serde_json::Value::Null, serde_json::Value::String),
                 );
                 metadata.insert(
                     "memory_id".to_string(),
-                    memory_id
-                        .as_ref()
-                        .map(|id| serde_json::Value::String(id.to_string()))
-                        .unwrap_or(serde_json::Value::Null),
+                    memory_id.as_ref().map_or(serde_json::Value::Null, |id| {
+                        serde_json::Value::String(id.to_string())
+                    }),
                 );
 
                 AuditEntry::new("hook.capture_decision", "decision")
@@ -861,7 +864,10 @@ impl AuditLogger {
             MemoryEvent::HookFailed { meta, hook, error } => {
                 let mut metadata = base_metadata(meta);
                 metadata.insert("hook".to_string(), serde_json::Value::String(hook.clone()));
-                metadata.insert("error".to_string(), serde_json::Value::String(error.clone()));
+                metadata.insert(
+                    "error".to_string(),
+                    serde_json::Value::String(error.clone()),
+                );
 
                 AuditEntry::new("hook.failed", "invoke")
                     .with_outcome(AuditOutcome::Failure)
@@ -969,6 +975,12 @@ pub fn global_logger() -> Option<&'static AuditLogger> {
     GLOBAL_AUDIT_LOGGER.get()
 }
 
+fn log_event_if_configured(event: &MemoryEvent) {
+    if let Some(logger) = global_logger() {
+        logger.log(event);
+    }
+}
+
 fn start_audit_subscription() {
     if tokio::runtime::Handle::try_current().is_err() {
         tracing::warn!("Audit event subscription requires a Tokio runtime");
@@ -982,16 +994,14 @@ fn start_audit_subscription() {
         async move {
             let run = async move {
                 while let Ok(event) = receiver.recv().await {
-                    if let Some(logger) = global_logger() {
-                        logger.log(&event);
-                    }
+                    log_event_if_configured(&event);
                 }
             };
 
             if let Some(context) = request_context {
-                scope_request_context(context, run).await
+                scope_request_context(context, run).await;
             } else {
-                run.await
+                run.await;
             }
         }
         .instrument(span),

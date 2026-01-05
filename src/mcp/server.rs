@@ -13,8 +13,10 @@ use crate::mcp::{
     PromptRegistry, ResourceContent, ResourceDefinition, ResourceHandler, ToolContent,
     ToolDefinition, ToolRegistry, ToolResult,
 };
-use crate::observability::{RequestContext, current_request_id, flush_metrics, scope_request_context};
 use crate::models::{EventMeta, MemoryEvent};
+use crate::observability::{
+    RequestContext as ObsRequestContext, current_request_id, flush_metrics, scope_request_context,
+};
 use crate::security::record_event;
 use crate::services::ServiceContainer;
 use crate::{Error, Result as SubcogResult};
@@ -54,7 +56,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
-use tracing::{Instrument, info_span};
 use tokio::sync::Mutex;
 #[cfg(feature = "http")]
 use tower_http::cors::CorsLayer;
@@ -62,8 +63,118 @@ use tower_http::cors::CorsLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
 #[cfg(feature = "http")]
 use tower_http::trace::TraceLayer;
+use tracing::{Instrument, info_span};
 
 type McpResult<T> = std::result::Result<T, McpError>;
+
+fn record_mcp_metrics<T>(operation: &'static str, start: Instant, result: &McpResult<T>) {
+    let status = if result.is_ok() { "success" } else { "error" };
+    metrics::counter!(
+        "mcp_requests_total",
+        "operation" => operation,
+        "status" => status
+    )
+    .increment(1);
+    if result.is_err() {
+        metrics::counter!("mcp_request_errors_total", "operation" => operation).increment(1);
+    }
+    metrics::histogram!("mcp_request_duration_ms", "operation" => operation)
+        .record(start.elapsed().as_secs_f64() * 1000.0);
+}
+
+async fn run_mcp_with_context<T, F, Fut>(
+    request_context: Option<ObsRequestContext>,
+    span: tracing::Span,
+    operation: &'static str,
+    f: F,
+) -> McpResult<T>
+where
+    F: FnOnce(Instant) -> Fut,
+    Fut: std::future::Future<Output = McpResult<T>>,
+{
+    let run = async move {
+        let _span_guard = span.enter();
+        let start = Instant::now();
+        let result = f(start).await;
+        record_mcp_metrics(operation, start, &result);
+        result
+    };
+
+    if let Some(context) = request_context {
+        scope_request_context(context, run).await
+    } else {
+        run.await
+    }
+}
+
+fn init_request_context(
+    existing_request_id: Option<String>,
+) -> (Option<ObsRequestContext>, String) {
+    if let Some(request_id) = existing_request_id {
+        (None, request_id)
+    } else {
+        let context = ObsRequestContext::new();
+        let request_id = context.request_id().to_string();
+        (Some(context), request_id)
+    }
+}
+
+async fn await_shutdown(cancel_token: rmcp::service::RunningServiceCancellationToken) {
+    while !is_shutdown_requested() {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    cancel_token.cancel();
+}
+
+fn execute_call_tool(
+    state: &McpState,
+    request: CallToolRequestParam,
+    context: &RequestContext<RoleServer>,
+    start: Instant,
+) -> McpResult<CallToolResult> {
+    #[cfg(feature = "http")]
+    if let Err(err) = ensure_tool_authorized(&state.tool_auth, context, &request.name) {
+        record_event(MemoryEvent::McpRequestError {
+            meta: EventMeta::new("mcp", current_request_id()),
+            operation: "call_tool".to_string(),
+            error: err.to_string(),
+        });
+        return Err(err);
+    }
+    #[cfg(not(feature = "http"))]
+    let _ = context;
+
+    let arguments = match request.arguments {
+        Some(args) => Value::Object(args),
+        None => Value::Object(Map::new()),
+    };
+
+    let result = match state.tools.execute(&request.name, arguments) {
+        Ok(result) => result,
+        Err(err) => {
+            record_event(MemoryEvent::McpRequestError {
+                meta: EventMeta::new("mcp", current_request_id()),
+                operation: "call_tool".to_string(),
+                error: err.to_string(),
+            });
+            return Err(McpError::invalid_params(err.to_string(), None));
+        },
+    };
+
+    let status = if result.is_error { "error" } else { "success" };
+    let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+    record_event(MemoryEvent::McpToolExecuted {
+        meta: EventMeta::new("mcp", current_request_id()),
+        tool_name: request.name.to_string(),
+        status: status.to_string(),
+        duration_ms,
+        error: result
+            .is_error
+            .then_some("tool execution returned error".to_string()),
+    });
+
+    Ok(tool_result_to_rmcp(result))
+}
 
 /// Global shutdown flag for graceful termination (RES-M4).
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -165,7 +276,7 @@ async fn auth_middleware(
     mut req: Request,
     next: Next,
 ) -> Response {
-    let request_context = RequestContext::new();
+    let request_context = ObsRequestContext::new();
     let request_id = request_context.request_id().to_string();
     scope_request_context(request_context, async move {
         let span = info_span!(
@@ -181,8 +292,8 @@ async fn auth_middleware(
             .get(header::AUTHORIZATION)
             .and_then(|h| h.to_str().ok());
 
-        let claims = match auth_header {
-            Some(header_value) => match state.authenticator.validate_header(header_value) {
+        let claims = if let Some(header_value) = auth_header {
+            match state.authenticator.validate_header(header_value) {
                 Ok(claims) => claims,
                 Err(e) => {
                     tracing::warn!(error = %e, "JWT authentication failed");
@@ -202,24 +313,23 @@ async fn auth_middleware(
                     )
                         .into_response();
                 },
-            },
-            None => {
-                record_event(MemoryEvent::McpAuthFailed {
-                    meta: EventMeta::new("mcp", current_request_id()),
-                    client_id: None,
-                    reason: "missing authorization header".to_string(),
-                });
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(serde_json::json!({
-                        "error": {
-                            "code": -32000,
-                            "message": "Authentication required"
-                        }
-                    })),
-                )
-                    .into_response();
-            },
+            }
+        } else {
+            record_event(MemoryEvent::McpAuthFailed {
+                meta: EventMeta::new("mcp", current_request_id()),
+                client_id: None,
+                reason: "missing authorization header".to_string(),
+            });
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": {
+                        "code": -32000,
+                        "message": "Authentication required"
+                    }
+                })),
+            )
+                .into_response();
         };
 
         let client_id = claims.sub.clone();
@@ -485,54 +595,26 @@ impl ServerHandler for McpHandler {
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListToolsResult>> + Send + '_ {
         let state = self.state.clone();
-        let existing_request_id = current_request_id();
-        let request_context = existing_request_id.is_none().then(RequestContext::new);
-        let request_id = existing_request_id
-            .unwrap_or_else(|| request_context.as_ref().unwrap().request_id().to_string());
+        let (request_context, request_id) = init_request_context(current_request_id());
 
         async move {
-            let run = async move {
-                let span = info_span!(
-                    "subcog.mcp.list_tools",
-                    request_id = %request_id,
-                    component = "mcp",
-                    operation = "list_tools"
-                );
-                let _span_guard = span.enter();
+            let span = info_span!(
+                "subcog.mcp.list_tools",
+                request_id = %request_id,
+                component = "mcp",
+                operation = "list_tools"
+            );
 
-                let start = Instant::now();
-                let result = {
-                    let tools = state
-                        .tools
-                        .list_tools()
-                        .into_iter()
-                        .map(tool_definition_to_rmcp)
-                        .collect();
-                    Ok(ListToolsResult::with_all_items(tools))
-                };
-
-                let status = if result.is_ok() { "success" } else { "error" };
-                metrics::counter!(
-                    "mcp_requests_total",
-                    "operation" => "list_tools",
-                    "status" => status
-                )
-                .increment(1);
-                if result.is_err() {
-                    metrics::counter!("mcp_request_errors_total", "operation" => "list_tools")
-                        .increment(1);
-                }
-                metrics::histogram!("mcp_request_duration_ms", "operation" => "list_tools")
-                    .record(start.elapsed().as_secs_f64() * 1000.0);
-
-                result
-            };
-
-            if let Some(context) = request_context {
-                scope_request_context(context, run).await
-            } else {
-                run.await
-            }
+            run_mcp_with_context(request_context, span, "list_tools", |_start| async move {
+                let tools = state
+                    .tools
+                    .list_tools()
+                    .into_iter()
+                    .map(tool_definition_to_rmcp)
+                    .collect();
+                Ok(ListToolsResult::with_all_items(tools))
+            })
+            .await
         }
     }
 
@@ -542,89 +624,24 @@ impl ServerHandler for McpHandler {
         context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<CallToolResult>> + Send + '_ {
         let state = self.state.clone();
-        let existing_request_id = current_request_id();
-        let request_context = existing_request_id.is_none().then(RequestContext::new);
-        let request_id = existing_request_id
-            .unwrap_or_else(|| request_context.as_ref().unwrap().request_id().to_string());
+        let (request_context, request_id) = init_request_context(current_request_id());
+        let tool_name = request.name.clone();
         async move {
-            let run = async move {
-                let span = info_span!(
-                    "subcog.mcp.call_tool",
-                    request_id = %request_id,
-                    component = "mcp",
-                    operation = "call_tool",
-                    tool_name = %request.name
-                );
-                let _span_guard = span.enter();
+            let span = info_span!(
+                "subcog.mcp.call_tool",
+                request_id = %request_id,
+                component = "mcp",
+                operation = "call_tool",
+                tool_name = %tool_name
+            );
 
-                let start = Instant::now();
-                let result = (|| {
-                    #[cfg(feature = "http")]
-                    if let Err(err) = ensure_tool_authorized(&state.tool_auth, &context, &request.name)
-                    {
-                        record_event(MemoryEvent::McpRequestError {
-                            meta: EventMeta::new("mcp", current_request_id()),
-                            operation: "call_tool".to_string(),
-                            error: err.to_string(),
-                        });
-                        return Err(err);
-                    }
-                    #[cfg(not(feature = "http"))]
-                    let _ = &context;
-
-                    let arguments = match request.arguments {
-                        Some(args) => Value::Object(args),
-                        None => Value::Object(Map::new()),
-                    };
-
-                    let result = state
-                        .tools
-                        .execute(&request.name, arguments)
-                        .map_err(|e| {
-                            record_event(MemoryEvent::McpRequestError {
-                                meta: EventMeta::new("mcp", current_request_id()),
-                                operation: "call_tool".to_string(),
-                                error: e.to_string(),
-                            });
-                            McpError::invalid_params(e.to_string(), None)
-                        })?;
-
-                    let status = if result.is_error { "error" } else { "success" };
-                    record_event(MemoryEvent::McpToolExecuted {
-                        meta: EventMeta::new("mcp", current_request_id()),
-                        tool_name: request.name.clone(),
-                        status: status.to_string(),
-                        duration_ms: start.elapsed().as_millis() as u64,
-                        error: result
-                            .is_error
-                            .then_some("tool execution returned error".to_string()),
-                    });
-
-                    Ok(tool_result_to_rmcp(result))
-                })();
-
-                let status = if result.is_ok() { "success" } else { "error" };
-                metrics::counter!(
-                    "mcp_requests_total",
-                    "operation" => "call_tool",
-                    "status" => status
-                )
-                .increment(1);
-                if result.is_err() {
-                    metrics::counter!("mcp_request_errors_total", "operation" => "call_tool")
-                        .increment(1);
-                }
-                metrics::histogram!("mcp_request_duration_ms", "operation" => "call_tool")
-                    .record(start.elapsed().as_secs_f64() * 1000.0);
-
-                result
-            };
-
-            if let Some(context) = request_context {
-                scope_request_context(context, run).await
-            } else {
-                run.await
-            }
+            run_mcp_with_context(
+                request_context,
+                span,
+                "call_tool",
+                move |start| async move { execute_call_tool(&state, request, &context, start) },
+            )
+            .await
         }
     }
 
@@ -634,22 +651,20 @@ impl ServerHandler for McpHandler {
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListResourcesResult>> + Send + '_ {
         let state = self.state.clone();
-        let existing_request_id = current_request_id();
-        let request_context = existing_request_id.is_none().then(RequestContext::new);
-        let request_id = existing_request_id
-            .unwrap_or_else(|| request_context.as_ref().unwrap().request_id().to_string());
+        let (request_context, request_id) = init_request_context(current_request_id());
         async move {
-            let run = async move {
-                let span = info_span!(
-                    "subcog.mcp.list_resources",
-                    request_id = %request_id,
-                    component = "mcp",
-                    operation = "list_resources"
-                );
-                let _span_guard = span.enter();
+            let span = info_span!(
+                "subcog.mcp.list_resources",
+                request_id = %request_id,
+                component = "mcp",
+                operation = "list_resources"
+            );
 
-                let start = Instant::now();
-                let result = {
+            run_mcp_with_context(
+                request_context,
+                span,
+                "list_resources",
+                |_start| async move {
                     let resources = state
                         .resources
                         .lock()
@@ -659,30 +674,9 @@ impl ServerHandler for McpHandler {
                         .map(resource_definition_to_rmcp)
                         .collect();
                     Ok(ListResourcesResult::with_all_items(resources))
-                };
-
-                let status = if result.is_ok() { "success" } else { "error" };
-                metrics::counter!(
-                    "mcp_requests_total",
-                    "operation" => "list_resources",
-                    "status" => status
-                )
-                .increment(1);
-                if result.is_err() {
-                    metrics::counter!("mcp_request_errors_total", "operation" => "list_resources")
-                        .increment(1);
-                }
-                metrics::histogram!("mcp_request_duration_ms", "operation" => "list_resources")
-                    .record(start.elapsed().as_secs_f64() * 1000.0);
-
-                result
-            };
-
-            if let Some(context) = request_context {
-                scope_request_context(context, run).await
-            } else {
-                run.await
-            }
+                },
+            )
+            .await
         }
     }
 
@@ -691,49 +685,23 @@ impl ServerHandler for McpHandler {
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListResourceTemplatesResult>> + Send + '_ {
-        let existing_request_id = current_request_id();
-        let request_context = existing_request_id.is_none().then(RequestContext::new);
-        let request_id = existing_request_id
-            .unwrap_or_else(|| request_context.as_ref().unwrap().request_id().to_string());
+        let (request_context, request_id) = init_request_context(current_request_id());
 
         async move {
-            let run = async move {
-                let span = info_span!(
-                    "subcog.mcp.list_resource_templates",
-                    request_id = %request_id,
-                    component = "mcp",
-                    operation = "list_resource_templates"
-                );
-                let _span_guard = span.enter();
-                let start = Instant::now();
-                let result = Ok(ListResourceTemplatesResult::with_all_items(Vec::new()));
-                let status = if result.is_ok() { "success" } else { "error" };
-                metrics::counter!(
-                    "mcp_requests_total",
-                    "operation" => "list_resource_templates",
-                    "status" => status
-                )
-                .increment(1);
-                if result.is_err() {
-                    metrics::counter!(
-                        "mcp_request_errors_total",
-                        "operation" => "list_resource_templates"
-                    )
-                    .increment(1);
-                }
-                metrics::histogram!(
-                    "mcp_request_duration_ms",
-                    "operation" => "list_resource_templates"
-                )
-                .record(start.elapsed().as_secs_f64() * 1000.0);
-                result
-            };
+            let span = info_span!(
+                "subcog.mcp.list_resource_templates",
+                request_id = %request_id,
+                component = "mcp",
+                operation = "list_resource_templates"
+            );
 
-            if let Some(context) = request_context {
-                scope_request_context(context, run).await
-            } else {
-                run.await
-            }
+            run_mcp_with_context(
+                request_context,
+                span,
+                "list_resource_templates",
+                |_start| async move { Ok(ListResourceTemplatesResult::with_all_items(Vec::new())) },
+            )
+            .await
         }
     }
 
@@ -744,23 +712,22 @@ impl ServerHandler for McpHandler {
     ) -> impl std::future::Future<Output = McpResult<rmcp::model::ReadResourceResult>> + Send + '_
     {
         let state = self.state.clone();
-        let existing_request_id = current_request_id();
-        let request_context = existing_request_id.is_none().then(RequestContext::new);
-        let request_id = existing_request_id
-            .unwrap_or_else(|| request_context.as_ref().unwrap().request_id().to_string());
+        let (request_context, request_id) = init_request_context(current_request_id());
+        let resource_uri = request.uri.clone();
         async move {
-            let run = async move {
-                let span = info_span!(
-                    "subcog.mcp.read_resource",
-                    request_id = %request_id,
-                    component = "mcp",
-                    operation = "read_resource",
-                    resource_uri = %request.uri
-                );
-                let _span_guard = span.enter();
+            let span = info_span!(
+                "subcog.mcp.read_resource",
+                request_id = %request_id,
+                component = "mcp",
+                operation = "read_resource",
+                resource_uri = %resource_uri
+            );
 
-                let start = Instant::now();
-                let result = {
+            run_mcp_with_context(
+                request_context,
+                span,
+                "read_resource",
+                |_start| async move {
                     let content = state
                         .resources
                         .lock()
@@ -770,30 +737,9 @@ impl ServerHandler for McpHandler {
 
                     let contents = vec![resource_content_to_rmcp(content)];
                     Ok(rmcp::model::ReadResourceResult { contents })
-                };
-
-                let status = if result.is_ok() { "success" } else { "error" };
-                metrics::counter!(
-                    "mcp_requests_total",
-                    "operation" => "read_resource",
-                    "status" => status
-                )
-                .increment(1);
-                if result.is_err() {
-                    metrics::counter!("mcp_request_errors_total", "operation" => "read_resource")
-                        .increment(1);
-                }
-                metrics::histogram!("mcp_request_duration_ms", "operation" => "read_resource")
-                    .record(start.elapsed().as_secs_f64() * 1000.0);
-
-                result
-            };
-
-            if let Some(context) = request_context {
-                scope_request_context(context, run).await
-            } else {
-                run.await
-            }
+                },
+            )
+            .await
         }
     }
 
@@ -803,53 +749,25 @@ impl ServerHandler for McpHandler {
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListPromptsResult>> + Send + '_ {
         let state = self.state.clone();
-        let existing_request_id = current_request_id();
-        let request_context = existing_request_id.is_none().then(RequestContext::new);
-        let request_id = existing_request_id
-            .unwrap_or_else(|| request_context.as_ref().unwrap().request_id().to_string());
+        let (request_context, request_id) = init_request_context(current_request_id());
         async move {
-            let run = async move {
-                let span = info_span!(
-                    "subcog.mcp.list_prompts",
-                    request_id = %request_id,
-                    component = "mcp",
-                    operation = "list_prompts"
-                );
-                let _span_guard = span.enter();
+            let span = info_span!(
+                "subcog.mcp.list_prompts",
+                request_id = %request_id,
+                component = "mcp",
+                operation = "list_prompts"
+            );
 
-                let start = Instant::now();
-                let result = {
-                    let prompts: Vec<Prompt> = state
-                        .prompts
-                        .list_prompts()
-                        .into_iter()
-                        .map(prompt_definition_to_rmcp)
-                        .collect();
-                    Ok(ListPromptsResult::with_all_items(prompts))
-                };
-
-                let status = if result.is_ok() { "success" } else { "error" };
-                metrics::counter!(
-                    "mcp_requests_total",
-                    "operation" => "list_prompts",
-                    "status" => status
-                )
-                .increment(1);
-                if result.is_err() {
-                    metrics::counter!("mcp_request_errors_total", "operation" => "list_prompts")
-                        .increment(1);
-                }
-                metrics::histogram!("mcp_request_duration_ms", "operation" => "list_prompts")
-                    .record(start.elapsed().as_secs_f64() * 1000.0);
-
-                result
-            };
-
-            if let Some(context) = request_context {
-                scope_request_context(context, run).await
-            } else {
-                run.await
-            }
+            run_mcp_with_context(request_context, span, "list_prompts", |_start| async move {
+                let prompts: Vec<Prompt> = state
+                    .prompts
+                    .list_prompts()
+                    .into_iter()
+                    .map(prompt_definition_to_rmcp)
+                    .collect();
+                Ok(ListPromptsResult::with_all_items(prompts))
+            })
+            .await
         }
     }
 
@@ -859,66 +777,37 @@ impl ServerHandler for McpHandler {
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<GetPromptResult>> + Send + '_ {
         let state = self.state.clone();
-        let existing_request_id = current_request_id();
-        let request_context = existing_request_id.is_none().then(RequestContext::new);
-        let request_id = existing_request_id
-            .unwrap_or_else(|| request_context.as_ref().unwrap().request_id().to_string());
+        let (request_context, request_id) = init_request_context(current_request_id());
+        let prompt_name = request.name.clone();
         async move {
-            let run = async move {
-                let span = info_span!(
-                    "subcog.mcp.get_prompt",
-                    request_id = %request_id,
-                    component = "mcp",
-                    operation = "get_prompt",
-                    prompt = %request.name
-                );
-                let _span_guard = span.enter();
+            let span = info_span!(
+                "subcog.mcp.get_prompt",
+                request_id = %request_id,
+                component = "mcp",
+                operation = "get_prompt",
+                prompt = %prompt_name
+            );
 
-                let start = Instant::now();
-                let result = {
-                    let messages = match request.arguments {
-                        Some(args) => Value::Object(args),
-                        None => Value::Object(Map::new()),
-                    };
-
-                    state
-                        .prompts
-                        .get_prompt_messages(&request.name, &messages)
-                        .ok_or_else(|| McpError::invalid_params("Unknown prompt".to_string(), None))
-                        .map(|msgs| {
-                            let mapped = msgs
-                                .into_iter()
-                                .map(prompt_message_to_rmcp)
-                                .collect::<Vec<_>>();
-                            GetPromptResult {
-                                description: None,
-                                messages: mapped,
-                            }
-                        })
+            run_mcp_with_context(request_context, span, "get_prompt", |_start| async move {
+                let messages = match request.arguments {
+                    Some(args) => Value::Object(args),
+                    None => Value::Object(Map::new()),
                 };
 
-                let status = if result.is_ok() { "success" } else { "error" };
-                metrics::counter!(
-                    "mcp_requests_total",
-                    "operation" => "get_prompt",
-                    "status" => status
-                )
-                .increment(1);
-                if result.is_err() {
-                    metrics::counter!("mcp_request_errors_total", "operation" => "get_prompt")
-                        .increment(1);
-                }
-                metrics::histogram!("mcp_request_duration_ms", "operation" => "get_prompt")
-                    .record(start.elapsed().as_secs_f64() * 1000.0);
-
-                result
-            };
-
-            if let Some(context) = request_context {
-                scope_request_context(context, run).await
-            } else {
-                run.await
-            }
+                let msgs = state
+                    .prompts
+                    .get_prompt_messages(&request.name, &messages)
+                    .ok_or_else(|| McpError::invalid_params("Unknown prompt".to_string(), None))?;
+                let mapped = msgs
+                    .into_iter()
+                    .map(prompt_message_to_rmcp)
+                    .collect::<Vec<_>>();
+                Ok(GetPromptResult {
+                    description: None,
+                    messages: mapped,
+                })
+            })
+            .await
         }
     }
 }
@@ -1238,19 +1127,14 @@ impl McpServer {
 
         let cancel_token = service.cancellation_token();
         let span = tracing::Span::current();
-        let request_context = current_request_id().map(RequestContext::from_id);
+        let request_context = current_request_id().map(ObsRequestContext::from_id);
         tokio::spawn(
             async move {
-                let run = async move {
-                    while !is_shutdown_requested() {
-                        tokio::time::sleep(Duration::from_millis(200)).await;
-                    }
-                    cancel_token.cancel();
-                };
+                let run = await_shutdown(cancel_token);
                 if let Some(context) = request_context {
-                    scope_request_context(context, run).await
+                    scope_request_context(context, run).await;
                 } else {
-                    run.await
+                    run.await;
                 }
             }
             .instrument(span),

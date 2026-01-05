@@ -239,7 +239,7 @@ impl<I: IndexBackend> BranchGarbageCollector<I> {
     pub fn gc_stale_branches(&self, project_id: &str, dry_run: bool) -> Result<GcResult> {
         let start = Instant::now();
         if let Some(request_id) = crate::observability::current_request_id() {
-            tracing::Span::current().record("request_id", &request_id.as_str());
+            tracing::Span::current().record("request_id", request_id.as_str());
         }
 
         // Step 1: Discover git repository

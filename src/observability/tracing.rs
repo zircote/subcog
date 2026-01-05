@@ -327,7 +327,9 @@ mod tests {
             resource_attributes: Vec::new(),
         };
 
-        let init = build_tracing(&config).expect("build tracing").expect("init tracing");
+        let init = build_tracing(&config)
+            .expect("build tracing")
+            .expect("init tracing");
         let _ = init.provider.shutdown();
         let _ = init.logger_provider.shutdown();
     }
