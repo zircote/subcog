@@ -37,3 +37,10 @@ Environment variables:
 - Logging missing fields: confirm `SUBCOG_LOG_FORMAT=json` and `SUBCOG_LOG_LEVEL` are set.
 - Tracing not exported: verify `SUBCOG_OTLP_ENDPOINT` and `SUBCOG_OTLP_PROTOCOL` values.
 - Metrics empty: ensure `SUBCOG_METRICS_ENABLED=true` and check the metrics port.
+
+## Deployment Checklist
+
+- OTLP collector reachable from the service network.
+- OTLP protocol matches collector (gRPC 4317 vs HTTP 4318).
+- Log sink permissions and file paths validated.
+- Metrics port exposed or push gateway configured.
