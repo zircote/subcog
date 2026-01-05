@@ -47,7 +47,7 @@
 ### Phase 3: Logging Standardization
 - [x] Define structured log schema (level, event, request_id, memory_id, domain) ✓
 - [x] Ensure logs include correlation IDs and span context ✓
-- [ ] Add log redaction rules for sensitive content
+- [x] Add log redaction rules for sensitive content ✓
 - [ ] Normalize log levels across services (error/warn/info/debug)
 - [ ] Add log format validation tests (json format, required keys)
 

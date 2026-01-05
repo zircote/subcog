@@ -1,8 +1,13 @@
 //! Structured logging.
 
+use std::fmt;
 use std::path::PathBuf;
 
+use serde_json::{Map, Number, Value};
+use tracing::field::{Field, Visit};
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::field::RecordFields;
+use tracing_subscriber::fmt::format::{FormatFields, Writer};
 
 use crate::config::LoggingSettings;
 
@@ -77,6 +82,149 @@ impl Logger {
 impl Default for Logger {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Redactor for sensitive log fields.
+#[derive(Debug, Clone)]
+pub struct LogRedactor {
+    sensitive_fields: Vec<&'static str>,
+    max_len: usize,
+}
+
+impl LogRedactor {
+    /// Creates a redactor with default rules.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            sensitive_fields: vec![
+                "content",
+                "prompt",
+                "token",
+                "secret",
+                "password",
+                "authorization",
+                "api_key",
+                "api-key",
+                "jwt",
+            ],
+            max_len: 120,
+        }
+    }
+
+    /// Redacts a value based on field name.
+    #[must_use]
+    pub fn redact_field(&self, field: &str, value: &str) -> String {
+        let field_lower = field.to_lowercase();
+        if self
+            .sensitive_fields
+            .iter()
+            .any(|needle| field_lower.contains(needle))
+        {
+            return "[REDACTED]".to_string();
+        }
+
+        if value.chars().count() > self.max_len {
+            let truncated: String = value.chars().take(self.max_len).collect();
+            return format!("{truncated}...(truncated)");
+        }
+
+        value.to_string()
+    }
+}
+
+impl Default for LogRedactor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// JSON field formatter with redaction support.
+#[derive(Debug, Clone, Default)]
+pub struct RedactingJsonFields {
+    redactor: LogRedactor,
+}
+
+impl RedactingJsonFields {
+    /// Creates a redacting JSON field formatter.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            redactor: LogRedactor::new(),
+        }
+    }
+}
+
+impl Default for RedactingJsonFields {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FormatFields for RedactingJsonFields {
+    fn format_fields<R: RecordFields>(&self, writer: Writer<'_>, fields: R) -> fmt::Result {
+        let mut visitor = RedactingVisitor::new(&self.redactor);
+        fields.record(&mut visitor);
+        let json = serde_json::to_string(&visitor.values).map_err(|_| fmt::Error)?;
+        writer.write_str(&json)
+    }
+}
+
+struct RedactingVisitor<'a> {
+    values: Map<String, Value>,
+    redactor: &'a LogRedactor,
+}
+
+impl<'a> RedactingVisitor<'a> {
+    fn new(redactor: &'a LogRedactor) -> Self {
+        Self {
+            values: Map::new(),
+            redactor,
+        }
+    }
+
+    fn insert_str(&mut self, field: &Field, value: &str) {
+        let redacted = self.redactor.redact_field(field.name(), value);
+        self.values
+            .insert(field.name().to_string(), Value::String(redacted));
+    }
+
+    fn insert_number(&mut self, field: &Field, number: Number) {
+        self.values
+            .insert(field.name().to_string(), Value::Number(number));
+    }
+}
+
+impl Visit for RedactingVisitor<'_> {
+    fn record_i64(&mut self, field: &Field, value: i64) {
+        self.insert_number(field, Number::from(value));
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        self.insert_number(field, Number::from(value));
+    }
+
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        self.values
+            .insert(field.name().to_string(), Value::Bool(value));
+    }
+
+    fn record_f64(&mut self, field: &Field, value: f64) {
+        let number = Number::from_f64(value).unwrap_or_else(|| Number::from(0_u64));
+        self.insert_number(field, number);
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.insert_str(field, value);
+    }
+
+    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        let formatted = format!("{value:?}");
+        self.insert_str(field, &formatted);
+    }
+
+    fn record_error(&mut self, field: &Field, value: &(dyn std::error::Error + 'static)) {
+        self.insert_str(field, &value.to_string());
     }
 }
 

@@ -9,6 +9,7 @@ mod tracing;
 
 pub use event_bus::{EventBus, global_event_bus};
 pub use logging::{LogFormat, Logger, LoggingConfig};
+use logging::RedactingJsonFields;
 pub use metrics::{Metrics, MetricsConfig, flush_global as flush_metrics, set_instance_label};
 pub use otlp::{OtlpConfig, OtlpExporter, OtlpProtocol};
 pub use request_context::{
@@ -260,6 +261,7 @@ pub fn init(config: ObservabilityConfig) -> Result<ObservabilityHandle> {
                 .with(
                     tracing_subscriber::fmt::layer()
                         .json()
+                        .fmt_fields(RedactingJsonFields::default())
                         .with_writer(writer)
                         .with_current_span(true)
                         .with_span_list(true)
@@ -297,6 +299,7 @@ pub fn init(config: ObservabilityConfig) -> Result<ObservabilityHandle> {
                 .with(
                     tracing_subscriber::fmt::layer()
                         .json()
+                        .fmt_fields(RedactingJsonFields::default())
                         .with_current_span(true)
                         .with_span_list(true)
                         .with_target(true)
