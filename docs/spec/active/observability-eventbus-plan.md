@@ -57,7 +57,7 @@
 - [x] Add metrics for memory lifecycle latency (capture/recall/GC/consolidation) ✓
 - [x] Add metrics for MCP request latency and error rates ✓
 - [x] Add metrics for hook execution latency and error rates ✓
-- [ ] Verify OTLP exporter settings (grpc/http) and env var docs
+- [x] Verify OTLP exporter settings (grpc/http) and env var docs ✓
 - [ ] Add smoke tests for metrics registry and OTLP initialization
 
 ### Phase 5: Documentation & Rollout
