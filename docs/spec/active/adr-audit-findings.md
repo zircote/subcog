@@ -573,7 +573,7 @@ org_scope_enabled = true
 
 **Mitigation:**
 - [x] Make tombstoned_at `Option<DateTime<Utc>>` (nullable) ✓
-- [ ] Default to None for existing memories
+- [x] Default to None for existing memories ✓
 - [ ] Maintain backward compatibility in JSON serialization
 - [ ] Test deserialization of old memory objects
 - [ ] Version the Memory struct if needed
