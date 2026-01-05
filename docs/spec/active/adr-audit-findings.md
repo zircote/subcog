@@ -646,7 +646,7 @@ Copy this to track progress:
 ## Phase 3: Org-Scope (ADR-0051) [0/4]
 - [x] Task 3.1: Add org_scope_enabled to FeatureFlags ✓
 - [x] Task 3.2: Add environment variable support ✓
-- [ ] Task 3.3: Wire up feature check
+- [x] Task 3.3: Wire up feature check ✓
 - [ ] Task 3.4: Document org-scope configuration
 
 ## Phase 4: Documentation (ADR-0009) [0/1]
