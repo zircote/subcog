@@ -641,7 +641,7 @@ Copy this to track progress:
 
 ## Phase 2: Lazy GC (ADR-0052) [0/2]
 - [x] Task 2.1: Verify BranchGarbageCollector works ✓
-- [ ] Task 2.2: Add end-to-end GC integration test
+- [x] Task 2.2: Add end-to-end GC integration test ✓
 
 ## Phase 3: Org-Scope (ADR-0051) [0/4]
 - [ ] Task 3.1: Add org_scope_enabled to FeatureFlags
