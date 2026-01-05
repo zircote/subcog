@@ -466,7 +466,7 @@ org_scope_enabled = true
 - [x] Verify graceful fallback to false ✓
 
 #### MCP Server Testing
-- [ ] Test MCP server with notifications
+- [x] Test MCP server with notifications ✓
 - [ ] Verify notifications don't receive responses
 - [ ] Verify HTTP returns 204 No Content for notifications
 - [ ] Verify stdio skips response for notifications

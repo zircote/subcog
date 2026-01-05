@@ -243,7 +243,7 @@ async fn main() -> ExitCode {
         },
     };
 
-    let result = run_command(cli, config);
+    let result = run_command(cli, config).await;
 
     // Explicitly shutdown observability before async runtime exits
     observability_handle.shutdown();
@@ -258,7 +258,10 @@ async fn main() -> ExitCode {
 }
 
 /// Runs the selected command.
-fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_command(
+    cli: Cli,
+    config: SubcogConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
     if config.features.audit_log {
         let audit_path = config.data_dir.join("audit.log");
         let audit_config = AuditConfig::new().with_log_path(audit_path);
@@ -299,7 +302,7 @@ fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::error:
 
         Commands::Config { show, set } => commands::cmd_config(config, show, set),
 
-        Commands::Serve { transport, port } => cmd_serve(transport, port),
+        Commands::Serve { transport, port } => cmd_serve(transport, port).await,
 
         Commands::Hook { event } => commands::cmd_hook(event, &config),
 
@@ -401,7 +404,7 @@ fn load_config(path: Option<&str>) -> Result<SubcogConfig, Box<dyn std::error::E
 }
 
 /// Serve command.
-fn cmd_serve(transport: String, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+async fn cmd_serve(transport: String, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     // Set instance label for metrics to prevent MCP from overwriting hook metrics
     observability::set_instance_label("mcp");
 
@@ -414,7 +417,12 @@ fn cmd_serve(transport: String, port: u16) -> Result<(), Box<dyn std::error::Err
         .with_transport(transport_type)
         .with_port(port);
 
-    server.start().map_err(|e| e.to_string())?;
+    #[cfg(feature = "http")]
+    if matches!(transport_type, Transport::Http) {
+        server = server.with_jwt_from_env().map_err(|e| e.to_string())?;
+    }
+
+    server.start().await.map_err(|e| e.to_string())?;
 
     Ok(())
 }

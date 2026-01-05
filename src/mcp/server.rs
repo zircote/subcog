@@ -697,13 +697,13 @@ impl McpServer {
     /// # Errors
     ///
     /// Returns an error if the server fails to start or signal handler cannot be installed.
-    pub fn start(&mut self) -> SubcogResult<()> {
+    pub async fn start(&mut self) -> SubcogResult<()> {
         // Set up signal handler for graceful shutdown (RES-M4)
         setup_signal_handler()?;
 
         match self.transport {
-            Transport::Stdio => self.run_stdio(),
-            Transport::Http => self.run_http(),
+            Transport::Stdio => self.run_stdio().await,
+            Transport::Http => self.run_http().await,
         }
     }
 
@@ -715,43 +715,36 @@ impl McpServer {
     }
 
     /// Runs the server over stdio with graceful shutdown (RES-M4).
-    fn run_stdio(&mut self) -> SubcogResult<()> {
+    async fn run_stdio(&mut self) -> SubcogResult<()> {
         let handler = self.build_handler();
-        let rt = tokio::runtime::Runtime::new().map_err(|e| Error::OperationFailed {
-            operation: "create_runtime".to_string(),
-            cause: e.to_string(),
-        })?;
+        let service = handler
+            .serve(stdio())
+            .await
+            .map_err(|e| Error::OperationFailed {
+                operation: "serve_stdio".to_string(),
+                cause: e.to_string(),
+            })?;
 
-        rt.block_on(async {
-            let service = handler
-                .serve(stdio())
-                .await
-                .map_err(|e| Error::OperationFailed {
-                    operation: "serve_stdio".to_string(),
-                    cause: e.to_string(),
-                })?;
-
-            let cancel_token = service.cancellation_token();
-            tokio::spawn(async move {
-                loop {
-                    if is_shutdown_requested() {
-                        cancel_token.cancel();
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(200)).await;
+        let cancel_token = service.cancellation_token();
+        tokio::spawn(async move {
+            loop {
+                if is_shutdown_requested() {
+                    cancel_token.cancel();
+                    break;
                 }
-            });
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        });
 
-            service
-                .waiting()
-                .await
-                .map_err(|e| Error::OperationFailed {
-                    operation: "wait_stdio".to_string(),
-                    cause: e.to_string(),
-                })?;
+        service
+            .waiting()
+            .await
+            .map_err(|e| Error::OperationFailed {
+                operation: "wait_stdio".to_string(),
+                cause: e.to_string(),
+            })?;
 
-            Ok(())
-        })
+        Ok(())
     }
 
     /// Performs graceful shutdown cleanup (RES-M4).
@@ -778,8 +771,8 @@ impl McpServer {
     ///
     /// Requires the `http` feature and `SUBCOG_MCP_JWT_SECRET` environment variable.
     #[cfg(feature = "http")]
-    fn run_http(&mut self) -> SubcogResult<()> {
-        use axum::extract::State;
+    async fn run_http(&mut self) -> SubcogResult<()> {
+        use axum::extract::{Request, State};
         use axum::http::{Method, StatusCode, header};
         use axum::middleware::Next;
         use axum::response::{IntoResponse, Response};
@@ -807,10 +800,10 @@ impl McpServer {
             rate_limits: Arc<Mutex<HashMap<String, RateLimitEntry>>>,
         }
 
-        async fn auth_middleware<B>(
+        async fn auth_middleware(
             State(state): State<HttpAuthState>,
-            mut req: axum::http::Request<B>,
-            next: Next<B>,
+            mut req: Request,
+            next: Next,
         ) -> Response {
             let auth_header = req
                 .headers()
@@ -892,6 +885,14 @@ impl McpServer {
             next.run(req).await
         }
 
+        async fn map_notification_status(req: Request, next: Next) -> Response {
+            let mut response = next.run(req).await;
+            if response.status() == StatusCode::ACCEPTED {
+                *response.status_mut() = StatusCode::NO_CONTENT;
+            }
+            response
+        }
+
         // Ensure JWT authenticator is configured
         let authenticator = self.jwt_authenticator.clone().ok_or_else(|| {
             Error::OperationFailed {
@@ -934,8 +935,11 @@ impl McpServer {
 
         let app = Router::new()
             .route_service("/mcp", any_service(streamable))
-            .with_state(auth_state)
-            .layer(axum::middleware::from_fn(auth_middleware))
+            .layer(axum::middleware::from_fn_with_state(
+                auth_state.clone(),
+                auth_middleware,
+            ))
+            .layer(axum::middleware::from_fn(map_notification_status))
             // CORS layer (HIGH-SEC-006) - must be before other layers
             .layer(cors_layer)
             // Security headers (OWASP recommendations)
@@ -961,35 +965,28 @@ impl McpServer {
             ))
             .layer(TraceLayer::new_for_http());
 
-        let rt = tokio::runtime::Runtime::new().map_err(|e| Error::OperationFailed {
-            operation: "create_runtime".to_string(),
-            cause: e.to_string(),
-        })?;
-
         let addr = std::net::SocketAddr::from(([0, 0, 0, 0], self.port));
         tracing::info!(port = self.port, "Starting MCP HTTP server with JWT auth");
 
-        rt.block_on(async {
-            let listener =
-                tokio::net::TcpListener::bind(addr)
-                    .await
-                    .map_err(|e| Error::OperationFailed {
-                        operation: "bind".to_string(),
-                        cause: e.to_string(),
-                    })?;
-
-            axum::serve(listener, app)
+        let listener =
+            tokio::net::TcpListener::bind(addr)
                 .await
                 .map_err(|e| Error::OperationFailed {
-                    operation: "serve".to_string(),
+                    operation: "bind".to_string(),
                     cause: e.to_string(),
-                })
-        })
+                })?;
+
+        axum::serve(listener, app)
+            .await
+            .map_err(|e| Error::OperationFailed {
+                operation: "serve".to_string(),
+                cause: e.to_string(),
+            })
     }
 
     /// Runs the server over HTTP (feature not enabled).
     #[cfg(not(feature = "http"))]
-    fn run_http(&self) -> SubcogResult<()> {
+    async fn run_http(&self) -> SubcogResult<()> {
         Err(Error::FeatureNotEnabled("http".to_string()))
     }
 }
