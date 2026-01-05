@@ -32,6 +32,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::instrument;
+use crate::observability::current_request_id;
 
 // Content analysis thresholds
 //
@@ -346,11 +347,21 @@ impl HookHandler for PreCompactHandler {
     }
 
     #[instrument(
+        name = "subcog.hook.pre_compact",
         skip(self, input),
-        fields(hook = "PreCompact", captures = tracing::field::Empty)
+        fields(
+            request_id = tracing::field::Empty,
+            component = "hooks",
+            operation = "pre_compact",
+            hook = "PreCompact",
+            captures = tracing::field::Empty
+        )
     )]
     fn handle(&self, input: &str) -> Result<String> {
         let start = Instant::now();
+        if let Some(request_id) = current_request_id() {
+            tracing::Span::current().record("request_id", &request_id.as_str());
+        }
 
         // Parse input
         let parsed: PreCompactInput =

@@ -614,8 +614,12 @@ impl HookHandler for UserPromptHandler {
     }
 
     #[instrument(
+        name = "subcog.hook.user_prompt_submit",
         skip(self, input),
         fields(
+            request_id = tracing::field::Empty,
+            component = "hooks",
+            operation = "user_prompt_submit",
             hook = "UserPromptSubmit",
             prompt_length = tracing::field::Empty,
             search_intent = tracing::field::Empty
@@ -625,6 +629,9 @@ impl HookHandler for UserPromptHandler {
         let start = Instant::now();
         let mut prompt_len = 0usize;
         let mut intent_detected = false;
+        if let Some(request_id) = current_request_id() {
+            tracing::Span::current().record("request_id", &request_id.as_str());
+        }
 
         tracing::info!(
             hook = "UserPromptSubmit",

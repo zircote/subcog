@@ -3,6 +3,7 @@
 use super::HookHandler;
 use crate::Result;
 use crate::current_timestamp;
+use crate::observability::current_request_id;
 use crate::services::SyncService;
 use std::time::{Duration, Instant};
 use tracing::instrument;
@@ -385,13 +386,25 @@ impl HookHandler for StopHandler {
     }
 
     #[instrument(
+        name = "subcog.hook.stop",
         skip(self, input),
-        fields(hook = "Stop", session_id = tracing::field::Empty, sync_performed = tracing::field::Empty, timed_out = tracing::field::Empty)
+        fields(
+            request_id = tracing::field::Empty,
+            component = "hooks",
+            operation = "stop",
+            hook = "Stop",
+            session_id = tracing::field::Empty,
+            sync_performed = tracing::field::Empty,
+            timed_out = tracing::field::Empty
+        )
     )]
     fn handle(&self, input: &str) -> Result<String> {
         let start = Instant::now();
         let deadline = Duration::from_millis(self.timeout_ms);
         let mut timed_out = false;
+        if let Some(request_id) = current_request_id() {
+            tracing::Span::current().record("request_id", &request_id.as_str());
+        }
 
         tracing::info!(
             hook = "Stop",
