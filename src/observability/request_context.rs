@@ -84,3 +84,26 @@ pub fn current_request_id() -> Option<String> {
 
     THREAD_CONTEXT.with(|slot| slot.borrow().as_ref().map(|ctx| ctx.request_id.clone()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_context_guard_propagates_request_id() {
+        let context = RequestContext::from_id("thread-test");
+        let _guard = enter_request_context(context);
+        assert_eq!(current_request_id().as_deref(), Some("thread-test"));
+    }
+
+    #[tokio::test]
+    async fn test_scope_request_context_propagates_across_await() {
+        let context = RequestContext::from_id("async-test");
+        let observed = scope_request_context(context, async {
+            tokio::task::yield_now().await;
+            current_request_id()
+        })
+        .await;
+        assert_eq!(observed.as_deref(), Some("async-test"));
+    }
+}
