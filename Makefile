@@ -1,38 +1,38 @@
 # Subcog Makefile
 # Common build, test, and development tasks
 
-.PHONY: all build release test test-verbose test-lib lint lint-strict format format-check deny doc-check check check-strict dev quick install clean doc bench ci msrv help
+.PHONY: all build release test test-verbose test-lib lint lint-strict format format-check deny doc-check check check-strict dev quick install clean doc bench ci msrv verify-clean help
 
 # Default target
 all: check
 
 # Build debug binary
 build:
-	cargo build
+	cargo build --all-features --locked
 
 # Build release binary
 release:
-	cargo build --release
+	cargo build --release --all-features --locked
 
 # Run all tests
 test:
-	cargo test --all-features
+	cargo test --all-features --all-targets --locked
 
 # Run tests with output
 test-verbose:
-	cargo test --all-features -- --nocapture
+	cargo test --all-features --all-targets --locked -- --nocapture
 
 # Run library tests only
 test-lib:
-	cargo test --lib --all-features
+	cargo test --lib --all-features --locked
 
 # Run clippy linting (warnings allowed)
 lint:
-	cargo clippy --all-targets --all-features
+	cargo clippy --all-targets --all-features --locked
 
 # Run clippy linting (warnings as errors - for CI)
 lint-strict:
-	cargo clippy --all-targets --all-features -- -D warnings
+	cargo clippy --all-targets --all-features --locked -- -D warnings
 
 # Run supply chain security audit
 deny:
@@ -40,7 +40,7 @@ deny:
 
 # Build documentation (without opening)
 doc-check:
-	cargo doc --no-deps
+	cargo doc --no-deps --all-features --locked
 
 # Format code
 format:
@@ -87,12 +87,16 @@ bench-full:
 msrv:
 	@MSRV=$$(grep '^rust-version' Cargo.toml | cut -d'"' -f2); \
 	echo "Checking MSRV: $$MSRV"; \
-	rustup run $$MSRV cargo check --all-features
+	rustup run $$MSRV cargo check --all-features --all-targets --locked
+
+# Ensure working tree is clean before CI/release
+verify-clean:
+	@git diff --quiet && git diff --cached --quiet || (echo "Working tree is dirty"; exit 1)
 
 # CI-style full check (all gates must pass)
 # Matches GitHub Actions: fmt, clippy, test, doc, deny, msrv, bench
 # (coverage requires tarpaulin, skip locally)
-ci: format-check lint-strict test doc-check deny msrv bench
+ci: verify-clean format-check lint-strict test doc-check deny msrv build release bench
 
 # Show help
 help:
