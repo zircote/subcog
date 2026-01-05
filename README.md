@@ -137,6 +137,10 @@ Configure in Claude Desktop's `claude_desktop_config.json`:
 | `memory.consolidate` | Run memory consolidation |
 | `memory.configure` | Get/set configuration |
 
+When working with an agent, treat inputs that match MCP tool names as tool
+invocations (not shell commands) unless you explicitly say "shell" or "run in
+terminal".
+
 ## Claude Code Hooks
 
 Subcog integrates with all 5 Claude Code hooks:
