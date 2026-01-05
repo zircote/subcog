@@ -449,7 +449,7 @@ org_scope_enabled = true
 - [x] Delete the feature branch ✓
 - [x] Run recall (should trigger lazy GC) ✓
 - [x] Verify memory is tombstoned ✓
-- [ ] Verify memory doesn't appear in default results
+- [x] Verify memory doesn't appear in default results ✓
 - [ ] Run recall with --include-tombstoned
 - [ ] Verify tombstoned memory appears
 - [ ] Test `subcog gc` command
