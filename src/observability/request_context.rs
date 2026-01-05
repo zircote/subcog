@@ -19,6 +19,14 @@ impl RequestContext {
         }
     }
 
+    /// Creates a new request context with an existing request ID.
+    #[must_use]
+    pub fn from_id(request_id: impl Into<String>) -> Self {
+        Self {
+            request_id: request_id.into(),
+        }
+    }
+
     /// Returns the request ID.
     #[must_use]
     pub fn request_id(&self) -> &str {

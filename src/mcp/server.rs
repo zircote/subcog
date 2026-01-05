@@ -54,7 +54,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
-use tracing::info_span;
+use tracing::{Instrument, info_span};
 use tokio::sync::Mutex;
 #[cfg(feature = "http")]
 use tower_http::cors::CorsLayer;
@@ -1104,12 +1104,24 @@ impl McpServer {
             })?;
 
         let cancel_token = service.cancellation_token();
-        tokio::spawn(async move {
-            while !is_shutdown_requested() {
-                tokio::time::sleep(Duration::from_millis(200)).await;
+        let span = tracing::Span::current();
+        let request_context = current_request_id().map(RequestContext::from_id);
+        tokio::spawn(
+            async move {
+                let run = async move {
+                    while !is_shutdown_requested() {
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                    }
+                    cancel_token.cancel();
+                };
+                if let Some(context) = request_context {
+                    scope_request_context(context, run).await
+                } else {
+                    run.await
+                }
             }
-            cancel_token.cancel();
-        });
+            .instrument(span),
+        );
 
         service
             .waiting()

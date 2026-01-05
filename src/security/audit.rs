@@ -11,7 +11,7 @@
 //! To verify chain integrity, use [`AuditLogger::verify_chain`].
 
 use crate::models::{EventMeta, MemoryEvent};
-use crate::observability::global_event_bus;
+use crate::observability::{RequestContext, current_request_id, global_event_bus, scope_request_context};
 use crate::{Error, Result};
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
@@ -20,6 +20,7 @@ use sha2::Sha256;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::OnceLock;
+use tracing::Instrument;
 
 /// HMAC-SHA256 type alias.
 type HmacSha256 = Hmac<Sha256>;
@@ -975,13 +976,26 @@ fn start_audit_subscription() {
     }
 
     let mut receiver = global_event_bus().subscribe();
-    tokio::spawn(async move {
-        while let Ok(event) = receiver.recv().await {
-            if let Some(logger) = global_logger() {
-                logger.log(&event);
+    let span = tracing::Span::current();
+    let request_context = current_request_id().map(RequestContext::from_id);
+    tokio::spawn(
+        async move {
+            let run = async move {
+                while let Ok(event) = receiver.recv().await {
+                    if let Some(logger) = global_logger() {
+                        logger.log(&event);
+                    }
+                }
+            };
+
+            if let Some(context) = request_context {
+                scope_request_context(context, run).await
+            } else {
+                run.await
             }
         }
-    });
+        .instrument(span),
+    );
 }
 
 /// Records a memory event through the global audit logger.

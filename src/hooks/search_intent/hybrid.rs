@@ -8,6 +8,7 @@ use super::llm::classify_intent_with_llm;
 use super::types::{DetectionSource, SearchIntent};
 use crate::config::SearchIntentConfig;
 use crate::llm::LlmProvider as LlmProviderTrait;
+use crate::observability::{RequestContext, current_request_id, enter_request_context};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
@@ -110,11 +111,15 @@ fn run_llm_with_timeout(
     let provider = provider?;
     let (tx, rx) = mpsc::channel();
     let parent_span = tracing::Span::current();
+    let request_id = current_request_id();
 
     // Record that we're starting an LLM call
     metrics::counter!("search_intent_llm_started").increment(1);
 
     std::thread::spawn(move || {
+        let _request_guard = request_id
+            .map(RequestContext::from_id)
+            .map(enter_request_context);
         let _parent = parent_span.enter();
         let span = tracing::info_span!("search_intent.llm");
         let _guard = span.enter();

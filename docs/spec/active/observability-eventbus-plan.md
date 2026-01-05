@@ -40,7 +40,7 @@
 - [x] Add request correlation IDs to CLI/MCP/hook flows (parity) ✓
 - [x] Instrument capture/recall/consolidation/GC with spans and sub-spans ✓
 - [x] Instrument MCP tool execution and hook handlers with spans ✓
-- [ ] Propagate context across async boundaries (tokio tasks, hooks, MCP)
+- [x] Propagate context across async boundaries (tokio tasks, hooks, MCP) ✓
 - [ ] Add trace sampling configuration with defaults
 - [ ] Add tests for trace context propagation in at least two critical flows
 
