@@ -7,7 +7,7 @@ use crate::mcp::tool_types::{
     CaptureArgs, ConsolidateArgs, EnrichArgs, RecallArgs, ReindexArgs, SyncArgs,
     build_filter_description, format_content_for_detail, parse_namespace, parse_search_mode,
 };
-use crate::models::{CaptureRequest, DetailLevel, Domain, SearchFilter, SearchMode};
+use crate::models::{CaptureRequest, DetailLevel, Domain, SearchFilter, SearchMode, SearchResult};
 use crate::services::{ServiceContainer, parse_filter_query};
 use crate::{Error, Result};
 use serde_json::Value;
@@ -39,6 +39,20 @@ fn validate_input_length(input: &str, field_name: &str, max_length: usize) -> Re
         )));
     }
     Ok(())
+}
+
+fn fetch_consolidation_candidates(
+    recall: &crate::services::RecallService,
+    filter: &SearchFilter,
+    query: Option<&str>,
+    limit: usize,
+) -> Result<SearchResult> {
+    let query = query.unwrap_or("*");
+    if query == "*" || query.is_empty() {
+        recall.list_all(filter, limit)
+    } else {
+        recall.search(query, SearchMode::Hybrid, filter, limit)
+    }
 }
 
 /// Executes the capture tool.
@@ -244,9 +258,8 @@ pub fn execute_consolidate(arguments: Value) -> Result<ToolResult> {
     // Fetch memories for consolidation
     let services = ServiceContainer::from_current_dir_or_user()?;
     let filter = SearchFilter::new().with_namespace(namespace);
-    let query = args.query.as_deref().unwrap_or("*");
     let recall = services.recall()?;
-    let result = recall.search(query, SearchMode::Hybrid, &filter, 50)?;
+    let result = fetch_consolidation_candidates(&recall, &filter, args.query.as_deref(), 50)?;
 
     if result.memories.is_empty() {
         return Ok(ToolResult {
@@ -442,6 +455,10 @@ pub fn execute_reindex(arguments: Value) -> Result<ToolResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{Memory, MemoryId, MemoryStatus, Namespace};
+    use crate::storage::index::SqliteBackend;
+    use crate::storage::traits::IndexBackend;
+    use crate::services::RecallService;
 
     #[test]
     fn test_validate_input_length_within_limit() {
@@ -510,5 +527,52 @@ mod tests {
         let err = result.unwrap_err();
         assert!(matches!(err, Error::InvalidInput(_)));
         assert!(err.to_string().contains("query"));
+    }
+
+    fn create_test_memory(id: &str, content: &str, namespace: Namespace) -> Memory {
+        Memory {
+            id: MemoryId::new(id),
+            content: content.to_string(),
+            namespace,
+            domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
+            status: MemoryStatus::Active,
+            created_at: 1,
+            updated_at: 1,
+            tombstoned_at: None,
+            embedding: None,
+            tags: Vec::new(),
+            source: None,
+        }
+    }
+
+    #[test]
+    fn test_consolidate_candidates_uses_list_all_for_wildcard() {
+        let backend = SqliteBackend::in_memory().unwrap();
+        let memory = create_test_memory("id1", "hello world", Namespace::Decisions);
+        backend.index(&memory).unwrap();
+
+        let recall = RecallService::with_index(backend);
+        let filter = SearchFilter::new().with_namespace(Namespace::Decisions);
+        let result = fetch_consolidation_candidates(&recall, &filter, Some("*"), 10).unwrap();
+
+        assert_eq!(result.mode, SearchMode::Text);
+        assert_eq!(result.memories.len(), 1);
+    }
+
+    #[test]
+    fn test_consolidate_candidates_uses_search_for_query() {
+        let backend = SqliteBackend::in_memory().unwrap();
+        let memory = create_test_memory("id1", "hello world", Namespace::Decisions);
+        backend.index(&memory).unwrap();
+
+        let recall = RecallService::with_index(backend);
+        let filter = SearchFilter::new().with_namespace(Namespace::Decisions);
+        let result = fetch_consolidation_candidates(&recall, &filter, Some("hello"), 10).unwrap();
+
+        assert_eq!(result.mode, SearchMode::Hybrid);
+        assert_eq!(result.memories.len(), 1);
     }
 }
