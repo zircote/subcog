@@ -608,7 +608,7 @@ org_scope_enabled = true
 ### Testing
 - [x] Unit tests pass for all new code ✓
 - [x] Integration tests pass for tombstone flow ✓
-- [ ] Manual testing completed successfully
+- [x] Manual testing completed successfully ✓
 - [ ] Performance acceptable (no regression)
 
 ### Documentation
