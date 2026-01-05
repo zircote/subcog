@@ -451,7 +451,7 @@ impl SessionStartHandler {
 
     /// Returns standard guidance text.
     fn standard_guidance() -> String {
-        r#"## Subcog Memory Protocol (Quick Start)
+        r"## Subcog Memory Protocol (Quick Start)
 
 Use the `prompt_understanding` tool for full, authoritative guidance.
 
@@ -460,13 +460,13 @@ Use the `prompt_understanding` tool for full, authoritative guidance.
 2) Before any substantive response, call `mcp__plugin_subcog_subcog__subcog_recall`.
 3) Capture decisions/patterns/learnings immediately with `mcp__plugin_subcog_subcog__subcog_capture`.
 
-Call `mcp__plugin_subcog_subcog__prompt_understanding` whenever you need the full protocol, namespaces, and workflow examples."#
+Call `mcp__plugin_subcog_subcog__prompt_understanding` whenever you need the full protocol, namespaces, and workflow examples."
             .to_string()
     }
 
     /// Returns detailed guidance text.
     fn detailed_guidance() -> String {
-        r#"# Subcog Memory Protocol (Detailed)
+        r"# Subcog Memory Protocol (Detailed)
 
 This hook is intentionally concise. Use the `prompt_understanding` tool for the full protocol,
 namespaces, workflows, and examples.
@@ -477,7 +477,7 @@ namespaces, workflows, and examples.
 3) Capture decisions/patterns/learnings immediately with `mcp__plugin_subcog_subcog__subcog_capture`.
 
 **Reminder:** The authoritative guidance lives in `prompt_understanding` and should be used
-whenever you need detailed instructions."#
+whenever you need detailed instructions."
             .to_string()
     }
 

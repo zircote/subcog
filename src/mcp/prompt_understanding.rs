@@ -1,4 +1,4 @@
-//! Guidance content for the prompt_understanding tool.
+//! Guidance content for the `prompt_understanding` tool.
 
 pub const PROMPT_UNDERSTANDING: &str = r#"# SUBCOG.MCP-SERVER - How to use Subcog memory tools effectively
 
