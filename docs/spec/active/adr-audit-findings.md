@@ -564,7 +564,7 @@ org_scope_enabled = true
 - [x] Add partial index on tombstoned_at (only non-NULL values) ✓
 - [x] Use `WHERE status != 'Tombstoned'` in default queries (indexed) ✓
 - [x] Monitor query performance after deployment ✓
-- [ ] Run EXPLAIN ANALYZE on recall queries
+- [x] Run EXPLAIN ANALYZE on recall queries ✓
 - [ ] Benchmark before/after with realistic data
 
 ### Risk 3: Breaking Changes in Memory Struct
