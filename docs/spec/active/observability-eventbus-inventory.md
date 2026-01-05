@@ -27,7 +27,21 @@
 
 ## Metrics & Exporters
 
-_(pending inventory)_
+**Metrics coverage (examples):**
+- Memory lifecycle: capture, search, consolidation, tombstone, GC, sync.
+- Hooks: execution counts and duration (SessionStart, PreCompact, PostToolUse, Stop, UserPrompt).
+- LLM: bulkhead/retry/circuit breaker metrics.
+- Storage: SQLite checkpoints, resilience retries.
+- MCP: shutdown metrics.
+
+**Exporters:**
+- Prometheus exporter (metrics-exporter-prometheus).
+- Optional metrics push gateway support.
+
+**Label cardinality risks:**
+- Current labels appear bounded (`mode`, `status`, `hook_type`, `provider`, `backend`).
+- No `memory_id`/`request_id` used as metric labels (good).
+- Watch for any future labels derived from user input (e.g., project IDs, query strings).
 
 ## Coverage Gaps
 
