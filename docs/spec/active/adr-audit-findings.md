@@ -631,7 +631,7 @@ Copy this to track progress:
 
 ```markdown
 ## Phase 1: Tombstone Pattern (ADR-0053) [0/7]
-- [ ] Task 1.1: Add Tombstoned variant to MemoryStatus enum
+- [x] Task 1.1: Add Tombstoned variant to MemoryStatus enum ✓
 - [ ] Task 1.2: Add tombstoned_at field to Memory struct
 - [ ] Task 1.3: Create SQLite migration for tombstoned_at
 - [ ] Task 1.4: Update PostgreSQL schema
