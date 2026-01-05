@@ -8,7 +8,9 @@ use subcog::hooks::{
     AdaptiveContextConfig, HookHandler, PostToolUseHandler, PreCompactHandler, SessionStartHandler,
     StopHandler, UserPromptHandler,
 };
+use subcog::models::{EventMeta, MemoryEvent};
 use subcog::observability::flush_metrics;
+use subcog::security::record_event;
 use subcog::services::ContextBuilderService;
 use subcog::storage::index::SqliteBackend;
 use subcog::{CaptureService, RecallService, SyncService};
@@ -39,6 +41,12 @@ pub fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn s
     let capture_service = CaptureService::new(capture_config.clone());
     let sync_service = SyncService::default();
 
+    let hook_name = event.as_str();
+    record_event(MemoryEvent::HookInvoked {
+        meta: EventMeta::new("hooks", None),
+        hook: hook_name.to_string(),
+    });
+
     let response = match event {
         HookEvent::SessionStart => {
             // SessionStart with context builder for memory injection
@@ -48,7 +56,7 @@ pub fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn s
             } else {
                 SessionStartHandler::new()
             };
-            handler.handle(&input)?
+            handler.handle(&input)
         },
         HookEvent::UserPromptSubmit => {
             let context_config =
@@ -63,7 +71,7 @@ pub fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn s
             if let Some(provider) = build_hook_llm_provider(config) {
                 handler = handler.with_llm_provider(provider);
             }
-            handler.handle(&input)?
+            handler.handle(&input)
         },
         HookEvent::PostToolUse => {
             // PostToolUse with recall service for memory surfacing
@@ -72,17 +80,29 @@ pub fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn s
             } else {
                 PostToolUseHandler::new()
             };
-            handler.handle(&input)?
+            handler.handle(&input)
         },
         HookEvent::PreCompact => {
             // PreCompact with capture service for auto-capture
             let handler = PreCompactHandler::new().with_capture(capture_service);
-            handler.handle(&input)?
+            handler.handle(&input)
         },
         HookEvent::Stop => {
             // Stop with sync service for session-end sync
             let handler = StopHandler::new().with_sync(sync_service);
-            handler.handle(&input)?
+            handler.handle(&input)
+        },
+    };
+
+    let response = match response {
+        Ok(response) => response,
+        Err(err) => {
+            record_event(MemoryEvent::HookFailed {
+                meta: EventMeta::new("hooks", None),
+                hook: hook_name.to_string(),
+                error: err.to_string(),
+            });
+            return Err(Box::new(err));
         },
     };
 

@@ -167,6 +167,48 @@ pub enum MemoryEvent {
         /// Error message.
         error: String,
     },
+    /// Hook invocation event.
+    HookInvoked {
+        /// Event metadata.
+        meta: EventMeta,
+        /// Hook name.
+        hook: String,
+    },
+    /// Hook classification event.
+    HookClassified {
+        /// Event metadata.
+        meta: EventMeta,
+        /// Hook name.
+        hook: String,
+        /// Classification label.
+        classification: String,
+        /// Classifier source (keyword/llm/hybrid).
+        classifier: String,
+        /// Confidence score.
+        confidence: f32,
+    },
+    /// Hook capture decision event.
+    HookCaptureDecision {
+        /// Event metadata.
+        meta: EventMeta,
+        /// Hook name.
+        hook: String,
+        /// Decision outcome.
+        decision: String,
+        /// Namespace selected for capture.
+        namespace: Option<String>,
+        /// Memory ID if captured.
+        memory_id: Option<MemoryId>,
+    },
+    /// Hook failure event.
+    HookFailed {
+        /// Event metadata.
+        meta: EventMeta,
+        /// Hook name.
+        hook: String,
+        /// Error message.
+        error: String,
+    },
 }
 
 impl MemoryEvent {
@@ -186,6 +228,10 @@ impl MemoryEvent {
             Self::McpAuthFailed { .. } => "mcp.auth_failed",
             Self::McpToolExecuted { .. } => "mcp.tool_executed",
             Self::McpRequestError { .. } => "mcp.request_error",
+            Self::HookInvoked { .. } => "hook.invoked",
+            Self::HookClassified { .. } => "hook.classified",
+            Self::HookCaptureDecision { .. } => "hook.capture_decision",
+            Self::HookFailed { .. } => "hook.failed",
         }
     }
 
@@ -204,7 +250,11 @@ impl MemoryEvent {
             | Self::McpStarted { meta, .. }
             | Self::McpAuthFailed { meta, .. }
             | Self::McpToolExecuted { meta, .. }
-            | Self::McpRequestError { meta, .. } => meta.timestamp,
+            | Self::McpRequestError { meta, .. }
+            | Self::HookInvoked { meta, .. }
+            | Self::HookClassified { meta, .. }
+            | Self::HookCaptureDecision { meta, .. }
+            | Self::HookFailed { meta, .. } => meta.timestamp,
         }
     }
 
@@ -223,7 +273,11 @@ impl MemoryEvent {
             | Self::McpStarted { meta, .. }
             | Self::McpAuthFailed { meta, .. }
             | Self::McpToolExecuted { meta, .. }
-            | Self::McpRequestError { meta, .. } => meta,
+            | Self::McpRequestError { meta, .. }
+            | Self::HookInvoked { meta, .. }
+            | Self::HookClassified { meta, .. }
+            | Self::HookCaptureDecision { meta, .. }
+            | Self::HookFailed { meta, .. } => meta,
         }
     }
 }

@@ -11,7 +11,8 @@ use super::search_intent::{
 use crate::Result;
 use crate::config::SearchIntentConfig;
 use crate::llm::LlmProvider;
-use crate::models::{CaptureRequest, CaptureResult, Namespace};
+use crate::models::{CaptureRequest, CaptureResult, EventMeta, MemoryEvent, Namespace};
+use crate::security::record_event;
 use crate::services::{CaptureService, RecallService};
 use regex::Regex;
 use std::sync::{Arc, LazyLock};
@@ -248,6 +249,13 @@ impl UserPromptHandler {
             return None;
         }
         let intent = self.classify_intent(prompt);
+        record_event(MemoryEvent::HookClassified {
+            meta: EventMeta::new("hooks", None),
+            hook: "UserPromptSubmit".to_string(),
+            classification: intent.intent_type.as_str().to_string(),
+            classifier: intent.source.as_str().to_string(),
+            confidence: intent.confidence,
+        });
 
         if intent.confidence >= self.search_intent_threshold {
             Some(intent)
@@ -491,6 +499,20 @@ impl UserPromptHandler {
         } else {
             None
         };
+        let decision = if !should_capture {
+            "skipped"
+        } else if capture_result.is_some() {
+            "captured"
+        } else {
+            "suggested"
+        };
+        record_event(MemoryEvent::HookCaptureDecision {
+            meta: EventMeta::new("hooks", None),
+            hook: "UserPromptSubmit".to_string(),
+            decision: decision.to_string(),
+            namespace: signals.first().map(|signal| signal.namespace.as_str().to_string()),
+            memory_id: capture_result.as_ref().map(|result| result.memory_id.clone()),
+        });
 
         // Detect search intent for proactive memory surfacing
         let search_intent = self.detect_search_intent(prompt);

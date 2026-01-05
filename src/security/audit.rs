@@ -787,6 +787,85 @@ impl AuditLogger {
                     .with_outcome(AuditOutcome::Failure)
                     .with_metadata(serde_json::Value::Object(metadata))
             },
+
+            MemoryEvent::HookInvoked { meta, hook } => {
+                let mut metadata = base_metadata(meta);
+                metadata.insert("hook".to_string(), serde_json::Value::String(hook.clone()));
+
+                AuditEntry::new("hook.invoked", "invoke")
+                    .with_metadata(serde_json::Value::Object(metadata))
+            },
+
+            MemoryEvent::HookClassified {
+                meta,
+                hook,
+                classification,
+                classifier,
+                confidence,
+            } => {
+                let mut metadata = base_metadata(meta);
+                metadata.insert("hook".to_string(), serde_json::Value::String(hook.clone()));
+                metadata.insert(
+                    "classification".to_string(),
+                    serde_json::Value::String(classification.clone()),
+                );
+                metadata.insert(
+                    "classifier".to_string(),
+                    serde_json::Value::String(classifier.clone()),
+                );
+                metadata.insert(
+                    "confidence".to_string(),
+                    serde_json::Value::Number(
+                        serde_json::Number::from_f64(f64::from(*confidence))
+                            .unwrap_or_else(|| serde_json::Number::from(0_u64)),
+                    ),
+                );
+
+                AuditEntry::new("hook.classified", "classify")
+                    .with_metadata(serde_json::Value::Object(metadata))
+            },
+
+            MemoryEvent::HookCaptureDecision {
+                meta,
+                hook,
+                decision,
+                namespace,
+                memory_id,
+            } => {
+                let mut metadata = base_metadata(meta);
+                metadata.insert("hook".to_string(), serde_json::Value::String(hook.clone()));
+                metadata.insert(
+                    "decision".to_string(),
+                    serde_json::Value::String(decision.clone()),
+                );
+                metadata.insert(
+                    "namespace".to_string(),
+                    namespace
+                        .clone()
+                        .map(serde_json::Value::String)
+                        .unwrap_or(serde_json::Value::Null),
+                );
+                metadata.insert(
+                    "memory_id".to_string(),
+                    memory_id
+                        .as_ref()
+                        .map(|id| serde_json::Value::String(id.to_string()))
+                        .unwrap_or(serde_json::Value::Null),
+                );
+
+                AuditEntry::new("hook.capture_decision", "decision")
+                    .with_metadata(serde_json::Value::Object(metadata))
+            },
+
+            MemoryEvent::HookFailed { meta, hook, error } => {
+                let mut metadata = base_metadata(meta);
+                metadata.insert("hook".to_string(), serde_json::Value::String(hook.clone()));
+                metadata.insert("error".to_string(), serde_json::Value::String(error.clone()));
+
+                AuditEntry::new("hook.failed", "invoke")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_metadata(serde_json::Value::Object(metadata))
+            },
         }
     }
 

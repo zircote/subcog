@@ -31,7 +31,7 @@
 - [x] Add event bus subscription helpers (filtered subscribers by event type) ✓
 - [x] Emit events from all memory lifecycle operations (capture/update/delete/tombstone/recall) ✓
 - [x] Emit events for MCP lifecycle (startup, auth, tool execution, request errors) ✓
-- [ ] Emit events for hook lifecycle (invocation, classification, capture decisions, failures)
+- [x] Emit events for hook lifecycle (invocation, classification, capture decisions, failures) ✓
 - [ ] Add event bus health metrics (publish rate, drop rate, lag)
 - [ ] Add unit tests for event dispatch and subscriber filtering
 
