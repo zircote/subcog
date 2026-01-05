@@ -446,7 +446,7 @@ org_scope_enabled = true
 
 #### Tombstone Testing
 - [ ] Create a memory in a feature branch context
-- [ ] Delete the feature branch
+- [x] Delete the feature branch ✓
 - [ ] Run recall (should trigger lazy GC)
 - [ ] Verify memory is tombstoned
 - [ ] Verify memory doesn't appear in default results
