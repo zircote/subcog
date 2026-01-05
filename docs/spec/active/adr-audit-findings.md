@@ -455,7 +455,7 @@ org_scope_enabled = true
 - [x] Test `subcog gc` command ✓
 - [x] Test `subcog gc --dry-run` ✓
 - [x] Test `subcog gc --purge --older-than=30d` ✓
-- [ ] Verify purged memories are permanently deleted
+- [x] Verify purged memories are permanently deleted ✓
 
 #### Org-Scope Testing
 - [ ] Test with SUBCOG_ORG_SCOPE_ENABLED=false (default)
