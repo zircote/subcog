@@ -44,6 +44,7 @@ audit_log = false
 llm_features = false
 auto_capture = false
 consolidation = false
+org_scope_enabled = false
 
 [llm]
 provider = "anthropic" # anthropic, openai, ollama, lmstudio

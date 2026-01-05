@@ -24,6 +24,7 @@ This consolidated reference includes:
 | LLM | `SUBCOG_LLM_PROVIDER`, `SUBCOG_LLM_MODEL`, `ANTHROPIC_API_KEY` |
 | Storage | `SUBCOG_STORAGE_PERSISTENCE`, `DATABASE_URL`, `REDIS_URL` |
 | Observability | `SUBCOG_METRICS_ENABLED`, `SUBCOG_TRACING_ENABLED` |
+| Features | `SUBCOG_ORG_SCOPE_ENABLED` |
 
 ## See Also
 

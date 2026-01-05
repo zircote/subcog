@@ -145,7 +145,11 @@ For short-lived processes (e.g., hooks), push metrics to a gateway.
 
 ## Feature Flags
 
-Enable or disable optional features via config file only (not environment variables).
+Feature flags are configured in `config.toml`. The org-scope flag also supports an environment override.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `SUBCOG_ORG_SCOPE_ENABLED` | boolean | `false` | Enable org-scoped storage when org config is provided |
 
 ```toml
 [features]

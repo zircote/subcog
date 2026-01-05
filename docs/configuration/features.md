@@ -2,6 +2,8 @@
 
 Subcog uses feature flags to enable optional functionality. This allows the system to run in minimal mode while providing advanced features when configured.
 
+Feature flags are configured in `config.toml`. The only environment override currently supported is `SUBCOG_ORG_SCOPE_ENABLED`.
+
 ## Feature Tiers
 
 | Tier | Features | Requirements |
@@ -32,8 +34,6 @@ features:
 - `true`: Block capture, return error
 - `false`: Allow capture (not recommended)
 
-**Environment:** `SUBCOG_FEATURES_SECRETS_FILTER`
-
 ---
 
 ### pii_filter
@@ -56,8 +56,6 @@ features:
 - `true`: Redact PII with `[REDACTED]`
 - `false`: Store as-is
 
-**Environment:** `SUBCOG_FEATURES_PII_FILTER`
-
 ## Scoping Features
 
 ### multi_domain
@@ -79,7 +77,25 @@ features:
 - Simpler storage model
 - Lower resource usage
 
-**Environment:** `SUBCOG_FEATURES_MULTI_DOMAIN`
+### org_scope_enabled
+
+Enables org-scoped storage (shared PostgreSQL persistence).
+
+```yaml
+features:
+  org_scope_enabled: false
+```
+
+**When enabled:**
+- Org-scoped storage is allowed when org configuration is provided
+- Shared memories can be stored in PostgreSQL
+- Requires org-scope initialization at runtime
+
+**When disabled:**
+- Org-scoped storage is rejected
+- Project/user scopes only
+
+**Environment:** `SUBCOG_ORG_SCOPE_ENABLED`
 
 ## Observability Features
 
@@ -110,8 +126,6 @@ features:
 }
 ```
 
-**Environment:** `SUBCOG_FEATURES_AUDIT_LOG`
-
 ## LLM Features
 
 ### llm_features
@@ -133,8 +147,6 @@ features:
 - LLM provider configuration
 - Valid API key
 
-**Environment:** `SUBCOG_FEATURES_LLM_FEATURES`
-
 ---
 
 ### auto_capture
@@ -153,8 +165,6 @@ features:
 
 **Requires:** `llm_features: true`
 
-**Environment:** `SUBCOG_FEATURES_AUTO_CAPTURE`
-
 ---
 
 ### consolidation
@@ -172,8 +182,6 @@ features:
 - Creates summaries of related memories
 
 **Requires:** `llm_features: true`
-
-**Environment:** `SUBCOG_FEATURES_CONSOLIDATION`
 
 ## Search Intent Configuration
 
