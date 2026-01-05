@@ -83,45 +83,53 @@ impl LlmResilienceConfig {
     /// Applies environment variable overrides.
     #[must_use]
     pub fn with_env_overrides(mut self) -> Self {
-        if let Ok(v) = std::env::var("SUBCOG_LLM_MAX_RETRIES") {
-            if let Ok(parsed) = v.parse::<u32>() {
-                self.max_retries = parsed;
-            }
+        if let Some(parsed) = std::env::var("SUBCOG_LLM_MAX_RETRIES")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+        {
+            self.max_retries = parsed;
         }
-        if let Ok(v) = std::env::var("SUBCOG_LLM_RETRY_BACKOFF_MS") {
-            if let Ok(parsed) = v.parse::<u64>() {
-                self.retry_backoff_ms = parsed;
-            }
+        if let Some(parsed) = std::env::var("SUBCOG_LLM_RETRY_BACKOFF_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            self.retry_backoff_ms = parsed;
         }
-        if let Ok(v) = std::env::var("SUBCOG_LLM_BREAKER_FAILURE_THRESHOLD") {
-            if let Ok(parsed) = v.parse::<u32>() {
-                self.breaker_failure_threshold = parsed.max(1);
-            }
+        if let Some(parsed) = std::env::var("SUBCOG_LLM_BREAKER_FAILURE_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+        {
+            self.breaker_failure_threshold = parsed.max(1);
         }
-        if let Ok(v) = std::env::var("SUBCOG_LLM_BREAKER_RESET_MS") {
-            if let Ok(parsed) = v.parse::<u64>() {
-                self.breaker_reset_timeout_ms = parsed;
-            }
+        if let Some(parsed) = std::env::var("SUBCOG_LLM_BREAKER_RESET_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            self.breaker_reset_timeout_ms = parsed;
         }
-        if let Ok(v) = std::env::var("SUBCOG_LLM_BREAKER_HALF_OPEN_MAX_CALLS") {
-            if let Ok(parsed) = v.parse::<u32>() {
-                self.breaker_half_open_max_calls = parsed.max(1);
-            }
+        if let Some(parsed) = std::env::var("SUBCOG_LLM_BREAKER_HALF_OPEN_MAX_CALLS")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+        {
+            self.breaker_half_open_max_calls = parsed.max(1);
         }
-        if let Ok(v) = std::env::var("SUBCOG_LLM_LATENCY_SLO_MS") {
-            if let Ok(parsed) = v.parse::<u64>() {
-                self.latency_slo_ms = parsed;
-            }
+        if let Some(parsed) = std::env::var("SUBCOG_LLM_LATENCY_SLO_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            self.latency_slo_ms = parsed;
         }
-        if let Ok(v) = std::env::var("SUBCOG_LLM_ERROR_BUDGET_RATIO") {
-            if let Ok(parsed) = v.parse::<f64>() {
-                self.error_budget_ratio = parsed.clamp(0.0, 1.0);
-            }
+        if let Some(parsed) = std::env::var("SUBCOG_LLM_ERROR_BUDGET_RATIO")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+        {
+            self.error_budget_ratio = parsed.clamp(0.0, 1.0);
         }
-        if let Ok(v) = std::env::var("SUBCOG_LLM_ERROR_BUDGET_WINDOW_SECS") {
-            if let Ok(parsed) = v.parse::<u64>() {
-                self.error_budget_window_secs = parsed.max(1);
-            }
+        if let Some(parsed) = std::env::var("SUBCOG_LLM_ERROR_BUDGET_WINDOW_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            self.error_budget_window_secs = parsed.max(1);
         }
 
         self

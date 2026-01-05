@@ -316,10 +316,10 @@ impl AuditLogger {
             return entry;
         };
 
-        if entry.sign(key, &last) {
-            if let Some(ref sig) = entry.hmac_signature {
-                last.clone_from(sig);
-            }
+        if entry.sign(key, &last)
+            && let Some(ref sig) = entry.hmac_signature
+        {
+            last.clone_from(sig);
         }
         entry
     }
@@ -948,13 +948,13 @@ impl AuditLogger {
 /// Returns an error if the log directory cannot be created or if the global
 /// audit logger has already been initialized.
 pub fn init_global(config: AuditConfig) -> Result<()> {
-    if let Some(ref path) = config.log_path {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| Error::OperationFailed {
-                operation: "init_audit_logger".to_string(),
-                cause: e.to_string(),
-            })?;
-        }
+    if let Some(ref path) = config.log_path
+        && let Some(parent) = path.parent()
+    {
+        std::fs::create_dir_all(parent).map_err(|e| Error::OperationFailed {
+            operation: "init_audit_logger".to_string(),
+            cause: e.to_string(),
+        })?;
     }
 
     GLOBAL_AUDIT_LOGGER

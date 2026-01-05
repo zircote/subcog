@@ -632,15 +632,15 @@ impl SqliteBackend {
     ///
     /// Returns an error if the checkpoint operation fails.
     pub fn checkpoint_if_needed(&self, threshold_pages: u32) -> Result<Option<(u32, u32)>> {
-        if let Some(current_size) = self.wal_size() {
-            if current_size > threshold_pages {
-                tracing::debug!(
-                    current_pages = current_size,
-                    threshold = threshold_pages,
-                    "WAL exceeds threshold, triggering checkpoint"
-                );
-                return self.checkpoint().map(Some);
-            }
+        if let Some(current_size) = self.wal_size()
+            && current_size > threshold_pages
+        {
+            tracing::debug!(
+                current_pages = current_size,
+                threshold = threshold_pages,
+                "WAL exceeds threshold, triggering checkpoint"
+            );
+            return self.checkpoint().map(Some);
         }
         Ok(None)
     }

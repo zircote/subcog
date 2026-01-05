@@ -64,7 +64,7 @@ pub struct GcResult {
 impl GcResult {
     /// Returns `true` if any stale branches were found.
     #[must_use]
-    pub fn has_stale_branches(&self) -> bool {
+    pub const fn has_stale_branches(&self) -> bool {
         !self.stale_branches.is_empty()
     }
 
@@ -526,10 +526,12 @@ pub fn branch_exists(branch: &str) -> bool {
     }
 
     // If the current branch matches, it definitely exists
-    if let Some(ref current) = ctx.branch {
-        if current == branch {
-            return true;
-        }
+    if ctx
+        .branch
+        .as_deref()
+        .is_some_and(|current| current == branch)
+    {
+        return true;
     }
 
     // For other branches, we need to check the repository

@@ -650,12 +650,10 @@ Your response:
     /// Checks if this is the first session (no user memories).
     fn is_first_session(&self) -> bool {
         // Check if we have any user memories
-        if let Some(ref builder) = self.context_builder {
-            if let Ok(context) = builder.build_context(100) {
-                return context.is_empty();
-            }
-        }
-        true
+        self.context_builder
+            .as_ref()
+            .and_then(|builder| builder.build_context(100).ok())
+            .is_none_or(|context| context.is_empty())
     }
 }
 

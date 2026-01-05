@@ -116,7 +116,7 @@ impl VectorFilter {
 
     /// Returns true if the filter is empty (matches all).
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.namespaces.is_empty() && self.domains.is_empty() && self.min_score.is_none()
     }
 }

@@ -772,15 +772,13 @@ fn determine_export_format(format: Option<&str>, output: Option<&PathBuf>) -> Ou
     }
 
     // Infer from output file extension
-    if let Some(path) = output {
-        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            return match ext.to_lowercase().as_str() {
-                "yaml" | "yml" => OutputFormat::Yaml,
-                "json" => OutputFormat::Json,
-                // Default to Markdown for .md, .markdown, and unknown extensions
-                _ => OutputFormat::Markdown,
-            };
-        }
+    if let Some(ext) = output.and_then(|path| path.extension().and_then(|e| e.to_str())) {
+        return match ext.to_lowercase().as_str() {
+            "yaml" | "yml" => OutputFormat::Yaml,
+            "json" => OutputFormat::Json,
+            // Default to Markdown for .md, .markdown, and unknown extensions
+            _ => OutputFormat::Markdown,
+        };
     }
 
     OutputFormat::Markdown

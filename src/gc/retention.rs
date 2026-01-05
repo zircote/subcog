@@ -133,24 +133,27 @@ impl RetentionConfig {
         let mut config = Self::default();
 
         // Default retention
-        if let Ok(days) = std::env::var(RETENTION_DAYS_ENV) {
-            if let Ok(d) = days.parse::<u32>() {
-                config.default_days = d;
-            }
+        if let Some(d) = std::env::var(RETENTION_DAYS_ENV)
+            .ok()
+            .and_then(|days| days.parse::<u32>().ok())
+        {
+            config.default_days = d;
         }
 
         // Minimum retention
-        if let Ok(days) = std::env::var("SUBCOG_RETENTION_MIN_DAYS") {
-            if let Ok(d) = days.parse::<u32>() {
-                config.minimum_days = d;
-            }
+        if let Some(d) = std::env::var("SUBCOG_RETENTION_MIN_DAYS")
+            .ok()
+            .and_then(|days| days.parse::<u32>().ok())
+        {
+            config.minimum_days = d;
         }
 
         // Batch limit
-        if let Ok(limit) = std::env::var("SUBCOG_RETENTION_BATCH_LIMIT") {
-            if let Ok(l) = limit.parse::<usize>() {
-                config.batch_limit = l;
-            }
+        if let Some(l) = std::env::var("SUBCOG_RETENTION_BATCH_LIMIT")
+            .ok()
+            .and_then(|limit| limit.parse::<usize>().ok())
+        {
+            config.batch_limit = l;
         }
 
         // Per-namespace overrides
@@ -159,13 +162,12 @@ impl RetentionConfig {
                 "SUBCOG_RETENTION_{}_DAYS",
                 ns.as_str().to_uppercase().replace('-', "_")
             );
-            let Ok(days) = std::env::var(&env_key) else {
-                continue;
-            };
-            let Ok(d) = days.parse::<u32>() else {
-                continue;
-            };
-            config.namespace_days.insert(ns, d);
+            if let Some(d) = std::env::var(&env_key)
+                .ok()
+                .and_then(|days| days.parse::<u32>().ok())
+            {
+                config.namespace_days.insert(ns, d);
+            }
         }
 
         config

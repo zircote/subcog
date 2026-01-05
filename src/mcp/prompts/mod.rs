@@ -41,20 +41,48 @@ impl PromptRegistry {
     /// Returns all prompt definitions.
     fn all_prompts() -> Vec<PromptDefinition> {
         vec![
+            Self::subcog_prompt(),
             Self::tutorial_prompt(),
             Self::generate_tutorial_definition(),
+            Self::generate_tutorial_alias_prompt(),
             Self::capture_assistant_prompt(),
+            Self::capture_prompt_alias(),
             Self::review_prompt(),
             Self::document_decision_prompt(),
+            Self::generate_decision_alias_prompt(),
             Self::search_help_prompt(),
+            Self::recall_prompt_alias(),
             Self::browse_prompt(),
             Self::list_prompt(),
             // Phase 4: Intent-aware prompts
             Self::intent_search_prompt(),
+            Self::intent_search_alias_prompt(),
             Self::query_suggest_prompt(),
+            Self::query_suggest_alias_prompt(),
             Self::context_capture_prompt(),
+            Self::context_capture_alias_prompt(),
             Self::discover_prompt(),
+            Self::discover_alias_prompt(),
         ]
+    }
+
+    fn subcog_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "subcog".to_string(),
+            description: Some("Quickstart prompt (alias for subcog_tutorial)".to_string()),
+            arguments: vec![
+                PromptArgument {
+                    name: "familiarity".to_string(),
+                    description: Some("Your familiarity level with memory systems".to_string()),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "focus".to_string(),
+                    description: Some("Topic to focus on".to_string()),
+                    required: false,
+                },
+            ],
+        }
     }
 
     fn tutorial_prompt() -> PromptDefinition {
@@ -104,6 +132,32 @@ impl PromptRegistry {
         }
     }
 
+    fn generate_tutorial_alias_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "generate_tutorial".to_string(),
+            description: Some("Alias for subcog_generate_tutorial".to_string()),
+            arguments: vec![
+                PromptArgument {
+                    name: "topic".to_string(),
+                    description: Some("Topic to create tutorial for".to_string()),
+                    required: true,
+                },
+                PromptArgument {
+                    name: "level".to_string(),
+                    description: Some(
+                        "Tutorial level: beginner, intermediate, advanced".to_string(),
+                    ),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "format".to_string(),
+                    description: Some("Output format: markdown, outline, steps".to_string()),
+                    required: false,
+                },
+            ],
+        }
+    }
+
     fn capture_assistant_prompt() -> PromptDefinition {
         PromptDefinition {
             name: "subcog_capture_assistant".to_string(),
@@ -113,6 +167,18 @@ impl PromptRegistry {
                 description: Some(
                     "The current context or conversation to analyze for memories".to_string(),
                 ),
+                required: true,
+            }],
+        }
+    }
+
+    fn capture_prompt_alias() -> PromptDefinition {
+        PromptDefinition {
+            name: "subcog_capture".to_string(),
+            description: Some("Alias for subcog_capture_assistant".to_string()),
+            arguments: vec![PromptArgument {
+                name: "content".to_string(),
+                description: Some("Memory content to capture".to_string()),
                 required: true,
             }],
         }
@@ -160,6 +226,30 @@ impl PromptRegistry {
         }
     }
 
+    fn generate_decision_alias_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "generate_decision".to_string(),
+            description: Some("Alias for subcog_document_decision".to_string()),
+            arguments: vec![
+                PromptArgument {
+                    name: "decision".to_string(),
+                    description: Some("Brief description of the decision".to_string()),
+                    required: true,
+                },
+                PromptArgument {
+                    name: "context".to_string(),
+                    description: Some("Background context for the decision".to_string()),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "alternatives".to_string(),
+                    description: Some("Alternatives that were considered".to_string()),
+                    required: false,
+                },
+            ],
+        }
+    }
+
     fn search_help_prompt() -> PromptDefinition {
         PromptDefinition {
             name: "subcog_search_help".to_string(),
@@ -167,6 +257,18 @@ impl PromptRegistry {
             arguments: vec![PromptArgument {
                 name: "goal".to_string(),
                 description: Some("What you're trying to find or accomplish".to_string()),
+                required: true,
+            }],
+        }
+    }
+
+    fn recall_prompt_alias() -> PromptDefinition {
+        PromptDefinition {
+            name: "subcog_recall".to_string(),
+            description: Some("Alias for subcog_search_help".to_string()),
+            arguments: vec![PromptArgument {
+                name: "query".to_string(),
+                description: Some("Search query".to_string()),
                 required: true,
             }],
         }
@@ -258,6 +360,34 @@ impl PromptRegistry {
         }
     }
 
+    fn intent_search_alias_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "intent_search".to_string(),
+            description: Some("Alias for subcog_intent_search".to_string()),
+            arguments: vec![
+                PromptArgument {
+                    name: "query".to_string(),
+                    description: Some("Natural language query to search for".to_string()),
+                    required: true,
+                },
+                PromptArgument {
+                    name: "intent".to_string(),
+                    description: Some(
+                        "Intent hint: howto, location, explanation, etc.".to_string(),
+                    ),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "context".to_string(),
+                    description: Some(
+                        "Current working context (file, task) for relevance boosting".to_string(),
+                    ),
+                    required: false,
+                },
+            ],
+        }
+    }
+
     fn query_suggest_prompt() -> PromptDefinition {
         PromptDefinition {
             name: "subcog_query_suggest".to_string(),
@@ -279,12 +409,52 @@ impl PromptRegistry {
         }
     }
 
+    fn query_suggest_alias_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "query_suggest".to_string(),
+            description: Some("Alias for subcog_query_suggest".to_string()),
+            arguments: vec![
+                PromptArgument {
+                    name: "query".to_string(),
+                    description: Some("Initial query".to_string()),
+                    required: true,
+                },
+                PromptArgument {
+                    name: "namespace".to_string(),
+                    description: Some("Namespace to focus suggestions on".to_string()),
+                    required: false,
+                },
+            ],
+        }
+    }
+
     fn context_capture_prompt() -> PromptDefinition {
         PromptDefinition {
             name: "subcog_context_capture".to_string(),
             description: Some(
                 "Analyze conversation context and suggest memories to capture".to_string(),
             ),
+            arguments: vec![
+                PromptArgument {
+                    name: "conversation".to_string(),
+                    description: Some("Recent conversation or code changes to analyze".to_string()),
+                    required: true,
+                },
+                PromptArgument {
+                    name: "threshold".to_string(),
+                    description: Some(
+                        "Confidence threshold for suggestions (default: 0.7)".to_string(),
+                    ),
+                    required: false,
+                },
+            ],
+        }
+    }
+
+    fn context_capture_alias_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "context_capture".to_string(),
+            description: Some("Alias for subcog_context_capture".to_string()),
             arguments: vec![
                 PromptArgument {
                     name: "conversation".to_string(),
@@ -323,6 +493,29 @@ impl PromptRegistry {
         }
     }
 
+    fn discover_alias_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "discover".to_string(),
+            description: Some("Alias for subcog_discover".to_string()),
+            arguments: vec![
+                PromptArgument {
+                    name: "topic".to_string(),
+                    description: Some("Topic to explore".to_string()),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "tag".to_string(),
+                    description: Some("Tag to explore".to_string()),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "depth".to_string(),
+                    description: Some("How many hops to explore (default: 2)".to_string()),
+                    required: false,
+                },
+            ],
+        }
+    }
     /// Returns all prompt definitions (built-in only).
     #[must_use]
     pub fn list_prompts(&self) -> Vec<&PromptDefinition> {
@@ -390,25 +583,33 @@ impl PromptRegistry {
     #[must_use]
     pub fn get_prompt_messages(&self, name: &str, arguments: &Value) -> Option<Vec<PromptMessage>> {
         match name {
-            "subcog_tutorial" => Some(generators::generate_tutorial_prompt(arguments)),
-            "subcog_generate_tutorial" => {
+            "subcog_tutorial" | "subcog" => Some(generators::generate_tutorial_prompt(arguments)),
+            "subcog_generate_tutorial" | "generate_tutorial" => {
                 Some(generators::generate_generate_tutorial_messages(arguments))
             },
-            "subcog_capture_assistant" => {
+            "subcog_capture_assistant" | "subcog_capture" => {
                 Some(generators::generate_capture_assistant_prompt(arguments))
             },
             "subcog_review" => Some(generators::generate_review_prompt(arguments)),
-            "subcog_document_decision" => Some(generators::generate_decision_prompt(arguments)),
-            "subcog_search_help" => Some(generators::generate_search_help_prompt(arguments)),
+            "subcog_document_decision" | "generate_decision" => {
+                Some(generators::generate_decision_prompt(arguments))
+            },
+            "subcog_search_help" | "subcog_recall" => {
+                Some(generators::generate_search_help_prompt(arguments))
+            },
             "subcog_browse" => Some(generators::generate_browse_prompt(arguments)),
             "subcog_list" => Some(generators::generate_list_prompt(arguments)),
             // Phase 4: Intent-aware prompts
-            "subcog_intent_search" => Some(generators::generate_intent_search_prompt(arguments)),
-            "subcog_query_suggest" => Some(generators::generate_query_suggest_prompt(arguments)),
-            "subcog_context_capture" => {
+            "subcog_intent_search" | "intent_search" => {
+                Some(generators::generate_intent_search_prompt(arguments))
+            },
+            "subcog_query_suggest" | "query_suggest" => {
+                Some(generators::generate_query_suggest_prompt(arguments))
+            },
+            "subcog_context_capture" | "context_capture" => {
                 Some(generators::generate_context_capture_prompt(arguments))
             },
-            "subcog_discover" => Some(generators::generate_discover_prompt(arguments)),
+            "subcog_discover" | "discover" => Some(generators::generate_discover_prompt(arguments)),
             _ => None,
         }
     }
@@ -432,6 +633,8 @@ mod tests {
         assert!(!prompts.is_empty());
         assert!(registry.get_prompt("subcog_tutorial").is_some());
         assert!(registry.get_prompt("subcog_capture_assistant").is_some());
+        assert!(registry.get_prompt("subcog").is_some());
+        assert!(registry.get_prompt("subcog_capture").is_some());
     }
 
     #[test]
@@ -464,6 +667,21 @@ mod tests {
         if let PromptContent::Text { text } = &messages[1].content {
             assert!(text.contains("Capturing Memories"));
         }
+    }
+
+    #[test]
+    fn test_prompt_alias_messages() {
+        let registry = PromptRegistry::new();
+
+        let messages = registry
+            .get_prompt_messages("subcog", &serde_json::json!({}))
+            .unwrap();
+        assert!(!messages.is_empty());
+
+        let messages = registry
+            .get_prompt_messages("generate_tutorial", &serde_json::json!({"topic": "MCP"}))
+            .unwrap();
+        assert!(!messages.is_empty());
     }
 
     #[test]

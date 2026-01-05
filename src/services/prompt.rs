@@ -524,10 +524,10 @@ impl PromptService {
         }
 
         // Check name pattern (simple glob with * wildcard)
-        if let Some(ref pattern) = filter.name_pattern {
-            if !matches_glob(pattern, &template.name) {
-                return false;
-            }
+        if let Some(pattern) = filter.name_pattern.as_deref()
+            && !matches_glob(pattern, &template.name)
+        {
+            return false;
         }
 
         true

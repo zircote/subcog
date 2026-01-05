@@ -469,15 +469,17 @@ impl SearchIntentConfig {
         if let Ok(v) = std::env::var("SUBCOG_SEARCH_INTENT_USE_LLM") {
             self.use_llm = v.to_lowercase() == "true" || v == "1";
         }
-        if let Ok(v) = std::env::var("SUBCOG_SEARCH_INTENT_LLM_TIMEOUT_MS") {
-            if let Ok(ms) = v.parse::<u64>() {
-                self.llm_timeout_ms = ms;
-            }
+        if let Some(ms) = std::env::var("SUBCOG_SEARCH_INTENT_LLM_TIMEOUT_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            self.llm_timeout_ms = ms;
         }
-        if let Ok(v) = std::env::var("SUBCOG_SEARCH_INTENT_MIN_CONFIDENCE") {
-            if let Ok(conf) = v.parse::<f32>() {
-                self.min_confidence = conf.clamp(0.0, 1.0);
-            }
+        if let Some(conf) = std::env::var("SUBCOG_SEARCH_INTENT_MIN_CONFIDENCE")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+        {
+            self.min_confidence = conf.clamp(0.0, 1.0);
         }
 
         self

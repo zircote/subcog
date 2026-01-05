@@ -144,7 +144,7 @@ Add to your Claude Code configuration:
 ## Version Information
 
 - **Language**: Rust (Edition 2024)
-- **MSRV**: 1.85
+- **MSRV**: 1.88
 - **Repository**: [github.com/zircote/subcog](https://github.com/zircote/subcog)
 
 ## Specifications

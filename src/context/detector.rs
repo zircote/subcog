@@ -155,12 +155,12 @@ impl GitContext {
 /// 3. Repository directory name
 fn detect_project_id(repo: &Repository) -> Option<String> {
     // Try to get origin remote first
-    if let Ok(origin) = repo.find_remote("origin") {
-        if let Some(url) = origin.url() {
-            if let Some(project_id) = sanitize_git_url(url) {
-                return Some(project_id);
-            }
-        }
+    if let Some(project_id) = repo
+        .find_remote("origin")
+        .ok()
+        .and_then(|origin| origin.url().and_then(sanitize_git_url))
+    {
+        return Some(project_id);
     }
 
     // Try any other remote using iterator chain

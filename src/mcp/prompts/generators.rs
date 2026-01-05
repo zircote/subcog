@@ -127,6 +127,8 @@ pub fn generate_generate_tutorial_messages(arguments: &Value) -> Vec<PromptMessa
 pub fn generate_capture_assistant_prompt(arguments: &Value) -> Vec<PromptMessage> {
     let context = arguments
         .get("context")
+        .or_else(|| arguments.get("content"))
+        .or_else(|| arguments.get("conversation"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
@@ -177,6 +179,11 @@ pub fn generate_decision_prompt(arguments: &Value) -> Vec<PromptMessage> {
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
+    let context = arguments
+        .get("context")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
     let alternatives = arguments
         .get("alternatives")
         .and_then(|v| v.as_str())
@@ -184,6 +191,10 @@ pub fn generate_decision_prompt(arguments: &Value) -> Vec<PromptMessage> {
 
     let mut prompt =
         format!("I need to document the following decision:\n\n**Decision**: {decision}\n");
+
+    if !context.is_empty() {
+        prompt.push_str(&format!("\n**Context**: {context}\n"));
+    }
 
     if !alternatives.is_empty() {
         prompt.push_str(&format!("\n**Alternatives considered**: {alternatives}\n"));
@@ -205,7 +216,11 @@ pub fn generate_decision_prompt(arguments: &Value) -> Vec<PromptMessage> {
 
 /// Generates the search help prompt.
 pub fn generate_search_help_prompt(arguments: &Value) -> Vec<PromptMessage> {
-    let goal = arguments.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+    let goal = arguments
+        .get("goal")
+        .or_else(|| arguments.get("query"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     vec![
         PromptMessage {
@@ -327,12 +342,21 @@ pub fn generate_intent_search_prompt(arguments: &Value) -> Vec<PromptMessage> {
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
+    let intent = arguments
+        .get("intent")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
     let context = arguments
         .get("context")
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
     let mut prompt = format!("Search for memories related to: **{query}**\n\n");
+
+    if !intent.is_empty() {
+        prompt.push_str(&format!("Intent hint: {intent}\n\n"));
+    }
 
     if !context.is_empty() {
         prompt.push_str(&format!("Current context: {context}\n\n"));
@@ -358,6 +382,7 @@ pub fn generate_intent_search_prompt(arguments: &Value) -> Vec<PromptMessage> {
 pub fn generate_query_suggest_prompt(arguments: &Value) -> Vec<PromptMessage> {
     let topic = arguments
         .get("topic")
+        .or_else(|| arguments.get("query"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
@@ -397,6 +422,7 @@ pub fn generate_query_suggest_prompt(arguments: &Value) -> Vec<PromptMessage> {
 pub fn generate_context_capture_prompt(arguments: &Value) -> Vec<PromptMessage> {
     let conversation = arguments
         .get("conversation")
+        .or_else(|| arguments.get("context"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
@@ -430,6 +456,8 @@ pub fn generate_context_capture_prompt(arguments: &Value) -> Vec<PromptMessage> 
 pub fn generate_discover_prompt(arguments: &Value) -> Vec<PromptMessage> {
     let start = arguments
         .get("start")
+        .or_else(|| arguments.get("topic"))
+        .or_else(|| arguments.get("tag"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
 

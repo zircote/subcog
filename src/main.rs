@@ -422,11 +422,11 @@ fn load_config(path: Option<&str>) -> Result<SubcogConfig, Box<dyn std::error::E
     }
 
     // Priority 2: Environment variable
-    if let Ok(config_path) = std::env::var("SUBCOG_CONFIG_PATH") {
-        if !config_path.trim().is_empty() {
-            return SubcogConfig::load_from_file(std::path::Path::new(&config_path))
-                .map_err(std::convert::Into::into);
-        }
+    if let Ok(config_path) = std::env::var("SUBCOG_CONFIG_PATH")
+        && !config_path.trim().is_empty()
+    {
+        return SubcogConfig::load_from_file(std::path::Path::new(&config_path))
+            .map_err(std::convert::Into::into);
     }
 
     // Priority 3: Default locations

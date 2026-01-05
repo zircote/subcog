@@ -88,10 +88,8 @@ fn protocol_from_env_override() -> Option<OtlpProtocol> {
 }
 
 fn protocol_from_endpoint(endpoint: Option<&str>) -> OtlpProtocol {
-    if let Some(endpoint) = endpoint {
-        if endpoint.contains(":4317") {
-            return OtlpProtocol::Grpc;
-        }
+    if endpoint.is_some_and(|endpoint| endpoint.contains(":4317")) {
+        return OtlpProtocol::Grpc;
     }
 
     OtlpProtocol::Http

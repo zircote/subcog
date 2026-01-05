@@ -139,40 +139,46 @@ impl DeduplicationConfig {
         let mut thresholds = HashMap::new();
 
         // Load per-namespace thresholds
-        if let Ok(v) = std::env::var("SUBCOG_DEDUP_THRESHOLD_DECISIONS") {
-            if let Ok(threshold) = v.parse() {
-                thresholds.insert(Namespace::Decisions, threshold);
-            }
+        if let Some(threshold) = std::env::var("SUBCOG_DEDUP_THRESHOLD_DECISIONS")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+        {
+            thresholds.insert(Namespace::Decisions, threshold);
         }
 
-        if let Ok(v) = std::env::var("SUBCOG_DEDUP_THRESHOLD_PATTERNS") {
-            if let Ok(threshold) = v.parse() {
-                thresholds.insert(Namespace::Patterns, threshold);
-            }
+        if let Some(threshold) = std::env::var("SUBCOG_DEDUP_THRESHOLD_PATTERNS")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+        {
+            thresholds.insert(Namespace::Patterns, threshold);
         }
 
-        if let Ok(v) = std::env::var("SUBCOG_DEDUP_THRESHOLD_LEARNINGS") {
-            if let Ok(threshold) = v.parse() {
-                thresholds.insert(Namespace::Learnings, threshold);
-            }
+        if let Some(threshold) = std::env::var("SUBCOG_DEDUP_THRESHOLD_LEARNINGS")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+        {
+            thresholds.insert(Namespace::Learnings, threshold);
         }
 
-        if let Ok(v) = std::env::var("SUBCOG_DEDUP_THRESHOLD_BLOCKERS") {
-            if let Ok(threshold) = v.parse() {
-                thresholds.insert(Namespace::Blockers, threshold);
-            }
+        if let Some(threshold) = std::env::var("SUBCOG_DEDUP_THRESHOLD_BLOCKERS")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+        {
+            thresholds.insert(Namespace::Blockers, threshold);
         }
 
-        if let Ok(v) = std::env::var("SUBCOG_DEDUP_THRESHOLD_TECHDEBT") {
-            if let Ok(threshold) = v.parse() {
-                thresholds.insert(Namespace::TechDebt, threshold);
-            }
+        if let Some(threshold) = std::env::var("SUBCOG_DEDUP_THRESHOLD_TECHDEBT")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+        {
+            thresholds.insert(Namespace::TechDebt, threshold);
         }
 
-        if let Ok(v) = std::env::var("SUBCOG_DEDUP_THRESHOLD_CONTEXT") {
-            if let Ok(threshold) = v.parse() {
-                thresholds.insert(Namespace::Context, threshold);
-            }
+        if let Some(threshold) = std::env::var("SUBCOG_DEDUP_THRESHOLD_CONTEXT")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+        {
+            thresholds.insert(Namespace::Context, threshold);
         }
 
         Self {

@@ -269,24 +269,24 @@ impl PromptStorageFactory {
     /// 2. Git remote URL (extracts org from `github.com/org/repo`)
     fn resolve_org_identifier(config: &Config) -> Result<String> {
         // 1. Check SUBCOG_ORG environment variable
-        if let Ok(org) = std::env::var("SUBCOG_ORG") {
-            if !org.is_empty() {
-                return Ok(org);
-            }
+        if let Ok(org) = std::env::var("SUBCOG_ORG")
+            && !org.is_empty()
+        {
+            return Ok(org);
         }
 
         // 2. Try to extract from git remote in config repo path
-        if let Some(ref repo_path) = config.repo_path {
-            if let Some(org) = Self::extract_org_from_repo_path(repo_path) {
-                return Ok(org);
-            }
+        if let Some(ref repo_path) = config.repo_path
+            && let Some(org) = Self::extract_org_from_repo_path(repo_path)
+        {
+            return Ok(org);
         }
 
         // 3. Try current directory as fallback
-        if let Ok(cwd) = std::env::current_dir() {
-            if let Some(org) = Self::extract_org_from_repo_path(&cwd) {
-                return Ok(org);
-            }
+        if let Ok(cwd) = std::env::current_dir()
+            && let Some(org) = Self::extract_org_from_repo_path(&cwd)
+        {
+            return Ok(org);
         }
 
         Err(Error::InvalidInput(
@@ -312,11 +312,12 @@ impl PromptStorageFactory {
     /// - `ssh://git@github.com/org/repo.git`
     fn extract_org_from_git_url(url: &str) -> Option<String> {
         // Handle SSH format: git@github.com:org/repo.git
-        if let Some(rest) = url.strip_prefix("git@") {
-            if let Some(path_start) = rest.find(':') {
-                let path = &rest[path_start + 1..];
-                return path.split('/').next().map(ToString::to_string);
-            }
+        if let Some((rest, path_start)) = url
+            .strip_prefix("git@")
+            .and_then(|rest| rest.find(':').map(|path_start| (rest, path_start)))
+        {
+            let path = &rest[path_start + 1..];
+            return path.split('/').next().map(ToString::to_string);
         }
 
         // Handle HTTPS/SSH URL format
@@ -329,14 +330,10 @@ impl PromptStorageFactory {
             .or_else(|| url.strip_prefix("ssh://"))
             .or_else(|| url.strip_prefix("git://"));
 
-        if let Some(rest) = path {
-            // Skip host (github.com, gitlab.com, etc.)
-            let parts: Vec<&str> = rest.split('/').collect();
-            if parts.len() >= 2 {
-                // parts[0] = host (github.com) or user@host
-                // parts[1] = org
-                return Some(parts[1].to_string());
-            }
+        if let Some(org) = path.and_then(|rest| rest.split('/').nth(1)) {
+            // parts[0] = host (github.com) or user@host
+            // parts[1] = org
+            return Some(org.to_string());
         }
 
         None

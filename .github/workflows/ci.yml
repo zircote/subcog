@@ -168,7 +168,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # master
         with:
-          toolchain: "1.86"
+          toolchain: "1.88"
 
       - name: Install cmake (for vendored libgit2)
         run: sudo apt-get update && sudo apt-get install -y cmake
@@ -185,9 +185,6 @@ jobs:
             ${{ runner.os }}-cargo-msrv-
 
       - name: Check MSRV
-        # Exclude fastembed-embeddings: zune-jpeg 0.5.7 (transitive dep via image crate)
-        # has unsafe code incompatible with Rust 1.86. Fixed in 0.5.8 but requires Rust 1.87.
-        # Core functionality is verified; fastembed is tested on stable.
         run: cargo check --features "postgres,postgres-tls,redis,usearch-hnsw,http,encryption"
 
   # NOTE: Benchmarks disabled - run manually with `cargo bench`

@@ -424,15 +424,15 @@ fn ensure_tool_authorized(
     context: &RequestContext<RoleServer>,
     tool_name: &str,
 ) -> McpResult<()> {
-    if let Some(claims) = context.extensions.get::<Claims>() {
-        if !tool_auth.is_authorized(claims, tool_name) {
-            let required_scope = tool_auth.required_scope(tool_name);
-            let scope_str = required_scope.unwrap_or("unknown");
-            return Err(McpError::invalid_params(
-                format!("Forbidden: tool '{tool_name}' requires '{scope_str}' scope"),
-                None,
-            ));
-        }
+    if let Some(claims) = context.extensions.get::<Claims>()
+        && !tool_auth.is_authorized(claims, tool_name)
+    {
+        let required_scope = tool_auth.required_scope(tool_name);
+        let scope_str = required_scope.unwrap_or("unknown");
+        return Err(McpError::invalid_params(
+            format!("Forbidden: tool '{tool_name}' requires '{scope_str}' scope"),
+            None,
+        ));
     }
     Ok(())
 }

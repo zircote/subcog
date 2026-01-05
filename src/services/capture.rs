@@ -461,14 +461,18 @@ fn resolve_file_path(repo_root: Option<&Path>, source: Option<&String>) -> Optio
     let repo_root = repo_root?;
 
     if let Ok(relative) = source_path.strip_prefix(repo_root) {
-        return Some(relative.to_string_lossy().to_string());
+        return Some(normalize_path(&relative.to_string_lossy()));
     }
 
     if source_path.is_relative() {
-        return Some(source.clone());
+        return Some(normalize_path(source));
     }
 
     None
+}
+
+fn normalize_path(path: &str) -> String {
+    path.replace('\\', "/")
 }
 
 impl Default for CaptureService {

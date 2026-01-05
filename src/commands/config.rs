@@ -177,10 +177,10 @@ fn display_metrics_config(config: &SubcogConfig) {
     if let Some(port) = metrics.port {
         println!("    Prometheus Port: {port}");
     }
-    if let Some(ref push_gw) = metrics.push_gateway {
-        if let Some(ref endpoint) = push_gw.endpoint {
-            println!("    Push Gateway: {endpoint}");
-        }
+    if let Some(ref push_gw) = metrics.push_gateway
+        && let Some(ref endpoint) = push_gw.endpoint
+    {
+        println!("    Push Gateway: {endpoint}");
     }
 }
 

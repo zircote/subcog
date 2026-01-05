@@ -198,17 +198,16 @@ impl ContentRedactor {
     ///
     /// Only logs when matches are found to avoid noise.
     fn log_pii_detection_if_any(&self, pii_matches: &[super::PiiMatch]) {
-        if !pii_matches.is_empty() {
-            if let Some(logger) = global_logger() {
-                let pii_types: Vec<&str> =
-                    pii_matches.iter().map(|m| m.pii_type.as_str()).collect();
-                let mut entry = super::audit::AuditEntry::new("security", "pii_detected");
-                entry.metadata = serde_json::json!({
-                    "pii_count": pii_matches.len(),
-                    "pii_types": pii_types,
-                });
-                logger.log_entry(entry);
-            }
+        if !pii_matches.is_empty()
+            && let Some(logger) = global_logger()
+        {
+            let pii_types: Vec<&str> = pii_matches.iter().map(|m| m.pii_type.as_str()).collect();
+            let mut entry = super::audit::AuditEntry::new("security", "pii_detected");
+            entry.metadata = serde_json::json!({
+                "pii_count": pii_matches.len(),
+                "pii_types": pii_types,
+            });
+            logger.log_entry(entry);
         }
     }
 

@@ -82,35 +82,32 @@ impl ContextBuilderService {
         // Add recent decisions (high priority)
         if let Some(decisions) =
             self.get_relevant_memories(Namespace::Decisions, CONTEXT_DECISIONS_LIMIT)?
+            && !decisions.is_empty()
         {
-            if !decisions.is_empty() {
-                context_parts.push(format_section("Recent Decisions", &decisions));
-            }
+            context_parts.push(format_section("Recent Decisions", &decisions));
         }
 
         // Add active patterns
         if let Some(patterns) =
             self.get_relevant_memories(Namespace::Patterns, CONTEXT_PATTERNS_LIMIT)?
+            && !patterns.is_empty()
         {
-            if !patterns.is_empty() {
-                context_parts.push(format_section("Active Patterns", &patterns));
-            }
+            context_parts.push(format_section("Active Patterns", &patterns));
         }
 
         // Add relevant context
-        if let Some(ctx) = self.get_relevant_memories(Namespace::Context, CONTEXT_PROJECT_LIMIT)? {
-            if !ctx.is_empty() {
-                context_parts.push(format_section("Project Context", &ctx));
-            }
+        if let Some(ctx) = self.get_relevant_memories(Namespace::Context, CONTEXT_PROJECT_LIMIT)?
+            && !ctx.is_empty()
+        {
+            context_parts.push(format_section("Project Context", &ctx));
         }
 
         // Add known tech debt
         if let Some(debt) =
             self.get_relevant_memories(Namespace::TechDebt, CONTEXT_TECH_DEBT_LIMIT)?
+            && !debt.is_empty()
         {
-            if !debt.is_empty() {
-                context_parts.push(format_section("Known Tech Debt", &debt));
-            }
+            context_parts.push(format_section("Known Tech Debt", &debt));
         }
 
         // Combine and truncate to fit token budget

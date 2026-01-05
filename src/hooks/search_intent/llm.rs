@@ -84,31 +84,33 @@ fn extract_json_from_response(response: &str) -> &str {
     let trimmed = response.trim();
 
     // Handle ```json ... ``` blocks
-    if let Some(start) = trimmed.find("```json") {
+    if let Some((json_start, end)) = trimmed.find("```json").and_then(|start| {
         let json_start = start + 7;
-        if let Some(end) = trimmed[json_start..].find("```") {
-            return trimmed[json_start..json_start + end].trim();
-        }
+        trimmed[json_start..]
+            .find("```")
+            .map(|end| (json_start, end))
+    }) {
+        return trimmed[json_start..json_start + end].trim();
     }
 
     // Handle ``` ... ``` blocks (without json marker)
-    if let Some(start) = trimmed.find("```") {
+    if let Some((json_start, end)) = trimmed.find("```").and_then(|start| {
         let content_start = start + 3;
         // Skip language identifier if present (e.g., "json\n")
         let after_marker = &trimmed[content_start..];
         let json_start = after_marker
             .find('{')
             .map_or(content_start, |pos| content_start + pos);
-        if let Some(end) = trimmed[json_start..].find("```") {
-            return trimmed[json_start..json_start + end].trim();
-        }
+        trimmed[json_start..]
+            .find("```")
+            .map(|end| (json_start, end))
+    }) {
+        return trimmed[json_start..json_start + end].trim();
     }
 
     // Handle raw JSON (find first { to last })
-    if let Some(start) = trimmed.find('{') {
-        if let Some(end) = trimmed.rfind('}') {
-            return &trimmed[start..=end];
-        }
+    if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}')) {
+        return &trimmed[start..=end];
     }
 
     trimmed

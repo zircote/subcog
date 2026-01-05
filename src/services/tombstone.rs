@@ -131,21 +131,19 @@ impl TombstoneService {
 
         let mut purged = 0;
         for id in all_ids {
-            if let Some(memory) = self.persistence.get(&id)? {
-                if memory.status == MemoryStatus::Tombstoned {
-                    if let Some(ts) = memory.tombstoned_at {
-                        if ts.timestamp() < threshold_i64 {
-                            let memory_id = memory.id;
-                            self.persistence.delete(&memory_id)?;
-                            record_event(MemoryEvent::Deleted {
-                                meta: EventMeta::new("tombstone", current_request_id()),
-                                memory_id,
-                                reason: "purge_tombstoned".to_string(),
-                            });
-                            purged += 1;
-                        }
-                    }
-                }
+            if let Some(memory) = self.persistence.get(&id)?
+                && memory.status == MemoryStatus::Tombstoned
+                && let Some(ts) = memory.tombstoned_at
+                && ts.timestamp() < threshold_i64
+            {
+                let memory_id = memory.id;
+                self.persistence.delete(&memory_id)?;
+                record_event(MemoryEvent::Deleted {
+                    meta: EventMeta::new("tombstone", current_request_id()),
+                    memory_id,
+                    reason: "purge_tombstoned".to_string(),
+                });
+                purged += 1;
             }
         }
 

@@ -183,7 +183,7 @@ impl PartialMetadata {
 
     /// Checks if any metadata is provided.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.description.is_none() && self.tags.is_empty() && self.variables.is_empty()
     }
 

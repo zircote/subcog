@@ -58,7 +58,7 @@ pub enum McpMethod {
 impl McpMethod {
     /// Returns the MCP protocol method name.
     #[must_use]
-    pub fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> &str {
         match self {
             Self::Initialize => "initialize",
             Self::ListTools => "tools/list",
