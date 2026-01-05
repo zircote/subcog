@@ -41,7 +41,7 @@ pub fn parse_search_mode(s: &str) -> SearchMode {
 
 /// Capture command.
 pub fn cmd_capture(
-    config: &SubcogConfig,
+    _config: &SubcogConfig,
     content: String,
     namespace: String,
     tags: Option<String>,
@@ -91,6 +91,7 @@ pub fn cmd_recall(
     namespace: Option<String>,
     limit: usize,
     raw: bool,
+    include_tombstoned: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use subcog::services::ServiceContainer;
 
@@ -101,6 +102,9 @@ pub fn cmd_recall(
     let mut filter = SearchFilter::new();
     if let Some(ns) = namespace {
         filter = filter.with_namespace(parse_namespace(&ns));
+    }
+    if include_tombstoned {
+        filter = filter.with_include_tombstoned(true);
     }
 
     let result = service.search(&query, parse_search_mode(&mode), &filter, limit);

@@ -450,7 +450,7 @@ org_scope_enabled = true
 - [x] Run recall (should trigger lazy GC) ✓
 - [x] Verify memory is tombstoned ✓
 - [x] Verify memory doesn't appear in default results ✓
-- [ ] Run recall with --include-tombstoned
+- [x] Run recall with --include-tombstoned ✓
 - [ ] Verify tombstoned memory appears
 - [ ] Test `subcog gc` command
 - [ ] Test `subcog gc --dry-run`

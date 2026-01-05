@@ -89,6 +89,10 @@ enum Commands {
         /// Display raw (un-normalized) scores instead of normalized scores.
         #[arg(long)]
         raw: bool,
+
+        /// Include tombstoned memories in results.
+        #[arg(long)]
+        include_tombstoned: bool,
     },
 
     /// Show status.
@@ -275,7 +279,8 @@ fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::error:
             namespace,
             limit,
             raw,
-        } => commands::cmd_recall(query, mode, namespace, limit, raw),
+            include_tombstoned,
+        } => commands::cmd_recall(query, mode, namespace, limit, raw, include_tombstoned),
 
         Commands::Status => commands::cmd_status(&config),
 
