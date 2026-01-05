@@ -55,7 +55,7 @@
 - [x] Define metric naming conventions and required labels ✓
 - [x] Add metrics for event bus (queue depth, publish/subscribe counts) ✓
 - [x] Add metrics for memory lifecycle latency (capture/recall/GC/consolidation) ✓
-- [ ] Add metrics for MCP request latency and error rates
+- [x] Add metrics for MCP request latency and error rates ✓
 - [ ] Add metrics for hook execution latency and error rates
 - [ ] Verify OTLP exporter settings (grpc/http) and env var docs
 - [ ] Add smoke tests for metrics registry and OTLP initialization

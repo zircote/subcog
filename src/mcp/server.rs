@@ -500,13 +500,32 @@ impl ServerHandler for McpHandler {
                 );
                 let _span_guard = span.enter();
 
-                let tools = state
-                    .tools
-                    .list_tools()
-                    .into_iter()
-                    .map(tool_definition_to_rmcp)
-                    .collect();
-                Ok(ListToolsResult::with_all_items(tools))
+                let start = Instant::now();
+                let result = {
+                    let tools = state
+                        .tools
+                        .list_tools()
+                        .into_iter()
+                        .map(tool_definition_to_rmcp)
+                        .collect();
+                    Ok(ListToolsResult::with_all_items(tools))
+                };
+
+                let status = if result.is_ok() { "success" } else { "error" };
+                metrics::counter!(
+                    "mcp_requests_total",
+                    "operation" => "list_tools",
+                    "status" => status
+                )
+                .increment(1);
+                if result.is_err() {
+                    metrics::counter!("mcp_request_errors_total", "operation" => "list_tools")
+                        .increment(1);
+                }
+                metrics::histogram!("mcp_request_duration_ms", "operation" => "list_tools")
+                    .record(start.elapsed().as_secs_f64() * 1000.0);
+
+                result
             };
 
             if let Some(context) = request_context {
@@ -539,47 +558,66 @@ impl ServerHandler for McpHandler {
                 let _span_guard = span.enter();
 
                 let start = Instant::now();
-                #[cfg(feature = "http")]
-                if let Err(err) = ensure_tool_authorized(&state.tool_auth, &context, &request.name) {
-                    record_event(MemoryEvent::McpRequestError {
-                        meta: EventMeta::new("mcp", current_request_id()),
-                        operation: "call_tool".to_string(),
-                        error: err.to_string(),
-                    });
-                    return Err(err);
-                }
-                #[cfg(not(feature = "http"))]
-                let _ = &context;
-
-                let arguments = match request.arguments {
-                    Some(args) => Value::Object(args),
-                    None => Value::Object(Map::new()),
-                };
-
-                let result = state
-                    .tools
-                    .execute(&request.name, arguments)
-                    .map_err(|e| {
+                let result = (|| {
+                    #[cfg(feature = "http")]
+                    if let Err(err) = ensure_tool_authorized(&state.tool_auth, &context, &request.name)
+                    {
                         record_event(MemoryEvent::McpRequestError {
                             meta: EventMeta::new("mcp", current_request_id()),
                             operation: "call_tool".to_string(),
-                            error: e.to_string(),
+                            error: err.to_string(),
                         });
-                        McpError::invalid_params(e.to_string(), None)
-                    })?;
+                        return Err(err);
+                    }
+                    #[cfg(not(feature = "http"))]
+                    let _ = &context;
 
-                let status = if result.is_error { "error" } else { "success" };
-                record_event(MemoryEvent::McpToolExecuted {
-                    meta: EventMeta::new("mcp", current_request_id()),
-                    tool_name: request.name.clone(),
-                    status: status.to_string(),
-                    duration_ms: start.elapsed().as_millis() as u64,
-                    error: result
-                        .is_error
-                        .then_some("tool execution returned error".to_string()),
-                });
+                    let arguments = match request.arguments {
+                        Some(args) => Value::Object(args),
+                        None => Value::Object(Map::new()),
+                    };
 
-                Ok(tool_result_to_rmcp(result))
+                    let result = state
+                        .tools
+                        .execute(&request.name, arguments)
+                        .map_err(|e| {
+                            record_event(MemoryEvent::McpRequestError {
+                                meta: EventMeta::new("mcp", current_request_id()),
+                                operation: "call_tool".to_string(),
+                                error: e.to_string(),
+                            });
+                            McpError::invalid_params(e.to_string(), None)
+                        })?;
+
+                    let status = if result.is_error { "error" } else { "success" };
+                    record_event(MemoryEvent::McpToolExecuted {
+                        meta: EventMeta::new("mcp", current_request_id()),
+                        tool_name: request.name.clone(),
+                        status: status.to_string(),
+                        duration_ms: start.elapsed().as_millis() as u64,
+                        error: result
+                            .is_error
+                            .then_some("tool execution returned error".to_string()),
+                    });
+
+                    Ok(tool_result_to_rmcp(result))
+                })();
+
+                let status = if result.is_ok() { "success" } else { "error" };
+                metrics::counter!(
+                    "mcp_requests_total",
+                    "operation" => "call_tool",
+                    "status" => status
+                )
+                .increment(1);
+                if result.is_err() {
+                    metrics::counter!("mcp_request_errors_total", "operation" => "call_tool")
+                        .increment(1);
+                }
+                metrics::histogram!("mcp_request_duration_ms", "operation" => "call_tool")
+                    .record(start.elapsed().as_secs_f64() * 1000.0);
+
+                result
             };
 
             if let Some(context) = request_context {
@@ -610,15 +648,34 @@ impl ServerHandler for McpHandler {
                 );
                 let _span_guard = span.enter();
 
-                let resources = state
-                    .resources
-                    .lock()
-                    .await
-                    .list_resources()
-                    .into_iter()
-                    .map(resource_definition_to_rmcp)
-                    .collect();
-                Ok(ListResourcesResult::with_all_items(resources))
+                let start = Instant::now();
+                let result = {
+                    let resources = state
+                        .resources
+                        .lock()
+                        .await
+                        .list_resources()
+                        .into_iter()
+                        .map(resource_definition_to_rmcp)
+                        .collect();
+                    Ok(ListResourcesResult::with_all_items(resources))
+                };
+
+                let status = if result.is_ok() { "success" } else { "error" };
+                metrics::counter!(
+                    "mcp_requests_total",
+                    "operation" => "list_resources",
+                    "status" => status
+                )
+                .increment(1);
+                if result.is_err() {
+                    metrics::counter!("mcp_request_errors_total", "operation" => "list_resources")
+                        .increment(1);
+                }
+                metrics::histogram!("mcp_request_duration_ms", "operation" => "list_resources")
+                    .record(start.elapsed().as_secs_f64() * 1000.0);
+
+                result
             };
 
             if let Some(context) = request_context {
@@ -648,7 +705,28 @@ impl ServerHandler for McpHandler {
                     operation = "list_resource_templates"
                 );
                 let _span_guard = span.enter();
-                Ok(ListResourceTemplatesResult::with_all_items(Vec::new()))
+                let start = Instant::now();
+                let result = Ok(ListResourceTemplatesResult::with_all_items(Vec::new()));
+                let status = if result.is_ok() { "success" } else { "error" };
+                metrics::counter!(
+                    "mcp_requests_total",
+                    "operation" => "list_resource_templates",
+                    "status" => status
+                )
+                .increment(1);
+                if result.is_err() {
+                    metrics::counter!(
+                        "mcp_request_errors_total",
+                        "operation" => "list_resource_templates"
+                    )
+                    .increment(1);
+                }
+                metrics::histogram!(
+                    "mcp_request_duration_ms",
+                    "operation" => "list_resource_templates"
+                )
+                .record(start.elapsed().as_secs_f64() * 1000.0);
+                result
             };
 
             if let Some(context) = request_context {
@@ -681,15 +759,34 @@ impl ServerHandler for McpHandler {
                 );
                 let _span_guard = span.enter();
 
-                let content = state
-                    .resources
-                    .lock()
-                    .await
-                    .get_resource(&request.uri)
-                    .map_err(|e| McpError::resource_not_found(e.to_string(), None))?;
+                let start = Instant::now();
+                let result = {
+                    let content = state
+                        .resources
+                        .lock()
+                        .await
+                        .get_resource(&request.uri)
+                        .map_err(|e| McpError::resource_not_found(e.to_string(), None))?;
 
-                let contents = vec![resource_content_to_rmcp(content)];
-                Ok(rmcp::model::ReadResourceResult { contents })
+                    let contents = vec![resource_content_to_rmcp(content)];
+                    Ok(rmcp::model::ReadResourceResult { contents })
+                };
+
+                let status = if result.is_ok() { "success" } else { "error" };
+                metrics::counter!(
+                    "mcp_requests_total",
+                    "operation" => "read_resource",
+                    "status" => status
+                )
+                .increment(1);
+                if result.is_err() {
+                    metrics::counter!("mcp_request_errors_total", "operation" => "read_resource")
+                        .increment(1);
+                }
+                metrics::histogram!("mcp_request_duration_ms", "operation" => "read_resource")
+                    .record(start.elapsed().as_secs_f64() * 1000.0);
+
+                result
             };
 
             if let Some(context) = request_context {
@@ -720,13 +817,32 @@ impl ServerHandler for McpHandler {
                 );
                 let _span_guard = span.enter();
 
-                let prompts: Vec<Prompt> = state
-                    .prompts
-                    .list_prompts()
-                    .into_iter()
-                    .map(prompt_definition_to_rmcp)
-                    .collect();
-                Ok(ListPromptsResult::with_all_items(prompts))
+                let start = Instant::now();
+                let result = {
+                    let prompts: Vec<Prompt> = state
+                        .prompts
+                        .list_prompts()
+                        .into_iter()
+                        .map(prompt_definition_to_rmcp)
+                        .collect();
+                    Ok(ListPromptsResult::with_all_items(prompts))
+                };
+
+                let status = if result.is_ok() { "success" } else { "error" };
+                metrics::counter!(
+                    "mcp_requests_total",
+                    "operation" => "list_prompts",
+                    "status" => status
+                )
+                .increment(1);
+                if result.is_err() {
+                    metrics::counter!("mcp_request_errors_total", "operation" => "list_prompts")
+                        .increment(1);
+                }
+                metrics::histogram!("mcp_request_duration_ms", "operation" => "list_prompts")
+                    .record(start.elapsed().as_secs_f64() * 1000.0);
+
+                result
             };
 
             if let Some(context) = request_context {
@@ -758,25 +874,42 @@ impl ServerHandler for McpHandler {
                 );
                 let _span_guard = span.enter();
 
-                let messages = match request.arguments {
-                    Some(args) => Value::Object(args),
-                    None => Value::Object(Map::new()),
+                let start = Instant::now();
+                let result = {
+                    let messages = match request.arguments {
+                        Some(args) => Value::Object(args),
+                        None => Value::Object(Map::new()),
+                    };
+
+                    state
+                        .prompts
+                        .get_prompt_messages(&request.name, &messages)
+                        .ok_or_else(|| McpError::invalid_params("Unknown prompt".to_string(), None))
+                        .map(|msgs| {
+                            let mapped = msgs
+                                .into_iter()
+                                .map(prompt_message_to_rmcp)
+                                .collect::<Vec<_>>();
+                            GetPromptResult {
+                                description: None,
+                                messages: mapped,
+                            }
+                        })
                 };
 
-                let result = state
-                    .prompts
-                    .get_prompt_messages(&request.name, &messages)
-                    .ok_or_else(|| McpError::invalid_params("Unknown prompt".to_string(), None))
-                    .map(|msgs| {
-                        let mapped = msgs
-                            .into_iter()
-                            .map(prompt_message_to_rmcp)
-                            .collect::<Vec<_>>();
-                        GetPromptResult {
-                            description: None,
-                            messages: mapped,
-                        }
-                    });
+                let status = if result.is_ok() { "success" } else { "error" };
+                metrics::counter!(
+                    "mcp_requests_total",
+                    "operation" => "get_prompt",
+                    "status" => status
+                )
+                .increment(1);
+                if result.is_err() {
+                    metrics::counter!("mcp_request_errors_total", "operation" => "get_prompt")
+                        .increment(1);
+                }
+                metrics::histogram!("mcp_request_duration_ms", "operation" => "get_prompt")
+                    .record(start.elapsed().as_secs_f64() * 1000.0);
 
                 result
             };
