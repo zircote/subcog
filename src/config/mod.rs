@@ -109,6 +109,28 @@ fn expand_env_vars(input: &str) -> Cow<'_, str> {
     Cow::Owned(result)
 }
 
+fn expand_config_path(input: &str) -> String {
+    let expanded = expand_env_vars(input);
+    let expanded_ref = expanded.as_ref();
+    let is_tilde_home =
+        expanded_ref == "~" || expanded_ref.starts_with("~/") || expanded_ref.starts_with("~\\");
+
+    if is_tilde_home && let Some(base_dirs) = directories::BaseDirs::new() {
+        let mut path = base_dirs.home_dir().to_path_buf();
+        let suffix = expanded_ref
+            .strip_prefix("~/")
+            .or_else(|| expanded_ref.strip_prefix("~\\"));
+        if let Some(suffix) = suffix
+            && !suffix.is_empty()
+        {
+            path.push(suffix);
+        }
+        return path.to_string_lossy().into_owned();
+    }
+
+    expanded.into_owned()
+}
+
 fn parse_bool_env(value: &str) -> Option<bool> {
     match value.trim().to_lowercase().as_str() {
         "true" | "1" | "yes" | "on" => Some(true),
@@ -931,7 +953,7 @@ impl StorageConfig {
             if let Some(ref backend) = project.backend {
                 config.project.backend = StorageBackendType::parse(backend);
             }
-            config.project.path.clone_from(&project.path);
+            config.project.path = project.path.as_ref().map(|path| expand_config_path(path));
             config
                 .project
                 .connection_string
@@ -942,7 +964,7 @@ impl StorageConfig {
             if let Some(ref backend) = user.backend {
                 config.user.backend = StorageBackendType::parse(backend);
             }
-            config.user.path.clone_from(&user.path);
+            config.user.path = user.path.as_ref().map(|path| expand_config_path(path));
             config
                 .user
                 .connection_string
@@ -953,7 +975,7 @@ impl StorageConfig {
             if let Some(ref backend) = org.backend {
                 config.org.backend = StorageBackendType::parse(backend);
             }
-            config.org.path.clone_from(&org.path);
+            config.org.path = org.path.as_ref().map(|path| expand_config_path(path));
             config
                 .org
                 .connection_string
@@ -1147,10 +1169,10 @@ impl SubcogConfig {
     /// Applies a `ConfigFile` to the current configuration.
     fn apply_config_file(&mut self, file: ConfigFile) {
         if let Some(repo_path) = file.repo_path {
-            self.repo_path = PathBuf::from(repo_path);
+            self.repo_path = PathBuf::from(expand_config_path(&repo_path));
         }
         if let Some(data_dir) = file.data_dir {
-            self.data_dir = PathBuf::from(data_dir);
+            self.data_dir = PathBuf::from(expand_config_path(&data_dir));
         }
         if let Some(max_results) = file.max_results {
             self.max_results = max_results;
@@ -1429,6 +1451,34 @@ mod tests {
         let result = expand_env_vars("${${INNER}}");
         // First finds ${${INNER} - var name is "${INNER", which won't exist
         assert_eq!(result, "${${INNER}}");
+    }
+
+    #[test]
+    fn test_expand_config_path_tilde_home() {
+        if let Some(base_dirs) = directories::BaseDirs::new() {
+            let expected = base_dirs.home_dir().to_path_buf();
+            let result = expand_config_path("~");
+            assert_eq!(PathBuf::from(result), expected);
+        }
+    }
+
+    #[test]
+    fn test_expand_config_path_tilde_suffix() {
+        if let Some(base_dirs) = directories::BaseDirs::new() {
+            let expected = base_dirs.home_dir().join(".config/subcog");
+            let result = expand_config_path("~/.config/subcog");
+            assert_eq!(PathBuf::from(result), expected);
+        }
+    }
+
+    #[test]
+    fn test_expand_config_path_env_var() {
+        let var_name = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+        if let Ok(home) = std::env::var(var_name) {
+            let input = format!("${{{var_name}}}/data");
+            let result = expand_config_path(&input);
+            assert_eq!(PathBuf::from(result), PathBuf::from(home).join("data"));
+        }
     }
 
     #[test]
