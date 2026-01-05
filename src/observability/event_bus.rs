@@ -28,12 +28,24 @@ impl EventBus {
 
     /// Publishes an event to all subscribers (best effort).
     pub fn publish(&self, event: MemoryEvent) {
-        let _ = self.sender.send(event);
+        metrics::counter!("event_bus_publish_total").increment(1);
+        let receivers = self.sender.receiver_count();
+        metrics::gauge!("event_bus_receivers").set(receivers as f64);
+        match self.sender.send(event) {
+            Ok(_) => {
+                metrics::gauge!("event_bus_queue_depth").set(self.sender.len() as f64);
+            },
+            Err(_) => {
+                metrics::counter!("event_bus_publish_failed_total").increment(1);
+            },
+        }
     }
 
     /// Subscribes to the event bus.
     #[must_use]
     pub fn subscribe(&self) -> broadcast::Receiver<MemoryEvent> {
+        metrics::counter!("event_bus_subscriptions_total").increment(1);
+        metrics::gauge!("event_bus_receivers").set(self.sender.receiver_count() as f64);
         self.sender.subscribe()
     }
 
@@ -43,6 +55,8 @@ impl EventBus {
     where
         F: Fn(&MemoryEvent) -> bool,
     {
+        metrics::counter!("event_bus_subscriptions_total").increment(1);
+        metrics::gauge!("event_bus_receivers").set(self.sender.receiver_count() as f64);
         FilteredReceiver {
             receiver: self.sender.subscribe(),
             predicate,
@@ -72,6 +86,9 @@ where
                         return Ok(event);
                     }
                 }
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    metrics::counter!("event_bus_lagged_total").increment(skipped as u64);
+                },
                 Err(err) => return Err(err),
             }
         }
