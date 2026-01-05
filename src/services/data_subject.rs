@@ -31,8 +31,8 @@
 //! ```
 
 use crate::Result;
-use crate::models::{Memory, MemoryId, SearchFilter};
-use crate::security::{AuditEntry, AuditOutcome, global_logger};
+use crate::models::{Memory, MemoryEvent, MemoryId, SearchFilter};
+use crate::security::{AuditEntry, AuditOutcome, global_logger, record_event};
 use crate::storage::index::SqliteBackend;
 use crate::storage::traits::{IndexBackend, VectorBackend};
 use serde::{Deserialize, Serialize};
@@ -362,6 +362,11 @@ impl DataSubjectService {
             match self.delete_memory_from_all_layers(id) {
                 Ok(()) => {
                     deleted_ids.push(id.to_string());
+                    record_event(MemoryEvent::Deleted {
+                        memory_id: id.clone(),
+                        reason: "gdpr.delete_user_data".to_string(),
+                        timestamp: crate::current_timestamp(),
+                    });
                 },
                 Err(e) => {
                     tracing::warn!(memory_id = %id, error = %e, "Failed to delete memory");

@@ -100,6 +100,11 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
                 if let Some(mut memory) = self.persistence.get(&id)? {
                     memory.status = MemoryStatus::Archived;
                     self.persistence.store(&memory)?;
+                    record_event(MemoryEvent::Archived {
+                        memory_id: memory.id.clone(),
+                        reason: "consolidation_archive".to_string(),
+                        timestamp: now,
+                    });
                     stats.archived += 1;
                 }
             }

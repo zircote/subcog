@@ -1,6 +1,7 @@
 //! Tombstone operations for soft-delete functionality (ADR-0053).
 
-use crate::models::{MemoryId, MemoryStatus};
+use crate::models::{MemoryEvent, MemoryId, MemoryStatus};
+use crate::security::record_event;
 use crate::storage::traits::PersistenceBackend;
 use crate::{Error, Result};
 use chrono::{TimeZone, Utc};
@@ -53,6 +54,12 @@ impl TombstoneService {
         // Update in persistence
         self.persistence.store(&memory)?;
 
+        record_event(MemoryEvent::Updated {
+            memory_id: memory.id.clone(),
+            modified_fields: vec!["status".to_string(), "tombstoned_at".to_string()],
+            timestamp: now,
+        });
+
         tracing::info!(
             memory_id = %id.as_str(),
             tombstoned_at = now,
@@ -89,6 +96,12 @@ impl TombstoneService {
         // Update in persistence
         self.persistence.store(&memory)?;
 
+        record_event(MemoryEvent::Updated {
+            memory_id: memory.id.clone(),
+            modified_fields: vec!["status".to_string(), "tombstoned_at".to_string()],
+            timestamp: memory.updated_at,
+        });
+
         tracing::info!(
             memory_id = %id.as_str(),
             "Untombstoned memory"
@@ -121,6 +134,11 @@ impl TombstoneService {
                     if let Some(ts) = memory.tombstoned_at {
                         if ts.timestamp() < threshold_i64 {
                             self.persistence.delete(&memory.id)?;
+                            record_event(MemoryEvent::Deleted {
+                                memory_id: memory.id.clone(),
+                                reason: "purge_tombstoned".to_string(),
+                                timestamp: crate::current_timestamp(),
+                            });
                             purged += 1;
                         }
                     }
