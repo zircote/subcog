@@ -56,3 +56,17 @@ export SUBCOG_METRICS_PORT=9090
 
 subcog status
 ```
+
+## Rollout and Rollback
+
+Rollout steps:
+
+1. Enable logging (JSON) and verify request correlation IDs.
+2. Enable tracing with sampling and confirm spans reach OTLP.
+3. Enable metrics export and validate dashboards/alerts.
+
+Rollback criteria:
+
+- OTLP export failures cause elevated latency or errors.
+- Log sink failures block service startup.
+- Metrics export causes resource exhaustion.

@@ -65,7 +65,7 @@
 - [x] Add troubleshooting steps for tracing/logging/metrics ✓
 - [x] Add deployment checklist for OTLP endpoints and log sinks ✓
 - [x] Provide a minimal “observability quickstart” example ✓
-- [ ] Define rollout steps and rollback criteria
+- [x] Define rollout steps and rollback criteria ✓
 
 ### Phase 6: Verification
 - [ ] Run `make ci` after instrumentation changes
