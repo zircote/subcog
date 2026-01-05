@@ -41,7 +41,7 @@
 - [x] Instrument capture/recall/consolidation/GC with spans and sub-spans ✓
 - [x] Instrument MCP tool execution and hook handlers with spans ✓
 - [x] Propagate context across async boundaries (tokio tasks, hooks, MCP) ✓
-- [ ] Add trace sampling configuration with defaults
+- [x] Add trace sampling configuration with defaults ✓
 - [ ] Add tests for trace context propagation in at least two critical flows
 
 ### Phase 3: Logging Standardization

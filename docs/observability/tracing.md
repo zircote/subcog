@@ -44,3 +44,13 @@ When applicable, include these attributes:
 
 - Always attach spans to the current `request_id` context.
 - Spawned tasks MUST inherit the current span/context.
+
+## Sampling Defaults
+
+- Default sampler: `parentbased_traceidratio`
+- Default sample ratio: `1.0`
+
+Configuration overrides:
+
+- `SUBCOG_TRACING_SAMPLER` (fallback: `OTEL_TRACES_SAMPLER`)
+- `SUBCOG_TRACE_SAMPLE_RATIO` (fallback: `OTEL_TRACES_SAMPLER_ARG`)
