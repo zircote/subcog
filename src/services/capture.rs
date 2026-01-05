@@ -223,12 +223,10 @@ impl CaptureService {
             };
 
             // Resolve git context for facets.
-            let git_context = self
-                .config
-                .repo_path
-                .as_ref()
-                .map(|path| GitContext::from_path(path))
-                .unwrap_or_else(GitContext::from_cwd);
+            let git_context = self.config.repo_path.as_ref().map_or_else(
+                GitContext::from_cwd,
+                |path| GitContext::from_path(path),
+            );
 
             let file_path = resolve_file_path(self.config.repo_path.as_deref(), request.source.as_ref());
 
@@ -430,9 +428,7 @@ fn resolve_file_path(repo_root: Option<&Path>, source: Option<&String>) -> Optio
     }
 
     let source_path = Path::new(source);
-    let Some(repo_root) = repo_root else {
-        return None;
-    };
+    let repo_root = repo_root?;
 
     if let Ok(relative) = source_path.strip_prefix(repo_root) {
         return Some(relative.to_string_lossy().to_string());

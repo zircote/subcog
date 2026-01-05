@@ -1,5 +1,7 @@
 //! Garbage collection CLI command.
 
+#![allow(clippy::print_stdout)]
+
 use crate::Result;
 use crate::services::TombstoneService;
 use crate::storage::persistence::FilesystemBackend;
@@ -7,6 +9,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// Runs garbage collection.
+///
+/// # Errors
+///
+/// Returns an error if persistence access or tombstone operations fail.
 pub fn execute(dry_run: bool, purge: bool, older_than_days: u64) -> Result<()> {
     // Use project-local persistence
     let persistence = Arc::new(FilesystemBackend::new(".subcog/memories"))
@@ -21,19 +27,21 @@ pub fn execute(dry_run: bool, purge: bool, older_than_days: u64) -> Result<()> {
         let mut tombstoned_count = 0;
 
         for id in all_ids {
-            if let Some(memory) = persistence.get(&id)? {
-                if memory.status == crate::models::MemoryStatus::Tombstoned {
-                    tombstoned_count += 1;
-                    println!(
-                        "Would delete: {} ({})",
-                        id.as_str(),
-                        memory.namespace.as_str()
-                    );
-                }
+            let Some(memory) = persistence.get(&id)? else {
+                continue;
+            };
+            if memory.status != crate::models::MemoryStatus::Tombstoned {
+                continue;
             }
+            tombstoned_count += 1;
+            println!(
+                "Would delete: {} ({})",
+                id.as_str(),
+                memory.namespace.as_str()
+            );
         }
 
-        println!("\nTotal tombstoned memories: {}", tombstoned_count);
+        println!("\nTotal tombstoned memories: {tombstoned_count}");
         return Ok(());
     }
 
@@ -42,8 +50,7 @@ pub fn execute(dry_run: bool, purge: bool, older_than_days: u64) -> Result<()> {
         let purged = tombstone_service.purge_tombstoned(older_than)?;
 
         println!(
-            "Purged {} tombstoned memories older than {} days",
-            purged, older_than_days
+            "Purged {purged} tombstoned memories older than {older_than_days} days"
         );
     } else {
         println!("Garbage collection complete");

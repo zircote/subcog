@@ -467,8 +467,9 @@ impl<I: IndexBackend> BranchGarbageCollector<I> {
         mut memory: crate::models::Memory,
         now: u64,
     ) -> bool {
+        let now_i64 = i64::try_from(now).unwrap_or(i64::MAX);
         let now_dt = Utc
-            .timestamp_opt(now as i64, 0)
+            .timestamp_opt(now_i64, 0)
             .single()
             .unwrap_or_else(Utc::now);
         memory.tombstoned_at = Some(now_dt);

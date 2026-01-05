@@ -159,11 +159,13 @@ impl RetentionConfig {
                 "SUBCOG_RETENTION_{}_DAYS",
                 ns.as_str().to_uppercase().replace('-', "_")
             );
-            if let Ok(days) = std::env::var(&env_key) {
-                if let Ok(d) = days.parse::<u32>() {
-                    config.namespace_days.insert(ns, d);
-                }
-            }
+            let Ok(days) = std::env::var(&env_key) else {
+                continue;
+            };
+            let Ok(d) = days.parse::<u32>() else {
+                continue;
+            };
+            config.namespace_days.insert(ns, d);
         }
 
         config
@@ -247,7 +249,7 @@ pub struct RetentionGcResult {
 impl RetentionGcResult {
     /// Returns `true` if any memories were tombstoned.
     #[must_use]
-    pub fn has_expired_memories(&self) -> bool {
+    pub const fn has_expired_memories(&self) -> bool {
         self.memories_tombstoned > 0
     }
 
@@ -426,28 +428,28 @@ impl<I: IndexBackend> RetentionGarbageCollector<I> {
             // Memory has expired
             if dry_run {
                 tombstoned += 1;
-            } else {
-                // Tombstone the memory
-                let mut updated = memory.clone();
-                let now_dt = Utc
-                    .timestamp_opt(now as i64, 0)
-                    .single()
-                    .unwrap_or_else(Utc::now);
-                updated.tombstoned_at = Some(now_dt);
-
-                match self.index.index(&updated) {
-                    Ok(()) => {
-                        tombstoned += 1;
-                    },
-                    Err(e) => {
-                        warn!(
-                            memory_id = %id.as_str(),
-                            error = %e,
-                            "Failed to tombstone expired memory"
-                        );
-                    },
-                }
+                continue;
             }
+
+            // Tombstone the memory
+            let mut updated = memory.clone();
+            let now_i64 = i64::try_from(now).unwrap_or(i64::MAX);
+            let now_dt = Utc
+                .timestamp_opt(now_i64, 0)
+                .single()
+                .unwrap_or_else(Utc::now);
+            updated.tombstoned_at = Some(now_dt);
+
+            let Err(e) = self.index.index(&updated) else {
+                tombstoned += 1;
+                continue;
+            };
+
+            warn!(
+                memory_id = %id.as_str(),
+                error = %e,
+                "Failed to tombstone expired memory"
+            );
         }
 
         result.memories_tombstoned += tombstoned;
@@ -456,7 +458,7 @@ impl<I: IndexBackend> RetentionGarbageCollector<I> {
 
     /// Returns the current retention configuration.
     #[must_use]
-    pub fn config(&self) -> &RetentionConfig {
+    pub const fn config(&self) -> &RetentionConfig {
         &self.config
     }
 }
@@ -543,7 +545,7 @@ mod tests {
         let expected = now - (30 * 86400);
 
         // Allow 1 second tolerance for test timing
-        assert!((cutoff as i64 - expected as i64).abs() <= 1);
+        assert!(cutoff.abs_diff(expected) <= 1);
     }
 
     #[test]

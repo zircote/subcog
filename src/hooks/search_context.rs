@@ -27,7 +27,7 @@ pub struct AdaptiveContextConfig {
     pub weights: NamespaceWeightsConfig,
 }
 
-/// Tokens per character approximation (consistent with ContextBuilderService).
+/// Tokens per character approximation (consistent with `ContextBuilderService`).
 const TOKENS_PER_CHAR: usize = 4;
 
 impl Default for AdaptiveContextConfig {
@@ -414,23 +414,12 @@ impl<'a> SearchContextBuilder<'a> {
         let mut remaining_tokens = self.config.max_tokens;
 
         for (hit, score) in weighted_memories.into_iter().take(limit) {
-            if remaining_tokens == 0 {
+            let Some((content_preview, tokens_used)) = build_preview(
+                &hit.memory.content,
+                remaining_tokens,
+                self.config.preview_length,
+            ) else {
                 break;
-            }
-
-            let preview = truncate_content(&hit.memory.content, self.config.preview_length);
-            let preview_tokens = ContextBuilderService::estimate_tokens(&preview);
-
-            let (content_preview, tokens_used) = if preview_tokens <= remaining_tokens {
-                (preview, preview_tokens)
-            } else {
-                let max_chars = remaining_tokens.saturating_mul(TOKENS_PER_CHAR);
-                let truncated = truncate_content(&hit.memory.content, max_chars);
-                let truncated_tokens = ContextBuilderService::estimate_tokens(&truncated);
-                if truncated_tokens == 0 {
-                    break;
-                }
-                (truncated, truncated_tokens.min(remaining_tokens))
             };
 
             remaining_tokens = remaining_tokens.saturating_sub(tokens_used);
@@ -516,6 +505,32 @@ fn truncate_content(content: &str, max_len: usize) -> String {
             |last_space| format!("{}...", &truncated[..last_space]),
         )
     }
+}
+
+fn build_preview(
+    content: &str,
+    remaining_tokens: usize,
+    preview_len: usize,
+) -> Option<(String, usize)> {
+    if remaining_tokens == 0 {
+        return None;
+    }
+
+    let preview = truncate_content(content, preview_len);
+    let preview_tokens = ContextBuilderService::estimate_tokens(&preview);
+    if preview_tokens <= remaining_tokens {
+        return Some((preview, preview_tokens));
+    }
+
+    let max_chars = remaining_tokens.saturating_mul(TOKENS_PER_CHAR);
+    let truncated = truncate_content(content, max_chars);
+    let truncated_tokens = ContextBuilderService::estimate_tokens(&truncated);
+    let tokens_used = truncated_tokens.min(remaining_tokens);
+    if tokens_used == 0 {
+        return None;
+    }
+
+    Some((truncated, tokens_used))
 }
 
 #[cfg(test)]

@@ -128,9 +128,10 @@ impl StoredMemory {
             status,
             created_at: self.created_at,
             updated_at: self.updated_at,
-            tombstoned_at: self
-                .tombstoned_at
-                .and_then(|ts| Utc.timestamp_opt(ts as i64, 0).single()),
+            tombstoned_at: self.tombstoned_at.and_then(|ts| {
+                let ts_i64 = i64::try_from(ts).unwrap_or(i64::MAX);
+                Utc.timestamp_opt(ts_i64, 0).single()
+            }),
             embedding: self.embedding.clone(),
             tags: self.tags.clone(),
             source: self.source.clone(),

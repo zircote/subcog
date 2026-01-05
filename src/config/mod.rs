@@ -1125,20 +1125,17 @@ impl SubcogConfig {
 
     fn apply_env_overrides(&mut self) {
         if let Ok(value) = std::env::var("SUBCOG_ORG_SCOPE_ENABLED") {
-            match parse_bool_env(&value) {
-                Some(enabled) => {
-                    self.features.org_scope_enabled = enabled;
-                    if enabled {
-                        tracing::info!("Org-scope enabled via SUBCOG_ORG_SCOPE_ENABLED");
-                    }
-                },
-                None => {
-                    self.features.org_scope_enabled = false;
-                    tracing::warn!(
-                        value = %value,
-                        "Invalid SUBCOG_ORG_SCOPE_ENABLED value, defaulting to false"
-                    );
-                },
+            let Some(enabled) = parse_bool_env(&value) else {
+                self.features.org_scope_enabled = false;
+                tracing::warn!(
+                    value = %value,
+                    "Invalid SUBCOG_ORG_SCOPE_ENABLED value, defaulting to false"
+                );
+                return;
+            };
+            self.features.org_scope_enabled = enabled;
+            if enabled {
+                tracing::info!("Org-scope enabled via SUBCOG_ORG_SCOPE_ENABLED");
             }
         }
         self.search_intent = self.search_intent.clone().with_env_overrides();

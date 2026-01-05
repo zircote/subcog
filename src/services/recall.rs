@@ -290,8 +290,9 @@ impl RecallService {
         };
 
         let now = current_timestamp();
+        let now_i64 = i64::try_from(now).unwrap_or(i64::MAX);
         let now_dt = Utc
-            .timestamp_opt(now as i64, 0)
+            .timestamp_opt(now_i64, 0)
             .single()
             .unwrap_or_else(Utc::now);
 

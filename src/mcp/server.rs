@@ -16,6 +16,18 @@ use crate::mcp::{
 use crate::observability::flush_metrics;
 use crate::services::ServiceContainer;
 use crate::{Error, Result as SubcogResult};
+#[cfg(feature = "http")]
+use axum::extract::{Request, State};
+#[cfg(feature = "http")]
+use axum::http::{header, Method, StatusCode};
+#[cfg(feature = "http")]
+use axum::middleware::Next;
+#[cfg(feature = "http")]
+use axum::response::{IntoResponse, Response};
+#[cfg(feature = "http")]
+use axum::routing::any_service;
+#[cfg(feature = "http")]
+use axum::{Json, Router};
 use rmcp::model::{
     AnnotateAble, CallToolRequestParam, CallToolResult, Content, GetPromptRequestParam,
     GetPromptResult, Implementation, ListPromptsResult, ListResourceTemplatesResult,
@@ -25,6 +37,12 @@ use rmcp::model::{
 };
 use rmcp::service::RequestContext;
 use rmcp::transport::stdio;
+#[cfg(feature = "http")]
+use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+#[cfg(feature = "http")]
+use rmcp::transport::streamable_http_server::tower::{
+    StreamableHttpServerConfig, StreamableHttpService,
+};
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -35,6 +53,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+#[cfg(feature = "http")]
+use tower_http::cors::CorsLayer;
+#[cfg(feature = "http")]
+use tower_http::set_header::SetResponseHeaderLayer;
+#[cfg(feature = "http")]
+use tower_http::trace::TraceLayer;
 
 type McpResult<T> = std::result::Result<T, McpError>;
 
@@ -115,6 +139,157 @@ impl Default for CorsConfig {
             max_age_secs: 3600,
         }
     }
+}
+
+#[cfg(feature = "http")]
+#[derive(Clone)]
+struct RateLimitEntry {
+    count: usize,
+    window_start: Instant,
+}
+
+#[cfg(feature = "http")]
+#[derive(Clone)]
+struct HttpAuthState {
+    authenticator: JwtAuthenticator,
+    rate_limit: RateLimitConfig,
+    rate_limits: Arc<Mutex<HashMap<String, RateLimitEntry>>>,
+}
+
+#[cfg(feature = "http")]
+async fn auth_middleware(State(state): State<HttpAuthState>, mut req: Request, next: Next) -> Response {
+    let auth_header = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok());
+
+    let claims = match auth_header {
+        Some(header_value) => match state.authenticator.validate_header(header_value) {
+            Ok(claims) => claims,
+            Err(e) => {
+                tracing::warn!(error = %e, "JWT authentication failed");
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({
+                        "error": {
+                            "code": -32000,
+                            "message": format!("Authentication failed: {e}")
+                        }
+                    })),
+                )
+                    .into_response();
+            }
+        },
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": {
+                        "code": -32000,
+                        "message": "Authentication required"
+                    }
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let client_id = claims.sub.clone();
+    let mut rate_limits = state.rate_limits.lock().await;
+    let entry = rate_limits
+        .entry(client_id.clone())
+        .or_insert_with(|| RateLimitEntry {
+            count: 0,
+            window_start: Instant::now(),
+        });
+
+    if entry.window_start.elapsed() > state.rate_limit.window {
+        entry.count = 0;
+        entry.window_start = Instant::now();
+    }
+
+    if entry.count >= state.rate_limit.max_requests {
+        tracing::warn!(
+            client = %client_id,
+            requests = entry.count,
+            "Per-client rate limit exceeded"
+        );
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "error": {
+                    "code": -32000,
+                    "message": format!(
+                        "Rate limit exceeded: max {} requests per {:?}",
+                        state.rate_limit.max_requests,
+                        state.rate_limit.window
+                    )
+                }
+            })),
+        )
+            .into_response();
+    }
+
+    entry.count += 1;
+    drop(rate_limits);
+
+    req.extensions_mut().insert(claims);
+
+    next.run(req).await
+}
+
+#[cfg(feature = "http")]
+async fn map_notification_status(req: Request, next: Next) -> Response {
+    let mut response = next.run(req).await;
+    if response.status() == StatusCode::ACCEPTED {
+        *response.status_mut() = StatusCode::NO_CONTENT;
+    }
+    response
+}
+
+#[cfg(feature = "http")]
+fn build_cors_layer(config: &CorsConfig) -> SubcogResult<CorsLayer> {
+    if config.allowed_origins.is_empty() {
+        return Ok(CorsLayer::new());
+    }
+
+    let mut cors = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS]);
+
+    for origin in &config.allowed_origins {
+        let header_value = origin.parse::<header::HeaderValue>().map_err(|e| {
+            Error::OperationFailed {
+                operation: "cors_origin".to_string(),
+                cause: e.to_string(),
+            }
+        })?;
+        cors = cors.allow_origin(header_value);
+    }
+
+    if config.allow_credentials {
+        cors = cors.allow_credentials(true);
+    }
+
+    Ok(cors.max_age(Duration::from_secs(config.max_age_secs)))
+}
+
+#[cfg(feature = "http")]
+fn ensure_tool_authorized(
+    tool_auth: &ToolAuthorization,
+    context: &RequestContext<RoleServer>,
+    tool_name: &str,
+) -> McpResult<()> {
+    if let Some(claims) = context.extensions.get::<Claims>() {
+        if !tool_auth.is_authorized(claims, tool_name) {
+            let required_scope = tool_auth.required_scope(tool_name);
+            let scope_str = required_scope.unwrap_or("unknown");
+            return Err(McpError::invalid_params(
+                format!("Forbidden: tool '{tool_name}' requires '{scope_str}' scope"),
+                None,
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(feature = "http")]
@@ -287,24 +462,12 @@ impl ServerHandler for McpHandler {
     fn call_tool(
         &self,
         request: CallToolRequestParam,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<CallToolResult>> + Send + '_ {
         let state = self.state.clone();
         async move {
             #[cfg(feature = "http")]
-            if let Some(claims) = _context.extensions.get::<Claims>() {
-                if !state.tool_auth.is_authorized(claims, &request.name) {
-                    let required_scope = state.tool_auth.required_scope(&request.name);
-                    let scope_str = required_scope.unwrap_or("unknown");
-                    return Err(McpError::invalid_params(
-                        format!(
-                            "Forbidden: tool '{}' requires '{}' scope",
-                            request.name, scope_str
-                        ),
-                        None,
-                    ));
-                }
-            }
+            ensure_tool_authorized(&state.tool_auth, &context, &request.name)?;
 
             let arguments = match request.arguments {
                 Some(args) => Value::Object(args),
@@ -727,13 +890,10 @@ impl McpServer {
 
         let cancel_token = service.cancellation_token();
         tokio::spawn(async move {
-            loop {
-                if is_shutdown_requested() {
-                    cancel_token.cancel();
-                    break;
-                }
+            while !is_shutdown_requested() {
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }
+            cancel_token.cancel();
         });
 
         service
@@ -772,127 +932,6 @@ impl McpServer {
     /// Requires the `http` feature and `SUBCOG_MCP_JWT_SECRET` environment variable.
     #[cfg(feature = "http")]
     async fn run_http(&mut self) -> SubcogResult<()> {
-        use axum::extract::{Request, State};
-        use axum::http::{Method, StatusCode, header};
-        use axum::middleware::Next;
-        use axum::response::{IntoResponse, Response};
-        use axum::routing::any_service;
-        use axum::{Json, Router};
-        use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
-        use rmcp::transport::streamable_http_server::tower::{
-            StreamableHttpServerConfig, StreamableHttpService,
-        };
-        use std::sync::Arc;
-        use tower_http::cors::CorsLayer;
-        use tower_http::set_header::SetResponseHeaderLayer;
-        use tower_http::trace::TraceLayer;
-
-        #[derive(Clone)]
-        struct RateLimitEntry {
-            count: usize,
-            window_start: Instant,
-        }
-
-        #[derive(Clone)]
-        struct HttpAuthState {
-            authenticator: JwtAuthenticator,
-            rate_limit: RateLimitConfig,
-            rate_limits: Arc<Mutex<HashMap<String, RateLimitEntry>>>,
-        }
-
-        async fn auth_middleware(
-            State(state): State<HttpAuthState>,
-            mut req: Request,
-            next: Next,
-        ) -> Response {
-            let auth_header = req
-                .headers()
-                .get(header::AUTHORIZATION)
-                .and_then(|h| h.to_str().ok());
-
-            let claims = match auth_header {
-                Some(header_value) => match state.authenticator.validate_header(header_value) {
-                    Ok(claims) => claims,
-                    Err(e) => {
-                        tracing::warn!(error = %e, "JWT authentication failed");
-                        return (
-                            StatusCode::UNAUTHORIZED,
-                            Json(serde_json::json!({
-                                "error": {
-                                    "code": -32000,
-                                    "message": format!("Authentication failed: {e}")
-                                }
-                            })),
-                        )
-                            .into_response();
-                    }
-                },
-                None => {
-                    return (
-                        StatusCode::UNAUTHORIZED,
-                        Json(serde_json::json!({
-                            "error": {
-                                "code": -32000,
-                                "message": "Authentication required"
-                            }
-                        })),
-                    )
-                        .into_response();
-                }
-            };
-
-            let client_id = claims.sub.clone();
-            let mut rate_limits = state.rate_limits.lock().await;
-            let entry = rate_limits
-                .entry(client_id.clone())
-                .or_insert_with(|| RateLimitEntry {
-                    count: 0,
-                    window_start: Instant::now(),
-                });
-
-            if entry.window_start.elapsed() > state.rate_limit.window {
-                entry.count = 0;
-                entry.window_start = Instant::now();
-            }
-
-            if entry.count >= state.rate_limit.max_requests {
-                tracing::warn!(
-                    client = %client_id,
-                    requests = entry.count,
-                    "Per-client rate limit exceeded"
-                );
-                return (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    Json(serde_json::json!({
-                        "error": {
-                            "code": -32000,
-                            "message": format!(
-                                "Rate limit exceeded: max {} requests per {:?}",
-                                state.rate_limit.max_requests,
-                                state.rate_limit.window
-                            )
-                        }
-                    })),
-                )
-                    .into_response();
-            }
-
-            entry.count += 1;
-            drop(rate_limits);
-
-            req.extensions_mut().insert(claims);
-
-            next.run(req).await
-        }
-
-        async fn map_notification_status(req: Request, next: Next) -> Response {
-            let mut response = next.run(req).await;
-            if response.status() == StatusCode::ACCEPTED {
-                *response.status_mut() = StatusCode::NO_CONTENT;
-            }
-            response
-        }
-
         // Ensure JWT authenticator is configured
         let authenticator = self.jwt_authenticator.clone().ok_or_else(|| {
             Error::OperationFailed {
@@ -916,22 +955,7 @@ impl McpServer {
         };
 
         // Build CORS layer
-        let cors_layer = if self.cors_config.allowed_origins.is_empty() {
-            CorsLayer::new()
-        } else {
-            let mut cors = CorsLayer::new()
-                .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS]);
-
-            for origin in &self.cors_config.allowed_origins {
-                cors = cors.allow_origin(origin.parse::<header::HeaderValue>().unwrap());
-            }
-
-            if self.cors_config.allow_credentials {
-                cors = cors.allow_credentials(true);
-            }
-
-            cors.max_age(Duration::from_secs(self.cors_config.max_age_secs))
-        };
+        let cors_layer = build_cors_layer(&self.cors_config)?;
 
         let app = Router::new()
             .route_service("/mcp", any_service(streamable))
