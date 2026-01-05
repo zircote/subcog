@@ -562,7 +562,7 @@ org_scope_enabled = true
 
 **Mitigation:**
 - [x] Add partial index on tombstoned_at (only non-NULL values) ✓
-- [ ] Use `WHERE status != 'Tombstoned'` in default queries (indexed)
+- [x] Use `WHERE status != 'Tombstoned'` in default queries (indexed) ✓
 - [ ] Monitor query performance after deployment
 - [ ] Run EXPLAIN ANALYZE on recall queries
 - [ ] Benchmark before/after with realistic data
