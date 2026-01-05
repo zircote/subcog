@@ -575,7 +575,7 @@ org_scope_enabled = true
 - [x] Make tombstoned_at `Option<DateTime<Utc>>` (nullable) ✓
 - [x] Default to None for existing memories ✓
 - [x] Maintain backward compatibility in JSON serialization ✓
-- [ ] Test deserialization of old memory objects
+- [x] Test deserialization of old memory objects ✓
 - [ ] Version the Memory struct if needed
 
 ### Risk 4: GC Tests Fail After Changes
