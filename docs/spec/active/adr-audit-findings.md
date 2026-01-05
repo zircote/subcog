@@ -585,7 +585,7 @@ org_scope_enabled = true
 **Mitigation:**
 - [x] Run GC tests frequently during development ✓
 - [x] Fix test failures immediately ✓
-- [ ] Add new tests before removing old ones
+- [x] Add new tests before removing old ones ✓
 - [ ] Use TDD approach for new tombstone operations
 
 ---
