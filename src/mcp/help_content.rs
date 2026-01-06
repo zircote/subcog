@@ -80,16 +80,7 @@ Once configured, these tools are available:
 | `subcog://org/_` | List org-scoped memories (if enabled) |
 | `subcog://memory/{id}` | Get specific memory |
 
-## UX Helper Prompts (CLI-only)
-
-These prompts are not exposed via MCP. Use the CLI to list and run them:
-
-```bash
-subcog prompt list --tags ux-helper
-subcog prompt run subcog_browse --interactive
-```
-
-## Filter Syntax (for browse/list)
+## Filter Syntax (for subcog_recall filter)
 
 ```
 ns:decisions          # filter by namespace
@@ -323,7 +314,7 @@ Access memories directly via MCP resources:
 - `subcog://org/_` - Org-scoped memories (if enabled)
 - `subcog://memory/{id}` - Get specific memory by ID
 
-For advanced filtering by namespace, tags, time, etc., use `subcog prompt run subcog_browse`.
+For advanced filtering by namespace, tags, time, etc., use `subcog_recall` with the `filter` parameter.
 
 ## Understanding Scores
 
@@ -395,7 +386,7 @@ Access memories directly without search:
 | `subcog://org/_` | Org-scoped memories (if enabled) |
 | `subcog://memory/{id}` | Specific memory by ID |
 
-For filtering by namespace, tags, time, etc., use `subcog prompt run subcog_browse`.
+For filtering by namespace, tags, time, etc., use `subcog_recall` with the `filter` parameter.
 
 ## Status Check
 

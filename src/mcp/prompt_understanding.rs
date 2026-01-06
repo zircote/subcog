@@ -46,24 +46,6 @@ Use domain-aware defaults: if in a git repo, default scope is project; otherwise
 
 Domain resolution order for `prompt_get` and `prompt_run`: project -> user -> org.
 
-### 3.3 UX Helper Prompts (CLI-only)
-
-These are built-in helper prompts for interactive workflows. They are not exposed
-via MCP. Use the CLI to list/run them:
-
-```
-subcog prompt list --tags ux-helper
-subcog prompt run subcog_browse --interactive
-```
-
-- **subcog_browse**: Interactive memory browser with faceted discovery
-- **subcog_list**: Formatted memory listing with filtering
-- **subcog_tutorial**: Interactive learning guide
-- **subcog_capture_assistant**: Help decide what to capture
-- **subcog_review**: Review and consolidate memories
-- **subcog_search_help**: Craft effective search queries
-
-
 ## 4. When to Capture
 
 Capture memories when you detect:
