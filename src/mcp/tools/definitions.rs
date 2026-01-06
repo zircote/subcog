@@ -93,7 +93,7 @@ pub fn status_tool() -> ToolDefinition {
     }
 }
 
-/// Defines the prompt_understanding tool.
+/// Defines the `prompt_understanding` tool.
 pub fn prompt_understanding_tool() -> ToolDefinition {
     ToolDefinition {
         name: "prompt_understanding".to_string(),
