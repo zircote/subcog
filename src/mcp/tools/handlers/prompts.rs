@@ -270,9 +270,6 @@ pub fn execute_prompt_list(arguments: Value) -> Result<ToolResult> {
     if let Some(pattern) = args.name_pattern {
         filter = filter.with_name_pattern(pattern);
     }
-    if let Some(pattern) = args.name_pattern {
-        filter = filter.with_name_pattern(pattern);
-    }
 
     // Get prompts (works in both project and user scope)
     let services = ServiceContainer::from_current_dir_or_user()?;
