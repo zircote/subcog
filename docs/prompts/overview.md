@@ -164,17 +164,17 @@ tags: [security, review]
 subcog prompt save --from-file review.yaml
 ```
 
-## Comparison with MCP Prompts
+## Comparison with UX Helper Prompts (CLI-only)
 
-| Feature | User Templates | Built-in MCP Prompts |
-|---------|----------------|---------------------|
+| Feature | User Templates | Built-in UX Helper Prompts |
+|---------|----------------|----------------------------|
 | Customizable | Yes | No |
 | Stored | SQLite | Hardcoded |
 | Variables | User-defined | Fixed |
 | Shareable | Yes | No |
 | Domain-scoped | Yes | No |
 
-User templates complement built-in prompts by allowing customization.
+User templates complement built-in UX helper prompts by allowing customization.
 
 ## See Also
 

@@ -2,7 +2,7 @@
 //!
 //! Enriches memories with tags, structure, and context using LLM.
 
-use crate::llm::LlmProvider;
+use crate::llm::{LlmProvider, OperationMode, build_system_prompt};
 use crate::models::{Memory, MemoryId, SearchFilter};
 use crate::storage::traits::IndexBackend;
 use crate::{Error, Result};
@@ -202,16 +202,11 @@ impl<P: LlmProvider> EnrichmentService<P> {
 
     /// Generates tags for content using LLM.
     fn generate_tags(&self, content: &str, namespace: &str) -> Result<Vec<String>> {
-        let prompt = format!(
-            r#"Generate 3-5 relevant tags for this memory. Tags should be lowercase, hyphenated, and descriptive.
-
-Namespace: {namespace}
-Content: {content}
-
-Respond with ONLY a JSON array of strings, no other text. Example: ["rust", "error-handling", "async"]"#
+        let system = build_system_prompt(OperationMode::Enrichment, None);
+        let user_prompt = format!(
+            "Generate tags for this memory.\n\nNamespace: {namespace}\nContent: {content}\n\nReturn ONLY a JSON array of strings."
         );
-
-        let response = self.llm.complete(&prompt)?;
+        let response = self.llm.complete_with_system(&system, &user_prompt)?;
 
         // Parse the JSON response
         let tags: Vec<String> =

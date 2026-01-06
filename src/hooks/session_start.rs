@@ -751,8 +751,8 @@ impl HookHandler for SessionStartHandler {
             // Add tutorial invitation for first session
             if is_first {
                 metadata["tutorial_invitation"] = serde_json::json!({
-                    "prompt_name": "subcog_tutorial",
-                    "message": "Welcome to Subcog! Use the subcog_tutorial prompt to get started."
+                    "ux_prompt": "subcog_tutorial",
+                    "message": "Welcome to Subcog! Use `subcog prompt run subcog_tutorial` to get started."
                 });
             }
 

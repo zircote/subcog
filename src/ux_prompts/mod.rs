@@ -1,6 +1,7 @@
-//! MCP pre-defined prompts.
+//! UX helper prompts (CLI-only).
 //!
-//! Provides prompt templates for the Model Context Protocol.
+//! Provides prompt templates for CLI guidance and workflows. These prompts are
+//! not exposed via MCP and are intended for interactive use with `subcog prompt`.
 //!
 //! # Module Structure
 //!
@@ -18,7 +19,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use types::user_prompt_to_definition;
 
-/// Registry of pre-defined prompts.
+/// Registry of built-in UX helper prompts.
 pub struct PromptRegistry {
     /// Available prompts.
     prompts: HashMap<String, PromptDefinition>,

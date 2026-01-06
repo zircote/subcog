@@ -7,7 +7,7 @@
 pub const SETUP: &str = r#"
 ## MCP Server Configuration
 
-Subcog exposes tools, resources, and prompts via the Model Context Protocol (MCP).
+Subcog exposes tools and resources via the Model Context Protocol (MCP).
 
 ### Claude Desktop Setup
 
@@ -79,16 +79,14 @@ Once configured, these tools are available:
 | `subcog://org/_` | List org-scoped memories (if enabled) |
 | `subcog://memory/{id}` | Get specific memory |
 
-## Available MCP Prompts
+## UX Helper Prompts (CLI-only)
 
-| Prompt | Description |
-|--------|-------------|
-| `subcog_browse` | Interactive memory browser with faceted discovery |
-| `subcog_list` | Formatted memory listing with filtering |
-| `subcog_tutorial` | Interactive learning guide |
-| `subcog_capture_assistant` | Help decide what to capture |
-| `subcog_review` | Review and consolidate memories |
-| `subcog_search_help` | Craft effective search queries |
+These prompts are not exposed via MCP. Use the CLI to list and run them:
+
+```bash
+subcog prompt list --tags ux-helper
+subcog prompt run subcog_browse --interactive
+```
 
 ## Filter Syntax (for browse/list)
 
@@ -324,7 +322,7 @@ Access memories directly via MCP resources:
 - `subcog://org/_` - Org-scoped memories (if enabled)
 - `subcog://memory/{id}` - Get specific memory by ID
 
-For advanced filtering by namespace, tags, time, etc., use the `subcog_browse` prompt.
+For advanced filtering by namespace, tags, time, etc., use `subcog prompt run subcog_browse`.
 
 ## Understanding Scores
 
@@ -396,7 +394,7 @@ Access memories directly without search:
 | `subcog://org/_` | Org-scoped memories (if enabled) |
 | `subcog://memory/{id}` | Specific memory by ID |
 
-For filtering by namespace, tags, time, etc., use the `subcog_browse` prompt.
+For filtering by namespace, tags, time, etc., use `subcog prompt run subcog_browse`.
 
 ## Status Check
 
