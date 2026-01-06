@@ -9,13 +9,13 @@
 // The if-let-else pattern is clearer for nested conditionals
 #![allow(clippy::option_if_let_else)]
 
-use crate::ux_prompts::{PromptContent, PromptDefinition, PromptMessage, PromptRegistry};
 use crate::models::{PromptTemplate, PromptVariable, substitute_variables};
 use crate::services::{
     EnrichmentStatus, PartialMetadata, PromptFilter, PromptFormat, PromptParser, PromptService,
     SaveOptions, prompt_service_for_cwd,
 };
 use crate::storage::index::DomainScope;
+use crate::ux_prompts::{PromptContent, PromptDefinition, PromptMessage, PromptRegistry};
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -400,8 +400,7 @@ fn builtin_prompt_template(definition: &PromptDefinition) -> PromptTemplate {
     PromptTemplate {
         name: definition.name.clone(),
         description,
-        content: "Built-in UX helper prompt (CLI-only). Use prompt run to render."
-            .to_string(),
+        content: "Built-in UX helper prompt (CLI-only). Use prompt run to render.".to_string(),
         variables,
         tags: vec!["built-in".to_string(), "ux-helper".to_string()],
         ..Default::default()
@@ -451,11 +450,7 @@ fn builtin_matches_filter(
     tags: &[String],
     name_pattern: Option<&str>,
 ) -> bool {
-    if !tags.is_empty()
-        && !tags
-            .iter()
-            .all(|t| t == "built-in" || t == "ux-helper")
-    {
+    if !tags.is_empty() && !tags.iter().all(|t| t == "built-in" || t == "ux-helper") {
         return false;
     }
 
@@ -845,10 +840,9 @@ pub fn cmd_prompt_delete(
 
     let scope = parse_domain_scope(Some(&domain));
     if builtin_prompt_definition(&name).is_some() {
-        return Err(format!(
-            "Prompt '{name}' is a built-in UX helper and cannot be deleted."
-        )
-        .into());
+        return Err(
+            format!("Prompt '{name}' is a built-in UX helper and cannot be deleted.").into(),
+        );
     }
 
     // Confirm deletion unless --force

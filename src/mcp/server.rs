@@ -9,8 +9,8 @@
 //!   Requires `http` feature and `SUBCOG_MCP_JWT_SECRET` environment variable.
 
 use crate::mcp::{
-    ResourceContent, ResourceDefinition, ResourceHandler, ToolContent, ToolDefinition, ToolRegistry,
-    ToolResult,
+    ResourceContent, ResourceDefinition, ResourceHandler, ToolContent, ToolDefinition,
+    ToolRegistry, ToolResult,
 };
 use crate::models::{EventMeta, MemoryEvent};
 use crate::observability::{
