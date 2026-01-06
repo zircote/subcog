@@ -44,7 +44,8 @@ Add to `~/.claude/settings.json`:
 Create `~/.config/subcog/config.toml`:
 
 ```toml
-data_dir = "~/.subcog"
+# Default data_dir is ~/.config/subcog; override if desired.
+data_dir = "~/.config/subcog"
 
 [features]
 secrets_filter = true
@@ -71,7 +72,10 @@ Once configured, these tools are available:
 |----------|-------------|
 | `subcog://help` | Help index |
 | `subcog://help/{topic}` | Topic-specific help |
-| `subcog://project/_` | List all memories |
+| `subcog://_` | List all memories across all domains |
+| `subcog://project/_` | List project-scoped memories |
+| `subcog://user/_` | List user-scoped memories |
+| `subcog://org/_` | List org-scoped memories (if enabled) |
 | `subcog://memory/{id}` | Get specific memory |
 
 ## Available MCP Prompts
@@ -121,9 +125,11 @@ Memories are organized into namespaces:
 
 Domains provide scope isolation:
 
-- **Global**: Shared across all projects
-- **Organization**: Shared within an org (e.g., `zircote`)
-- **Repository**: Specific to a repo (e.g., `zircote/subcog`)
+- **Project** (`project`): Scoped to the current repository
+- **User** (`user`): Shared across all projects for the current user
+- **Organization** (`org`): Shared within an org when enabled
+
+Org scope is optional and controlled by `SUBCOG_ORG_SCOPE_ENABLED`.
 
 ## URN Scheme
 
@@ -133,9 +139,10 @@ Memories are addressed via URNs:
 subcog://{domain}/{namespace}/{id}
 ```
 
-Example:
+Examples:
 ```
-subcog://zircote/subcog/decisions/abc123
+subcog://project/decisions/abc123
+subcog://user/decisions/def456
 ```
 
 ## Memory Lifecycle
@@ -145,6 +152,7 @@ subcog://zircote/subcog/decisions/abc123
 3. **Superseded**: Replaced by newer memory
 4. **Pending**: Awaiting review
 5. **Deleted**: Marked for cleanup
+6. **Tombstoned**: Removed from search results; retained for cleanup/audit
 ";
 
 /// Capture documentation.
@@ -309,7 +317,10 @@ Traditional keyword search with BM25 ranking:
 
 Access memories directly via MCP resources:
 
-- `subcog://project/_` - List all memories
+- `subcog://_` - All memories across all domains
+- `subcog://project/_` - Project-scoped memories
+- `subcog://user/_` - User-scoped memories
+- `subcog://org/_` - Org-scoped memories (if enabled)
 - `subcog://memory/{id}` - Get specific memory by ID
 
 For advanced filtering by namespace, tags, time, etc., use the `subcog_browse` prompt.
@@ -391,7 +402,10 @@ Access memories directly without search:
 
 | Resource URI | Returns |
 |--------------|---------|
-| `subcog://project/_` | All memories (JSON) |
+| `subcog://_` | All memories across all domains (JSON) |
+| `subcog://project/_` | Project-scoped memories |
+| `subcog://user/_` | User-scoped memories |
+| `subcog://org/_` | Org-scoped memories (if enabled) |
 | `subcog://memory/{id}` | Specific memory by ID |
 
 For filtering by namespace, tags, time, etc., use the `subcog_browse` prompt.
