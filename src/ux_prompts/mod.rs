@@ -5,9 +5,9 @@
 //!
 //! # Module Structure
 //!
-//! - [`types`]: Core data structures (`PromptDefinition`, `PromptMessage`, etc.)
-//! - [`templates`]: Static content strings for prompts
-//! - [`generators`]: Prompt message generation logic
+//! - `types`: Core data structures (`PromptDefinition`, `PromptMessage`, etc.)
+//! - `templates`: Static content strings for prompts
+//! - `generators`: Prompt message generation logic
 
 mod generators;
 mod templates;
