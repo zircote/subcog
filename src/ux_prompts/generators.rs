@@ -399,11 +399,11 @@ pub fn generate_query_suggest_prompt(arguments: &Value) -> Vec<PromptMessage> {
     let mut prompt = String::from("Help me explore my memory collection.\n\n");
 
     if !topic.is_empty() {
-        let _ = write!(prompt, "Topic area: **{topic}**\n");
+        let _ = writeln!(prompt, "Topic area: **{topic}**");
     }
 
     if !namespace.is_empty() {
-        let _ = write!(prompt, "Focus namespace: **{namespace}**\n");
+        let _ = writeln!(prompt, "Focus namespace: **{namespace}**");
     }
 
     prompt.push('\n');
@@ -476,7 +476,7 @@ pub fn generate_discover_prompt(arguments: &Value) -> Vec<PromptMessage> {
     if start.is_empty() {
         prompt.push_str("No starting point specified - show an overview of available topics.\n");
     } else {
-        let _ = write!(prompt, "Starting point: **{start}**\n");
+        let _ = writeln!(prompt, "Starting point: **{start}**");
     }
 
     let _ = write!(prompt, "Exploration depth: {depth} hops\n\n");
