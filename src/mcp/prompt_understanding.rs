@@ -38,13 +38,30 @@ Use domain-aware defaults: if in a git repo, default scope is project; otherwise
 
 ### 3.2 Prompt Tools
 
-- **prompt_save**: Save a reusable prompt template
+- **prompt_save**: Save a reusable prompt template (set `merge: true` to preserve existing metadata; content optional)
 - **prompt_list**: List saved prompts
 - **prompt_get**: Fetch a prompt by name
 - **prompt_run**: Render a prompt with variables
 - **prompt_delete**: Remove a prompt
 
 Domain resolution order for `prompt_get` and `prompt_run`: project -> user -> org.
+
+### 3.3 UX Helper Prompts (CLI-only)
+
+These are built-in helper prompts for interactive workflows. They are not exposed
+via MCP. Use the CLI to list/run them:
+
+```
+subcog prompt list --tags ux-helper
+subcog prompt run subcog_browse --interactive
+```
+
+- **subcog_browse**: Interactive memory browser with faceted discovery
+- **subcog_list**: Formatted memory listing with filtering
+- **subcog_tutorial**: Interactive learning guide
+- **subcog_capture_assistant**: Help decide what to capture
+- **subcog_review**: Review and consolidate memories
+- **subcog_search_help**: Craft effective search queries
 
 ## 4. When to Capture
 
@@ -105,6 +122,22 @@ prompt_save:
   name: "code-review"
   content: "Review {{file}} for {{focus_area}} issues."
   tags: ["review", "quality"]
+```
+
+### 7.4 Update a Prompt While Preserving Metadata
+```
+prompt_save:
+  name: "code-review"
+  content: "Review {{file}} for {{focus_area}} issues and edge cases."
+  merge: true
+```
+
+### 7.5 Update Metadata Only
+```
+prompt_save:
+  name: "code-review"
+  description: "Updated description only"
+  merge: true
 ```
 
 ## 8. Safety and Integrity
