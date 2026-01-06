@@ -230,7 +230,6 @@ impl RecallService {
         const MAX_QUERY_SIZE: usize = 10_000;
         // Deadline for timeout enforcement (RES-M5)
         let deadline_ms = self.timeout_ms;
-
         let result = (|| {
             // Validate query length (MED-RES-005)
             if query.trim().is_empty() {
@@ -243,7 +242,6 @@ impl RecallService {
                     query.len()
                 )));
             }
-
             // Check timeout before search (RES-M5)
             if deadline_ms > 0 && start.elapsed().as_millis() as u64 >= deadline_ms {
                 tracing::warn!(
@@ -257,7 +255,6 @@ impl RecallService {
                     cause: format!("Search timeout exceeded ({deadline_ms}ms)"),
                 });
             }
-
             let mut memories = match mode {
                 SearchMode::Text => {
                     let _span = info_span!("subcog.memory.recall.text_search").entered();
@@ -272,7 +269,6 @@ impl RecallService {
                     self.hybrid_search(query, filter, limit)?
                 },
             };
-
             // Check timeout after search (RES-M5)
             if deadline_ms > 0 && start.elapsed().as_millis() as u64 >= deadline_ms {
                 tracing::warn!(
