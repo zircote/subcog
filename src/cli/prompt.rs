@@ -9,6 +9,7 @@
 // The if-let-else pattern is clearer for nested conditionals
 #![allow(clippy::option_if_let_else)]
 
+use crate::ux_prompts::{PromptContent, PromptDefinition, PromptMessage, PromptRegistry};
 use crate::models::{PromptTemplate, PromptVariable, substitute_variables};
 use crate::services::{
     EnrichmentStatus, PartialMetadata, PromptFilter, PromptFormat, PromptParser, PromptService,
@@ -380,6 +381,110 @@ fn format_variables_summary(variables: &[PromptVariable]) -> String {
         .join(", ")
 }
 
+fn builtin_prompt_template(definition: &PromptDefinition) -> PromptTemplate {
+    let description = definition
+        .description
+        .clone()
+        .unwrap_or_else(|| "Built-in UX helper prompt (CLI-only)".to_string());
+    let variables = definition
+        .arguments
+        .iter()
+        .map(|arg| PromptVariable {
+            name: arg.name.clone(),
+            description: arg.description.clone(),
+            default: None,
+            required: arg.required,
+        })
+        .collect();
+
+    PromptTemplate {
+        name: definition.name.clone(),
+        description,
+        content: "Built-in UX helper prompt (CLI-only). Use prompt run to render."
+            .to_string(),
+        variables,
+        tags: vec!["built-in".to_string(), "ux-helper".to_string()],
+        ..Default::default()
+    }
+}
+
+fn builtin_prompt_definition(name: &str) -> Option<PromptDefinition> {
+    PromptRegistry::default().get_prompt(name).cloned()
+}
+
+fn matches_glob(pattern: &str, text: &str) -> bool {
+    if !pattern.contains('*') {
+        return pattern == text;
+    }
+
+    let parts: Vec<&str> = pattern.split('*').collect();
+    if parts.is_empty() {
+        return true;
+    }
+
+    if !parts[0].is_empty() && !text.starts_with(parts[0]) {
+        return false;
+    }
+
+    let last = parts.last().unwrap_or(&"");
+    if !last.is_empty() && !text.ends_with(last) {
+        return false;
+    }
+
+    let mut remaining = text;
+    for part in &parts {
+        if part.is_empty() {
+            continue;
+        }
+        if let Some(pos) = remaining.find(part) {
+            remaining = &remaining[pos + part.len()..];
+        } else {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn builtin_matches_filter(
+    definition: &PromptDefinition,
+    tags: &[String],
+    name_pattern: Option<&str>,
+) -> bool {
+    if !tags.is_empty()
+        && !tags
+            .iter()
+            .all(|t| t == "built-in" || t == "ux-helper")
+    {
+        return false;
+    }
+
+    if let Some(pattern) = name_pattern
+        && !matches_glob(pattern, &definition.name)
+    {
+        return false;
+    }
+
+    true
+}
+
+fn format_prompt_messages(messages: &[PromptMessage]) -> String {
+    use std::fmt::Write;
+
+    let mut output = String::new();
+    for message in messages {
+        let rendered = match &message.content {
+            PromptContent::Text { text } => text.clone(),
+            PromptContent::Resource { uri } => format!("[resource: {uri}]"),
+            PromptContent::Image { data, mime_type } => {
+                format!("[image: {mime_type}, {} bytes]", data.len())
+            },
+        };
+        let _ = writeln!(output, "{}:\n{}\n", message.role, rendered);
+    }
+    output.trim_end().to_string()
+}
+
 /// Executes the `prompt list` subcommand.
 ///
 /// # Arguments
@@ -401,20 +506,49 @@ pub fn cmd_prompt_list(
     limit: Option<usize>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut service = create_prompt_service()?;
+    let limit = limit.unwrap_or(20);
 
     // Build filter
     let mut filter = PromptFilter::default();
-    if let Some(tag_str) = tags {
-        filter = filter.with_tags(tag_str.split(',').map(|s| s.trim().to_string()).collect());
+    let tag_list = tags.map(|tag_str| {
+        tag_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .collect::<Vec<_>>()
+    });
+    if let Some(ref tag_list) = tag_list {
+        filter = filter.with_tags(tag_list.clone());
     }
-    if let Some(pattern) = name_pattern {
-        filter = filter.with_name_pattern(&pattern);
-    }
-    if let Some(n) = limit {
-        filter = filter.with_limit(n);
+    if let Some(ref pattern) = name_pattern {
+        filter = filter.with_name_pattern(pattern);
     }
 
-    let prompts = service.list(&filter)?;
+    let mut user_filter = filter;
+    user_filter.limit = None;
+    let mut prompts = service.list(&user_filter)?;
+
+    let registry = PromptRegistry::default();
+    let mut builtin_prompts: Vec<PromptTemplate> = registry
+        .list_prompts()
+        .into_iter()
+        .filter(|definition| {
+            builtin_matches_filter(
+                definition,
+                tag_list.as_deref().unwrap_or(&[]),
+                name_pattern.as_deref(),
+            )
+        })
+        .filter(|definition| prompts.iter().all(|p| p.name != definition.name))
+        .map(builtin_prompt_template)
+        .collect();
+
+    prompts.append(&mut builtin_prompts);
+    prompts.sort_by(|a, b| {
+        b.usage_count
+            .cmp(&a.usage_count)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    prompts.truncate(limit);
     let output_format = format
         .as_deref()
         .map_or(OutputFormat::Table, OutputFormat::parse);
@@ -484,8 +618,13 @@ pub fn cmd_prompt_get(
     let scope = domain.as_deref().map(|d| parse_domain_scope(Some(d)));
     let prompt = service.get(&name, scope)?;
 
-    let Some(template) = prompt else {
-        return Err(format!("Prompt not found: {name}").into());
+    let template = if let Some(template) = prompt {
+        template
+    } else {
+        let Some(definition) = builtin_prompt_definition(&name) else {
+            return Err(format!("Prompt not found: {name}").into());
+        };
+        builtin_prompt_template(&definition)
     };
 
     let output_format = format
@@ -576,9 +715,14 @@ pub fn cmd_prompt_run(
 
     let scope = domain.as_deref().map(|d| parse_domain_scope(Some(d)));
     let prompt = service.get(&name, scope)?;
-
-    let Some(template) = prompt else {
-        return Err(format!("Prompt not found: {name}").into());
+    let builtin_definition = prompt
+        .is_none()
+        .then(|| builtin_prompt_definition(&name))
+        .flatten();
+    let template = match (prompt, builtin_definition.clone()) {
+        (Some(template), _) => template,
+        (None, Some(definition)) => builtin_prompt_template(&definition),
+        (None, None) => return Err(format!("Prompt not found: {name}").into()),
     };
 
     // Parse provided variables
@@ -606,15 +750,27 @@ pub fn cmd_prompt_run(
         }
     }
 
-    // Substitute variables
-    let result = substitute_variables(&template.content, &values, &template.variables)?;
+    if builtin_definition.is_some() {
+        let mut args_map = serde_json::Map::new();
+        for (key, value) in &values {
+            args_map.insert(key.clone(), serde_json::Value::String(value.clone()));
+        }
+        let messages = PromptRegistry::default()
+            .get_prompt_messages(&name, &serde_json::Value::Object(args_map))
+            .ok_or_else(|| "Prompt generation failed".to_string())?;
+        let rendered = format_prompt_messages(&messages);
+        println!("{rendered}");
+    } else {
+        // Substitute variables
+        let result = substitute_variables(&template.content, &values, &template.variables)?;
 
-    // Increment usage count
-    let actual_scope = scope.unwrap_or(DomainScope::Project);
-    let _ = service.increment_usage(&name, actual_scope);
+        // Increment usage count
+        let actual_scope = scope.unwrap_or(DomainScope::Project);
+        let _ = service.increment_usage(&name, actual_scope);
 
-    // Output the result
-    println!("{result}");
+        // Output the result
+        println!("{result}");
+    }
 
     Ok(())
 }
@@ -688,6 +844,12 @@ pub fn cmd_prompt_delete(
     let mut service = create_prompt_service()?;
 
     let scope = parse_domain_scope(Some(&domain));
+    if builtin_prompt_definition(&name).is_some() {
+        return Err(format!(
+            "Prompt '{name}' is a built-in UX helper and cannot be deleted."
+        )
+        .into());
+    }
 
     // Confirm deletion unless --force
     if !force {
@@ -738,6 +900,12 @@ pub fn cmd_prompt_export(
     let prompt = service.get(&name, scope)?;
 
     let Some(template) = prompt else {
+        if builtin_prompt_definition(&name).is_some() {
+            return Err(format!(
+                "Prompt '{name}' is a built-in UX helper and cannot be exported. Use `prompt run` to render it."
+            )
+            .into());
+        }
         return Err(format!("Prompt not found: {name}").into());
     };
 
@@ -932,6 +1100,12 @@ pub fn cmd_prompt_share(
     let prompt = service.get(&name, scope)?;
 
     let Some(template) = prompt else {
+        if builtin_prompt_definition(&name).is_some() {
+            return Err(format!(
+                "Prompt '{name}' is a built-in UX helper and cannot be shared. Use `prompt run` to render it."
+            )
+            .into());
+        }
         return Err(format!("Prompt not found: {name}").into());
     };
 

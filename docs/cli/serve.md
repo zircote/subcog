@@ -83,8 +83,8 @@ Output:
     "subcog_namespaces",
     "subcog_consolidate",
     "subcog_enrich",
-    "subcog_sync",
     "subcog_reindex",
+    "prompt_understanding",
     "prompt_save",
     "prompt_list",
     "prompt_get",
@@ -99,15 +99,7 @@ Output:
     "subcog://topics",
     "subcog://_prompts"
   ],
-  "prompts": [
-    "subcog_capture",
-    "subcog_recall",
-    "subcog_browse",
-    "subcog_tutorial",
-    "intent_search",
-    "discover",
-    "generate_decision"
-  ]
+  "prompts": []
 }
 ```
 
@@ -219,5 +211,5 @@ subcog serve &> /tmp/subcog.log &
 
 - [MCP Tools](../mcp/tools.md) - Available MCP tools
 - [MCP Resources](../mcp/resources.md) - Available MCP resources
-- [MCP Prompts](../mcp/prompts.md) - Available MCP prompts
+- [UX Helper Prompts](../cli/prompt.md) - Built-in CLI prompts
 - [hook](hook.md) - Claude Code hooks

@@ -1,331 +1,41 @@
-# MCP Prompts
+# UX Helper Prompts (CLI-only)
 
-Subcog provides 11 built-in MCP prompts for common operations and guided workflows.
+Subcog ships built-in UX helper prompts for interactive workflows. These are **not**
+exposed via MCP. Use the CLI to list and run them:
 
-## Memory Prompts
-
-### subcog_capture
-
-Guided memory capture with namespace selection.
-
-**Arguments:**
-
-| Argument | Type | Required | Description |
-|----------|------|----------|-------------|
-| `content` | string | Yes | Memory content to capture |
-
-**Example:**
-
-```json
-{
-  "method": "prompts/get",
-  "params": {
-    "name": "subcog_capture",
-    "arguments": {
-      "content": "Decided to use PostgreSQL for primary storage"
-    }
-  }
-}
+```bash
+subcog prompt list --tags ux-helper
+subcog prompt run subcog_browse --interactive
 ```
 
-**Returns prompt guiding through:**
-1. Namespace selection based on content analysis
-2. Tag suggestions
-3. Source reference prompt
+## Available Prompts
 
----
+Canonical names are shown below; aliases are listed in parentheses.
 
-### subcog_recall
+| Prompt | Description | Variables |
+|--------|-------------|-----------|
+| `subcog_tutorial` (`subcog`) | Interactive learning guide | `familiarity`, `focus` |
+| `subcog_generate_tutorial` (`generate_tutorial`) | Generate tutorial using memories | `topic`, `level`, `format` |
+| `subcog_capture_assistant` (`subcog_capture`) | Suggest captures and namespaces | `context` |
+| `subcog_review` | Review or summarize memories | `namespace`, `action` |
+| `subcog_document_decision` (`generate_decision`) | Structure an architecture decision | `decision`, `alternatives` |
+| `subcog_search_help` (`subcog_recall`) | Craft effective search queries | `goal` |
+| `subcog_browse` | Memory browser dashboard | `filter`, `view`, `top` |
+| `subcog_list` | Formatted memory listing | `filter`, `format`, `limit` |
+| `subcog_intent_search` (`intent_search`) | Intent-aware search workflow | `query`, `context`, `intent` |
+| `subcog_query_suggest` (`query_suggest`) | Query suggestions for exploration | `topic`, `namespace` |
+| `subcog_context_capture` (`context_capture`) | Context-aware capture suggestions | `conversation`, `threshold` |
+| `subcog_discover` (`discover`) | Explore related memories and topics | `start`, `depth`, `topic`, `tag` |
 
-Guided memory search with filter suggestions.
+## Examples
 
-**Arguments:**
+```bash
+# Explore memories with a dashboard
+subcog prompt run subcog_browse --var filter="ns:decisions tag:database"
 
-| Argument | Type | Required | Description |
-|----------|------|----------|-------------|
-| `query` | string | Yes | Search query |
+# Get search query suggestions
+subcog prompt run subcog_query_suggest --var topic="authentication"
 
-**Example:**
-
-```json
-{
-  "method": "prompts/get",
-  "params": {
-    "name": "subcog_recall",
-    "arguments": {
-      "query": "database storage"
-    }
-  }
-}
+# Document a decision
+subcog prompt run subcog_document_decision --var decision="Use SQLite for dev"
 ```
-
-**Returns prompt with:**
-1. Search results
-2. Suggested refinement filters
-3. Related topics
-
----
-
-### subcog_browse
-
-Interactive memory browser with faceted discovery.
-
-**Arguments:**
-
-| Argument | Type | Required | Description |
-|----------|------|----------|-------------|
-| `filter` | string | No | Filter expression |
-| `view` | string | No | `dashboard` or `list` (default: dashboard) |
-| `top` | integer | No | Items per facet (default: 10) |
-
-**Dashboard view shows:**
-- Tag distribution with counts
-- Namespace breakdown
-- Recent activity timeline
-- Source file clusters
-
----
-
-### subcog_list
-
-Formatted memory listing for export.
-
-**Arguments:**
-
-| Argument | Type | Required | Description |
-|----------|------|----------|-------------|
-| `filter` | string | No | Filter expression |
-| `format` | string | No | `table`, `json`, `markdown` (default: table) |
-| `limit` | integer | No | Maximum results (default: 50) |
-
----
-
-### subcog_tutorial
-
-Interactive tutorial for new users.
-
-**Arguments:** None
-
-**Returns comprehensive guide covering:**
-1. Core concepts
-2. Capturing memories
-3. Searching and recalling
-4. Integration with Claude Code
-5. Best practices
-
----
-
-## Search Prompts
-
-### intent_search
-
-Search with intent-aware namespace weighting.
-
-**Arguments:**
-
-| Argument | Type | Required | Description |
-|----------|------|----------|-------------|
-| `query` | string | Yes | Natural language query |
-| `intent` | string | No | Override intent type |
-
-**Intent Types:**
-- `howto` - Prioritizes patterns, learnings
-- `location` - Prioritizes apis, config
-- `explanation` - Prioritizes decisions, context
-- `comparison` - Prioritizes decisions, patterns
-- `troubleshoot` - Prioritizes blockers, learnings
-- `general` - Balanced weights
-
----
-
-### query_suggest
-
-Get filter suggestions for a query.
-
-**Arguments:**
-
-| Argument | Type | Required | Description |
-|----------|------|----------|-------------|
-| `query` | string | Yes | Initial query |
-
-**Returns:**
-- Suggested namespace filters
-- Relevant tag filters
-- Time range suggestions
-
----
-
-### discover
-
-Explore memories by topic or tag.
-
-**Arguments:**
-
-| Argument | Type | Required | Description |
-|----------|------|----------|-------------|
-| `topic` | string | No | Topic to explore |
-| `tag` | string | No | Tag to explore |
-
-**Returns:**
-- Related memories
-- Connected topics
-- Suggested next queries
-
----
-
-## Content Generation Prompts
-
-### generate_decision
-
-Generate a well-structured decision record.
-
-**Arguments:**
-
-| Argument | Type | Required | Description |
-|----------|------|----------|-------------|
-| `decision` | string | Yes | Brief decision statement |
-| `context` | string | No | Background context |
-
-**Returns ADR-style decision record:**
-```markdown
-## Decision: {decision}
-
-### Context
-{analyzed context}
-
-### Decision
-{expanded decision}
-
-### Consequences
-- Positive: ...
-- Negative: ...
-
-### Alternatives Considered
-- ...
-```
-
----
-
-### generate_tutorial
-
-Generate a tutorial from learnings.
-
-**Arguments:**
-
-| Argument | Type | Required | Description |
-|----------|------|----------|-------------|
-| `topic` | string | Yes | Topic for tutorial |
-| `level` | string | No | `beginner`, `intermediate`, `advanced` |
-
-**Synthesizes relevant memories into tutorial format.**
-
----
-
-### context_capture
-
-Capture rich context from a conversation.
-
-**Arguments:**
-
-| Argument | Type | Required | Description |
-|----------|------|----------|-------------|
-| `conversation` | string | Yes | Conversation excerpt |
-
-**Analyzes conversation and suggests:**
-- Decisions to capture
-- Patterns identified
-- Learnings discovered
-- Blockers mentioned
-
----
-
-## Using Prompts
-
-### Get Prompt Content
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "prompts/get",
-  "params": {
-    "name": "subcog_capture",
-    "arguments": {
-      "content": "Use RRF for hybrid search fusion"
-    }
-  }
-}
-```
-
-### List Available Prompts
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "prompts/list"
-}
-```
-
-**Response:**
-
-```json
-{
-  "prompts": [
-    {
-      "name": "subcog_capture",
-      "description": "Guided memory capture",
-      "arguments": [
-        {"name": "content", "required": true}
-      ]
-    },
-    {
-      "name": "subcog_recall",
-      "description": "Guided memory search",
-      "arguments": [
-        {"name": "query", "required": true}
-      ]
-    }
-  ]
-}
-```
-
----
-
-## Prompt vs Tool
-
-| Use Prompt When | Use Tool When |
-|-----------------|---------------|
-| Guided workflow needed | Direct operation |
-| Suggestions helpful | Exact parameters known |
-| Learning the system | Automation/scripts |
-| Exploring options | Specific action |
-
-**Example - Prompt for guidance:**
-```
-"I want to capture something about our database choice"
-→ Use subcog_capture prompt for namespace suggestion
-```
-
-**Example - Tool for direct action:**
-```
-"Capture this to decisions: Use PostgreSQL"
-→ Use subcog_capture tool directly
-```
-
----
-
-## Custom Prompts
-
-User-defined prompts are managed separately. See:
-- [prompt_save](tools.md#prompt_save) tool
-- [Prompt Templates](../prompts/README.md) documentation
-- `subcog://_prompts` resources
-
----
-
-## See Also
-
-- [Tools](tools.md) - MCP tools reference
-- [Resources](resources.md) - MCP resources reference
-- [Prompt Templates](../prompts/README.md) - User-defined prompts

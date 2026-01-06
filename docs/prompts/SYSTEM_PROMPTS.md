@@ -1136,6 +1136,6 @@ Review these metrics to assess prompt performance:
 ## Related Documentation
 
 - [Prompt Templates Overview](./overview.md) - User-defined prompt templates
-- [MCP Prompts](mcp.md) - Pre-defined MCP prompts
+- [UX Helper Prompts](../mcp/prompts.md) - CLI-only helper prompts
 - [Configuration Guide](../configuration/config-file.md) - Full configuration reference
 - [Security Features](../architecture/security.md) - Security architecture details

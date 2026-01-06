@@ -161,6 +161,8 @@ pub fn execute_prompt_list(arguments: Value) -> Result<ToolResult> {
     let args: PromptListArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
+    let limit = args.limit.unwrap_or(20).min(100);
+
     // Build filter
     let mut filter = PromptFilter::new();
     if let Some(domain) = args.domain {
@@ -172,11 +174,6 @@ pub fn execute_prompt_list(arguments: Value) -> Result<ToolResult> {
     if let Some(pattern) = args.name_pattern {
         filter = filter.with_name_pattern(pattern);
     }
-    if let Some(limit) = args.limit {
-        filter = filter.with_limit(limit);
-    } else {
-        filter = filter.with_limit(20);
-    }
 
     // Get prompts (works in both project and user scope)
     let services = ServiceContainer::from_current_dir_or_user()?;
@@ -186,7 +183,9 @@ pub fn execute_prompt_list(arguments: Value) -> Result<ToolResult> {
         let user_dir = crate::storage::get_user_data_dir()?;
         create_prompt_service(&user_dir)
     };
-    let prompts = prompt_service.list(&filter)?;
+    let mut user_filter = filter.clone();
+    user_filter.limit = Some(limit);
+    let prompts = prompt_service.list(&user_filter)?;
 
     if prompts.is_empty() {
         return Ok(ToolResult {

@@ -1,6 +1,6 @@
 # Subcog Query Syntax
 
-This document describes the filter syntax used by the `subcog_browse` and `subcog_list` MCP prompts for discovering and filtering memories.
+This document describes the filter syntax used by the `subcog_browse` and `subcog_list` UX helper prompts (CLI-only) for discovering and filtering memories.
 
 ## Overview
 
@@ -197,11 +197,15 @@ ns:tech-debt source:src/target-module/*
 ns:decisions tag:architecture
 ```
 
-## MCP Prompts
+## UX Helper Prompts (CLI-only)
 
 ### `subcog_browse`
 
-Interactive memory browser with faceted discovery dashboard:
+Interactive memory browser with faceted discovery dashboard. Run via:
+
+```
+subcog prompt run subcog_browse --interactive
+```
 
 ```
 Arguments:
