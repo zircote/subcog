@@ -292,18 +292,7 @@ impl RecallService {
             // Safe cast: u128 milliseconds will practically never exceed u64::MAX
             let execution_time_ms = start.elapsed().as_millis() as u64;
             let total_count = memories.len();
-            let timestamp = current_timestamp();
-            // Use Arc<str> for zero-copy sharing across events (PERF-C1).
-            // Arc::clone() is O(1) atomic increment vs O(n) String::clone().
-            let query_arc: std::sync::Arc<str> = query.into();
-            for hit in &memories {
-                record_event(MemoryEvent::Retrieved {
-                    meta: EventMeta::with_timestamp("recall", current_request_id(), timestamp),
-                    memory_id: hit.memory.id.clone(),
-                    query: std::sync::Arc::clone(&query_arc),
-                    score: hit.score,
-                });
-            }
+            record_recall_events(&memories, query);
 
             Ok(SearchResult {
                 memories,
@@ -458,17 +447,7 @@ impl RecallService {
 
             let execution_time_ms = start.elapsed().as_millis() as u64;
             let total_count = memories.len();
-            let timestamp = current_timestamp();
-            // Use Arc<str> for zero-copy sharing (PERF-C1). Static pattern for list_all.
-            let query_arc: std::sync::Arc<str> = "*".into();
-            for hit in &memories {
-                record_event(MemoryEvent::Retrieved {
-                    meta: EventMeta::with_timestamp("recall", current_request_id(), timestamp),
-                    memory_id: hit.memory.id.clone(),
-                    query: std::sync::Arc::clone(&query_arc),
-                    score: hit.score,
-                });
-            }
+            record_recall_events(&memories, "*");
 
             Ok(SearchResult {
                 memories,
@@ -871,6 +850,19 @@ fn domain_label(filter: &SearchFilter) -> Cow<'static, str> {
         0 => Cow::Borrowed("all"),
         1 => Cow::Owned(filter.domains[0].to_string()),
         _ => Cow::Borrowed("multi"),
+    }
+}
+
+fn record_recall_events(memories: &[SearchHit], query: &str) {
+    let timestamp = current_timestamp();
+    let query_arc: std::sync::Arc<str> = query.into();
+    for hit in memories {
+        record_event(MemoryEvent::Retrieved {
+            meta: EventMeta::with_timestamp("recall", current_request_id(), timestamp),
+            memory_id: hit.memory.id.clone(),
+            query: std::sync::Arc::clone(&query_arc),
+            score: hit.score,
+        });
     }
 }
 
