@@ -745,7 +745,7 @@ pub fn cmd_prompt_run(
         }
     }
 
-    if let Some(definition) = builtin_definition {
+    if builtin_definition.is_some() {
         let mut args_map = serde_json::Map::new();
         for (key, value) in &values {
             args_map.insert(key.clone(), serde_json::Value::String(value.clone()));
