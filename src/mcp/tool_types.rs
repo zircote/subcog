@@ -106,6 +106,9 @@ pub struct PromptSaveArgs {
     /// Skip LLM-powered metadata enrichment.
     #[serde(default)]
     pub skip_enrichment: bool,
+    /// Merge with existing prompt metadata when updating (default: false).
+    #[serde(default)]
+    pub merge: bool,
 }
 
 /// Variable definition argument for prompt.save.

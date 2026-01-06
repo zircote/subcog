@@ -68,8 +68,31 @@ pub fn execute_prompt_save(arguments: Value) -> Result<ToolResult> {
         ));
     };
 
-    // Build partial metadata from user-provided values
+    // Get repo path and create service (works in both project and user scope)
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let mut prompt_service = if let Some(repo_path) = services.repo_path() {
+        create_prompt_service(repo_path)
+    } else {
+        // User-scope: create prompt service with user data directory
+        let user_dir = crate::storage::get_user_data_dir()?;
+        create_prompt_service(&user_dir)
+    };
+
+    // Build partial metadata from existing prompt (optional) + user-provided values
     let mut existing = PartialMetadata::new();
+    if args.merge {
+        if let Some(template) = prompt_service.get(&args.name, Some(domain))? {
+            if !template.description.is_empty() {
+                existing = existing.with_description(template.description);
+            }
+            if !template.tags.is_empty() {
+                existing = existing.with_tags(template.tags);
+            }
+            if !template.variables.is_empty() {
+                existing = existing.with_variables(template.variables);
+            }
+        }
+    }
     if let Some(desc) = args.description {
         existing = existing.with_description(desc);
     }
@@ -94,16 +117,6 @@ pub fn execute_prompt_save(arguments: Value) -> Result<ToolResult> {
 
     // Configure save options
     let options = SaveOptions::new().with_skip_enrichment(args.skip_enrichment);
-
-    // Get repo path and create service (works in both project and user scope)
-    let services = ServiceContainer::from_current_dir_or_user()?;
-    let mut prompt_service = if let Some(repo_path) = services.repo_path() {
-        create_prompt_service(repo_path)
-    } else {
-        // User-scope: create prompt service with user data directory
-        let user_dir = crate::storage::get_user_data_dir()?;
-        create_prompt_service(&user_dir)
-    };
 
     // Use save_with_enrichment (no LLM provider for now - fallback mode)
     let result = prompt_service.save_with_enrichment::<crate::llm::OllamaClient>(
