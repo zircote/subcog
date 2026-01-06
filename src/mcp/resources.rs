@@ -60,7 +60,7 @@
 //! subcog://topics/authentication # Memories about authentication
 //! ```
 //!
-//! For advanced filtering and discovery, use the `subcog_browse` prompt
+//! For advanced filtering and discovery, use `subcog prompt run subcog_browse`,
 //! which supports filtering by namespace, tags, time, source, and status.
 
 use super::help_content;
@@ -228,7 +228,7 @@ impl ResourceHandler {
     /// - Help topics
     /// - Memory browsing patterns
     ///
-    /// For advanced filtering, use the `subcog_browse` prompt.
+    /// For advanced filtering, use `subcog prompt run subcog_browse`.
     #[must_use]
     pub fn list_resources(&self) -> Vec<ResourceDefinition> {
         let mut resources = Vec::new();
@@ -456,7 +456,7 @@ impl ResourceHandler {
     /// - `subcog://topics` - List all indexed topics
     /// - `subcog://topics/{topic}` - Get memories for a specific topic
     ///
-    /// For advanced filtering, use the `subcog_browse` prompt instead.
+    /// For advanced filtering, use `subcog prompt run subcog_browse` instead.
     ///
     /// # Errors
     ///
@@ -526,7 +526,7 @@ impl ResourceHandler {
     /// - `subcog://_/{namespace}` - All memories in a namespace
     /// - `subcog://project/_` - Alias for `subcog://_` (project-scoped, future domain filter)
     ///
-    /// For advanced filtering, use the `subcog_browse` prompt.
+    /// For advanced filtering, use `subcog prompt run subcog_browse`.
     fn get_all_memories_resource(&self, uri: &str, parts: &[&str]) -> Result<ResourceContent> {
         // Parse namespace filter from URI
         // subcog://_ -> no filter
@@ -1060,7 +1060,7 @@ impl ResourceHandler {
         index.push_str("2. **Search**: Use `subcog_recall` tool with `query` parameter\n");
         index.push_str("3. **Status**: Use `subcog_status` tool\n");
         index.push_str(
-            "4. **Browse**: Use `subcog_browse` prompt or `subcog://project/_` resource\n",
+            "4. **Browse**: Use `subcog prompt run subcog_browse` or `subcog://project/_` resource\n",
         );
 
         index

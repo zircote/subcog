@@ -9,9 +9,8 @@
 //!   Requires `http` feature and `SUBCOG_MCP_JWT_SECRET` environment variable.
 
 use crate::mcp::{
-    PromptContent as SubcogPromptContent, PromptDefinition, PromptMessage as SubcogPromptMessage,
-    PromptRegistry, ResourceContent, ResourceDefinition, ResourceHandler, ToolContent,
-    ToolDefinition, ToolRegistry, ToolResult,
+    ResourceContent, ResourceDefinition, ResourceHandler, ToolContent, ToolDefinition, ToolRegistry,
+    ToolResult,
 };
 use crate::models::{EventMeta, MemoryEvent};
 use crate::observability::{
@@ -35,8 +34,7 @@ use axum::{Json, Router};
 use rmcp::model::{
     AnnotateAble, CallToolRequestParam, CallToolResult, Content, GetPromptRequestParam,
     GetPromptResult, Implementation, ListPromptsResult, ListResourceTemplatesResult,
-    ListResourcesResult, ListToolsResult, PaginatedRequestParam, Prompt, PromptArgument,
-    PromptMessage, PromptMessageContent, PromptMessageRole, RawResource, Resource,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParam, RawResource, Resource,
     ResourceContents, ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::RequestContext;
@@ -550,7 +548,6 @@ pub enum Transport {
 
 struct McpState {
     tools: ToolRegistry,
-    prompts: PromptRegistry,
     resources: Mutex<ResourceHandler>,
     #[cfg(feature = "http")]
     tool_auth: ToolAuthorization,
@@ -562,11 +559,10 @@ struct McpHandler {
 }
 
 impl McpHandler {
-    fn new(tools: ToolRegistry, resources: ResourceHandler, prompts: PromptRegistry) -> Self {
+    fn new(tools: ToolRegistry, resources: ResourceHandler) -> Self {
         Self {
             state: Arc::new(McpState {
                 tools,
-                prompts,
                 resources: Mutex::new(resources),
                 #[cfg(feature = "http")]
                 tool_auth: ToolAuthorization::default(),
@@ -582,7 +578,6 @@ impl ServerHandler for McpHandler {
             capabilities: ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
-                .enable_prompts()
                 .build(),
             server_info: Implementation::from_build_env(),
             instructions: Some("Subcog MCP server".to_string()),
@@ -758,7 +753,6 @@ impl ServerHandler for McpHandler {
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListPromptsResult>> + Send + '_ {
-        let state = self.state.clone();
         let (request_context, request_id) = init_request_context(current_request_id());
         async move {
             let span = info_span!(
@@ -771,13 +765,7 @@ impl ServerHandler for McpHandler {
             );
 
             run_mcp_with_context(request_context, span, "list_prompts", |_start| async move {
-                let prompts: Vec<Prompt> = state
-                    .prompts
-                    .list_prompts()
-                    .into_iter()
-                    .map(prompt_definition_to_rmcp)
-                    .collect();
-                Ok(ListPromptsResult::with_all_items(prompts))
+                Ok(ListPromptsResult::with_all_items(Vec::new()))
             })
             .await
         }
@@ -788,7 +776,6 @@ impl ServerHandler for McpHandler {
         request: GetPromptRequestParam,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<GetPromptResult>> + Send + '_ {
-        let state = self.state.clone();
         let (request_context, request_id) = init_request_context(current_request_id());
         let prompt_name = request.name.clone();
         async move {
@@ -803,23 +790,10 @@ impl ServerHandler for McpHandler {
             );
 
             run_mcp_with_context(request_context, span, "get_prompt", |_start| async move {
-                let messages = match request.arguments {
-                    Some(args) => Value::Object(args),
-                    None => Value::Object(Map::new()),
-                };
-
-                let msgs = state
-                    .prompts
-                    .get_prompt_messages(&request.name, &messages)
-                    .ok_or_else(|| McpError::invalid_params("Unknown prompt".to_string(), None))?;
-                let mapped = msgs
-                    .into_iter()
-                    .map(prompt_message_to_rmcp)
-                    .collect::<Vec<_>>();
-                Ok(GetPromptResult {
-                    description: None,
-                    messages: mapped,
-                })
+                Err(McpError::invalid_params(
+                    format!("Prompts are not supported (requested: {prompt_name})"),
+                    None,
+                ))
             })
             .await
         }
@@ -893,75 +867,12 @@ fn resource_content_to_rmcp(content: ResourceContent) -> ResourceContents {
     }
 }
 
-fn prompt_definition_to_rmcp(def: &PromptDefinition) -> Prompt {
-    let arguments = if def.arguments.is_empty() {
-        None
-    } else {
-        Some(
-            def.arguments
-                .iter()
-                .map(|arg| PromptArgument {
-                    name: arg.name.clone(),
-                    title: None,
-                    description: arg.description.clone(),
-                    required: Some(arg.required),
-                })
-                .collect(),
-        )
-    };
-
-    Prompt {
-        name: def.name.clone(),
-        title: None,
-        description: def.description.clone(),
-        arguments,
-        icons: None,
-        meta: None,
-    }
-}
-
-fn prompt_message_to_rmcp(message: SubcogPromptMessage) -> PromptMessage {
-    let role = match message.role.as_str() {
-        "user" => PromptMessageRole::User,
-        _ => PromptMessageRole::Assistant,
-    };
-
-    let content = match message.content {
-        SubcogPromptContent::Text { text } => PromptMessageContent::Text { text },
-        SubcogPromptContent::Image { data, mime_type } => PromptMessageContent::Image {
-            image: rmcp::model::RawImageContent {
-                data,
-                mime_type,
-                meta: None,
-            }
-            .no_annotation(),
-        },
-        SubcogPromptContent::Resource { uri } => PromptMessageContent::ResourceLink {
-            link: RawResource {
-                uri: uri.clone(),
-                name: uri,
-                title: None,
-                description: None,
-                mime_type: None,
-                size: None,
-                icons: None,
-                meta: None,
-            }
-            .no_annotation(),
-        },
-    };
-
-    PromptMessage { role, content }
-}
-
 /// MCP server for subcog.
 pub struct McpServer {
     /// Tool registry.
     tools: ToolRegistry,
     /// Resource handler.
     resources: ResourceHandler,
-    /// Prompt registry.
-    prompts: PromptRegistry,
     /// Transport type.
     transport: Transport,
     /// HTTP port (if using HTTP transport).
@@ -986,7 +897,6 @@ impl McpServer {
         Self {
             tools: ToolRegistry::new(),
             resources,
-            prompts: PromptRegistry::new(),
             transport: Transport::Stdio,
             port: 3000,
             rate_limit: RateLimitConfig::from_env(),
@@ -1124,8 +1034,7 @@ impl McpServer {
     fn build_handler(&mut self) -> McpHandler {
         let tools = std::mem::take(&mut self.tools);
         let resources = std::mem::take(&mut self.resources);
-        let prompts = std::mem::take(&mut self.prompts);
-        McpHandler::new(tools, resources, prompts)
+        McpHandler::new(tools, resources)
     }
 
     /// Runs the server over stdio with graceful shutdown (RES-M4).
@@ -1304,14 +1213,6 @@ mod tests {
         let tool = registry.get_tool("subcog_status").unwrap();
         let rmcp_tool = tool_definition_to_rmcp(tool);
         assert_eq!(rmcp_tool.name, "subcog_status");
-    }
-
-    #[test]
-    fn test_prompt_mapping() {
-        let registry = PromptRegistry::new();
-        let prompt = registry.get_prompt("subcog_tutorial").unwrap();
-        let rmcp_prompt = prompt_definition_to_rmcp(prompt);
-        assert_eq!(rmcp_prompt.name, "subcog_tutorial");
     }
 }
 

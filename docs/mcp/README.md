@@ -4,13 +4,12 @@ Subcog implements the Model Context Protocol (MCP) to provide AI assistants with
 
 ## Overview
 
-The MCP server exposes three types of capabilities:
+The MCP server exposes two types of capabilities:
 
 | Type | Description | Count |
 |------|-------------|-------|
 | [Tools](tools.md) | Callable functions for memory operations | 13 |
 | [Resources](resources.md) | URI-based data access | 26+ |
-| [Prompts](./prompts.md) | Pre-defined prompt templates | 11 |
 
 ## Quick Reference
 
@@ -24,8 +23,8 @@ The MCP server exposes three types of capabilities:
 | `subcog_namespaces` | List namespaces |
 | `subcog_consolidate` | Merge similar memories |
 | `subcog_enrich` | Enhance with LLM |
-| `subcog_sync` | Sync with remote |
 | `subcog_reindex` | Rebuild search index |
+| `prompt_understanding` | Guidance for using Subcog MCP tools |
 
 ### Prompt Tools
 

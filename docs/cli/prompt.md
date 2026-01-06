@@ -12,6 +12,27 @@ subcog prompt <COMMAND> [OPTIONS]
 
 The `prompt` command manages reusable prompt templates with variable substitution. Templates can be stored at project, user, or org scope and shared across sessions.
 
+## Built-in UX Helper Prompts (CLI-only)
+
+Subcog ships a set of built-in UX helper prompts for interactive workflows. These are **not** MCP prompts, but they are available in the CLI:
+
+```bash
+subcog prompt list --tags ux-helper
+subcog prompt run subcog_browse --interactive
+```
+
+Available built-ins:
+- `subcog_browse`: Interactive memory browser with faceted discovery
+- `subcog_list`: Formatted memory listing with filtering
+- `subcog_tutorial`: Interactive learning guide
+- `subcog_capture_assistant`: Help decide what to capture
+- `subcog_review`: Review and consolidate memories
+- `subcog_search_help`: Craft effective search queries
+- `subcog_intent_search`: Intent-aware search workflow
+- `subcog_query_suggest`: Query suggestions for exploration
+- `subcog_context_capture`: Context-aware capture suggestions
+- `subcog_discover`: Explore related memories and topics
+
 ## Subcommands
 
 | Command | Description |

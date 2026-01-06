@@ -9,7 +9,7 @@
 // The if-let-else pattern is clearer for nested conditionals
 #![allow(clippy::option_if_let_else)]
 
-use crate::mcp::{PromptContent, PromptDefinition, PromptMessage, PromptRegistry};
+use crate::ux_prompts::{PromptContent, PromptDefinition, PromptMessage, PromptRegistry};
 use crate::models::{PromptTemplate, PromptVariable, substitute_variables};
 use crate::services::{
     EnrichmentStatus, PartialMetadata, PromptFilter, PromptFormat, PromptParser, PromptService,
@@ -385,7 +385,7 @@ fn builtin_prompt_template(definition: &PromptDefinition) -> PromptTemplate {
     let description = definition
         .description
         .clone()
-        .unwrap_or_else(|| "Built-in MCP prompt".to_string());
+        .unwrap_or_else(|| "Built-in UX helper prompt (CLI-only)".to_string());
     let variables = definition
         .arguments
         .iter()
@@ -400,10 +400,10 @@ fn builtin_prompt_template(definition: &PromptDefinition) -> PromptTemplate {
     PromptTemplate {
         name: definition.name.clone(),
         description,
-        content: "Built-in MCP prompt (generated at runtime). Use prompt run to render."
+        content: "Built-in UX helper prompt (CLI-only). Use prompt run to render."
             .to_string(),
         variables,
-        tags: vec!["built-in".to_string()],
+        tags: vec!["built-in".to_string(), "ux-helper".to_string()],
         ..Default::default()
     }
 }
@@ -451,7 +451,11 @@ fn builtin_matches_filter(
     tags: &[String],
     name_pattern: Option<&str>,
 ) -> bool {
-    if !tags.is_empty() && !tags.iter().all(|t| t == "built-in") {
+    if !tags.is_empty()
+        && !tags
+            .iter()
+            .all(|t| t == "built-in" || t == "ux-helper")
+    {
         return false;
     }
 
@@ -841,7 +845,10 @@ pub fn cmd_prompt_delete(
 
     let scope = parse_domain_scope(Some(&domain));
     if builtin_prompt_definition(&name).is_some() {
-        return Err(format!("Prompt '{name}' is built-in and cannot be deleted.").into());
+        return Err(format!(
+            "Prompt '{name}' is a built-in UX helper and cannot be deleted."
+        )
+        .into());
     }
 
     // Confirm deletion unless --force
@@ -895,7 +902,7 @@ pub fn cmd_prompt_export(
     let Some(template) = prompt else {
         if builtin_prompt_definition(&name).is_some() {
             return Err(format!(
-                "Prompt '{name}' is built-in and cannot be exported. Use `prompt run` to render it."
+                "Prompt '{name}' is a built-in UX helper and cannot be exported. Use `prompt run` to render it."
             )
             .into());
         }
@@ -1095,7 +1102,7 @@ pub fn cmd_prompt_share(
     let Some(template) = prompt else {
         if builtin_prompt_definition(&name).is_some() {
             return Err(format!(
-                "Prompt '{name}' is built-in and cannot be shared. Use `prompt run` to render it."
+                "Prompt '{name}' is a built-in UX helper and cannot be shared. Use `prompt run` to render it."
             )
             .into());
         }
