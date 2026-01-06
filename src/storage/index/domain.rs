@@ -1,8 +1,8 @@
 //! Domain-scoped index management.
 //!
 //! Manages separate indices for different domain scopes:
-//! - **Project**: `<repo>/.subcog/index.db` - project-specific memories
-//! - **User**: `~/Library/.../subcog/repos/<hash>/index.db` - personal memories per repo
+//! - **Project**: `<user-data>/index.db` - project memories with project/branch/path facets
+//! - **User**: `<user-data>/index.db` - user-wide memories
 //! - **Org**: Configured path or database URL - team/enterprise memories
 
 use crate::storage::index::SqliteBackend;
@@ -14,9 +14,9 @@ use std::sync::Mutex;
 /// Domain scope for index isolation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DomainScope {
-    /// Project-local index in `.subcog/` within the repository.
+    /// Project scope stored in user-level index with project faceting.
     Project,
-    /// User-level index, hashed by repository path.
+    /// User-level index stored in the user data directory.
     User,
     /// Organization-level index, configured externally.
     Org,
@@ -38,9 +38,7 @@ impl DomainScope {
     /// - If in a git repository (`.git` folder exists): returns `Project`
     /// - If NOT in a git repository: returns `User`
     ///
-    /// This ensures memories are stored in the appropriate scope:
-    /// - Project-scoped memories are stored in `SQLite` with project faceting
-    /// - User-scoped memories are stored in sqlite (works anywhere)
+    /// Storage for both scopes is user-level `SQLite` with facets for project/branch/path.
     #[must_use]
     pub fn default_for_context() -> Self {
         if is_in_git_repo() {
@@ -67,7 +65,7 @@ impl DomainScope {
 /// Configuration for domain-scoped indices.
 #[derive(Debug, Clone, Default)]
 pub struct DomainIndexConfig {
-    /// Path to the git repository root (for project scope).
+    /// Path to the git repository root (for project context/faceting).
     pub repo_path: Option<PathBuf>,
     /// Organization index configuration.
     pub org_config: Option<OrgIndexConfig>,
@@ -161,27 +159,16 @@ impl DomainIndexManager {
         }
     }
 
-    /// Gets the project-scoped index path: `<repo>/.subcog/index.db`
+    /// Gets the project-scoped index path: `<user-data>/index.db`
     fn get_project_index_path(&self) -> Result<PathBuf> {
-        let repo_path = self.config.repo_path.as_ref().ok_or_else(|| {
-            Error::InvalidInput("Repository path not configured for project scope".to_string())
-        })?;
-
-        Ok(repo_path.join(".subcog").join("index.db"))
+        Ok(self.user_data_dir.join("index.db"))
     }
 
     /// Gets the user-scoped index path.
     ///
-    /// If a repo path is configured: `<user_data>/repos/<hash>/index.db`
-    /// If no repo path (pure user scope): `<user_data>/index.db`
+    /// `<user_data>/index.db`
     fn get_user_index_path(&self) -> PathBuf {
-        self.config.repo_path.as_ref().map_or_else(
-            || self.user_data_dir.join("index.db"),
-            |repo_path| {
-                let hash = hash_path(repo_path);
-                self.user_data_dir.join("repos").join(hash).join("index.db")
-            },
-        )
+        self.user_data_dir.join("index.db")
     }
 
     /// Gets the org-scoped index path from configuration.
@@ -293,23 +280,6 @@ pub fn get_user_data_dir() -> Result<PathBuf> {
         })
 }
 
-/// Hashes a path for use as a directory name.
-///
-/// Uses a short hash to avoid overly long paths while maintaining uniqueness.
-fn hash_path(path: &Path) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-
-    let mut hasher = DefaultHasher::new();
-    canonical.hash(&mut hasher);
-    let hash = hasher.finish();
-
-    // Use first 16 hex chars (64 bits) - collision-resistant enough
-    format!("{hash:016x}")
-}
-
 /// Checks if the current working directory is inside a git repository.
 ///
 /// Returns `true` if a `.git` directory exists in the current directory
@@ -373,23 +343,6 @@ mod tests {
     }
 
     #[test]
-    fn test_hash_path_consistency() {
-        let path = PathBuf::from("/tmp/test/repo");
-        let hash1 = hash_path(&path);
-        let hash2 = hash_path(&path);
-        assert_eq!(hash1, hash2);
-    }
-
-    #[test]
-    fn test_hash_path_uniqueness() {
-        let path1 = PathBuf::from("/tmp/test/repo1");
-        let path2 = PathBuf::from("/tmp/test/repo2");
-        let hash1 = hash_path(&path1);
-        let hash2 = hash_path(&path2);
-        assert_ne!(hash1, hash2);
-    }
-
-    #[test]
     fn test_find_repo_root() {
         let dir = TempDir::new().unwrap();
         let repo_root = dir.path();
@@ -423,7 +376,8 @@ mod tests {
         let manager = DomainIndexManager::new(config).unwrap();
 
         let path = manager.get_index_path(DomainScope::Project).unwrap();
-        assert_eq!(path, PathBuf::from("/path/to/repo/.subcog/index.db"));
+        let expected = get_user_data_dir().unwrap().join("index.db");
+        assert_eq!(path, expected);
     }
 
     #[test]
@@ -435,8 +389,8 @@ mod tests {
         let manager = DomainIndexManager::new(config).unwrap();
 
         let path = manager.get_index_path(DomainScope::User).unwrap();
-        assert!(path.to_string_lossy().contains("repos"));
-        assert!(path.to_string_lossy().ends_with("index.db"));
+        let expected = get_user_data_dir().unwrap().join("index.db");
+        assert_eq!(path, expected);
     }
 
     #[test]

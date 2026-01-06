@@ -4,6 +4,7 @@
 
 use crate::Result;
 use crate::services::TombstoneService;
+use crate::storage::get_user_data_dir;
 use crate::storage::persistence::FilesystemBackend;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,8 +15,9 @@ use std::time::Duration;
 ///
 /// Returns an error if persistence access or tombstone operations fail.
 pub fn execute(dry_run: bool, purge: bool, older_than_days: u64) -> Result<()> {
-    // Use project-local persistence
-    let persistence = Arc::new(FilesystemBackend::new(".subcog/memories"))
+    // Use user-level persistence directory (project facets live in metadata)
+    let data_dir = get_user_data_dir()?;
+    let persistence = Arc::new(FilesystemBackend::new(data_dir.join("memories")))
         as Arc<dyn crate::storage::traits::PersistenceBackend>;
     let tombstone_service = TombstoneService::new(persistence.clone());
 

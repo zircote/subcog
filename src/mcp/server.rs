@@ -944,7 +944,7 @@ impl McpServer {
 
     /// Tries to initialize `ResourceHandler` with services.
     ///
-    /// Uses domain-scoped index (project-local `.subcog/index.db`).
+    /// Uses domain-scoped index (user-level index with project facets).
     fn try_init_resources() -> ResourceHandler {
         use crate::config::SubcogConfig;
         use crate::services::PromptService;

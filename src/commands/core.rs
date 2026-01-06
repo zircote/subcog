@@ -93,7 +93,7 @@ pub fn cmd_recall(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use subcog::services::ServiceContainer;
 
-    // Use domain-scoped index (project-local or user-scoped)
+    // Use domain-scoped index (user-level storage with project facets)
     let services = ServiceContainer::from_current_dir_or_user()?;
     let service = services.recall()?;
 

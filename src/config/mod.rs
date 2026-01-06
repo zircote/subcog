@@ -1067,7 +1067,9 @@ impl Default for SubcogConfig {
     fn default() -> Self {
         Self {
             repo_path: PathBuf::from("."),
-            data_dir: PathBuf::from(".subcog"),
+            data_dir: directories::BaseDirs::new()
+                .map(|b| b.data_local_dir().join("subcog"))
+                .unwrap_or_else(|| PathBuf::from(".")),
             features: FeatureFlags::default(),
             max_results: 10,
             default_search_mode: crate::models::SearchMode::Hybrid,

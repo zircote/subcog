@@ -4,6 +4,7 @@
 //! Claude Code hook event handling.
 
 use subcog::config::SubcogConfig;
+use subcog::context::GitContext;
 use subcog::hooks::{
     AdaptiveContextConfig, HookHandler, PostToolUseHandler, PreCompactHandler, SessionStartHandler,
     StopHandler, UserPromptHandler,
@@ -14,6 +15,7 @@ use subcog::observability::{
 };
 use subcog::security::record_event;
 use subcog::services::ContextBuilderService;
+use subcog::storage::get_user_data_dir;
 use subcog::storage::index::SqliteBackend;
 use subcog::{CaptureService, RecallService, SyncService};
 use tracing::info_span;
@@ -47,7 +49,7 @@ pub fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn s
     // Try to initialize services for hooks (may fail if no data dir)
     let recall_service = try_init_recall_service();
 
-    // Get repo path for project-scoped SQLite storage
+    // Get repo path for project facet metadata
     let cwd = std::env::current_dir().ok();
     let mut capture_config = subcog::config::Config::from(config.clone());
     if let Some(path) = cwd.as_ref() {
@@ -138,20 +140,25 @@ pub fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn s
 
 /// Tries to initialize a recall service with `SQLite` backend.
 fn try_init_recall_service() -> Option<RecallService> {
-    let data_dir = directories::BaseDirs::new().map_or_else(
-        || std::path::PathBuf::from(".").join(".subcog"),
-        |b| b.data_local_dir().join("subcog"),
-    );
+    let data_dir = get_user_data_dir().ok()?;
 
-    // Ensure data directory exists
     if std::fs::create_dir_all(&data_dir).is_err() {
         return None;
     }
 
     let db_path = data_dir.join("index.db");
-    SqliteBackend::new(&db_path)
+    let recall = SqliteBackend::new(&db_path)
         .ok()
-        .map(RecallService::with_index)
+        .map(RecallService::with_index)?;
+
+    let scope_filter = GitContext::from_cwd()
+        .project_id
+        .map(|project_id| subcog::SearchFilter::new().with_project_id(project_id));
+
+    match scope_filter {
+        Some(filter) => Some(recall.with_scope_filter(filter)),
+        None => Some(recall),
+    }
 }
 
 /// Reads hook input from stdin as a string.

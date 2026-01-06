@@ -53,6 +53,8 @@ pub struct RecallService {
     embedder: Option<Arc<dyn Embedder>>,
     /// Vector backend for similarity search (optional).
     vector: Option<Arc<dyn VectorBackend + Send + Sync>>,
+    /// Scope filter applied to every search (e.g., project facets).
+    scope_filter: Option<SearchFilter>,
     /// Search timeout in milliseconds (RES-M5).
     timeout_ms: u64,
 }
@@ -68,6 +70,7 @@ impl RecallService {
             index: None,
             embedder: None,
             vector: None,
+            scope_filter: None,
             timeout_ms: DEFAULT_SEARCH_TIMEOUT_MS,
         }
     }
@@ -81,6 +84,7 @@ impl RecallService {
             index: Some(index),
             embedder: None,
             vector: None,
+            scope_filter: None,
             timeout_ms: DEFAULT_SEARCH_TIMEOUT_MS,
         }
     }
@@ -102,6 +106,7 @@ impl RecallService {
             index: Some(index),
             embedder: Some(embedder),
             vector: Some(vector),
+            scope_filter: None,
             timeout_ms: DEFAULT_SEARCH_TIMEOUT_MS,
         }
     }
@@ -117,6 +122,16 @@ impl RecallService {
     #[must_use]
     pub fn with_vector(mut self, vector: Arc<dyn VectorBackend + Send + Sync>) -> Self {
         self.vector = Some(vector);
+        self
+    }
+
+    /// Sets a scope filter that is applied to every search.
+    ///
+    /// This is used to enforce project-scoped searches using project facets
+    /// while still using a user-level index.
+    #[must_use]
+    pub fn with_scope_filter(mut self, filter: SearchFilter) -> Self {
+        self.scope_filter = Some(filter);
         self
     }
 
@@ -143,6 +158,29 @@ impl RecallService {
     #[must_use]
     pub fn has_vector_search(&self) -> bool {
         self.embedder.is_some() && self.vector.is_some()
+    }
+
+    fn effective_filter<'a>(&'a self, filter: &'a SearchFilter) -> Cow<'a, SearchFilter> {
+        let Some(scope_filter) = &self.scope_filter else {
+            return Cow::Borrowed(filter);
+        };
+
+        let mut merged = filter.clone();
+
+        if merged.project_id.is_none() {
+            merged.project_id = scope_filter.project_id.clone();
+        }
+        if merged.branch.is_none() {
+            merged.branch = scope_filter.branch.clone();
+        }
+        if merged.file_path.is_none() {
+            merged.file_path = scope_filter.file_path.clone();
+        }
+        if merged.source_pattern.is_none() {
+            merged.source_pattern = scope_filter.source_pattern.clone();
+        }
+
+        Cow::Owned(merged)
     }
 
     /// Searches for memories matching a query.
@@ -178,6 +216,8 @@ impl RecallService {
         limit: usize,
     ) -> Result<SearchResult> {
         let start = Instant::now();
+        let effective_filter = self.effective_filter(filter);
+        let filter = effective_filter.as_ref();
         let domain_label = domain_label(filter);
         let mode_label = mode.as_str();
         if let Some(request_id) = current_request_id() {
@@ -383,6 +423,8 @@ impl RecallService {
     )]
     pub fn list_all(&self, filter: &SearchFilter, limit: usize) -> Result<SearchResult> {
         let start = Instant::now();
+        let effective_filter = self.effective_filter(filter);
+        let filter = effective_filter.as_ref();
         let domain_label = domain_label(filter);
         if let Some(request_id) = current_request_id() {
             tracing::Span::current().record("request_id", request_id.as_str());
@@ -1414,6 +1456,32 @@ mod tests {
         assert!(
             hits[1].score.abs() < f32::EPSILON,
             "Zero score should remain zero"
+        );
+    }
+
+    #[test]
+    fn test_scope_filter_applies_project_id() {
+        let base = SearchFilter::new().with_project_id("github.com/org/repo");
+        let service = RecallService::new().with_scope_filter(base);
+        let filter = SearchFilter::new();
+        let effective = service.effective_filter(&filter);
+
+        assert_eq!(
+            effective.as_ref().project_id.as_deref(),
+            Some("github.com/org/repo")
+        );
+    }
+
+    #[test]
+    fn test_scope_filter_does_not_override_explicit_project_id() {
+        let base = SearchFilter::new().with_project_id("github.com/org/repo");
+        let service = RecallService::new().with_scope_filter(base);
+        let user_filter = SearchFilter::new().with_project_id("github.com/other/repo");
+        let effective = service.effective_filter(&user_filter);
+
+        assert_eq!(
+            effective.as_ref().project_id.as_deref(),
+            Some("github.com/other/repo")
         );
     }
 

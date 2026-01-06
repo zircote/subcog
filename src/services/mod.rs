@@ -73,8 +73,9 @@ pub use tombstone::TombstoneService;
 pub use topic_index::{TopicIndexService, TopicInfo};
 
 use crate::config::SubcogConfig;
+use crate::context::GitContext;
 use crate::embedding::Embedder;
-use crate::models::{Memory, MemoryId};
+use crate::models::{Memory, MemoryId, SearchFilter};
 use crate::storage::index::{
     DomainIndexConfig, DomainIndexManager, DomainScope, OrgIndexConfig, SqliteBackend,
     find_repo_root, get_user_data_dir,
@@ -159,9 +160,9 @@ pub fn prompt_service_for_cwd() -> Result<PromptService> {
 /// ```text
 /// ServiceContainer
 ///   └── Mutex<DomainIndexManager>
-///         ├── Project index (.subcog/index.db)   // per-repo
-///         ├── User index (~/.subcog/index.db)    // per-user
-///         └── Org index (configured path)         // optional
+///         ├── Project index (<user-data>/index.db) // faceted by project/branch/path
+///         ├── User index (<user-data>/index.db)    // user-wide
+///         └── Org index (configured path)          // optional
 /// ```
 ///
 /// ## Lazy Initialization
@@ -182,8 +183,8 @@ pub fn prompt_service_for_cwd() -> Result<PromptService> {
 ///
 /// | Scope | Path |
 /// |-------|------|
-/// | Project | `{repo}/.subcog/index.db` |
-/// | User | `~/.subcog/index.db` |
+/// | Project | `<user-data>/index.db` |
+/// | User | `<user-data>/index.db` |
 /// | Org | Configured via `OrgIndexConfig` |
 ///
 /// ## Error Handling
@@ -249,13 +250,19 @@ impl ServiceContainer {
         // Create CaptureService with repo_path for project-scoped storage
         let capture_config = crate::config::Config::new().with_repo_path(&repo_root);
 
-        // Create storage paths using PathManager
-        let paths = PathManager::for_repo(&repo_root);
+        let user_data_dir = get_user_data_dir()?;
+        std::fs::create_dir_all(&user_data_dir).map_err(|e| Error::OperationFailed {
+            operation: "create_user_data_dir".to_string(),
+            cause: format!(
+                "Cannot create {}: {}. Please create manually with: mkdir -p {}",
+                user_data_dir.display(),
+                e,
+                user_data_dir.display()
+            ),
+        })?;
 
-        // Ensure .subcog directory exists
-        if let Err(e) = paths.ensure_subcog_dir() {
-            tracing::warn!("Failed to create .subcog directory: {e}");
-        }
+        // Create storage paths using user-level data directory (project facets)
+        let paths = PathManager::for_user(&user_data_dir);
 
         // Create backends using factory (centralizes initialization logic)
         let backends = BackendFactory::create_all(&paths.index_path(), &paths.vector_path());
@@ -355,8 +362,8 @@ impl ServiceContainer {
     /// Creates a service container from the current directory, falling back to user scope.
     ///
     /// This is the recommended factory method for CLI and MCP entry points:
-    /// - If in a git repository → uses project scope (`SQLite` + local index)
-    /// - If NOT in a git repository → uses user scope (SQLite-only)
+    /// - If in a git repository → uses project scope (user-level index + project facets)
+    /// - If NOT in a git repository → uses user scope (user-level index)
     ///
     /// # Examples
     ///
@@ -429,7 +436,21 @@ impl ServiceContainer {
             service = service.with_vector(Arc::clone(vector));
         }
 
+        if matches!(scope, DomainScope::Project) {
+            if let Some(filter) = self.project_scope_filter() {
+                service = service.with_scope_filter(filter);
+            }
+        }
+
         Ok(service)
+    }
+
+    fn project_scope_filter(&self) -> Option<SearchFilter> {
+        let repo_path = self.repo_path.as_ref()?;
+        let git_context = GitContext::from_path(repo_path);
+        git_context
+            .project_id
+            .map(|project_id| SearchFilter::new().with_project_id(project_id))
     }
 
     /// Creates a recall service for the appropriate scope.

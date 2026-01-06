@@ -181,7 +181,7 @@ impl Domain {
         use crate::storage::index::is_in_git_repo;
 
         if is_in_git_repo() {
-            // In a git repo - use project scope (empty domain = project-local)
+            // In a git repo - use project scope (user-level storage with facets)
             Self::new()
         } else {
             // Not in a git repo - use user scope
