@@ -145,7 +145,7 @@ fn builtin_prompt_definition(name: &str) -> Option<PromptDefinition> {
 fn execute_builtin_prompt_run(
     name: &str,
     values: HashMap<String, String>,
-    definition: PromptDefinition,
+    definition: &PromptDefinition,
 ) -> Result<ToolResult> {
     let missing: Vec<&str> = definition
         .arguments
@@ -578,7 +578,7 @@ pub fn execute_prompt_run(arguments: Value) -> Result<ToolResult> {
         None => {
             if let Some(definition) = builtin_prompt_definition(&args.name) {
                 let values = args.variables.unwrap_or_default();
-                execute_builtin_prompt_run(&args.name, values, definition)
+                execute_builtin_prompt_run(&args.name, values, &definition)
             } else {
                 Ok(ToolResult {
                     content: vec![ToolContent::Text {
