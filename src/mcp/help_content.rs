@@ -603,7 +603,8 @@ Subcog supports saving and reusing prompt templates with variable substitution.
 
 ### Update While Preserving Metadata
 
-Set `merge` to `true` to keep existing description/tags/variable metadata when updating.
+Set `merge` to `true` to keep existing description/tags/variable metadata when updating. With
+`merge`, you can omit `content` to update metadata only.
 
 ```json
 {

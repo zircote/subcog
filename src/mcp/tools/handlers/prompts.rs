@@ -56,18 +56,6 @@ pub fn execute_prompt_save(arguments: Value) -> Result<ToolResult> {
     // Parse domain scope
     let domain = parse_domain_scope(args.domain.as_deref());
 
-    // Get content either directly or from file
-    let (content, mut base_template) = if let Some(content) = args.content {
-        (content.clone(), PromptTemplate::new(&args.name, &content))
-    } else if let Some(file_path) = args.file_path {
-        let template = PromptParser::from_file(&file_path)?;
-        (template.content.clone(), template)
-    } else {
-        return Err(Error::InvalidInput(
-            "Either 'content' or 'file_path' must be provided".to_string(),
-        ));
-    };
-
     // Get repo path and create service (works in both project and user scope)
     let services = ServiceContainer::from_current_dir_or_user()?;
     let mut prompt_service = if let Some(repo_path) = services.repo_path() {
@@ -78,10 +66,39 @@ pub fn execute_prompt_save(arguments: Value) -> Result<ToolResult> {
         create_prompt_service(&user_dir)
     };
 
+    let existing_template = if args.merge {
+        prompt_service.get(&args.name, Some(domain))?
+    } else {
+        None
+    };
+
+    // Get content either directly, from file, or by reusing existing content on merge
+    let (content, mut base_template) = if let Some(content) = args.content {
+        (content.clone(), PromptTemplate::new(&args.name, &content))
+    } else if let Some(file_path) = args.file_path.as_ref() {
+        let template = PromptParser::from_file(file_path)?;
+        (template.content.clone(), template)
+    } else if args.merge {
+        let Some(template) = existing_template.as_ref() else {
+            return Err(Error::InvalidInput(
+                "Prompt not found for merge update; provide 'content' or 'file_path' to create it."
+                    .to_string(),
+            ));
+        };
+        (
+            template.content.clone(),
+            PromptTemplate::new(&args.name, &template.content),
+        )
+    } else {
+        return Err(Error::InvalidInput(
+            "Either 'content' or 'file_path' must be provided".to_string(),
+        ));
+    };
+
     // Build partial metadata from existing prompt (optional) + user-provided values
     let mut existing = PartialMetadata::new();
     if args.merge {
-        if let Some(template) = prompt_service.get(&args.name, Some(domain))? {
+        if let Some(template) = existing_template {
             if !template.description.is_empty() {
                 existing = existing.with_description(template.description);
             }
@@ -111,7 +128,7 @@ pub fn execute_prompt_save(arguments: Value) -> Result<ToolResult> {
             })
             .collect();
         existing = existing.with_variables(variables);
-    } else if !base_template.variables.is_empty() {
+    } else if !base_template.variables.is_empty() && (!args.merge || args.file_path.is_some()) {
         existing = existing.with_variables(std::mem::take(&mut base_template.variables));
     }
 
