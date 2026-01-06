@@ -403,20 +403,21 @@ pub fn execute_reindex(arguments: Value) -> Result<ToolResult> {
     let args: ReindexArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
-    // Use provided repo path or current directory
-    let repo_path = args.repo_path.map_or_else(
-        || std::env::current_dir().unwrap_or_else(|_| ".".into()),
-        std::path::PathBuf::from,
-    );
+    let services = match args.repo_path {
+        Some(repo_path) => ServiceContainer::for_repo(std::path::PathBuf::from(repo_path), None)?,
+        None => ServiceContainer::from_current_dir_or_user()?,
+    };
 
-    let services = ServiceContainer::for_repo(&repo_path, None)?;
+    let scope_label = match services.repo_path() {
+        Some(repo_root) => format!("Repository: {}", repo_root.display()),
+        None => "Scope: user".to_string(),
+    };
+
     match services.reindex() {
         Ok(count) => Ok(ToolResult {
             content: vec![ToolContent::Text {
                 text: format!(
-                    "Reindex completed successfully!\n\nMemories indexed: {}\nRepository: {}",
-                    count,
-                    repo_path.display()
+                    "Reindex completed successfully!\n\nMemories indexed: {count}\n{scope_label}"
                 ),
             }],
             is_error: false,

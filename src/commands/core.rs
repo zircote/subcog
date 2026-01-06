@@ -275,14 +275,18 @@ fn run_consolidation<P: PersistenceBackend>(
 pub fn cmd_reindex(repo: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
     use subcog::services::ServiceContainer;
 
-    // Use provided repo path or current directory
-    let repo_path = repo.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
+    let services = match repo {
+        Some(repo_path) => ServiceContainer::for_repo(&repo_path, None)?,
+        None => ServiceContainer::from_current_dir_or_user()?,
+    };
 
     println!("Reindexing memories from SQLite storage...");
-    println!("Repository: {}", repo_path.display());
+    match services.repo_path() {
+        Some(repo_root) => println!("Repository: {}", repo_root.display()),
+        None => println!("Scope: user"),
+    }
     println!();
 
-    let services = ServiceContainer::for_repo(&repo_path, None)?;
     match services.reindex() {
         Ok(count) => {
             println!("Reindex completed successfully!");

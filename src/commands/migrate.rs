@@ -23,16 +23,19 @@ pub fn cmd_migrate_embeddings(
     dry_run: bool,
     force: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let repo_path = repo.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
+    let services = match repo {
+        Some(repo_path) => ServiceContainer::for_repo(&repo_path, None)?,
+        None => ServiceContainer::from_current_dir_or_user()?,
+    };
 
     println!("Migrating embeddings for memories...");
-    println!("Repository: {}", repo_path.display());
+    match services.repo_path() {
+        Some(repo_root) => println!("Repository: {}", repo_root.display()),
+        None => println!("Scope: user"),
+    }
     println!("Dry run: {dry_run}");
     println!("Force re-embed: {force}");
     println!();
-
-    // Get services
-    let services = ServiceContainer::for_repo(&repo_path, None)?;
 
     // Check if we have the required components
     let index = services.index().map_err(|e| Error::OperationFailed {

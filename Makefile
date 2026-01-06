@@ -16,11 +16,11 @@ release:
 
 # Run all tests
 test:
-	cargo test --all-features --all-targets --locked
+	cargo test --all-features --locked
 
 # Run tests with output
 test-verbose:
-	cargo test --all-features --all-targets --locked -- --nocapture
+	cargo test --all-features --locked -- --nocapture
 
 # Run library tests only
 test-lib:
@@ -89,9 +89,16 @@ msrv:
 	echo "Checking MSRV: $$MSRV"; \
 	rustup run $$MSRV cargo check --all-features --all-targets --locked
 
-# Ensure working tree is clean before CI/release
+# Ensure working tree is clean before CI/release.
+# Default: warn locally, enforce in CI or when REQUIRE_CLEAN=1.
 verify-clean:
-	@git diff --quiet && git diff --cached --quiet || (echo "Working tree is dirty"; exit 1)
+	@if [ "$$GITHUB_ACTIONS" = "true" ] || [ "$(REQUIRE_CLEAN)" = "1" ]; then \
+		git diff --quiet && git diff --cached --quiet || (echo "Working tree is dirty"; exit 1); \
+	else \
+		if ! (git diff --quiet && git diff --cached --quiet); then \
+			echo "Working tree is dirty (continuing)"; \
+		fi; \
+	fi
 
 # CI-style full check (all gates must pass)
 # Matches GitHub Actions: fmt, clippy, test, doc, deny, msrv, bench
