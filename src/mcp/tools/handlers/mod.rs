@@ -7,8 +7,8 @@ mod core;
 mod prompts;
 
 pub use core::{
-    execute_capture, execute_consolidate, execute_enrich, execute_namespaces, execute_recall,
-    execute_reindex, execute_status, execute_sync,
+    execute_capture, execute_consolidate, execute_enrich, execute_namespaces,
+    execute_prompt_understanding, execute_recall, execute_reindex, execute_status,
 };
 pub use prompts::{
     execute_prompt_delete, execute_prompt_get, execute_prompt_list, execute_prompt_run,

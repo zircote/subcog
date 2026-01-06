@@ -169,7 +169,6 @@ impl ToolAuthorization {
         ("prompt_get", "read"),
         ("prompt_run", "read"),
         // Admin operations
-        ("subcog_sync", "admin"),
         ("subcog_reindex", "admin"),
     ];
 
@@ -182,8 +181,8 @@ impl ToolAuthorization {
     ///
     /// Tool scope mapping:
     /// - `subcog_capture`, `subcog_enrich`, `subcog_consolidate`: "write"
-    /// - `subcog_recall`, `subcog_status`, `subcog_namespaces`: "read"
-    /// - `subcog_sync`, `subcog_reindex`: "admin"
+    /// - `subcog_recall`, `subcog_status`, `subcog_namespaces`, `prompt_understanding`: "read"
+    /// - `subcog_reindex`: "admin"
     /// - `prompt_save`, `prompt_delete`: "write"
     /// - `prompt_list`, `prompt_get`, `prompt_run`: "read"
     /// - Unknown tools: `None` (explicit deny) or "admin" if `allow_unknown_with_admin`
@@ -602,7 +601,6 @@ mod tests {
         assert_eq!(auth.required_scope("prompt_run"), Some("read"));
 
         // Admin operations
-        assert_eq!(auth.required_scope("subcog_sync"), Some("admin"));
         assert_eq!(auth.required_scope("subcog_reindex"), Some("admin"));
 
         // Unknown tools return None (explicitly denied by default)
@@ -627,7 +625,7 @@ mod tests {
         assert!(auth.is_authorized(&read_user, "subcog_recall"));
         assert!(auth.is_authorized(&read_user, "subcog_status"));
         assert!(!auth.is_authorized(&read_user, "subcog_capture"));
-        assert!(!auth.is_authorized(&read_user, "subcog_sync"));
+        assert!(!auth.is_authorized(&read_user, "subcog_reindex"));
 
         // User with write scope
         let write_user = Claims {
@@ -642,7 +640,7 @@ mod tests {
         assert!(auth.is_authorized(&write_user, "subcog_capture"));
         assert!(auth.is_authorized(&write_user, "prompt_save"));
         assert!(!auth.is_authorized(&write_user, "subcog_recall"));
-        assert!(!auth.is_authorized(&write_user, "subcog_sync"));
+        assert!(!auth.is_authorized(&write_user, "subcog_reindex"));
 
         // User with admin scope
         let admin_user = Claims {
@@ -654,7 +652,6 @@ mod tests {
             scopes: vec!["admin".to_string()],
         };
 
-        assert!(auth.is_authorized(&admin_user, "subcog_sync"));
         assert!(auth.is_authorized(&admin_user, "subcog_reindex"));
         assert!(!auth.is_authorized(&admin_user, "subcog_capture"));
         assert!(!auth.is_authorized(&admin_user, "subcog_recall"));
@@ -677,7 +674,7 @@ mod tests {
         // Wildcard should authorize all known tools
         assert!(auth.is_authorized(&superuser, "subcog_recall"));
         assert!(auth.is_authorized(&superuser, "subcog_capture"));
-        assert!(auth.is_authorized(&superuser, "subcog_sync"));
+        assert!(auth.is_authorized(&superuser, "subcog_reindex"));
         // Unknown tools are explicitly denied regardless of scope
         assert!(!auth.is_authorized(&superuser, "unknown_tool"));
     }
@@ -700,7 +697,7 @@ mod tests {
         assert!(auth.is_authorized(&multi_scope_user, "subcog_recall"));
         assert!(auth.is_authorized(&multi_scope_user, "subcog_capture"));
         // But not admin
-        assert!(!auth.is_authorized(&multi_scope_user, "subcog_sync"));
+        assert!(!auth.is_authorized(&multi_scope_user, "subcog_reindex"));
     }
 
     // HIGH-SEC-004: Character class diversity tests
