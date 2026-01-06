@@ -215,7 +215,7 @@ pub fn execute_status(_arguments: Value) -> Result<ToolResult> {
     })
 }
 
-/// Executes the prompt_understanding tool.
+/// Executes the `prompt_understanding` tool.
 pub fn execute_prompt_understanding(_arguments: Value) -> Result<ToolResult> {
     Ok(ToolResult {
         content: vec![ToolContent::Text {
