@@ -10,7 +10,6 @@
 //! | `capture` | Capture a memory to persistent storage |
 //! | `recall` | Search for memories using hybrid (vector + text) search |
 //! | `status` | Show memory system status and statistics |
-//! | `sync` | Synchronize memories with git remote |
 //! | `consolidate` | Consolidate related memories |
 //! | `serve` | Run as MCP server (stdio or HTTP) |
 //! | `hook` | Claude Code hook handlers |
@@ -52,7 +51,6 @@ mod prompt;
 mod recall;
 mod serve;
 mod status;
-mod sync;
 
 pub use capture::CaptureCommand;
 pub use config::ConfigCommand;
@@ -72,4 +70,3 @@ pub use prompt::{
 pub use recall::RecallCommand;
 pub use serve::ServeCommand;
 pub use status::StatusCommand;
-pub use sync::SyncCommand;

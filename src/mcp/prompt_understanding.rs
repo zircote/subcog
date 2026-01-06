@@ -34,7 +34,6 @@ Use domain-aware defaults: if in a git repo, default scope is project; otherwise
 - **subcog_namespaces**: List available namespaces
 - **subcog_consolidate**: Merge/summarize/dedupe memories (LLM-backed)
 - **subcog_enrich**: Improve memory structure/tags (LLM-backed)
-- **subcog_sync**: Sync local memories to remote
 - **subcog_reindex**: Rebuild search index
 
 ### 3.2 Prompt Tools

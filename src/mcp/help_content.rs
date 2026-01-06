@@ -66,7 +66,6 @@ Once configured, these tools are available:
 | `subcog_consolidate` | Consolidate memories (LLM) |
 | `subcog_enrich` | Enrich a memory (LLM) |
 | `subcog_reindex` | Rebuild search index |
-| `subcog_sync` | Sync with git remote |
 | `prompt_understanding` | Guidance for using Subcog MCP tools |
 
 ## Available MCP Resources
@@ -386,19 +385,6 @@ When working on a topic, find related memories:
 }
 ```
 
-### Session End: Sync Changes
-
-Sync memories to the git remote:
-
-```json
-{
-  "tool": "subcog_sync",
-  "arguments": {
-    "direction": "full"
-  }
-}
-```
-
 ## Browsing via Resources
 
 Access memories directly without search:
@@ -424,7 +410,7 @@ Monitor system health:
 }
 ```
 
-Returns: memory count, index status, sync state, storage backend info.
+Returns: memory count, index status, storage backend info.
 "#;
 
 /// Troubleshooting documentation.
@@ -482,21 +468,6 @@ Call the status tool to trigger initialization:
   }
 }
 ```
-
-### Sync Failures
-
-Check sync status and retry:
-
-```json
-{
-  "tool": "subcog_sync",
-  "arguments": {
-    "direction": "fetch"
-  }
-}
-```
-
-If push fails, ensure the git remote is configured and you have write access.
 
 ## Report Issues
 
