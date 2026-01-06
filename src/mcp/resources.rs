@@ -23,7 +23,7 @@
 //! |--------|-------------|
 //! | `_` | Wildcard - all domains combined |
 //! | `project` | Current project/repository (default) |
-//! | `user` | User-specific (e.g., `~/.subcog/`) |
+//! | `user` | User-specific (e.g., `<user-data>/subcog/`) |
 //! | `org/{name}` | Organization namespace |
 //!
 //! # Resource Types

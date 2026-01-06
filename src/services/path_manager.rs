@@ -13,7 +13,7 @@
 //! use subcog::services::PathManager;
 //! use std::path::Path;
 //!
-//! // For repository-scoped storage
+//! // For project-scoped storage (user-level data dir with project facets)
 //! let manager = PathManager::for_repo(Path::new("/path/to/repo"));
 //! let index_path = manager.index_path();
 //! let vector_path = manager.vector_path();
@@ -22,10 +22,11 @@
 //! manager.ensure_subcog_dir()?;
 //! ```
 
+use crate::storage::get_user_data_dir;
 use crate::{Error, Result};
 use std::path::{Path, PathBuf};
 
-/// Name of the subcog data directory within a repository.
+/// Legacy name for the repo-local subcog directory (project storage no longer uses it).
 pub const SUBCOG_DIR_NAME: &str = ".subcog";
 
 /// Name of the `SQLite` index database file.
@@ -39,22 +40,22 @@ pub const VECTOR_INDEX_NAME: &str = "vectors.idx";
 /// `PathManager` provides a centralized way to construct paths for:
 /// - `SQLite` index databases
 /// - Vector similarity indices
-/// - The `.subcog` configuration directory
+/// - The user-level data directory
 ///
-/// It supports both repository-scoped storage (`.subcog/` within a repo)
-/// and user-scoped storage (platform-specific data directory).
+/// Project scope uses the user-level data directory with project facets.
 #[derive(Debug, Clone)]
 pub struct PathManager {
-    /// Base directory for storage (repo root or user data dir).
+    /// Base directory for storage (user data dir).
     base_dir: PathBuf,
-    /// The subcog data directory (`base_dir/.subcog` or `base_dir` directly for user scope).
+    /// The subcog data directory (same as base dir).
     subcog_dir: PathBuf,
 }
 
 impl PathManager {
     /// Creates a `PathManager` for repository-scoped storage.
     ///
-    /// Storage paths will be within `{repo_root}/.subcog/`.
+    /// Storage paths will be within the user data directory.
+    /// Falls back to the provided repo path only if the user data dir cannot be resolved.
     ///
     /// # Arguments
     ///
@@ -64,12 +65,12 @@ impl PathManager {
     ///
     /// ```rust,ignore
     /// let manager = PathManager::for_repo(Path::new("/home/user/project"));
-    /// assert_eq!(manager.subcog_dir(), Path::new("/home/user/project/.subcog"));
+    /// // Uses user data directory, not repo-local storage
     /// ```
     #[must_use]
     pub fn for_repo(repo_root: impl AsRef<Path>) -> Self {
-        let base_dir = repo_root.as_ref().to_path_buf();
-        let subcog_dir = base_dir.join(SUBCOG_DIR_NAME);
+        let base_dir = get_user_data_dir().unwrap_or_else(|_| repo_root.as_ref().to_path_buf());
+        let subcog_dir = base_dir.clone();
         Self {
             base_dir,
             subcog_dir,
@@ -102,7 +103,7 @@ impl PathManager {
         }
     }
 
-    /// Returns the base directory (repo root or user data dir).
+    /// Returns the base directory (user data dir).
     #[must_use]
     pub fn base_dir(&self) -> &Path {
         &self.base_dir
@@ -110,8 +111,7 @@ impl PathManager {
 
     /// Returns the subcog data directory.
     ///
-    /// For repository scope: `{repo_root}/.subcog`
-    /// For user scope: `{user_data_dir}` (same as base)
+    /// For project/user scope: `{user_data_dir}` (same as base)
     #[must_use]
     pub fn subcog_dir(&self) -> &Path {
         &self.subcog_dir
@@ -191,25 +191,18 @@ impl PathManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn test_for_repo_paths() {
         let manager = PathManager::for_repo("/home/user/project");
+        let expected_base =
+            get_user_data_dir().unwrap_or_else(|_| PathBuf::from("/home/user/project"));
 
-        assert_eq!(manager.base_dir(), Path::new("/home/user/project"));
-        assert_eq!(
-            manager.subcog_dir(),
-            Path::new("/home/user/project/.subcog")
-        );
-        assert_eq!(
-            manager.index_path(),
-            Path::new("/home/user/project/.subcog/index.db")
-        );
-        assert_eq!(
-            manager.vector_path(),
-            Path::new("/home/user/project/.subcog/vectors.idx")
-        );
+        assert_eq!(manager.base_dir(), expected_base.as_path());
+        assert_eq!(manager.subcog_dir(), expected_base.as_path());
+        assert_eq!(manager.index_path(), expected_base.join("index.db"));
+        assert_eq!(manager.vector_path(), expected_base.join("vectors.idx"));
     }
 
     #[test]
@@ -247,7 +240,7 @@ mod tests {
         let temp_dir = std::env::temp_dir().join("subcog_path_manager_test");
         let _ = std::fs::remove_dir_all(&temp_dir); // Clean up from previous runs
 
-        let manager = PathManager::for_repo(&temp_dir);
+        let manager = PathManager::for_user(&temp_dir);
 
         // Directory should not exist yet
         assert!(!manager.subcog_dir().exists());

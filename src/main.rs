@@ -375,7 +375,6 @@ async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::
 ///    │
 /// 3. Default locations (checked by SubcogConfig::load_default)
 ///    │
-///    ├── .subcog/config.toml     (project-level, if in git repo)
 ///    ├── ~/.config/subcog/config.toml  (user-level)
 ///    └── Fallback to built-in defaults
 /// ```
@@ -397,7 +396,7 @@ async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::
 /// subcog --config ./custom.toml capture "..."
 ///
 /// # Override via environment
-/// SUBCOG_CONFIG_PATH=~/.subcog/prod.toml subcog recall "..."
+/// SUBCOG_CONFIG_PATH=~/.config/subcog/prod.toml subcog recall "..."
 ///
 /// # Use defaults (no flags)
 /// subcog status
