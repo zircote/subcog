@@ -601,6 +601,21 @@ Subcog supports saving and reusing prompt templates with variable substitution.
 }
 ```
 
+### Update While Preserving Metadata
+
+Set `merge` to `true` to keep existing description/tags/variable metadata when updating.
+
+```json
+{
+  "tool": "prompt_save",
+  "arguments": {
+    "name": "code-review",
+    "content": "Review {{file}} for:\n- Security issues\n- Performance\n- Best practices\n- Edge cases",
+    "merge": true
+  }
+}
+```
+
 ### From File
 
 ```json

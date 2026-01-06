@@ -38,7 +38,7 @@ Use domain-aware defaults: if in a git repo, default scope is project; otherwise
 
 ### 3.2 Prompt Tools
 
-- **prompt_save**: Save a reusable prompt template
+- **prompt_save**: Save a reusable prompt template (set `merge: true` to preserve existing metadata)
 - **prompt_list**: List saved prompts
 - **prompt_get**: Fetch a prompt by name
 - **prompt_run**: Render a prompt with variables
@@ -122,6 +122,14 @@ prompt_save:
   name: "code-review"
   content: "Review {{file}} for {{focus_area}} issues."
   tags: ["review", "quality"]
+```
+
+### 7.4 Update a Prompt While Preserving Metadata
+```
+prompt_save:
+  name: "code-review"
+  content: "Review {{file}} for {{focus_area}} issues and edge cases."
+  merge: true
 ```
 
 ## 8. Safety and Integrity

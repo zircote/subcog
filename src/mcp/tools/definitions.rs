@@ -262,6 +262,11 @@ pub fn prompt_save_tool() -> ToolDefinition {
                     "type": "boolean",
                     "description": "Skip LLM-powered metadata enrichment (default: false)",
                     "default": false
+                },
+                "merge": {
+                    "type": "boolean",
+                    "description": "Merge with existing prompt metadata when updating (default: false)",
+                    "default": false
                 }
             },
             "required": ["name"],

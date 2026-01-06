@@ -427,6 +427,7 @@ Save a user-defined prompt template.
 | `domain` | string | No | `project`, `user`, or `org` (default: `project`) |
 | `tags` | array[string] | No | Tags for categorization |
 | `variables` | array[object] | No | Explicit variable definitions |
+| `merge` | boolean | No | Preserve existing metadata when updating (default: `false`) |
 
 *Either `content` or `file_path` required, not both.
 
@@ -461,7 +462,8 @@ Save a user-defined prompt template.
         "description": "Type of issues to focus on",
         "default": "general"
       }
-    ]
+    ],
+    "merge": true
   }
 }
 ```
