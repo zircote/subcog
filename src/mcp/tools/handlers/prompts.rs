@@ -11,6 +11,7 @@ use crate::mcp::tool_types::{
     domain_scope_to_display, find_missing_required_variables, format_variable_info,
     parse_domain_scope,
 };
+use crate::mcp::{PromptContent, PromptDefinition, PromptMessage, PromptRegistry};
 use crate::models::{PromptTemplate, substitute_variables};
 use crate::services::{
     PromptFilter, PromptParser, PromptService, ServiceContainer, prompt_service_for_repo,
@@ -44,6 +45,101 @@ fn format_list_or_none(items: &[String]) -> String {
     } else {
         items.join(", ")
     }
+}
+
+fn builtin_prompt_template(definition: &PromptDefinition) -> PromptTemplate {
+    let description = definition
+        .description
+        .clone()
+        .unwrap_or_else(|| "Built-in MCP prompt".to_string());
+    let variables = definition
+        .arguments
+        .iter()
+        .map(|arg| crate::models::PromptVariable {
+            name: arg.name.clone(),
+            description: arg.description.clone(),
+            default: None,
+            required: arg.required,
+        })
+        .collect();
+
+    PromptTemplate {
+        name: definition.name.clone(),
+        description,
+        content: "Built-in MCP prompt (generated at runtime). Use prompt_run to render."
+            .to_string(),
+        variables,
+        tags: vec!["built-in".to_string()],
+        ..Default::default()
+    }
+}
+
+fn matches_glob(pattern: &str, text: &str) -> bool {
+    if !pattern.contains('*') {
+        return pattern == text;
+    }
+
+    let parts: Vec<&str> = pattern.split('*').collect();
+    if parts.is_empty() {
+        return true;
+    }
+
+    if !parts[0].is_empty() && !text.starts_with(parts[0]) {
+        return false;
+    }
+
+    let last = parts.last().unwrap_or(&"");
+    if !last.is_empty() && !text.ends_with(last) {
+        return false;
+    }
+
+    let mut remaining = text;
+    for part in &parts {
+        if part.is_empty() {
+            continue;
+        }
+        if let Some(pos) = remaining.find(part) {
+            remaining = &remaining[pos + part.len()..];
+        } else {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn builtin_matches_filter(definition: &PromptDefinition, filter: &PromptFilter) -> bool {
+    if !filter.tags.is_empty() && !filter.tags.iter().all(|t| t == "built-in") {
+        return false;
+    }
+
+    if let Some(pattern) = filter.name_pattern.as_deref()
+        && !matches_glob(pattern, &definition.name)
+    {
+        return false;
+    }
+
+    true
+}
+
+fn format_prompt_messages(messages: &[PromptMessage]) -> String {
+    let mut output = String::new();
+    for message in messages {
+        let rendered = match &message.content {
+            PromptContent::Text { text } => text.clone(),
+            PromptContent::Resource { uri } => format!("[resource: {uri}]"),
+            PromptContent::Image { data, mime_type } => {
+                format!("[image: {mime_type}, {} bytes]", data.len())
+            },
+        };
+        output.push_str(&format!("{}:\n{}\n\n", message.role, rendered));
+    }
+    output.trim_end().to_string()
+}
+
+fn builtin_prompt_definition(name: &str) -> Option<PromptDefinition> {
+    let registry = PromptRegistry::default();
+    registry.get_prompt(name).cloned()
 }
 
 /// Executes the prompt.save tool.
@@ -161,6 +257,8 @@ pub fn execute_prompt_list(arguments: Value) -> Result<ToolResult> {
     let args: PromptListArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
+    let limit = args.limit.unwrap_or(20).min(100);
+
     // Build filter
     let mut filter = PromptFilter::new();
     if let Some(domain) = args.domain {
@@ -172,10 +270,8 @@ pub fn execute_prompt_list(arguments: Value) -> Result<ToolResult> {
     if let Some(pattern) = args.name_pattern {
         filter = filter.with_name_pattern(pattern);
     }
-    if let Some(limit) = args.limit {
-        filter = filter.with_limit(limit);
-    } else {
-        filter = filter.with_limit(20);
+    if let Some(pattern) = args.name_pattern {
+        filter = filter.with_name_pattern(pattern);
     }
 
     // Get prompts (works in both project and user scope)
@@ -186,7 +282,27 @@ pub fn execute_prompt_list(arguments: Value) -> Result<ToolResult> {
         let user_dir = crate::storage::get_user_data_dir()?;
         create_prompt_service(&user_dir)
     };
-    let prompts = prompt_service.list(&filter)?;
+    let mut user_filter = filter.clone();
+    user_filter.limit = None;
+    let mut prompts = prompt_service.list(&user_filter)?;
+
+    let registry = PromptRegistry::default();
+    let mut builtin_prompts: Vec<PromptTemplate> = registry
+        .list_prompts()
+        .into_iter()
+        .filter(|definition| builtin_matches_filter(definition, &filter))
+        .filter(|definition| prompts.iter().all(|p| p.name != definition.name))
+        .map(builtin_prompt_template)
+        .collect();
+
+    prompts.append(&mut builtin_prompts);
+
+    prompts.sort_by(|a, b| {
+        b.usage_count
+            .cmp(&a.usage_count)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    prompts.truncate(limit);
 
     if prompts.is_empty() {
         return Ok(ToolResult {
@@ -299,12 +415,48 @@ pub fn execute_prompt_get(arguments: Value) -> Result<ToolResult> {
                 is_error: false,
             })
         },
-        None => Ok(ToolResult {
-            content: vec![ToolContent::Text {
-                text: format!("Prompt '{}' not found.", args.name),
-            }],
-            is_error: true,
-        }),
+        None => {
+            if let Some(definition) = builtin_prompt_definition(&args.name) {
+                let template = builtin_prompt_template(&definition);
+                let vars_info: Vec<String> =
+                    template.variables.iter().map(format_variable_info).collect();
+
+                Ok(ToolResult {
+                    content: vec![ToolContent::Text {
+                        text: format!(
+                            "**{}**\n\n\
+                             {}\n\n\
+                             **Variables:**\n{}\n\n\
+                             **Content:**\n```\n{}\n```\n\n\
+                             Tags: {}\n\
+                             Usage count: {}",
+                            template.name,
+                            if template.description.is_empty() {
+                                "(no description)".to_string()
+                            } else {
+                                template.description.clone()
+                            },
+                            if vars_info.is_empty() {
+                                "none".to_string()
+                            } else {
+                                vars_info.join("\n")
+                            },
+                            template.content,
+                            template.tags.join(", "),
+                            template.usage_count
+                        ),
+                    }],
+                    is_error: false,
+                })
+            } else {
+                Ok(ToolResult {
+                    content: vec![ToolContent::Text {
+                        text: format!("Prompt '{}' not found.", args.name),
+                    }],
+                    is_error: true,
+                })
+            }
+        },
     }
 }
 
@@ -376,12 +528,58 @@ pub fn execute_prompt_run(arguments: Value) -> Result<ToolResult> {
                 is_error: false,
             })
         },
-        None => Ok(ToolResult {
-            content: vec![ToolContent::Text {
-                text: format!("Prompt '{}' not found.", args.name),
-            }],
-            is_error: true,
-        }),
+        None => {
+            if let Some(definition) = builtin_prompt_definition(&args.name) {
+                let values = args.variables.unwrap_or_default();
+                let missing: Vec<&str> = definition
+                    .arguments
+                    .iter()
+                    .filter(|arg| arg.required && !values.contains_key(&arg.name))
+                    .map(|arg| arg.name.as_str())
+                    .collect();
+
+                if !missing.is_empty() {
+                    return Ok(ToolResult {
+                        content: vec![ToolContent::Text {
+                            text: format!(
+                                "Missing required variables: {}\n\n\
+                                 Use the 'variables' parameter to provide values:\n\
+                                 ```json\n{{\n  \"variables\": {{\n{}\n  }}\n}}\n```",
+                                missing.join(", "),
+                                missing
+                                    .iter()
+                                    .map(|n| format!("    \"{n}\": \"<value>\""))
+                                    .collect::<Vec<_>>()
+                                    .join(",\n")
+                            ),
+                        }],
+                        is_error: true,
+                    });
+                }
+
+                let mut args_map = serde_json::Map::new();
+                for (key, value) in values {
+                    args_map.insert(key, Value::String(value));
+                }
+
+                let messages = PromptRegistry::default()
+                    .get_prompt_messages(&args.name, &Value::Object(args_map))
+                    .ok_or_else(|| Error::InvalidInput("Prompt generation failed".to_string()))?;
+                let rendered = format_prompt_messages(&messages);
+
+                Ok(ToolResult {
+                    content: vec![ToolContent::Text { text: rendered }],
+                    is_error: false,
+                })
+            } else {
+                Ok(ToolResult {
+                    content: vec![ToolContent::Text {
+                        text: format!("Prompt '{}' not found.", args.name),
+                    }],
+                    is_error: true,
+                })
+            }
+        },
     }
 }
 
@@ -391,6 +589,18 @@ pub fn execute_prompt_delete(arguments: Value) -> Result<ToolResult> {
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
     let domain = parse_domain_scope(Some(&args.domain));
+
+    if builtin_prompt_definition(&args.name).is_some() {
+        return Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!(
+                    "Prompt '{}' is built-in and cannot be deleted.",
+                    args.name
+                ),
+            }],
+            is_error: true,
+        });
+    }
 
     // Works in both project and user scope
     let services = ServiceContainer::from_current_dir_or_user()?;
