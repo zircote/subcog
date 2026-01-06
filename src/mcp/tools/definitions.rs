@@ -93,6 +93,19 @@ pub fn status_tool() -> ToolDefinition {
     }
 }
 
+/// Defines the prompt_understanding tool.
+pub fn prompt_understanding_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "prompt_understanding".to_string(),
+        description: "Detailed guidance for using Subcog MCP tools effectively".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    }
+}
+
 /// Defines the namespaces tool.
 pub fn namespaces_tool() -> ToolDefinition {
     ToolDefinition {

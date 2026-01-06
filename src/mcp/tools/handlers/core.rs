@@ -1,7 +1,7 @@
 //! Core tool execution handlers.
 //!
 //! Contains handlers for subcog's core memory operations:
-//! capture, recall, status, namespaces, consolidate, enrich, reindex.
+//! capture, recall, status, namespaces, prompt understanding, consolidate, enrich, reindex.
 
 use crate::mcp::prompt_understanding::PROMPT_UNDERSTANDING;
 use crate::mcp::tool_types::{
