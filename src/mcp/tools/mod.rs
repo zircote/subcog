@@ -33,6 +33,10 @@ impl ToolRegistry {
         tools.insert("subcog_recall".to_string(), definitions::recall_tool());
         tools.insert("subcog_status".to_string(), definitions::status_tool());
         tools.insert(
+            "prompt_understanding".to_string(),
+            definitions::prompt_understanding_tool(),
+        );
+        tools.insert(
             "subcog_namespaces".to_string(),
             definitions::namespaces_tool(),
         );
@@ -78,6 +82,7 @@ impl ToolRegistry {
             "subcog_capture" => handlers::execute_capture(arguments),
             "subcog_recall" => handlers::execute_recall(arguments),
             "subcog_status" => handlers::execute_status(arguments),
+            "prompt_understanding" => handlers::execute_prompt_understanding(arguments),
             "subcog_namespaces" => handlers::execute_namespaces(arguments),
             "subcog_consolidate" => handlers::execute_consolidate(arguments),
             "subcog_enrich" => handlers::execute_enrich(arguments),
