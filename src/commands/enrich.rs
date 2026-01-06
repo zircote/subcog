@@ -3,7 +3,6 @@
 //! Contains the implementation of the `enrich` CLI command for
 //! LLM-powered memory tag enrichment.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use subcog::cli::{
@@ -23,9 +22,6 @@ pub fn cmd_enrich(
     id: Option<String>,
     dry_run: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Get repository path
-    let cwd = std::env::current_dir()?;
-
     // Create the appropriate LLM client based on config
     let llm_config = &config.llm;
     println!(
@@ -45,7 +41,6 @@ pub fn cmd_enrich(
             update_all,
             id,
             dry_run,
-            &cwd,
         ),
         LlmProvider::Anthropic => run_enrich_with_client(
             build_anthropic_client(llm_config),
@@ -54,7 +49,6 @@ pub fn cmd_enrich(
             update_all,
             id,
             dry_run,
-            &cwd,
         ),
         LlmProvider::Ollama => run_enrich_with_client(
             build_ollama_client(llm_config),
@@ -63,7 +57,6 @@ pub fn cmd_enrich(
             update_all,
             id,
             dry_run,
-            &cwd,
         ),
         LlmProvider::LmStudio => run_enrich_with_client(
             build_lmstudio_client(llm_config),
@@ -72,7 +65,6 @@ pub fn cmd_enrich(
             update_all,
             id,
             dry_run,
-            &cwd,
         ),
     }
 }
@@ -84,10 +76,9 @@ fn run_enrich_with_client<P: LlmProviderTrait>(
     update_all: bool,
     id: Option<String>,
     dry_run: bool,
-    cwd: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Create service container to get index backend
-    let container = ServiceContainer::for_repo(cwd, None)?;
+    let container = ServiceContainer::from_current_dir_or_user()?;
     let index: Arc<dyn IndexBackend> = Arc::new(container.index()?);
 
     let resilience_config = build_resilience_config(llm_config);
@@ -98,7 +89,6 @@ fn run_enrich_with_client<P: LlmProviderTrait>(
         update_all,
         id,
         dry_run,
-        cwd,
     )
 }
 
@@ -109,7 +99,6 @@ fn run_enrichment<P: LlmProviderTrait>(
     update_all: bool,
     id: Option<String>,
     dry_run: bool,
-    cwd: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(memory_id) = id {
         // Enrich a single memory
@@ -149,7 +138,7 @@ fn run_enrichment<P: LlmProviderTrait>(
                 if !dry_run && (stats.enriched > 0 || stats.updated > 0) {
                     println!();
                     println!("Reindexing to update search index...");
-                    let services = ServiceContainer::for_repo(cwd, None)?;
+                    let services = ServiceContainer::from_current_dir_or_user()?;
                     match services.reindex() {
                         Ok(count) => println!("Reindexed {count} memories"),
                         Err(e) => eprintln!("Reindex failed: {e}"),

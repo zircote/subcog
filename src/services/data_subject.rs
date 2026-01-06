@@ -18,7 +18,7 @@
 //! ```rust,ignore
 //! use subcog::services::{DataSubjectService, ServiceContainer};
 //!
-//! let container = ServiceContainer::from_current_dir()?;
+//! let container = ServiceContainer::from_current_dir_or_user()?;
 //! let service = DataSubjectService::new(&container)?;
 //!
 //! // Export all user data (GDPR Article 20)

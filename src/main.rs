@@ -26,7 +26,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use subcog::config::SubcogConfig;
 use subcog::mcp::{McpServer, Transport};
-use subcog::observability::{self, InitOptions, RequestContext, scope_request_context};
+use subcog::observability::{
+    self, InitOptions, RequestContext, enter_request_context, scope_request_context,
+};
 use subcog::security::AuditConfig;
 use tracing::info_span;
 
@@ -273,6 +275,7 @@ async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::
     };
 
     let request_context = RequestContext::new();
+    let blocking_context = request_context.clone();
     let request_id = request_context.request_id().to_string();
 
     Box::pin(scope_request_context(request_context, async move {
@@ -285,77 +288,134 @@ async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::
             operation = command_name
         );
         let _span_guard = span.enter();
+        let dispatch_span = span.clone();
+        dispatch_command(cli, config, dispatch_span, blocking_context).await
+    }))
+    .await
+}
 
-        match cli.command {
-            Commands::Capture {
-                content,
-                namespace,
-                tags,
-                source,
-            } => commands::cmd_capture(&config, content, namespace, tags, source),
+async fn dispatch_command(
+    cli: Cli,
+    config: SubcogConfig,
+    span: tracing::Span,
+    blocking_context: RequestContext,
+) -> Result<(), Box<dyn std::error::Error>> {
+    macro_rules! run_blocking_cmd {
+        ($body:expr) => {
+            run_blocking(span.clone(), blocking_context.clone(), $body).await
+        };
+    }
 
-            Commands::Recall {
-                query,
-                mode,
-                namespace,
-                limit,
-                raw,
-                include_tombstoned,
-            } => commands::cmd_recall(query, mode, namespace, limit, raw, include_tombstoned),
-
-            Commands::Status => commands::cmd_status(&config),
-
-            Commands::Consolidate => commands::cmd_consolidate(&config),
-
-            Commands::Reindex { repo } => commands::cmd_reindex(repo),
-
-            Commands::Enrich {
-                all,
-                update_all,
-                id,
-                dry_run,
-            } => commands::cmd_enrich(&config, all, update_all, id, dry_run),
-
-            Commands::Config { show, set } => commands::cmd_config(config, show, set),
-
-            Commands::Serve { transport, port } => cmd_serve(transport, port).await,
-
-            Commands::Hook { event } => commands::cmd_hook(event, &config),
-
-            Commands::Prompt { action } => commands::cmd_prompt(action),
-
-            Commands::Namespaces { format, verbose } => {
-                use std::str::FromStr;
-                use subcog::cli::{NamespacesOutputFormat, cmd_namespaces};
-                let format = NamespacesOutputFormat::from_str(&format).unwrap_or_default();
-                cmd_namespaces(format, verbose)
-            },
-
-            Commands::Migrate { action } => match action {
+    match cli.command {
+        Commands::Capture {
+            content,
+            namespace,
+            tags,
+            source,
+        } => {
+            let config = config.clone();
+            run_blocking_cmd!(move || {
+                commands::cmd_capture(&config, content, namespace, tags, source)
+                    .map_err(|e| e.to_string())
+            })
+        },
+        Commands::Recall {
+            query,
+            mode,
+            namespace,
+            limit,
+            raw,
+            include_tombstoned,
+        } => run_blocking_cmd!(move || {
+            commands::cmd_recall(query, mode, namespace, limit, raw, include_tombstoned)
+                .map_err(|e| e.to_string())
+        }),
+        Commands::Status => {
+            let config = config.clone();
+            run_blocking_cmd!(move || commands::cmd_status(&config).map_err(|e| e.to_string()))
+        },
+        Commands::Consolidate => {
+            let config = config.clone();
+            run_blocking_cmd!(move || {
+                commands::cmd_consolidate(&config).map_err(|e| e.to_string())
+            })
+        },
+        Commands::Reindex { repo } => {
+            run_blocking_cmd!(move || commands::cmd_reindex(repo).map_err(|e| e.to_string()))
+        },
+        Commands::Enrich {
+            all,
+            update_all,
+            id,
+            dry_run,
+        } => {
+            let config = config.clone();
+            run_blocking_cmd!(move || {
+                commands::cmd_enrich(&config, all, update_all, id, dry_run)
+                    .map_err(|e| e.to_string())
+            })
+        },
+        Commands::Config { show, set } => run_blocking_cmd!(move || {
+            commands::cmd_config(config, show, set).map_err(|e| e.to_string())
+        }),
+        Commands::Serve { transport, port } => cmd_serve(transport, port).await,
+        Commands::Hook { event } => {
+            let config = config.clone();
+            run_blocking_cmd!(move || commands::cmd_hook(event, &config).map_err(|e| e.to_string()))
+        },
+        Commands::Prompt { action } => {
+            run_blocking_cmd!(move || { commands::cmd_prompt(action).map_err(|e| e.to_string()) })
+        },
+        Commands::Namespaces { format, verbose } => run_blocking_cmd!(move || {
+            use std::str::FromStr;
+            use subcog::cli::{NamespacesOutputFormat, cmd_namespaces};
+            let format = NamespacesOutputFormat::from_str(&format).unwrap_or_default();
+            cmd_namespaces(format, verbose).map_err(|e| e.to_string())
+        }),
+        Commands::Migrate { action } => run_blocking_cmd!(move || {
+            match action {
                 MigrateAction::Embeddings {
                     repo,
                     dry_run,
                     force,
                 } => commands::cmd_migrate_embeddings(repo, dry_run, force),
-            },
+            }
+            .map_err(|e| e.to_string())
+        }),
+        Commands::Completions { shell } => run_blocking_cmd!(move || {
+            use clap::CommandFactory;
+            use clap_complete::generate;
+            use std::io;
+            let mut cmd = Cli::command();
+            generate(shell, &mut cmd, "subcog", &mut io::stdout());
+            Ok(())
+        }),
+        Commands::Gc {
+            dry_run,
+            purge,
+            older_than,
+        } => run_blocking_cmd!(move || {
+            subcog::cli::gc::execute(dry_run, purge, older_than).map_err(|e| e.to_string())
+        }),
+    }
+}
 
-            Commands::Completions { shell } => {
-                use clap::CommandFactory;
-                use clap_complete::generate;
-                use std::io;
-                let mut cmd = Cli::command();
-                generate(shell, &mut cmd, "subcog", &mut io::stdout());
-                Ok(())
-            },
-
-            Commands::Gc {
-                dry_run,
-                purge,
-                older_than,
-            } => subcog::cli::gc::execute(dry_run, purge, older_than).map_err(Into::into),
-        }
-    }))
+async fn run_blocking<F>(
+    span: tracing::Span,
+    context: RequestContext,
+    f: F,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    F: FnOnce() -> Result<(), String> + Send + 'static,
+{
+    let result = tokio::task::spawn_blocking(move || {
+        let _guard = enter_request_context(context);
+        span.in_scope(f)
+    })
     .await
+    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+    result.map_err(Into::into)
 }
 
 /// Loads configuration following a priority-based resolution order.
