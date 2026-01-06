@@ -47,6 +47,18 @@ Use domain-aware defaults: if in a git repo, default scope is project; otherwise
 
 Domain resolution order for `prompt_get` and `prompt_run`: project -> user -> org.
 
+### 3.3 Built-in MCP Prompts
+
+These are MCP prompts (not user-saved templates). Discover them via `prompts/list`
+and retrieve them via `prompts/get`:
+
+- **subcog_browse**: Interactive memory browser with faceted discovery
+- **subcog_list**: Formatted memory listing with filtering
+- **subcog_tutorial**: Interactive learning guide
+- **subcog_capture_assistant**: Help decide what to capture
+- **subcog_review**: Review and consolidate memories
+- **subcog_search_help**: Craft effective search queries
+
 ## 4. When to Capture
 
 Capture memories when you detect:
