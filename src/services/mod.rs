@@ -436,10 +436,10 @@ impl ServiceContainer {
             service = service.with_vector(Arc::clone(vector));
         }
 
-        if matches!(scope, DomainScope::Project) {
-            if let Some(filter) = self.project_scope_filter() {
-                service = service.with_scope_filter(filter);
-            }
+        if matches!(scope, DomainScope::Project)
+            && let Some(filter) = self.project_scope_filter()
+        {
+            service = service.with_scope_filter(filter);
         }
 
         Ok(service)

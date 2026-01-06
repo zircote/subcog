@@ -153,15 +153,15 @@ impl DomainIndexManager {
     /// Returns an error if the path cannot be determined.
     pub fn get_index_path(&self, scope: DomainScope) -> Result<PathBuf> {
         match scope {
-            DomainScope::Project => self.get_project_index_path(),
+            DomainScope::Project => Ok(self.get_project_index_path()),
             DomainScope::User => Ok(self.get_user_index_path()),
             DomainScope::Org => self.get_org_index_path(),
         }
     }
 
     /// Gets the project-scoped index path: `<user-data>/index.db`
-    fn get_project_index_path(&self) -> Result<PathBuf> {
-        Ok(self.user_data_dir.join("index.db"))
+    fn get_project_index_path(&self) -> PathBuf {
+        self.user_data_dir.join("index.db")
     }
 
     /// Gets the user-scoped index path.

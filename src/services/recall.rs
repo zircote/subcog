@@ -168,16 +168,18 @@ impl RecallService {
         let mut merged = filter.clone();
 
         if merged.project_id.is_none() {
-            merged.project_id = scope_filter.project_id.clone();
+            merged.project_id.clone_from(&scope_filter.project_id);
         }
         if merged.branch.is_none() {
-            merged.branch = scope_filter.branch.clone();
+            merged.branch.clone_from(&scope_filter.branch);
         }
         if merged.file_path.is_none() {
-            merged.file_path = scope_filter.file_path.clone();
+            merged.file_path.clone_from(&scope_filter.file_path);
         }
         if merged.source_pattern.is_none() {
-            merged.source_pattern = scope_filter.source_pattern.clone();
+            merged
+                .source_pattern
+                .clone_from(&scope_filter.source_pattern);
         }
 
         Cow::Owned(merged)
@@ -223,12 +225,9 @@ impl RecallService {
         if let Some(request_id) = current_request_id() {
             tracing::Span::current().record("request_id", request_id.as_str());
         }
-
         tracing::info!(mode = %mode_label, query_length = query.len(), limit = limit, timeout_ms = self.timeout_ms, "Searching memories");
-
         // Maximum query size (10KB) - prevents abuse and ensures reasonable embedding times (MED-RES-005)
         const MAX_QUERY_SIZE: usize = 10_000;
-
         // Deadline for timeout enforcement (RES-M5)
         let deadline_ms = self.timeout_ms;
 
