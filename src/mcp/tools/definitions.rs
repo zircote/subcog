@@ -209,11 +209,11 @@ pub fn prompt_save_tool() -> ToolDefinition {
                 },
                 "content": {
                     "type": "string",
-                    "description": "Prompt content with {{variable}} placeholders (required if file_path not provided)"
+                    "description": "Prompt content with {{variable}} placeholders (required if file_path not provided, unless merge is true)"
                 },
                 "file_path": {
                     "type": "string",
-                    "description": "Path to file containing prompt (alternative to content)"
+                    "description": "Path to file containing prompt (alternative to content; required if content missing unless merge is true)"
                 },
                 "description": {
                     "type": "string",

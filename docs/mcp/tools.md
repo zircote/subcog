@@ -429,7 +429,7 @@ Save a user-defined prompt template.
 | `variables` | array[object] | No | Explicit variable definitions |
 | `merge` | boolean | No | Preserve existing metadata when updating (default: `false`) |
 
-*Either `content` or `file_path` required, not both.
+*Either `content` or `file_path` required, not both (unless `merge: true`, which allows metadata-only updates).
 
 **Variable Object:**
 
@@ -463,6 +463,19 @@ Save a user-defined prompt template.
         "default": "general"
       }
     ],
+    "merge": true
+  }
+}
+```
+
+**Metadata-only update (preserves content):**
+
+```json
+{
+  "name": "prompt_save",
+  "arguments": {
+    "name": "code-review",
+    "description": "Updated description only",
     "merge": true
   }
 }
