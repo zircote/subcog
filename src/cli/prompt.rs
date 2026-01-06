@@ -449,13 +449,13 @@ fn matches_glob(pattern: &str, text: &str) -> bool {
 fn builtin_matches_filter(
     definition: &PromptDefinition,
     tags: &[String],
-    name_pattern: &Option<String>,
+    name_pattern: Option<&str>,
 ) -> bool {
     if !tags.is_empty() && !tags.iter().all(|t| t == "built-in") {
         return false;
     }
 
-    if let Some(pattern) = name_pattern.as_deref()
+    if let Some(pattern) = name_pattern
         && !matches_glob(pattern, &definition.name)
     {
         return false;
@@ -465,6 +465,8 @@ fn builtin_matches_filter(
 }
 
 fn format_prompt_messages(messages: &[PromptMessage]) -> String {
+    use std::fmt::Write;
+
     let mut output = String::new();
     for message in messages {
         let rendered = match &message.content {
@@ -474,7 +476,7 @@ fn format_prompt_messages(messages: &[PromptMessage]) -> String {
                 format!("[image: {mime_type}, {} bytes]", data.len())
             },
         };
-        output.push_str(&format!("{}:\n{}\n\n", message.role, rendered));
+        let _ = writeln!(output, "{}:\n{}\n", message.role, rendered);
     }
     output.trim_end().to_string()
 }
@@ -517,7 +519,7 @@ pub fn cmd_prompt_list(
         filter = filter.with_name_pattern(pattern);
     }
 
-    let mut user_filter = filter.clone();
+    let mut user_filter = filter;
     user_filter.limit = None;
     let mut prompts = service.list(&user_filter)?;
 
@@ -529,7 +531,7 @@ pub fn cmd_prompt_list(
             builtin_matches_filter(
                 definition,
                 tag_list.as_deref().unwrap_or(&[]),
-                &name_pattern,
+                name_pattern.as_deref(),
             )
         })
         .filter(|definition| prompts.iter().all(|p| p.name != definition.name))
@@ -612,14 +614,13 @@ pub fn cmd_prompt_get(
     let scope = domain.as_deref().map(|d| parse_domain_scope(Some(d)));
     let prompt = service.get(&name, scope)?;
 
-    let template = match prompt {
-        Some(template) => template,
-        None => {
-            let Some(definition) = builtin_prompt_definition(&name) else {
-                return Err(format!("Prompt not found: {name}").into());
-            };
-            builtin_prompt_template(&definition)
-        },
+    let template = if let Some(template) = prompt {
+        template
+    } else {
+        let Some(definition) = builtin_prompt_definition(&name) else {
+            return Err(format!("Prompt not found: {name}").into());
+        };
+        builtin_prompt_template(&definition)
     };
 
     let output_format = format
@@ -891,17 +892,14 @@ pub fn cmd_prompt_export(
     let scope = domain.as_deref().map(|d| parse_domain_scope(Some(d)));
     let prompt = service.get(&name, scope)?;
 
-    let template = match prompt {
-        Some(template) => template,
-        None => {
-            if builtin_prompt_definition(&name).is_some() {
-                return Err(format!(
-                    "Prompt '{name}' is built-in and cannot be exported. Use `prompt run` to render it."
-                )
-                .into());
-            }
-            return Err(format!("Prompt not found: {name}").into());
-        },
+    let Some(template) = prompt else {
+        if builtin_prompt_definition(&name).is_some() {
+            return Err(format!(
+                "Prompt '{name}' is built-in and cannot be exported. Use `prompt run` to render it."
+            )
+            .into());
+        }
+        return Err(format!("Prompt not found: {name}").into());
     };
 
     // Determine format from output path or explicit format
@@ -1094,17 +1092,14 @@ pub fn cmd_prompt_share(
     let scope = domain.as_deref().map(|d| parse_domain_scope(Some(d)));
     let prompt = service.get(&name, scope)?;
 
-    let template = match prompt {
-        Some(template) => template,
-        None => {
-            if builtin_prompt_definition(&name).is_some() {
-                return Err(format!(
-                    "Prompt '{name}' is built-in and cannot be shared. Use `prompt run` to render it."
-                )
-                .into());
-            }
-            return Err(format!("Prompt not found: {name}").into());
-        },
+    let Some(template) = prompt else {
+        if builtin_prompt_definition(&name).is_some() {
+            return Err(format!(
+                "Prompt '{name}' is built-in and cannot be shared. Use `prompt run` to render it."
+            )
+            .into());
+        }
+        return Err(format!("Prompt not found: {name}").into());
     };
 
     // Build shareable content with metadata

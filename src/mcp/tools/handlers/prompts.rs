@@ -142,6 +142,53 @@ fn builtin_prompt_definition(name: &str) -> Option<PromptDefinition> {
     registry.get_prompt(name).cloned()
 }
 
+fn execute_builtin_prompt_run(
+    name: &str,
+    values: HashMap<String, String>,
+    definition: PromptDefinition,
+) -> Result<ToolResult> {
+    let missing: Vec<&str> = definition
+        .arguments
+        .iter()
+        .filter(|arg| arg.required && !values.contains_key(&arg.name))
+        .map(|arg| arg.name.as_str())
+        .collect();
+
+    if !missing.is_empty() {
+        return Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!(
+                    "Missing required variables: {}\n\n\
+                     Use the 'variables' parameter to provide values:\n\
+                     ```json\n{{\n  \"variables\": {{\n{}\n  }}\n}}\n```",
+                    missing.join(", "),
+                    missing
+                        .iter()
+                        .map(|n| format!("    \"{n}\": \"<value>\""))
+                        .collect::<Vec<_>>()
+                        .join(",\n")
+                ),
+            }],
+            is_error: true,
+        });
+    }
+
+    let mut args_map = serde_json::Map::new();
+    for (key, value) in values {
+        args_map.insert(key, Value::String(value));
+    }
+
+    let messages = PromptRegistry::default()
+        .get_prompt_messages(name, &Value::Object(args_map))
+        .ok_or_else(|| Error::InvalidInput("Prompt generation failed".to_string()))?;
+    let rendered = format_prompt_messages(&messages);
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text { text: rendered }],
+        is_error: false,
+    })
+}
+
 /// Executes the prompt.save tool.
 pub fn execute_prompt_save(arguments: Value) -> Result<ToolResult> {
     use crate::services::{EnrichmentStatus, PartialMetadata, SaveOptions};
@@ -531,46 +578,7 @@ pub fn execute_prompt_run(arguments: Value) -> Result<ToolResult> {
         None => {
             if let Some(definition) = builtin_prompt_definition(&args.name) {
                 let values = args.variables.unwrap_or_default();
-                let missing: Vec<&str> = definition
-                    .arguments
-                    .iter()
-                    .filter(|arg| arg.required && !values.contains_key(&arg.name))
-                    .map(|arg| arg.name.as_str())
-                    .collect();
-
-                if !missing.is_empty() {
-                    return Ok(ToolResult {
-                        content: vec![ToolContent::Text {
-                            text: format!(
-                                "Missing required variables: {}\n\n\
-                                 Use the 'variables' parameter to provide values:\n\
-                                 ```json\n{{\n  \"variables\": {{\n{}\n  }}\n}}\n```",
-                                missing.join(", "),
-                                missing
-                                    .iter()
-                                    .map(|n| format!("    \"{n}\": \"<value>\""))
-                                    .collect::<Vec<_>>()
-                                    .join(",\n")
-                            ),
-                        }],
-                        is_error: true,
-                    });
-                }
-
-                let mut args_map = serde_json::Map::new();
-                for (key, value) in values {
-                    args_map.insert(key, Value::String(value));
-                }
-
-                let messages = PromptRegistry::default()
-                    .get_prompt_messages(&args.name, &Value::Object(args_map))
-                    .ok_or_else(|| Error::InvalidInput("Prompt generation failed".to_string()))?;
-                let rendered = format_prompt_messages(&messages);
-
-                Ok(ToolResult {
-                    content: vec![ToolContent::Text { text: rendered }],
-                    is_error: false,
-                })
+                execute_builtin_prompt_run(&args.name, values, definition)
             } else {
                 Ok(ToolResult {
                     content: vec![ToolContent::Text {
