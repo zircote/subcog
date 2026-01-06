@@ -418,8 +418,11 @@ pub fn execute_prompt_get(arguments: Value) -> Result<ToolResult> {
         None => {
             if let Some(definition) = builtin_prompt_definition(&args.name) {
                 let template = builtin_prompt_template(&definition);
-                let vars_info: Vec<String> =
-                    template.variables.iter().map(format_variable_info).collect();
+                let vars_info: Vec<String> = template
+                    .variables
+                    .iter()
+                    .map(format_variable_info)
+                    .collect();
 
                 Ok(ToolResult {
                     content: vec![ToolContent::Text {
@@ -593,10 +596,7 @@ pub fn execute_prompt_delete(arguments: Value) -> Result<ToolResult> {
     if builtin_prompt_definition(&args.name).is_some() {
         return Ok(ToolResult {
             content: vec![ToolContent::Text {
-                text: format!(
-                    "Prompt '{}' is built-in and cannot be deleted.",
-                    args.name
-                ),
+                text: format!("Prompt '{}' is built-in and cannot be deleted.", args.name),
             }],
             is_error: true,
         });

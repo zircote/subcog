@@ -446,7 +446,11 @@ fn matches_glob(pattern: &str, text: &str) -> bool {
     true
 }
 
-fn builtin_matches_filter(definition: &PromptDefinition, tags: &[String], name_pattern: &Option<String>) -> bool {
+fn builtin_matches_filter(
+    definition: &PromptDefinition,
+    tags: &[String],
+    name_pattern: &Option<String>,
+) -> bool {
     if !tags.is_empty() && !tags.iter().all(|t| t == "built-in") {
         return false;
     }
@@ -522,7 +526,11 @@ pub fn cmd_prompt_list(
         .list_prompts()
         .into_iter()
         .filter(|definition| {
-            builtin_matches_filter(definition, tag_list.as_deref().unwrap_or(&[]), &name_pattern)
+            builtin_matches_filter(
+                definition,
+                tag_list.as_deref().unwrap_or(&[]),
+                &name_pattern,
+            )
         })
         .filter(|definition| prompts.iter().all(|p| p.name != definition.name))
         .map(builtin_prompt_template)
@@ -702,7 +710,10 @@ pub fn cmd_prompt_run(
 
     let scope = domain.as_deref().map(|d| parse_domain_scope(Some(d)));
     let prompt = service.get(&name, scope)?;
-    let builtin_definition = prompt.is_none().then(|| builtin_prompt_definition(&name)).flatten();
+    let builtin_definition = prompt
+        .is_none()
+        .then(|| builtin_prompt_definition(&name))
+        .flatten();
     let template = match (prompt, builtin_definition.clone()) {
         (Some(template), _) => template,
         (None, Some(definition)) => builtin_prompt_template(&definition),
