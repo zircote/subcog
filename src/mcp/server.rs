@@ -599,10 +599,12 @@ impl ServerHandler for McpHandler {
 
         async move {
             let span = info_span!(
-                "subcog.mcp.list_tools",
+                "subcog.mcp.request",
                 request_id = %request_id,
                 component = "mcp",
-                operation = "list_tools"
+                origin = "mcp",
+                entrypoint = "tools/list",
+                operation = "tools/list"
             );
 
             run_mcp_with_context(request_context, span, "list_tools", |_start| async move {
@@ -628,10 +630,12 @@ impl ServerHandler for McpHandler {
         let tool_name = request.name.clone();
         async move {
             let span = info_span!(
-                "subcog.mcp.call_tool",
+                "subcog.mcp.request",
                 request_id = %request_id,
                 component = "mcp",
-                operation = "call_tool",
+                origin = "mcp",
+                entrypoint = "tools/call",
+                operation = "tools/call",
                 tool_name = %tool_name
             );
 
@@ -654,10 +658,12 @@ impl ServerHandler for McpHandler {
         let (request_context, request_id) = init_request_context(current_request_id());
         async move {
             let span = info_span!(
-                "subcog.mcp.list_resources",
+                "subcog.mcp.request",
                 request_id = %request_id,
                 component = "mcp",
-                operation = "list_resources"
+                origin = "mcp",
+                entrypoint = "resources/list",
+                operation = "resources/list"
             );
 
             run_mcp_with_context(
@@ -689,10 +695,12 @@ impl ServerHandler for McpHandler {
 
         async move {
             let span = info_span!(
-                "subcog.mcp.list_resource_templates",
+                "subcog.mcp.request",
                 request_id = %request_id,
                 component = "mcp",
-                operation = "list_resource_templates"
+                origin = "mcp",
+                entrypoint = "resources/list_templates",
+                operation = "resources/list_templates"
             );
 
             run_mcp_with_context(
@@ -716,10 +724,12 @@ impl ServerHandler for McpHandler {
         let resource_uri = request.uri.clone();
         async move {
             let span = info_span!(
-                "subcog.mcp.read_resource",
+                "subcog.mcp.request",
                 request_id = %request_id,
                 component = "mcp",
-                operation = "read_resource",
+                origin = "mcp",
+                entrypoint = "resources/read",
+                operation = "resources/read",
                 resource_uri = %resource_uri
             );
 
@@ -752,10 +762,12 @@ impl ServerHandler for McpHandler {
         let (request_context, request_id) = init_request_context(current_request_id());
         async move {
             let span = info_span!(
-                "subcog.mcp.list_prompts",
+                "subcog.mcp.request",
                 request_id = %request_id,
                 component = "mcp",
-                operation = "list_prompts"
+                origin = "mcp",
+                entrypoint = "prompts/list",
+                operation = "prompts/list"
             );
 
             run_mcp_with_context(request_context, span, "list_prompts", |_start| async move {
@@ -781,10 +793,12 @@ impl ServerHandler for McpHandler {
         let prompt_name = request.name.clone();
         async move {
             let span = info_span!(
-                "subcog.mcp.get_prompt",
+                "subcog.mcp.request",
                 request_id = %request_id,
                 component = "mcp",
-                operation = "get_prompt",
+                origin = "mcp",
+                entrypoint = "prompts/get",
+                operation = "prompts/get",
                 prompt = %prompt_name
             );
 

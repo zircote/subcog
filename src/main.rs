@@ -289,9 +289,11 @@ async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::
 
     Box::pin(scope_request_context(request_context, async move {
         let span = info_span!(
-            "subcog.cli.command",
+            "subcog.entrypoint",
             request_id = %request_id,
             component = "cli",
+            origin = "cli",
+            entrypoint = command_name,
             operation = command_name
         );
         let _span_guard = span.enter();
