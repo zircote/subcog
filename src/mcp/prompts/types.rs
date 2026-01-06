@@ -1,10 +1,10 @@
-//! UX helper prompt type definitions.
+//! MCP prompt type definitions.
 //!
-//! Contains the core data structures for CLI UX helper prompts.
+//! Contains the core data structures for MCP prompts.
 
 use serde::{Deserialize, Serialize};
 
-/// Definition of a UX helper prompt.
+/// Definition of an MCP prompt.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptDefinition {
     /// Prompt name.

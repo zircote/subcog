@@ -18,7 +18,7 @@
 | Hooks | 5 | 3 | 2 | 0 | 0 |
 | MCP Tools | 13 | 13 | 0 | 0 | 0 |
 | MCP Resources | 26+ | 22 | 0 | 0 | 4 |
-| UX Helper Prompts (CLI-only) | 11 | 10 | 0 | 0 | 1 |
+| MCP Prompts | 11 | 10 | 0 | 0 | 1 |
 | Storage Backends | 9 | 5 | 2 | 2 | 0 |
 | **TOTAL** | **74+** | **60** | **6** | **2** | **6** |
 
@@ -169,7 +169,7 @@
 | `subcog://_prompts` | Line 171 | **MISSING** - Aggregate prompts across all domains |
 | `subcog://org/_prompts` | Line 174 | **MISSING** - Org-scope prompts return NotImplemented |
 
-### 3.3 UX Helper Prompts (CLI-only)
+### 3.3 MCP Prompts
 
 **Reference:** [docs/mcp/prompts.md](./mcp/prompts.md)
 
@@ -387,7 +387,7 @@ All trait methods return `Error::NotImplemented`:
 | `namespaces` CLI command | docs/cli/namespaces.md | Create `src/cli/namespaces.rs` |
 | `subcog://namespaces` resource | docs/mcp/resources.md:207 | Add to `ResourceHandler.get_resource()` |
 | `subcog://_prompts` resource | docs/mcp/resources.md:171 | Add aggregate prompts resource |
-| `generate_tutorial` UX prompt | docs/mcp/prompts.md | Add to prompts list |
+| `generate_tutorial` MCP prompt | docs/mcp/prompts.md | Add to prompts list |
 | Shell completions | docs/cli/README.md:76-87 | Add clap derive completions |
 | `prompt import/share` subcommands | docs/prompts/mcp.md | Extend `src/cli/prompt.rs` |
 

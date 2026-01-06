@@ -9,6 +9,7 @@ Subcog provides a comprehensive command-line interface for managing memories, ru
 | [capture](./capture.md) | Capture a memory to persistent storage |
 | [recall](./recall.md) | Search and retrieve memories |
 | [status](./status.md) | Display system status and statistics |
+| [sync](./sync.md) | Synchronize memories with git remote |
 | [consolidate](consolidate.md) | Merge and deduplicate similar memories |
 | [config](config.md) | Manage configuration settings |
 | [serve](serve.md) | Run the MCP server |
@@ -95,6 +96,7 @@ subcog completions powershell > subcog.ps1
 
 ### System Operations
 - [status](./status.md) - Check system health
+- [sync](./sync.md) - Synchronize with remotes
 - [config](config.md) - Manage configuration
 
 ### Integration

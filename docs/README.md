@@ -19,6 +19,7 @@ Complete reference for all command-line interface commands:
 - [capture](cli/capture.md) - Capture memories
 - [recall](cli/recall.md) - Search and retrieve memories
 - [status](cli/status.md) - System status
+- [sync](cli/sync.md) - Synchronize with git remote
 - [consolidate](cli/consolidate.md) - Merge similar memories
 - [config](cli/config.md) - Configuration management
 - [serve](cli/serve.md) - Run MCP server
@@ -32,7 +33,7 @@ Model Context Protocol server documentation:
 
 - [Tools](mcp/tools.md) - 13 available MCP tools
 - [Resources](mcp/resources.md) - 26+ URI-based resources
-- [UX Helper Prompts](mcp/prompts.md) - CLI-only helper prompts
+- [Prompts](mcp/prompts.md) - 11 built-in prompt templates
 - [Protocol](mcp/protocol.md) - JSON-RPC protocol details
 
 ### [Claude Code Hooks](hooks/README.md)

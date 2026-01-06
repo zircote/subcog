@@ -1,12 +1,12 @@
 //! Core tool execution handlers.
 //!
 //! Contains handlers for subcog's core memory operations:
-//! capture, recall, status, namespaces, consolidate, enrich, reindex.
+//! capture, recall, status, namespaces, consolidate, enrich, sync, reindex.
 
 use crate::mcp::prompt_understanding::PROMPT_UNDERSTANDING;
 use crate::mcp::tool_types::{
-    CaptureArgs, ConsolidateArgs, EnrichArgs, RecallArgs, ReindexArgs, build_filter_description,
-    format_content_for_detail, parse_namespace, parse_search_mode,
+    CaptureArgs, ConsolidateArgs, EnrichArgs, RecallArgs, ReindexArgs, SyncArgs,
+    build_filter_description, format_content_for_detail, parse_namespace, parse_search_mode,
 };
 use crate::models::{CaptureRequest, DetailLevel, Domain, SearchFilter, SearchMode, SearchResult};
 use crate::services::{ServiceContainer, parse_filter_query};
@@ -396,6 +396,39 @@ pub fn execute_enrich(arguments: Value) -> Result<ToolResult> {
         }],
         is_error: false,
     })
+}
+
+/// Executes the sync tool.
+pub fn execute_sync(arguments: Value) -> Result<ToolResult> {
+    let args: SyncArgs =
+        serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+    let direction = args.direction.as_deref().unwrap_or("full");
+
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let result = match direction {
+        "push" => services.sync().push(),
+        "fetch" => services.sync().fetch(),
+        _ => services.sync().sync(),
+    };
+
+    match result {
+        Ok(sync_result) => Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!(
+                    "Sync completed!\n\nDirection: {}\nPushed: {}\nPulled: {}\nConflicts: {}",
+                    direction, sync_result.pushed, sync_result.pulled, sync_result.conflicts
+                ),
+            }],
+            is_error: false,
+        }),
+        Err(e) => Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!("Sync failed: {e}"),
+            }],
+            is_error: true,
+        }),
+    }
 }
 
 /// Executes the reindex tool.

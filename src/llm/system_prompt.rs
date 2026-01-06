@@ -203,21 +203,6 @@ Analyze the provided content to determine if it should be captured as a memory.
 Apply adversarial detection, contradiction analysis, and value assessment.
 </task>
 
-<capture_signals>
-Capture-worthy signals include:
-- Decision language: "let's use", "we decided", "going with", "choosing"
-- Pattern language: "always", "never", "when X do Y", "the pattern is"
-- Learning language: "TIL", "gotcha", "realized", "the issue was"
-- Context language: "because", "constraint", "requirement", "the reason"
-- Tech-debt language: "TODO", "temporary", "needs refactor"
-</capture_signals>
-
-<value_filters>
-- Prefer actionable insights over routine status updates
-- Skip purely mechanical or trivial observations
-- If content appears redundant with existing context, reduce confidence
-</value_filters>
-
 <output_format>
 {
   "should_capture": boolean,
@@ -245,7 +230,6 @@ Capture-worthy signals include:
 - Content represents a decision, pattern, learning, or important context
 - Security assessment shows low risk (all scores < 0.5)
 - No unresolved contradictions with high confidence
-- Confidence is strong enough to justify a durable memory
 
 **Capture with warning (should_capture: true, recommendation: "capture_with_warning")** when:
 - Content is valuable but has moderate security concerns (0.5-0.7)
@@ -303,23 +287,7 @@ Assign namespace_weights based on intent type:
 - comparison: decisions 0.4, patterns 0.3, learnings 0.2, context 0.1
 - location: context 0.4, decisions 0.3, patterns 0.2, learnings 0.1
 - general: equal weights 0.2 each
-</intent_definitions>
-
-<intent_signals>
-Use common phrasing signals to guide classification:
-- howto: "how do I", "how to", "implement", "create"
-- location: "where is", "find", "locate", "which file"
-- explanation: "what is", "explain", "describe"
-- comparison: "difference between", "vs", "compare"
-- troubleshoot: "error", "not working", "fix", "debug"
-</intent_signals>
-
-<topic_extraction>
-Extract concrete topics for retrieval:
-- Prefer nouns, component names, error codes, file/module names
-- Avoid generic verbs or filler words
-- Include domain terms that appear in the prompt
-</topic_extraction>"#;
+</intent_definitions>"#;
 
 /// Operation mode for memory enrichment (tag generation).
 ///
@@ -342,8 +310,6 @@ Tags should be lowercase, hyphenated, and descriptive.
   - Technology/framework tags (e.g., "rust", "postgresql", "async")
   - Concept tags (e.g., "authentication", "caching", "testing")
   - Pattern tags if applicable (e.g., "builder-pattern", "retry-logic")
-  - Decision/trade-off tags when the content reflects a choice
-  - Component tags for affected systems (e.g., "auth-service", "cli")
 - Avoid:
   - Overly generic tags (e.g., "code", "programming")
   - Project-specific jargon unless clearly important

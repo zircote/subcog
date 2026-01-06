@@ -187,6 +187,26 @@ pub fn enrich_tool() -> ToolDefinition {
     }
 }
 
+/// Defines the sync tool.
+pub fn sync_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_sync".to_string(),
+        description: "Sync memories with git remote (push, fetch, or full sync)".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "direction": {
+                    "type": "string",
+                    "description": "Sync direction: push (upload), fetch (download), full (both)",
+                    "enum": ["push", "fetch", "full"],
+                    "default": "full"
+                }
+            },
+            "required": []
+        }),
+    }
+}
+
 /// Defines the reindex tool.
 pub fn reindex_tool() -> ToolDefinition {
     ToolDefinition {
@@ -223,11 +243,11 @@ pub fn prompt_save_tool() -> ToolDefinition {
                 },
                 "content": {
                     "type": "string",
-                    "description": "Prompt content with {{variable}} placeholders (required if file_path not provided, unless merge is true)"
+                    "description": "Prompt content with {{variable}} placeholders (required if file_path not provided)"
                 },
                 "file_path": {
                     "type": "string",
-                    "description": "Path to file containing prompt (alternative to content; required if content missing unless merge is true)"
+                    "description": "Path to file containing prompt (alternative to content)"
                 },
                 "description": {
                     "type": "string",
@@ -261,11 +281,6 @@ pub fn prompt_save_tool() -> ToolDefinition {
                 "skip_enrichment": {
                     "type": "boolean",
                     "description": "Skip LLM-powered metadata enrichment (default: false)",
-                    "default": false
-                },
-                "merge": {
-                    "type": "boolean",
-                    "description": "Merge with existing prompt metadata when updating (default: false)",
                     "default": false
                 }
             },

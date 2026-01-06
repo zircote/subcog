@@ -2,9 +2,6 @@
 
 Access and manage prompt templates through MCP tools and resources.
 
-**Note:** MCP prompt capabilities are disabled. Built-in UX helper prompts are
-CLI-only (`subcog prompt list --tags ux-helper`).
-
 ## MCP Tools
 
 Subcog prompt tools are accessible via the `subcog:` prefix in Claude Code.
@@ -317,14 +314,14 @@ subcog:prompt:delete old-template --domain project
 }
 ```
 
-## Integration with UX Helper Prompts (CLI-only)
+## Integration with Built-in Prompts
 
-User templates complement built-in UX helper prompts:
+User templates complement built-in MCP prompts:
 
 | Built-in | User Template Use |
 |----------|-------------------|
-| `subcog_capture_assistant` | Create custom capture templates |
-| `subcog_search_help` | Create custom search templates |
+| `subcog_capture` | Create custom capture templates |
+| `subcog_recall` | Create custom search templates |
 | `generate_decision` | Create domain-specific decision templates |
 
 ### Example: Custom Capture Template

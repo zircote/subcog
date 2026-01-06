@@ -3,7 +3,6 @@
 //! Contains the implementation of prompt generation methods.
 
 use serde_json::Value;
-use std::fmt::Write;
 
 use super::templates::{
     BROWSE_DASHBOARD_INSTRUCTIONS, BROWSE_SYSTEM_RESPONSE, CAPTURE_ASSISTANT_SYSTEM,
@@ -194,11 +193,11 @@ pub fn generate_decision_prompt(arguments: &Value) -> Vec<PromptMessage> {
         format!("I need to document the following decision:\n\n**Decision**: {decision}\n");
 
     if !context.is_empty() {
-        let _ = write!(prompt, "\n**Context**: {context}\n");
+        prompt.push_str(&format!("\n**Context**: {context}\n"));
     }
 
     if !alternatives.is_empty() {
-        let _ = write!(prompt, "\n**Alternatives considered**: {alternatives}\n");
+        prompt.push_str(&format!("\n**Alternatives considered**: {alternatives}\n"));
     }
 
     prompt.push_str(
@@ -268,16 +267,14 @@ pub fn generate_browse_prompt(arguments: &Value) -> Vec<PromptMessage> {
         );
         prompt.push_str("No filters applied - show the full dashboard with:\n");
     } else {
-        let _ = write!(
-            prompt,
+        prompt.push_str(&format!(
             "```json\n{{ \"query\": \"*\", \"filter\": \"{filter}\", \"limit\": 100, \"detail\": \"medium\" }}\n```\n\n"
-        );
+        ));
     }
 
-    let _ = write!(
-        prompt,
+    prompt.push_str(&format!(
         "View mode: {view}\nShow top {top} items per facet.\n\n"
-    );
+    ));
 
     prompt.push_str(BROWSE_DASHBOARD_INSTRUCTIONS);
 
@@ -317,18 +314,16 @@ pub fn generate_list_prompt(arguments: &Value) -> Vec<PromptMessage> {
     );
 
     if filter.is_empty() {
-        let _ = write!(
-            prompt,
+        prompt.push_str(&format!(
             "```json\n{{ \"query\": \"*\", \"limit\": {limit}, \"detail\": \"medium\" }}\n```\n\n"
-        );
+        ));
     } else {
-        let _ = write!(
-            prompt,
+        prompt.push_str(&format!(
             "```json\n{{ \"query\": \"*\", \"filter\": \"{filter}\", \"limit\": {limit}, \"detail\": \"medium\" }}\n```\n\n"
-        );
+        ));
     }
 
-    let _ = write!(prompt, "Format: {format}\n\n");
+    prompt.push_str(&format!("Format: {format}\n\n"));
 
     prompt.push_str(LIST_FORMAT_INSTRUCTIONS);
 
@@ -360,11 +355,11 @@ pub fn generate_intent_search_prompt(arguments: &Value) -> Vec<PromptMessage> {
     let mut prompt = format!("Search for memories related to: **{query}**\n\n");
 
     if !intent.is_empty() {
-        let _ = write!(prompt, "Intent hint: {intent}\n\n");
+        prompt.push_str(&format!("Intent hint: {intent}\n\n"));
     }
 
     if !context.is_empty() {
-        let _ = write!(prompt, "Current context: {context}\n\n");
+        prompt.push_str(&format!("Current context: {context}\n\n"));
     }
 
     prompt.push_str(INTENT_SEARCH_INSTRUCTIONS);
@@ -399,11 +394,11 @@ pub fn generate_query_suggest_prompt(arguments: &Value) -> Vec<PromptMessage> {
     let mut prompt = String::from("Help me explore my memory collection.\n\n");
 
     if !topic.is_empty() {
-        let _ = writeln!(prompt, "Topic area: **{topic}**");
+        prompt.push_str(&format!("Topic area: **{topic}**\n"));
     }
 
     if !namespace.is_empty() {
-        let _ = writeln!(prompt, "Focus namespace: **{namespace}**");
+        prompt.push_str(&format!("Focus namespace: **{namespace}**\n"));
     }
 
     prompt.push('\n');
@@ -476,10 +471,10 @@ pub fn generate_discover_prompt(arguments: &Value) -> Vec<PromptMessage> {
     if start.is_empty() {
         prompt.push_str("No starting point specified - show an overview of available topics.\n");
     } else {
-        let _ = writeln!(prompt, "Starting point: **{start}**");
+        prompt.push_str(&format!("Starting point: **{start}**\n"));
     }
 
-    let _ = write!(prompt, "Exploration depth: {depth} hops\n\n");
+    prompt.push_str(&format!("Exploration depth: {depth} hops\n\n"));
     prompt.push_str(DISCOVER_INSTRUCTIONS);
 
     vec![

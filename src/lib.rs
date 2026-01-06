@@ -55,7 +55,6 @@ pub mod observability;
 pub mod security;
 pub mod services;
 pub mod storage;
-pub mod ux_prompts;
 
 // Re-exports for convenience
 pub use config::{FeatureFlags, SubcogConfig};

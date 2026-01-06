@@ -7,7 +7,7 @@
 pub const SETUP: &str = r#"
 ## MCP Server Configuration
 
-Subcog exposes tools and resources via the Model Context Protocol (MCP).
+Subcog exposes tools, resources, and prompts via the Model Context Protocol (MCP).
 
 ### Claude Desktop Setup
 
@@ -44,8 +44,7 @@ Add to `~/.claude/settings.json`:
 Create `~/.config/subcog/config.toml`:
 
 ```toml
-# Default data_dir is ~/.config/subcog; override if desired.
-data_dir = "~/.config/subcog"
+data_dir = "~/.subcog"
 
 [features]
 secrets_filter = true
@@ -66,6 +65,7 @@ Once configured, these tools are available:
 | `subcog_consolidate` | Consolidate memories (LLM) |
 | `subcog_enrich` | Enrich a memory (LLM) |
 | `subcog_reindex` | Rebuild search index |
+| `subcog_sync` | Sync with git remote |
 | `prompt_understanding` | Guidance for using Subcog MCP tools |
 
 ## Available MCP Resources
@@ -74,20 +74,19 @@ Once configured, these tools are available:
 |----------|-------------|
 | `subcog://help` | Help index |
 | `subcog://help/{topic}` | Topic-specific help |
-| `subcog://_` | List all memories across all domains |
-| `subcog://project/_` | List project-scoped memories |
-| `subcog://user/_` | List user-scoped memories |
-| `subcog://org/_` | List org-scoped memories (if enabled) |
+| `subcog://project/_` | List all memories |
 | `subcog://memory/{id}` | Get specific memory |
 
-## UX Helper Prompts (CLI-only)
+## Available MCP Prompts
 
-These prompts are not exposed via MCP. Use the CLI to list and run them:
-
-```bash
-subcog prompt list --tags ux-helper
-subcog prompt run subcog_browse --interactive
-```
+| Prompt | Description |
+|--------|-------------|
+| `subcog_browse` | Interactive memory browser with faceted discovery |
+| `subcog_list` | Formatted memory listing with filtering |
+| `subcog_tutorial` | Interactive learning guide |
+| `subcog_capture_assistant` | Help decide what to capture |
+| `subcog_review` | Review and consolidate memories |
+| `subcog_search_help` | Craft effective search queries |
 
 ## Filter Syntax (for browse/list)
 
@@ -125,11 +124,9 @@ Memories are organized into namespaces:
 
 Domains provide scope isolation:
 
-- **Project** (`project`): Scoped to the current repository
-- **User** (`user`): Shared across all projects for the current user
-- **Organization** (`org`): Shared within an org when enabled
-
-Org scope is optional and controlled by `SUBCOG_ORG_SCOPE_ENABLED`.
+- **Global**: Shared across all projects
+- **Organization**: Shared within an org (e.g., `zircote`)
+- **Repository**: Specific to a repo (e.g., `zircote/subcog`)
 
 ## URN Scheme
 
@@ -139,10 +136,9 @@ Memories are addressed via URNs:
 subcog://{domain}/{namespace}/{id}
 ```
 
-Examples:
+Example:
 ```
-subcog://project/decisions/abc123
-subcog://user/decisions/def456
+subcog://zircote/subcog/decisions/abc123
 ```
 
 ## Memory Lifecycle
@@ -152,7 +148,6 @@ subcog://user/decisions/def456
 3. **Superseded**: Replaced by newer memory
 4. **Pending**: Awaiting review
 5. **Deleted**: Marked for cleanup
-6. **Tombstoned**: Removed from search results; retained for cleanup/audit
 ";
 
 /// Capture documentation.
@@ -317,13 +312,10 @@ Traditional keyword search with BM25 ranking:
 
 Access memories directly via MCP resources:
 
-- `subcog://_` - All memories across all domains
-- `subcog://project/_` - Project-scoped memories
-- `subcog://user/_` - User-scoped memories
-- `subcog://org/_` - Org-scoped memories (if enabled)
+- `subcog://project/_` - List all memories
 - `subcog://memory/{id}` - Get specific memory by ID
 
-For advanced filtering by namespace, tags, time, etc., use `subcog prompt run subcog_browse`.
+For advanced filtering by namespace, tags, time, etc., use the `subcog_browse` prompt.
 
 ## Understanding Scores
 
@@ -383,19 +375,29 @@ When working on a topic, find related memories:
 }
 ```
 
+### Session End: Sync Changes
+
+Sync memories to the git remote:
+
+```json
+{
+  "tool": "subcog_sync",
+  "arguments": {
+    "direction": "full"
+  }
+}
+```
+
 ## Browsing via Resources
 
 Access memories directly without search:
 
 | Resource URI | Returns |
 |--------------|---------|
-| `subcog://_` | All memories across all domains (JSON) |
-| `subcog://project/_` | Project-scoped memories |
-| `subcog://user/_` | User-scoped memories |
-| `subcog://org/_` | Org-scoped memories (if enabled) |
+| `subcog://project/_` | All memories (JSON) |
 | `subcog://memory/{id}` | Specific memory by ID |
 
-For filtering by namespace, tags, time, etc., use `subcog prompt run subcog_browse`.
+For filtering by namespace, tags, time, etc., use the `subcog_browse` prompt.
 
 ## Status Check
 
@@ -408,7 +410,7 @@ Monitor system health:
 }
 ```
 
-Returns: memory count, index status, storage backend info.
+Returns: memory count, index status, sync state, storage backend info.
 "#;
 
 /// Troubleshooting documentation.
@@ -466,6 +468,21 @@ Call the status tool to trigger initialization:
   }
 }
 ```
+
+### Sync Failures
+
+Check sync status and retry:
+
+```json
+{
+  "tool": "subcog_sync",
+  "arguments": {
+    "direction": "fetch"
+  }
+}
+```
+
+If push fails, ensure the git remote is configured and you have write access.
 
 ## Report Issues
 
@@ -597,22 +614,6 @@ Subcog supports saving and reusing prompt templates with variable substitution.
     "content": "Review the {{language}} code in {{file}} for:\n- Security issues\n- Performance\n- Best practices",
     "description": "Code review checklist template",
     "tags": ["review", "quality"]
-  }
-}
-```
-
-### Update While Preserving Metadata
-
-Set `merge` to `true` to keep existing description/tags/variable metadata when updating. With
-`merge`, you can omit `content` to update metadata only.
-
-```json
-{
-  "tool": "prompt_save",
-  "arguments": {
-    "name": "code-review",
-    "content": "Review {{file}} for:\n- Security issues\n- Performance\n- Best practices\n- Edge cases",
-    "merge": true
   }
 }
 ```

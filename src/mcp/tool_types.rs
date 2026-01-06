@@ -73,6 +73,14 @@ pub struct EnrichArgs {
     pub add_context: Option<bool>,
 }
 
+/// Arguments for the sync tool.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SyncArgs {
+    /// Sync direction: "push", "fetch", or "full" (default: "full").
+    pub direction: Option<String>,
+}
+
 /// Arguments for the reindex tool.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -106,9 +114,6 @@ pub struct PromptSaveArgs {
     /// Skip LLM-powered metadata enrichment.
     #[serde(default)]
     pub skip_enrichment: bool,
-    /// Merge with existing prompt metadata when updating (default: false).
-    #[serde(default)]
-    pub merge: bool,
 }
 
 /// Variable definition argument for prompt.save.
@@ -424,6 +429,13 @@ mod tests {
     fn test_enrich_args_rejects_unknown_fields() {
         let json = r#"{"memory_id": "123", "inject": "payload"}"#;
         let result: Result<EnrichArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sync_args_rejects_unknown_fields() {
+        let json = r#"{"direction": "push", "force": true}"#;
+        let result: Result<SyncArgs, _> = serde_json::from_str(json);
         assert!(result.is_err());
     }
 

@@ -10,7 +10,7 @@ Subcog exposes 26+ resources through the `subcog://` URI scheme for browsing and
 | [Memory Listing](#memory-listing) | Browse memories by scope |
 | [Memory Fetch](#memory-fetch) | Get full memory content |
 | [Topics](#topics) | Topic-based navigation |
-| [Prompt Templates](#prompt-templates) | Prompt template access |
+| [Prompts](#prompts) | Prompt template access |
 
 ---
 
@@ -162,7 +162,7 @@ Topic-based navigation for discovering memories by subject.
 
 ---
 
-## Prompt Templates
+## Prompts
 
 Access saved prompt templates via resources.
 
@@ -298,4 +298,4 @@ Error Response:
 
 - [URN Guide](../URN-GUIDE.md) - Complete URN/URI documentation
 - [Tools](tools.md) - MCP tools reference
-- [UX Helper Prompts](./prompts.md) - CLI-only helper prompts
+- [Prompts](./prompts.md) - MCP prompts reference

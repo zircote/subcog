@@ -273,10 +273,80 @@ Read a resource.
 }
 ```
 
-### MCP Prompts
+### prompts/list
 
-Subcog does not expose MCP prompt capabilities. UX helper prompts are available
-via the CLI (`subcog prompt`), not via MCP.
+List available prompts.
+
+**Request:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "prompts/list"
+}
+```
+
+**Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "result": {
+    "prompts": [
+      {
+        "name": "subcog_capture",
+        "description": "Guided memory capture",
+        "arguments": [
+          {
+            "name": "content",
+            "description": "Content to capture",
+            "required": true
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### prompts/get
+
+Get a prompt with arguments.
+
+**Request:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "method": "prompts/get",
+  "params": {
+    "name": "subcog_capture",
+    "arguments": {
+      "content": "Important decision"
+    }
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "result": {
+    "description": "Guided memory capture",
+    "messages": [
+      {
+        "role": "user",
+        "content": {
+          "type": "text",
+          "text": "Capture this memory:\n\nContent: Important decision\n\nSuggested namespace: decisions..."
+        }
+      }
+    ]
+  }
+}
+```
 
 ## Error Codes
 
@@ -300,6 +370,7 @@ via the CLI (`subcog prompt`), not via MCP.
 | -32607 | Prompt not found | Prompt template not found |
 | -32608 | Validation error | Input validation failed |
 | -32609 | Storage error | Storage backend error |
+| -32610 | Sync error | Git sync failed |
 
 ## Notifications
 
@@ -344,6 +415,7 @@ During initialization, capabilities are negotiated:
 {
   "tools": {"listChanged": false},
   "resources": {"subscribe": false, "listChanged": false},
+  "prompts": {"listChanged": false},
   "logging": {}
 }
 ```
@@ -407,5 +479,5 @@ Log levels: `debug`, `info`, `warning`, `error`
 
 - [Tools](tools.md) - Available MCP tools
 - [Resources](resources.md) - Available MCP resources
-- [UX Helper Prompts](./prompts.md) - CLI-only helper prompts
+- [Prompts](./prompts.md) - Available MCP prompts
 - [MCP Specification](https://modelcontextprotocol.io/) - Official MCP documentation
