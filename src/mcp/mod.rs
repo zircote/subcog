@@ -6,7 +6,7 @@
 //!
 //! - **Tools**: `subcog_capture`, `subcog_recall`, `subcog_status`, `subcog_namespaces`
 //! - **Resources**: Help documentation via `subcog://help/{category}`
-//! - **Prompt tools**: Save/list/get/run prompt templates
+//! - **Prompts**: Tutorial, capture assistant, decision documentation
 //!
 //! ## Usage
 //!
@@ -46,12 +46,14 @@ mod auth;
 mod dispatch;
 mod help_content;
 mod prompt_understanding;
+mod prompts;
 mod resources;
 mod server;
 mod tool_types;
 mod tools;
 
 pub use auth::{Claims, JwtAuthenticator, JwtConfig};
+pub use prompts::{PromptArgument, PromptContent, PromptDefinition, PromptMessage, PromptRegistry};
 pub use resources::{HelpCategory, ResourceContent, ResourceDefinition, ResourceHandler};
 pub use server::{McpServer, Transport};
 pub use tools::{ToolContent, ToolDefinition, ToolRegistry, ToolResult};

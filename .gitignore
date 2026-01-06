@@ -115,6 +115,3 @@ observability/
 
 # Local Claude settings
 .claude/settings.local.json
-
-# Auto Claude data directory
-.auto-claude/

@@ -24,9 +24,7 @@ pub use orchestrator::CaptureOrchestrator;
 
 use crate::Result;
 use crate::hooks::HookHandler;
-use crate::llm::{
-    ContradictionAssessment, ExtendedCaptureAnalysis, LlmProvider, SecurityAssessment,
-};
+use crate::llm::LlmProvider;
 use crate::models::Namespace;
 use crate::observability::current_request_id;
 use crate::services::CaptureService;
@@ -189,76 +187,55 @@ impl PreCompactHandler {
     fn classify_with_llm(&self, section: &str) -> Option<CaptureCandidate> {
         let llm = self.llm.as_ref()?;
 
-        let analysis = match llm.analyze_for_capture_extended(section, None) {
-            Ok(analysis) => analysis,
-            Err(err) => {
-                tracing::warn!(
-                    error = %err,
-                    "LLM extended capture analysis failed, falling back to basic analysis"
+        match llm.analyze_for_capture(section) {
+            Ok(analysis) if analysis.should_capture && analysis.confidence > 0.6 => {
+                let namespace = analysis
+                    .suggested_namespace
+                    .as_ref()
+                    .and_then(|ns| Namespace::parse(ns))
+                    .unwrap_or(Namespace::Context);
+
+                tracing::debug!(
+                    namespace = %namespace.as_str(),
+                    confidence = analysis.confidence,
+                    reasoning = %analysis.reasoning,
+                    "LLM classified content for capture"
                 );
-                match llm.analyze_for_capture(section) {
-                    Ok(basic) => ExtendedCaptureAnalysis {
-                        should_capture: basic.should_capture,
-                        confidence: basic.confidence,
-                        suggested_namespace: basic.suggested_namespace,
-                        suggested_tags: basic.suggested_tags,
-                        reasoning: basic.reasoning,
-                        security_assessment: SecurityAssessment::default(),
-                        contradiction_assessment: ContradictionAssessment::default(),
-                    },
-                    Err(fallback_err) => {
-                        tracing::warn!(
-                            error = %fallback_err,
-                            "LLM basic capture analysis failed"
-                        );
-                        return None;
-                    },
-                }
+
+                metrics::counter!(
+                    "hook_llm_classifications_total",
+                    "hook_type" => "PreCompact",
+                    "namespace" => namespace.as_str().to_string(),
+                    "result" => "capture"
+                )
+                .increment(1);
+
+                Some(CaptureCandidate {
+                    content: section.to_string(),
+                    namespace,
+                    confidence: analysis.confidence,
+                })
             },
-        };
+            Ok(analysis) => {
+                tracing::debug!(
+                    confidence = analysis.confidence,
+                    should_capture = analysis.should_capture,
+                    "LLM analysis did not suggest capture"
+                );
 
-        if analysis.should_capture && analysis.confidence > 0.6 {
-            let namespace = analysis
-                .suggested_namespace
-                .as_ref()
-                .and_then(|ns| Namespace::parse(ns))
-                .unwrap_or(Namespace::Context);
+                metrics::counter!(
+                    "hook_llm_classifications_total",
+                    "hook_type" => "PreCompact",
+                    "result" => "skip"
+                )
+                .increment(1);
 
-            tracing::debug!(
-                namespace = %namespace.as_str(),
-                confidence = analysis.confidence,
-                reasoning = %analysis.reasoning,
-                "LLM classified content for capture"
-            );
-
-            metrics::counter!(
-                "hook_llm_classifications_total",
-                "hook_type" => "PreCompact",
-                "namespace" => namespace.as_str().to_string(),
-                "result" => "capture"
-            )
-            .increment(1);
-
-            Some(CaptureCandidate {
-                content: section.to_string(),
-                namespace,
-                confidence: analysis.confidence,
-            })
-        } else {
-            tracing::debug!(
-                confidence = analysis.confidence,
-                should_capture = analysis.should_capture,
-                "LLM analysis did not suggest capture"
-            );
-
-            metrics::counter!(
-                "hook_llm_classifications_total",
-                "hook_type" => "PreCompact",
-                "result" => "skip"
-            )
-            .increment(1);
-
-            None
+                None
+            },
+            Err(e) => {
+                tracing::warn!(error = %e, "LLM classification failed, skipping content");
+                None
+            },
         }
     }
 

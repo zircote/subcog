@@ -145,7 +145,7 @@ Subcog integrates with Claude Code through hooks:
 2. **UserPromptSubmit**: Detects capture signals
 3. **PostToolUse**: Surfaces related memories
 4. **PreCompact**: Auto-captures before compaction
-5. **Stop**: Session summary
+5. **Stop**: Session summary and sync
 
 ### Configuration
 
