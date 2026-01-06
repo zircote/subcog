@@ -99,17 +99,6 @@ enum Commands {
     /// Show status.
     Status,
 
-    /// Sync with remote.
-    Sync {
-        /// Push changes to remote.
-        #[arg(long)]
-        push: bool,
-
-        /// Fetch changes from remote.
-        #[arg(long)]
-        fetch: bool,
-    },
-
     /// Run consolidation.
     Consolidate,
 
@@ -270,7 +259,6 @@ async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::
         Commands::Capture { .. } => "capture",
         Commands::Recall { .. } => "recall",
         Commands::Status => "status",
-        Commands::Sync { .. } => "sync",
         Commands::Consolidate => "consolidate",
         Commands::Reindex { .. } => "reindex",
         Commands::Enrich { .. } => "enrich",
@@ -316,8 +304,6 @@ async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::
             } => commands::cmd_recall(query, mode, namespace, limit, raw, include_tombstoned),
 
             Commands::Status => commands::cmd_status(&config),
-
-            Commands::Sync { push, fetch } => commands::cmd_sync(&config, push, fetch),
 
             Commands::Consolidate => commands::cmd_consolidate(&config),
 

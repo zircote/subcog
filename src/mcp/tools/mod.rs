@@ -6,7 +6,7 @@
 //!
 //! - [`definitions`]: Tool schema definitions (JSON Schema for input validation)
 //! - [`handlers`]: Tool execution logic
-//!   - [`handlers::core`]: Core memory operations (capture, recall, sync, etc.)
+//!   - [`handlers::core`]: Core memory operations (capture, recall, etc.)
 //!   - [`handlers::prompts`]: Prompt management operations (save, list, run, etc.)
 
 mod definitions;
@@ -41,7 +41,6 @@ impl ToolRegistry {
             definitions::consolidate_tool(),
         );
         tools.insert("subcog_enrich".to_string(), definitions::enrich_tool());
-        tools.insert("subcog_sync".to_string(), definitions::sync_tool());
         tools.insert("subcog_reindex".to_string(), definitions::reindex_tool());
         tools.insert(
             "prompt_understanding".to_string(),
@@ -86,7 +85,6 @@ impl ToolRegistry {
             "subcog_namespaces" => handlers::execute_namespaces(arguments),
             "subcog_consolidate" => handlers::execute_consolidate(arguments),
             "subcog_enrich" => handlers::execute_enrich(arguments),
-            "subcog_sync" => handlers::execute_sync(arguments),
             "subcog_reindex" => handlers::execute_reindex(arguments),
             "prompt_understanding" => handlers::execute_prompt_understanding(arguments),
             // Prompt management tools

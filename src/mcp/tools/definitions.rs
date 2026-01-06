@@ -187,26 +187,6 @@ pub fn enrich_tool() -> ToolDefinition {
     }
 }
 
-/// Defines the sync tool.
-pub fn sync_tool() -> ToolDefinition {
-    ToolDefinition {
-        name: "subcog_sync".to_string(),
-        description: "Sync memories with git remote (push, fetch, or full sync)".to_string(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "direction": {
-                    "type": "string",
-                    "description": "Sync direction: push (upload), fetch (download), full (both)",
-                    "enum": ["push", "fetch", "full"],
-                    "default": "full"
-                }
-            },
-            "required": []
-        }),
-    }
-}
-
 /// Defines the reindex tool.
 pub fn reindex_tool() -> ToolDefinition {
     ToolDefinition {
