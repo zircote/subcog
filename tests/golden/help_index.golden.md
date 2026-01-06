@@ -18,4 +18,4 @@ Welcome to Subcog, the persistent memory system for AI coding assistants.
 1. **Capture**: Use `subcog_capture` tool with `namespace` and `content`
 2. **Search**: Use `subcog_recall` tool with `query` parameter
 3. **Status**: Use `subcog_status` tool
-4. **Browse**: Use `subcog_browse` prompt or `subcog://project/_` resource
+4. **Browse**: Use `subcog://project/_` resource

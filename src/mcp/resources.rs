@@ -60,8 +60,8 @@
 //! subcog://topics/authentication # Memories about authentication
 //! ```
 //!
-//! For advanced filtering and discovery, use `subcog prompt run subcog_browse`,
-//! which supports filtering by namespace, tags, time, source, and status.
+//! For advanced filtering and discovery, use `subcog_recall` with the `filter`
+//! argument to refine by namespace, tags, time, source, and status.
 
 use super::help_content;
 use crate::Namespace;
@@ -228,7 +228,7 @@ impl ResourceHandler {
     /// - Help topics
     /// - Memory browsing patterns
     ///
-    /// For advanced filtering, use `subcog prompt run subcog_browse`.
+    /// For advanced filtering, use `subcog_recall` with the `filter` argument.
     #[must_use]
     pub fn list_resources(&self) -> Vec<ResourceDefinition> {
         let mut resources = Vec::new();
@@ -456,7 +456,7 @@ impl ResourceHandler {
     /// - `subcog://topics` - List all indexed topics
     /// - `subcog://topics/{topic}` - Get memories for a specific topic
     ///
-    /// For advanced filtering, use `subcog prompt run subcog_browse` instead.
+    /// For advanced filtering, use `subcog_recall` with the `filter` argument.
     ///
     /// # Errors
     ///
@@ -526,7 +526,7 @@ impl ResourceHandler {
     /// - `subcog://_/{namespace}` - All memories in a namespace
     /// - `subcog://project/_` - Alias for `subcog://_` (project-scoped, future domain filter)
     ///
-    /// For advanced filtering, use `subcog prompt run subcog_browse`.
+    /// For advanced filtering, use `subcog_recall` with the `filter` argument.
     fn get_all_memories_resource(&self, uri: &str, parts: &[&str]) -> Result<ResourceContent> {
         // Parse namespace filter from URI
         // subcog://_ -> no filter
