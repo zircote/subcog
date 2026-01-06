@@ -46,9 +46,88 @@ fn format_list_or_none(items: &[String]) -> String {
     }
 }
 
+fn resolve_prompt_content(
+    args: &PromptSaveArgs,
+    existing_template: Option<&PromptTemplate>,
+) -> Result<(String, PromptTemplate)> {
+    if let Some(content) = args.content.as_ref() {
+        return Ok((content.clone(), PromptTemplate::new(&args.name, content)));
+    }
+
+    if let Some(file_path) = args.file_path.as_ref() {
+        let template = PromptParser::from_file(file_path)?;
+        return Ok((template.content.clone(), template));
+    }
+
+    if args.merge {
+        let Some(template) = existing_template else {
+            return Err(Error::InvalidInput(
+                "Prompt not found for merge update; provide 'content' or 'file_path' to create it."
+                    .to_string(),
+            ));
+        };
+        return Ok((
+            template.content.clone(),
+            PromptTemplate::new(&args.name, &template.content),
+        ));
+    }
+
+    Err(Error::InvalidInput(
+        "Either 'content' or 'file_path' must be provided".to_string(),
+    ))
+}
+
+fn prompt_variables_from_args(
+    vars: &[crate::mcp::tool_types::PromptVariableArg],
+) -> Vec<crate::models::PromptVariable> {
+    vars.iter()
+        .map(|v| crate::models::PromptVariable {
+            name: v.name.clone(),
+            description: v.description.clone(),
+            default: v.default.clone(),
+            required: v.required.unwrap_or(true),
+        })
+        .collect()
+}
+
+fn build_partial_metadata(
+    args: &PromptSaveArgs,
+    base_template: &mut PromptTemplate,
+    existing_template: Option<&PromptTemplate>,
+) -> crate::services::PartialMetadata {
+    let mut existing = crate::services::PartialMetadata::new();
+    if args.merge
+        && let Some(template) = existing_template
+    {
+        if !template.description.is_empty() {
+            existing = existing.with_description(template.description.clone());
+        }
+        if !template.tags.is_empty() {
+            existing = existing.with_tags(template.tags.clone());
+        }
+        if !template.variables.is_empty() {
+            existing = existing.with_variables(template.variables.clone());
+        }
+    }
+
+    if let Some(desc) = args.description.as_ref() {
+        existing = existing.with_description(desc.clone());
+    }
+    if let Some(tags) = args.tags.as_ref() {
+        existing = existing.with_tags(tags.clone());
+    }
+    if let Some(vars) = args.variables.as_ref() {
+        existing = existing.with_variables(prompt_variables_from_args(vars));
+    } else if !base_template.variables.is_empty() && (!args.merge || args.file_path.is_some()) {
+        existing = existing.with_variables(std::mem::take(&mut base_template.variables));
+    }
+
+    existing
+}
+
 /// Executes the prompt.save tool.
 pub fn execute_prompt_save(arguments: Value) -> Result<ToolResult> {
-    use crate::services::{EnrichmentStatus, PartialMetadata, SaveOptions};
+    use crate::services::{EnrichmentStatus, SaveOptions};
 
     let args: PromptSaveArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
@@ -72,65 +151,10 @@ pub fn execute_prompt_save(arguments: Value) -> Result<ToolResult> {
         None
     };
 
-    // Get content either directly, from file, or by reusing existing content on merge
-    let (content, mut base_template) = if let Some(content) = args.content {
-        (content.clone(), PromptTemplate::new(&args.name, &content))
-    } else if let Some(file_path) = args.file_path.as_ref() {
-        let template = PromptParser::from_file(file_path)?;
-        (template.content.clone(), template)
-    } else if args.merge {
-        let Some(template) = existing_template.as_ref() else {
-            return Err(Error::InvalidInput(
-                "Prompt not found for merge update; provide 'content' or 'file_path' to create it."
-                    .to_string(),
-            ));
-        };
-        (
-            template.content.clone(),
-            PromptTemplate::new(&args.name, &template.content),
-        )
-    } else {
-        return Err(Error::InvalidInput(
-            "Either 'content' or 'file_path' must be provided".to_string(),
-        ));
-    };
+    let (content, mut base_template) = resolve_prompt_content(&args, existing_template.as_ref())?;
 
     // Build partial metadata from existing prompt (optional) + user-provided values
-    let mut existing = PartialMetadata::new();
-    if args.merge {
-        if let Some(template) = existing_template {
-            if !template.description.is_empty() {
-                existing = existing.with_description(template.description);
-            }
-            if !template.tags.is_empty() {
-                existing = existing.with_tags(template.tags);
-            }
-            if !template.variables.is_empty() {
-                existing = existing.with_variables(template.variables);
-            }
-        }
-    }
-    if let Some(desc) = args.description {
-        existing = existing.with_description(desc);
-    }
-    if let Some(tags) = args.tags {
-        existing = existing.with_tags(tags);
-    }
-    if let Some(vars) = args.variables {
-        use crate::models::PromptVariable;
-        let variables: Vec<PromptVariable> = vars
-            .into_iter()
-            .map(|v| PromptVariable {
-                name: v.name,
-                description: v.description,
-                default: v.default,
-                required: v.required.unwrap_or(true),
-            })
-            .collect();
-        existing = existing.with_variables(variables);
-    } else if !base_template.variables.is_empty() && (!args.merge || args.file_path.is_some()) {
-        existing = existing.with_variables(std::mem::take(&mut base_template.variables));
-    }
+    let existing = build_partial_metadata(&args, &mut base_template, existing_template.as_ref());
 
     // Configure save options
     let options = SaveOptions::new().with_skip_enrichment(args.skip_enrichment);
