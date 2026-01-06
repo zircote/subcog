@@ -777,7 +777,7 @@ impl ServerHandler for McpHandler {
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<GetPromptResult>> + Send + '_ {
         let (request_context, request_id) = init_request_context(current_request_id());
-        let prompt_name = request.name.clone();
+        let prompt_name = request.name;
         async move {
             let span = info_span!(
                 "subcog.mcp.request",

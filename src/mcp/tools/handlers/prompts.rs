@@ -183,7 +183,7 @@ pub fn execute_prompt_list(arguments: Value) -> Result<ToolResult> {
         let user_dir = crate::storage::get_user_data_dir()?;
         create_prompt_service(&user_dir)
     };
-    let mut user_filter = filter.clone();
+    let mut user_filter = filter;
     user_filter.limit = Some(limit);
     let prompts = prompt_service.list(&user_filter)?;
 
