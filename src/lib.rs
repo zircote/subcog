@@ -52,10 +52,10 @@ pub mod llm;
 pub mod mcp;
 pub mod models;
 pub mod observability;
-pub mod ux_prompts;
 pub mod security;
 pub mod services;
 pub mod storage;
+pub mod ux_prompts;
 
 // Re-exports for convenience
 pub use config::{FeatureFlags, SubcogConfig};
