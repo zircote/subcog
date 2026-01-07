@@ -1262,3 +1262,88 @@ mod cors_tests {
         assert_eq!(server.cors_config.allowed_origins[0], "https://trusted.com");
     }
 }
+
+#[cfg(all(test, feature = "http"))]
+mod auth_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode, header};
+    use axum::middleware;
+    use axum::routing::get;
+    use axum::Router;
+    use chrono::Utc;
+    use jsonwebtoken::{EncodingKey, Header};
+    use tower::ServiceExt;
+
+    const TEST_JWT_SECRET: &str = "a-very-long-secret-key-that-is-at-least-32-chars";
+
+    fn build_app(state: HttpAuthState) -> Router {
+        Router::new()
+            .route("/", get(|| async { "ok" }))
+            .layer(middleware::from_fn_with_state(state, auth_middleware))
+    }
+
+    fn build_state(max_requests: usize) -> HttpAuthState {
+        let config = JwtConfig::new(TEST_JWT_SECRET);
+        HttpAuthState {
+            authenticator: JwtAuthenticator::new(&config),
+            rate_limit: RateLimitConfig {
+                max_requests,
+                window: Duration::from_secs(60),
+            },
+            rate_limits: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    fn create_test_token(sub: &str) -> String {
+        let claims = Claims {
+            sub: sub.to_string(),
+            exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+            iat: Utc::now().timestamp() as usize,
+            iss: None,
+            aud: None,
+            scopes: vec!["read".to_string()],
+        };
+        jsonwebtoken::encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(TEST_JWT_SECRET.as_bytes()),
+        )
+        .expect("Failed to encode test token")
+    }
+
+    #[tokio::test]
+    async fn test_auth_middleware_missing_header() {
+        let app = build_app(build_state(5));
+        let request = Request::builder()
+            .uri("/")
+            .body(Body::empty())
+            .expect("request");
+        let response = app.oneshot(request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_auth_middleware_rate_limit_exceeded() {
+        let state = build_state(1);
+        let app = build_app(state);
+        let token = create_test_token("client-a");
+        let auth_header = format!("Bearer {token}");
+
+        let request = Request::builder()
+            .uri("/")
+            .header(header::AUTHORIZATION, auth_header.clone())
+            .body(Body::empty())
+            .expect("request");
+        let first = app.clone().oneshot(request).await.expect("response");
+        assert_eq!(first.status(), StatusCode::OK);
+
+        let request = Request::builder()
+            .uri("/")
+            .header(header::AUTHORIZATION, auth_header)
+            .body(Body::empty())
+            .expect("request");
+        let second = app.oneshot(request).await.expect("response");
+        assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+}
