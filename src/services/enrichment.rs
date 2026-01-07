@@ -2,7 +2,9 @@
 //!
 //! Enriches memories with tags, structure, and context using LLM.
 
-use crate::llm::{LlmProvider, OperationMode, build_system_prompt};
+use crate::llm::{
+    LlmProvider, OperationMode, build_system_prompt, sanitize_llm_response_for_error,
+};
 use crate::models::{Memory, MemoryId, SearchFilter};
 use crate::storage::traits::IndexBackend;
 use crate::{Error, Result};
@@ -209,10 +211,11 @@ impl<P: LlmProvider> EnrichmentService<P> {
         let response = self.llm.complete_with_system(&system, &user_prompt)?;
 
         // Parse the JSON response
+        let sanitized = sanitize_llm_response_for_error(&response);
         let tags: Vec<String> =
             serde_json::from_str(&response).map_err(|e| Error::OperationFailed {
                 operation: "parse_tags".to_string(),
-                cause: format!("Failed to parse LLM response: {e}. Response was: {response}"),
+                cause: format!("Failed to parse LLM response: {e}. Response was: {sanitized}"),
             })?;
 
         Ok(tags)
