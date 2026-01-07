@@ -105,16 +105,10 @@ where
     }
 }
 
-fn init_request_context(
-    existing_request_id: Option<String>,
-) -> (Option<ObsRequestContext>, String) {
-    if let Some(request_id) = existing_request_id {
-        (None, request_id)
-    } else {
-        let context = ObsRequestContext::new();
-        let request_id = context.request_id().to_string();
-        (Some(context), request_id)
-    }
+fn init_request_context() -> (Option<ObsRequestContext>, String) {
+    let context = ObsRequestContext::new();
+    let request_id = context.request_id().to_string();
+    (Some(context), request_id)
 }
 
 async fn await_shutdown(cancel_token: rmcp::service::RunningServiceCancellationToken) {
@@ -590,10 +584,11 @@ impl ServerHandler for McpHandler {
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListToolsResult>> + Send + '_ {
         let state = self.state.clone();
-        let (request_context, request_id) = init_request_context(current_request_id());
+        let (request_context, request_id) = init_request_context();
 
         async move {
             let span = info_span!(
+                parent: None,
                 "subcog.mcp.request",
                 request_id = %request_id,
                 component = "mcp",
@@ -621,10 +616,11 @@ impl ServerHandler for McpHandler {
         context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<CallToolResult>> + Send + '_ {
         let state = self.state.clone();
-        let (request_context, request_id) = init_request_context(current_request_id());
+        let (request_context, request_id) = init_request_context();
         let tool_name = request.name.clone();
         async move {
             let span = info_span!(
+                parent: None,
                 "subcog.mcp.request",
                 request_id = %request_id,
                 component = "mcp",
@@ -650,9 +646,10 @@ impl ServerHandler for McpHandler {
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListResourcesResult>> + Send + '_ {
         let state = self.state.clone();
-        let (request_context, request_id) = init_request_context(current_request_id());
+        let (request_context, request_id) = init_request_context();
         async move {
             let span = info_span!(
+                parent: None,
                 "subcog.mcp.request",
                 request_id = %request_id,
                 component = "mcp",
@@ -686,10 +683,11 @@ impl ServerHandler for McpHandler {
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListResourceTemplatesResult>> + Send + '_ {
-        let (request_context, request_id) = init_request_context(current_request_id());
+        let (request_context, request_id) = init_request_context();
 
         async move {
             let span = info_span!(
+                parent: None,
                 "subcog.mcp.request",
                 request_id = %request_id,
                 component = "mcp",
@@ -715,10 +713,11 @@ impl ServerHandler for McpHandler {
     ) -> impl std::future::Future<Output = McpResult<rmcp::model::ReadResourceResult>> + Send + '_
     {
         let state = self.state.clone();
-        let (request_context, request_id) = init_request_context(current_request_id());
+        let (request_context, request_id) = init_request_context();
         let resource_uri = request.uri.clone();
         async move {
             let span = info_span!(
+                parent: None,
                 "subcog.mcp.request",
                 request_id = %request_id,
                 component = "mcp",
@@ -753,9 +752,10 @@ impl ServerHandler for McpHandler {
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListPromptsResult>> + Send + '_ {
-        let (request_context, request_id) = init_request_context(current_request_id());
+        let (request_context, request_id) = init_request_context();
         async move {
             let span = info_span!(
+                parent: None,
                 "subcog.mcp.request",
                 request_id = %request_id,
                 component = "mcp",
@@ -776,10 +776,11 @@ impl ServerHandler for McpHandler {
         request: GetPromptRequestParam,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<GetPromptResult>> + Send + '_ {
-        let (request_context, request_id) = init_request_context(current_request_id());
+        let (request_context, request_id) = init_request_context();
         let prompt_name = request.name;
         async move {
             let span = info_span!(
+                parent: None,
                 "subcog.mcp.request",
                 request_id = %request_id,
                 component = "mcp",
