@@ -1266,11 +1266,13 @@ mod cors_tests {
 #[cfg(all(test, feature = "http"))]
 mod auth_tests {
     use super::*;
-    use axum::body::Body;
-    use axum::http::{Request, StatusCode, header};
-    use axum::middleware;
-    use axum::routing::get;
-    use axum::Router;
+    use axum::{
+        Router,
+        body::Body,
+        http::{Request, StatusCode, header},
+        middleware,
+        routing::get,
+    };
     use chrono::Utc;
     use jsonwebtoken::{EncodingKey, Header};
     use tower::ServiceExt;
