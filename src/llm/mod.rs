@@ -353,7 +353,17 @@ pub fn build_http_client(config: LlmHttpConfig) -> reqwest::blocking::Client {
 
     builder.build().unwrap_or_else(|err| {
         tracing::warn!("Failed to build LLM HTTP client: {err}");
-        reqwest::blocking::Client::new()
+        let mut fallback = reqwest::blocking::Client::builder();
+        if config.timeout_ms > 0 {
+            fallback = fallback.timeout(Duration::from_millis(config.timeout_ms));
+        }
+        if config.connect_timeout_ms > 0 {
+            fallback = fallback.connect_timeout(Duration::from_millis(config.connect_timeout_ms));
+        }
+        fallback.build().unwrap_or_else(|fallback_err| {
+            tracing::warn!("Failed to build LLM HTTP fallback client: {fallback_err}");
+            reqwest::blocking::Client::new()
+        })
     })
 }
 

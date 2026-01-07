@@ -7,9 +7,9 @@
 
 ## Overall Progress
 - **Total Findings**: 6
-- **Completed**: 4
-- **Remaining**: 2
-- **Progress**: 4/6 (66%)
+- **Completed**: 5
+- **Remaining**: 1
+- **Progress**: 5/6 (83%)
 
 ## Commits Log
 
@@ -19,6 +19,7 @@
 | 2 | TBD | Security | Escape prompt enrichment XML content | src/services/prompt_enrichment.rs:389 |
 | 3 | TBD | Performance | Cache branch lookups in recall | src/services/recall.rs:330 |
 | 4 | TBD | Architecture | Avoid repo-local storage fallback | src/services/path_manager.rs:71 |
+| 5 | TBD | Code Quality | Preserve LLM HTTP timeouts on fallback | src/llm/mod.rs:337 |
 
 ## Category Progress
 
@@ -27,6 +28,6 @@
 | Security | 2 | 2 | 0 |
 | Performance | 1 | 1 | 0 |
 | Architecture | 1 | 1 | 0 |
-| Code Quality | 1 | 0 | 1 |
+| Code Quality | 1 | 1 | 0 |
 | Test Coverage | 1 | 0 | 1 |
 | Documentation | 0 | 0 | 0 |
