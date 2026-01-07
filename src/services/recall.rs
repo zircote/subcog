@@ -16,8 +16,9 @@ use crate::storage::index::SqliteBackend;
 use crate::storage::traits::{IndexBackend, VectorBackend};
 use crate::{Error, Result};
 use chrono::{TimeZone, Utc};
+use git2::{BranchType, Repository};
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{info_span, instrument, warn};
@@ -344,6 +345,8 @@ impl RecallService {
             .single()
             .unwrap_or_else(Utc::now);
 
+        let branch_names = Self::load_branch_names();
+
         for hit in hits.iter_mut() {
             let Some(branch) = hit.memory.branch.as_deref() else {
                 continue;
@@ -357,7 +360,12 @@ impl RecallService {
                 continue;
             }
 
-            if branch_exists(branch) {
+            let exists = match &branch_names {
+                Some(names) => names.contains(branch),
+                None => branch_exists(branch),
+            };
+
+            if exists {
                 continue;
             }
 
@@ -381,6 +389,32 @@ impl RecallService {
         if !filter.include_tombstoned {
             hits.retain(|hit| hit.memory.status != MemoryStatus::Tombstoned);
         }
+    }
+
+    fn load_branch_names() -> Option<HashSet<String>> {
+        let cwd = std::env::current_dir().ok()?;
+        let repo = Repository::discover(&cwd).ok()?;
+        let mut names = HashSet::new();
+
+        if let Ok(branches) = repo.branches(Some(BranchType::Local)) {
+            for branch in branches.flatten() {
+                if let Ok(Some(name)) = branch.0.name() {
+                    names.insert(name.to_string());
+                }
+            }
+        }
+
+        if let Ok(branches) = repo.branches(Some(BranchType::Remote)) {
+            for branch in branches.flatten() {
+                if let Ok(Some(name)) = branch.0.name() {
+                    if let Some((_, branch_name)) = name.split_once('/') {
+                        names.insert(branch_name.to_string());
+                    }
+                }
+            }
+        }
+
+        Some(names)
     }
 
     /// Lists all memories, optionally filtered by namespace.

@@ -566,7 +566,7 @@ pub fn branch_exists(branch: &str) -> bool {
             branches
                 .flatten()
                 .filter_map(|(b, _)| b.name().ok().flatten().map(String::from))
-                .filter_map(|name| name.split('/').nth(1).map(String::from))
+                .filter_map(|name| name.split_once('/').map(|(_, branch)| branch.to_string()))
                 .any(|name| name == branch)
         })
 }
