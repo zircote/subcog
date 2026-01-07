@@ -16,5 +16,5 @@
 
 ## Low Priority (Backlog)
 
-- [ ] [src/llm/mod.rs:337] Preserve timeouts in LLM HTTP client fallback path
+- [x] [src/llm/mod.rs:337] Preserve timeouts in LLM HTTP client fallback path
 - [ ] [src/mcp/server.rs:272] Add tests for JWT auth failures and rate-limit exceeded responses
