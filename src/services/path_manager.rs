@@ -55,7 +55,7 @@ impl PathManager {
     /// Creates a `PathManager` for repository-scoped storage.
     ///
     /// Storage paths will be within the user data directory.
-    /// Falls back to the provided repo path only if the user data dir cannot be resolved.
+    /// Falls back to a temporary user-level directory if the user data dir cannot be resolved.
     ///
     /// # Arguments
     ///
@@ -68,8 +68,14 @@ impl PathManager {
     /// // Uses user data directory, not repo-local storage
     /// ```
     #[must_use]
-    pub fn for_repo(repo_root: impl AsRef<Path>) -> Self {
-        let base_dir = get_user_data_dir().unwrap_or_else(|_| repo_root.as_ref().to_path_buf());
+    pub fn for_repo(_repo_root: impl AsRef<Path>) -> Self {
+        let base_dir = get_user_data_dir().unwrap_or_else(|err| {
+            tracing::warn!(
+                error = %err,
+                "Failed to resolve user data dir; falling back to temp dir"
+            );
+            std::env::temp_dir().join("subcog")
+        });
         let subcog_dir = base_dir.clone();
         Self {
             base_dir,
