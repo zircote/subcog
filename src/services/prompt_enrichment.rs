@@ -403,8 +403,7 @@ impl<P: LlmProvider> PromptEnrichmentService<P> {
         let escaped_content = escape_xml(&request.content);
         let escaped_variables = escape_xml(&variables_str);
         format!(
-            "<prompt_content>\n{}\n</prompt_content>\n\n<detected_variables>\n{}\n</detected_variables>",
-            escaped_content, escaped_variables
+            "<prompt_content>\n{escaped_content}\n</prompt_content>\n\n<detected_variables>\n{escaped_variables}\n</detected_variables>"
         )
     }
 

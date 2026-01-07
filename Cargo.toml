@@ -122,6 +122,7 @@ ctrlc = "3.5.1"
 proptest = "1.5"
 test-case = "3.3"
 tempfile = "3.14"
+tower = "0.5"
 
 # Async testing
 tokio-test = "0.4"

@@ -397,20 +397,24 @@ impl RecallService {
         let mut names = HashSet::new();
 
         if let Ok(branches) = repo.branches(Some(BranchType::Local)) {
-            for branch in branches.flatten() {
-                if let Ok(Some(name)) = branch.0.name() {
-                    names.insert(name.to_string());
-                }
+            for name in branches
+                .flatten()
+                .filter_map(|(branch, _)| branch.name().ok().flatten().map(str::to_string))
+            {
+                names.insert(name);
             }
         }
 
         if let Ok(branches) = repo.branches(Some(BranchType::Remote)) {
-            for branch in branches.flatten() {
-                if let Ok(Some(name)) = branch.0.name() {
-                    if let Some((_, branch_name)) = name.split_once('/') {
-                        names.insert(branch_name.to_string());
-                    }
-                }
+            for name in branches
+                .flatten()
+                .filter_map(|(branch, _)| branch.name().ok().flatten().map(str::to_string))
+                .filter_map(|name| {
+                    name.split_once('/')
+                        .map(|(_, branch_name)| branch_name.to_string())
+                })
+            {
+                names.insert(name);
             }
         }
 

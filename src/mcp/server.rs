@@ -1275,7 +1275,7 @@ mod auth_tests {
     };
     use chrono::Utc;
     use jsonwebtoken::{EncodingKey, Header};
-    use tower::ServiceExt;
+    use tower::util::ServiceExt;
 
     const TEST_JWT_SECRET: &str = "a-very-long-secret-key-that-is-at-least-32-chars";
 
@@ -1297,11 +1297,15 @@ mod auth_tests {
         }
     }
 
+    #[allow(clippy::expect_used)]
     fn create_test_token(sub: &str) -> String {
+        let exp =
+            usize::try_from((Utc::now() + chrono::Duration::hours(1)).timestamp()).unwrap_or(0);
+        let iat = usize::try_from(Utc::now().timestamp()).unwrap_or(0);
         let claims = Claims {
             sub: sub.to_string(),
-            exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
-            iat: Utc::now().timestamp() as usize,
+            exp,
+            iat,
             iss: None,
             aud: None,
             scopes: vec!["read".to_string()],
