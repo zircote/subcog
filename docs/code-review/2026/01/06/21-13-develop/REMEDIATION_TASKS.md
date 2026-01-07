@@ -10,7 +10,7 @@
 
 ## Medium Priority (Next 2-3 Sprints)
 
-- [ ] [src/services/prompt_enrichment.rs:389] Escape user content before inserting into XML tags
+- [x] [src/services/prompt_enrichment.rs:389] Escape user content before inserting into XML tags
 - [ ] [src/services/recall.rs:330] Cache branch existence checks within a recall call to avoid repeated git scans
 - [ ] [src/services/path_manager.rs:71] Remove implicit fallback to repo path or require explicit opt-in
 

@@ -96,6 +96,21 @@ Respond with ONLY valid JSON, no markdown formatting.
 - Respond with valid JSON only, no explanation
 </rules>"#;
 
+fn escape_xml(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => result.push_str("&amp;"),
+            '<' => result.push_str("&lt;"),
+            '>' => result.push_str("&gt;"),
+            '"' => result.push_str("&quot;"),
+            '\'' => result.push_str("&apos;"),
+            _ => result.push(c),
+        }
+    }
+    result
+}
+
 /// Default timeout for LLM enrichment calls.
 pub const ENRICHMENT_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -385,9 +400,11 @@ impl<P: LlmProvider> PromptEnrichmentService<P> {
         } else {
             request.variables.join(", ")
         };
+        let escaped_content = escape_xml(&request.content);
+        let escaped_variables = escape_xml(&variables_str);
         format!(
             "<prompt_content>\n{}\n</prompt_content>\n\n<detected_variables>\n{}\n</detected_variables>",
-            request.content, variables_str
+            escaped_content, escaped_variables
         )
     }
 
