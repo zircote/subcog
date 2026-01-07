@@ -169,6 +169,8 @@ pub use system_prompt::{
 };
 
 use crate::Result;
+use crate::security::{ContentRedactor, RedactionConfig};
+use std::sync::LazyLock;
 use std::time::Duration;
 
 /// Trait for LLM providers.
@@ -286,6 +288,10 @@ pub struct LlmHttpConfig {
     pub connect_timeout_ms: u64,
 }
 
+const MAX_LLM_ERROR_RESPONSE_CHARS: usize = 200;
+static LLM_ERROR_REDACTOR: LazyLock<ContentRedactor> =
+    LazyLock::new(|| ContentRedactor::with_config(RedactionConfig::new().with_pii()));
+
 impl Default for LlmHttpConfig {
     fn default() -> Self {
         Self {
@@ -351,32 +357,48 @@ pub fn build_http_client(config: LlmHttpConfig) -> reqwest::blocking::Client {
     })
 }
 
+pub(crate) fn sanitize_llm_response_for_error(response: &str) -> String {
+    let redacted = LLM_ERROR_REDACTOR.redact(response);
+    if redacted.chars().count() > MAX_LLM_ERROR_RESPONSE_CHARS {
+        let truncated: String = redacted
+            .chars()
+            .take(MAX_LLM_ERROR_RESPONSE_CHARS)
+            .collect();
+        format!("{truncated}...(truncated)")
+    } else {
+        redacted
+    }
+}
+
 /// Parses an extended capture analysis response from LLM output.
 ///
 /// Handles various JSON formats and extracts from markdown code blocks.
 fn parse_extended_capture_analysis(response: &str) -> Result<ExtendedCaptureAnalysis> {
     let json_str = extract_json_from_response(response);
+    let sanitized = sanitize_llm_response_for_error(response);
     serde_json::from_str(json_str).map_err(|e| crate::Error::OperationFailed {
         operation: "parse_extended_capture_analysis".to_string(),
-        cause: format!("Invalid JSON: {e}. Response: {response}"),
+        cause: format!("Invalid JSON: {e}. Response: {sanitized}"),
     })
 }
 
 /// Parses an extended search intent response from LLM output.
 fn parse_extended_search_intent(response: &str) -> Result<ExtendedSearchIntent> {
     let json_str = extract_json_from_response(response);
+    let sanitized = sanitize_llm_response_for_error(response);
     serde_json::from_str(json_str).map_err(|e| crate::Error::OperationFailed {
         operation: "parse_extended_search_intent".to_string(),
-        cause: format!("Invalid JSON: {e}. Response: {response}"),
+        cause: format!("Invalid JSON: {e}. Response: {sanitized}"),
     })
 }
 
 /// Parses a consolidation analysis response from LLM output.
 fn parse_consolidation_analysis(response: &str) -> Result<ConsolidationAnalysis> {
     let json_str = extract_json_from_response(response);
+    let sanitized = sanitize_llm_response_for_error(response);
     serde_json::from_str(json_str).map_err(|e| crate::Error::OperationFailed {
         operation: "parse_consolidation_analysis".to_string(),
-        cause: format!("Invalid JSON: {e}. Response: {response}"),
+        cause: format!("Invalid JSON: {e}. Response: {sanitized}"),
     })
 }
 

@@ -47,7 +47,7 @@
 //!
 //! The service never fails a prompt save due to enrichment errors.
 
-use crate::llm::LlmProvider;
+use crate::llm::{LlmProvider, sanitize_llm_response_for_error};
 use crate::models::PromptVariable;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -385,7 +385,6 @@ impl<P: LlmProvider> PromptEnrichmentService<P> {
         } else {
             request.variables.join(", ")
         };
-
         format!(
             "<prompt_content>\n{}\n</prompt_content>\n\n<detected_variables>\n{}\n</detected_variables>",
             request.content, variables_str
@@ -402,10 +401,11 @@ impl<P: LlmProvider> PromptEnrichmentService<P> {
         let json_str = crate::llm::extract_json_from_response(response);
 
         // Parse JSON
+        let sanitized = sanitize_llm_response_for_error(response);
         let llm_response: LlmEnrichmentResponse =
             serde_json::from_str(json_str).map_err(|e| Error::OperationFailed {
                 operation: "parse_enrichment_response".to_string(),
-                cause: format!("Failed to parse LLM response: {e}. Response was: {response}"),
+                cause: format!("Failed to parse LLM response: {e}. Response was: {sanitized}"),
             })?;
 
         // Convert to result, ensuring all expected variables are present

@@ -2,6 +2,7 @@
 
 use super::{
     CaptureAnalysis, LlmHttpConfig, LlmProvider, build_http_client, extract_json_from_response,
+    sanitize_llm_response_for_error,
 };
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -264,10 +265,11 @@ Only output the JSON, nothing else."#
         let json_str = extract_json_from_response(&response);
 
         // Parse JSON response
+        let sanitized = sanitize_llm_response_for_error(&response);
         let analysis: AnalysisResponse =
             serde_json::from_str(json_str).map_err(|e| Error::OperationFailed {
                 operation: "parse_analysis".to_string(),
-                cause: format!("Failed to parse: {e} - Response was: {response}"),
+                cause: format!("Failed to parse: {e} - Response was: {sanitized}"),
             })?;
 
         Ok(CaptureAnalysis {
