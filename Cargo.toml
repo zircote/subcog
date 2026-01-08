@@ -87,7 +87,7 @@ lru = "0.16"
 fastembed = { version = "5", optional = true, default-features = false, features = ["ort-download-binaries", "hf-hub-rustls-tls"] }
 
 # usearch HNSW vector search (optional - pure Rust fallback if not available)
-usearch = { version = "2.21", optional = true }
+usearch = { version = "2.23", optional = true }
 
 # HTTP client for LLM APIs (using rustls instead of native-tls to avoid openssl)
 reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
