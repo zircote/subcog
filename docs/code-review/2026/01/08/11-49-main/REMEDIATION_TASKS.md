@@ -7,366 +7,238 @@
 
 ---
 
-## Remediation Priority Order
-
-Tasks are ordered by severity, then by implementation complexity (simpler first within each severity level).
-
----
-
 ## Phase 1: CRITICAL (7 findings)
 
-### CHAOS-CRIT-001/002/003: Add retry logic to LLM clients
-**Files**: `src/llm/anthropic.rs`, `src/llm/openai.rs`, `src/llm/ollama.rs`
-**Effort**: ~2 hours
-**Action**:
-- Add exponential backoff retry with jitter
-- Configure max retries (default: 3)
-- Add timeout per attempt
-- Log retry attempts at warn level
-
-```rust
-// Implementation pattern
-use tokio_retry::{strategy::ExponentialBackoff, Retry};
-
-let retry_strategy = ExponentialBackoff::from_millis(100)
-    .factor(2)
-    .max_delay(Duration::from_secs(10))
-    .take(3);
-
-Retry::spawn(retry_strategy, || async {
-    self.do_request(prompt).await
-}).await
-```
-
-### COMP-CRIT-002: Enable encryption by default
-**File**: `src/config/mod.rs`
-**Effort**: ~15 minutes
-**Action**:
-- Change `encryption.enabled` default from `false` to `true`
-- Update tests that assume unencrypted storage
-- Add migration note to CHANGELOG
-
-### COMP-CRIT-003: Document stdio transport security model
-**File**: `src/mcp/transport/stdio.rs`, `README.md`
-**Effort**: ~30 minutes
-**Action**:
-- Add security warning in module docs
-- Document stdio is for local development only
-- Recommend HTTP transport with auth for production
-- Consider adding environment variable guard
-
-### TEST-CRIT-001: Add CaptureService integration tests
-**File**: `tests/capture_integration.rs` (new)
-**Effort**: ~2 hours
-**Action**:
-- Full capture flow: request → storage → index → vector
-- Test with SQLite backend
-- Test error handling paths
-- Add to CI matrix
-
-### COMP-CRIT-001: Implement GDPR data export
-**Files**: `src/services/export.rs` (new), `src/mcp/tools/handlers/core.rs`
-**Effort**: ~4 hours
-**Action**:
-- Add `export_user_data(user_id)` service method
-- Export all memories, prompts, and metadata
-- Support JSON and CSV formats
-- Add MCP tool `subcog_export`
-- Document in GDPR compliance section
+- [ ] CHAOS-CRIT-001: Add retry logic to `src/llm/anthropic.rs` - exponential backoff with jitter, max 3 retries
+- [ ] CHAOS-CRIT-002: Add retry logic to `src/llm/openai.rs` - exponential backoff with jitter, max 3 retries
+- [ ] CHAOS-CRIT-003: Add retry logic to `src/llm/ollama.rs` - exponential backoff with jitter, max 3 retries
+- [ ] COMP-CRIT-002: Enable encryption by default in `src/config/mod.rs` - change default from false to true
+- [ ] COMP-CRIT-003: Document stdio transport security model in `src/mcp/transport/stdio.rs` and README
+- [ ] TEST-CRIT-001: Add CaptureService integration tests in `tests/capture_integration.rs`
+- [ ] COMP-CRIT-001: Implement GDPR data export in `src/services/export.rs` with MCP tool
 
 ---
 
 ## Phase 2: HIGH (30 findings)
 
-### DEP-HIGH-002: Replace serde_yaml with serde_yml
-**Files**: `Cargo.toml`, all files using serde_yaml
-**Effort**: ~30 minutes
-**Action**:
-- Replace `serde_yaml` with `serde_yml` in Cargo.toml
-- Update all import statements
-- Verify YAML parsing behavior unchanged
-
-### DEP-HIGH-001: Acknowledge RUSTSEC-2023-0071
-**File**: `deny.toml`
-**Effort**: ~15 minutes
-**Action**:
-- Add advisory to ignore list with justification
-- RSA timing is transitive via ort (fastembed)
-- Document that we don't use RSA directly
-- Track ort stable release for fix
-
-### PERF-HIGH-001: Optimize SearchHit cloning in RRF fusion
-**File**: `src/services/recall.rs`
-**Effort**: ~1 hour
-**Action**:
-- Use references instead of cloning
-- Consider `Cow<SearchHit>` for deferred cloning
-- Profile with criterion before/after
-
-### PERF-HIGH-002: Optimize Memory cloning in lazy tombstone
-**File**: `src/services/recall.rs`
-**Effort**: ~1 hour
-**Action**:
-- Move instead of clone where possible
-- Use `Arc<Memory>` for shared ownership
-- Extract query from mutation
-
-### PERF-HIGH-003: Fix N+1 query in branch GC
-**File**: `src/gc/branch.rs`
-**Effort**: ~1.5 hours
-**Action**:
-- Batch load branch metadata
-- Use single query with IN clause
-- Add pagination for large result sets
-
-### PERF-HIGH-004: Reduce string allocation in embed_batch
-**File**: `src/embedding/fastembed.rs`
-**Effort**: ~45 minutes
-**Action**:
-- Use `&[&str]` instead of `Vec<String>`
-- Pre-allocate output vector
-- Consider streaming for large batches
-
-### ARCH-HIGH-001: Fix CQS violation in lazy_tombstone_stale_branches
-**File**: `src/services/recall.rs`
-**Effort**: ~2 hours
-**Action**:
-- Separate query from command
-- Extract mutation to dedicated method
-- Call mutation explicitly in caller
-- Update tests
-
-### ARCH-HIGH-002: Split SubcogConfig god object
-**File**: `src/config/mod.rs`
-**Effort**: ~3 hours
-**Action**:
-- Extract `StorageConfig`
-- Extract `SecurityConfig`
-- Extract `ObservabilityConfig`
-- Use builder pattern for composition
-
-### CHAOS-HIGH-001: Add circuit breakers to external services
-**Files**: `src/llm/*.rs`, `src/embedding/fastembed.rs`
-**Effort**: ~3 hours
-**Action**:
-- Implement simple circuit breaker pattern
-- States: Closed → Open → Half-Open
-- Configure failure threshold and reset timeout
-- Add metrics for circuit state
-
-### CHAOS-HIGH-002-006: Add graceful degradation
-**Various files**
-**Effort**: ~4 hours
-**Action**:
-- Embedding fallback to BM25-only
-- Database connection retry with backoff
-- Service isolation with bulkhead pattern
-- Configurable timeouts per operation
-- Health check endpoints for all services
-
-### TEST-HIGH-001/002: Add PostgreSQL/Redis integration tests
-**Files**: `tests/postgresql_integration.rs`, `tests/redis_integration.rs` (new)
-**Effort**: ~4 hours
-**Action**:
-- Use testcontainers for isolated instances
-- Test CRUD operations
-- Test connection failure handling
-- Add to CI with container services
-
-### TEST-HIGH-003: Add LLM client error handling tests
-**File**: `tests/llm_integration.rs` (new)
-**Effort**: ~2 hours
-**Action**:
-- Mock HTTP responses for error cases
-- Test timeout handling
-- Test rate limit handling
-- Test malformed response handling
-
-### TEST-HIGH-004: Add MCP server E2E tests
-**File**: `tests/mcp_e2e.rs` (new)
-**Effort**: ~3 hours
-**Action**:
-- Spawn server in subprocess
-- Test tool execution via JSON-RPC
-- Test resource access
-- Test error responses
-
-### TEST-HIGH-005: Add hook edge case tests
-**Files**: `tests/hooks_*.rs`
-**Effort**: ~2 hours
-**Action**:
-- Test with empty context
-- Test with malformed input
-- Test timeout scenarios
-- Test concurrent hook execution
-
-### DOC-HIGH-001/002/003: Add API documentation examples
-**Files**: `src/services/capture.rs`, `src/services/recall.rs`, `src/services/mod.rs`
-**Effort**: ~2 hours
-**Action**:
-- Add `# Examples` section to doc comments
-- Ensure examples compile with `cargo test --doc`
-- Include error handling examples
-
-### DB-HIGH-001/002: Add Redis health checks
-**Files**: `src/storage/index/redis.rs`, `src/storage/vector/redis.rs`
-**Effort**: ~1 hour
-**Action**:
-- Add `health_check()` method to backends
-- PING command on connection
-- Validate connection before use
-- Add to health endpoint
-
-### COMP-HIGH-001: Implement data retention enforcement
-**File**: `src/gc/retention.rs`
-**Effort**: ~3 hours
-**Action**:
-- Add configurable retention periods per namespace
-- Schedule automatic cleanup
-- Audit log deletions
-- Add GDPR documentation
-
-### COMP-HIGH-002: Protect audit log integrity
-**File**: `src/security/audit.rs`
-**Effort**: ~2 hours
-**Action**:
-- Add HMAC signature to log entries
-- Chain entries with hash links
-- Prevent tampering detection
-- Document verification procedure
-
-### COMP-HIGH-003-006: Add compliance controls
-**Various files**
-**Effort**: ~8 hours (can be deferred)
-**Action**:
-- Consent tracking mechanism
-- Access review reports
-- PII disclosure logging
-- Separation of duties (RBAC foundation)
+- [ ] DEP-HIGH-002: Replace serde_yaml with serde_yml in Cargo.toml and all imports
+- [ ] DEP-HIGH-001: Acknowledge RUSTSEC-2023-0071 in deny.toml with justification
+- [ ] PERF-HIGH-001: Optimize SearchHit cloning in RRF fusion (`src/services/recall.rs`)
+- [ ] PERF-HIGH-002: Optimize Memory cloning in lazy tombstone (`src/services/recall.rs`)
+- [ ] PERF-HIGH-003: Fix N+1 query in branch GC (`src/gc/branch.rs`)
+- [ ] PERF-HIGH-004: Reduce string allocation in embed_batch (`src/embedding/fastembed.rs`)
+- [ ] ARCH-HIGH-001: Fix CQS violation in lazy_tombstone_stale_branches (`src/services/recall.rs`)
+- [ ] ARCH-HIGH-002: Split SubcogConfig god object (`src/config/mod.rs`)
+- [ ] CHAOS-HIGH-001: Add circuit breakers to LLM clients (`src/llm/*.rs`)
+- [ ] CHAOS-HIGH-002: Add embedding fallback to BM25-only
+- [ ] CHAOS-HIGH-003: Add database connection retry with backoff
+- [ ] CHAOS-HIGH-004: Add service isolation with bulkhead pattern
+- [ ] CHAOS-HIGH-005: Add configurable timeouts per operation
+- [ ] CHAOS-HIGH-006: Add health check endpoints for all services
+- [ ] TEST-HIGH-001: Add PostgreSQL integration tests (`tests/postgresql_integration.rs`)
+- [ ] TEST-HIGH-002: Add Redis integration tests (`tests/redis_integration.rs`)
+- [ ] TEST-HIGH-003: Add LLM client error handling tests (`tests/llm_integration.rs`)
+- [ ] TEST-HIGH-004: Add MCP server E2E tests (`tests/mcp_e2e.rs`)
+- [ ] TEST-HIGH-005: Add hook edge case tests (`tests/hooks_*.rs`)
+- [ ] DOC-HIGH-001: Add API documentation examples to `src/services/capture.rs`
+- [ ] DOC-HIGH-002: Add API documentation examples to `src/services/recall.rs`
+- [ ] DOC-HIGH-003: Add API documentation examples to `src/services/mod.rs`
+- [ ] DB-HIGH-001: Add Redis health check to `src/storage/index/redis.rs`
+- [ ] DB-HIGH-002: Add Redis health check to `src/storage/vector/redis.rs`
+- [ ] COMP-HIGH-001: Implement data retention enforcement (`src/gc/retention.rs`)
+- [ ] COMP-HIGH-002: Protect audit log integrity (`src/security/audit.rs`)
+- [ ] COMP-HIGH-003: Add consent tracking mechanism
+- [ ] COMP-HIGH-004: Add access review reports
+- [ ] COMP-HIGH-005: Add PII disclosure logging
+- [ ] COMP-HIGH-006: Add separation of duties (RBAC foundation)
 
 ---
 
 ## Phase 3: MEDIUM (64 findings)
 
-### Code quality improvements
-**Various files**
-**Effort**: ~4 hours
-**Action**:
-- Move `#[allow(clippy::...)]` to function level
-- Resolve TODO comments or create issues
-- Reduce function complexity
-- Standardize error messages
+### Code Quality (16 findings)
+- [ ] QUAL-MED-001: Move clippy allows to function level in `src/lib.rs`
+- [ ] QUAL-MED-002: Move clippy allows to function level in `src/services/recall.rs`
+- [ ] QUAL-MED-003: Move clippy allows to function level in `src/mcp/tools/handlers/mod.rs`
+- [ ] QUAL-MED-004: Resolve TODO in `src/services/capture.rs` or create issue
+- [ ] QUAL-MED-005: Resolve TODO in `src/services/recall.rs` or create issue
+- [ ] QUAL-MED-006: Resolve TODO in `src/hooks/session_start.rs` or create issue
+- [ ] QUAL-MED-007: Resolve TODO in `src/mcp/server.rs` or create issue
+- [ ] QUAL-MED-008: Reduce complexity in `src/services/recall.rs::search()`
+- [ ] QUAL-MED-009: Reduce complexity in `src/hooks/pre_compact/orchestrator.rs`
+- [ ] QUAL-MED-010: Reduce complexity in `src/mcp/tools/handlers/mod.rs`
+- [ ] QUAL-MED-011: Standardize error messages in `src/services/capture.rs`
+- [ ] QUAL-MED-012: Standardize error messages in `src/services/recall.rs`
+- [ ] QUAL-MED-013: Standardize error messages in `src/storage/persistence/sqlite.rs`
+- [ ] QUAL-MED-014: Standardize error messages in `src/mcp/tools/handlers/mod.rs`
+- [ ] QUAL-MED-015: Standardize error messages in `src/llm/anthropic.rs`
+- [ ] QUAL-MED-016: Standardize error messages in `src/llm/openai.rs`
 
-### Performance optimizations
-**Various files**
-**Effort**: ~3 hours
-**Action**:
-- Pre-allocate HashMaps
-- Cache compiled regexes
-- Use `&str` over `String` where possible
-- Tune connection pool sizes
+### Performance (12 findings)
+- [ ] PERF-MED-001: Pre-allocate HashMap in `src/services/recall.rs::rrf_fusion()`
+- [ ] PERF-MED-002: Pre-allocate HashMap in `src/hooks/search_context.rs`
+- [ ] PERF-MED-003: Pre-allocate HashMap in `src/mcp/tools/handlers/mod.rs`
+- [ ] PERF-MED-004: Cache compiled regex in `src/hooks/user_prompt.rs`
+- [ ] PERF-MED-005: Cache compiled regex in `src/security/secrets.rs`
+- [ ] PERF-MED-006: Cache compiled regex in `src/security/pii.rs`
+- [ ] PERF-MED-007: Use `&str` over String in `src/services/capture.rs` parameters
+- [ ] PERF-MED-008: Use `&str` over String in `src/services/recall.rs` parameters
+- [ ] PERF-MED-009: Use `&str` over String in `src/mcp/tools/handlers/mod.rs`
+- [ ] PERF-MED-010: Tune SQLite connection pool size
+- [ ] PERF-MED-011: Tune PostgreSQL connection pool size
+- [ ] PERF-MED-012: Tune Redis connection pool size
 
-### Architecture improvements
-**Various files**
-**Effort**: ~4 hours
-**Action**:
-- Reduce ServiceContainer coupling
-- Organize feature flags
-- Standardize error types by layer
-- Align hook handler interfaces
+### Architecture (12 findings)
+- [ ] ARCH-MED-001: Reduce ServiceContainer coupling in `src/services/mod.rs`
+- [ ] ARCH-MED-002: Reduce ServiceContainer coupling in `src/cli/serve.rs`
+- [ ] ARCH-MED-003: Organize feature flags in `Cargo.toml`
+- [ ] ARCH-MED-004: Organize feature flags in `src/lib.rs`
+- [ ] ARCH-MED-005: Standardize error types in storage layer
+- [ ] ARCH-MED-006: Standardize error types in service layer
+- [ ] ARCH-MED-007: Standardize error types in MCP layer
+- [ ] ARCH-MED-008: Align hook handler interface for SessionStartHandler
+- [ ] ARCH-MED-009: Align hook handler interface for UserPromptHandler
+- [ ] ARCH-MED-010: Align hook handler interface for PostToolUseHandler
+- [ ] ARCH-MED-011: Align hook handler interface for PreCompactHandler
+- [ ] ARCH-MED-012: Align hook handler interface for StopHandler
 
-### Test coverage expansion
-**Various test files**
-**Effort**: ~6 hours
-**Action**:
-- Deduplication semantic checker tests
-- Encryption round-trip tests
-- GC edge cases
-- Config loading errors
+### Test Coverage (12 findings)
+- [ ] TEST-MED-001: Add deduplication semantic checker tests
+- [ ] TEST-MED-002: Add deduplication exact match tests
+- [ ] TEST-MED-003: Add deduplication recent capture tests
+- [ ] TEST-MED-004: Add encryption round-trip tests
+- [ ] TEST-MED-005: Add encryption key rotation tests
+- [ ] TEST-MED-006: Add GC branch edge case tests
+- [ ] TEST-MED-007: Add GC retention edge case tests
+- [ ] TEST-MED-008: Add config loading error tests
+- [ ] TEST-MED-009: Add config validation tests
+- [ ] TEST-MED-010: Add config migration tests
+- [ ] TEST-MED-011: Add prompt parser edge case tests
+- [ ] TEST-MED-012: Add prompt enrichment failure tests
 
-### Documentation updates
-**Various files**
-**Effort**: ~4 hours
-**Action**:
-- Error handling patterns
-- Storage architecture
-- Configuration reference
-- Feature flag documentation
+### Documentation (6 findings)
+- [ ] DOC-MED-001: Document error handling patterns in CLAUDE.md
+- [ ] DOC-MED-002: Document storage architecture in docs/
+- [ ] DOC-MED-003: Document configuration reference in docs/
+- [ ] DOC-MED-004: Document feature flags in CLAUDE.md
+- [ ] DOC-MED-005: Add rustdoc examples to public APIs
+- [ ] DOC-MED-006: Update README with latest features
 
-### Database optimizations
-**Storage files**
-**Effort**: ~3 hours
-**Action**:
-- Optimize SQLite PRAGMAs
-- Make pool size configurable
-- Add query logging
-- Verify index usage
-
-### Security hardening
-**MCP files**
-**Effort**: ~2 hours
-**Action**:
-- Generic error messages for auth failures
-- Add YAML complexity limits
-- Pagination limits on listings
-- Security headers for HTTP
-
-### Dependency management
-**Cargo.toml**
-**Effort**: ~2 hours
-**Action**:
-- Evaluate chrono alternatives
-- Optimize feature flags
-- Remove duplicate dependencies
-- Update outdated dependencies
-
-### Rust idiom improvements
-**Various files**
-**Effort**: ~2 hours
-**Action**:
-- Replace `Box<dyn Error>` with `anyhow`
-- Use `&str` parameters consistently
-- Add `#[non_exhaustive]` to public enums
+### Database (6 findings)
+- [ ] DB-MED-001: Optimize SQLite PRAGMAs for write performance
+- [ ] DB-MED-002: Optimize SQLite PRAGMAs for read performance
+- [ ] DB-MED-003: Make pool size configurable via env var
+- [ ] DB-MED-004: Add query logging for debugging
+- [ ] DB-MED-005: Verify index usage with EXPLAIN
+- [ ] DB-MED-006: Add index for common query patterns
 
 ---
 
 ## Phase 4: LOW (92 findings)
 
-Low severity findings are documented but not prioritized for immediate remediation. They can be addressed opportunistically during related work.
+### Documentation Polish (15 findings)
+- [ ] DOC-LOW-001: Add module-level docs to `src/services/mod.rs`
+- [ ] DOC-LOW-002: Add module-level docs to `src/storage/mod.rs`
+- [ ] DOC-LOW-003: Add module-level docs to `src/mcp/mod.rs`
+- [ ] DOC-LOW-004: Add module-level docs to `src/hooks/mod.rs`
+- [ ] DOC-LOW-005: Add module-level docs to `src/llm/mod.rs`
+- [ ] DOC-LOW-006: Add inline docs to complex functions in `src/services/recall.rs`
+- [ ] DOC-LOW-007: Add inline docs to complex functions in `src/hooks/pre_compact/orchestrator.rs`
+- [ ] DOC-LOW-008: Add inline docs to complex functions in `src/mcp/tools/handlers/mod.rs`
+- [ ] DOC-LOW-009: Improve error message clarity in `src/error.rs`
+- [ ] DOC-LOW-010: Add usage examples to CLI help text
+- [ ] DOC-LOW-011: Document environment variables comprehensively
+- [ ] DOC-LOW-012: Add troubleshooting section to README
+- [ ] DOC-LOW-013: Document MCP resource URI scheme
+- [ ] DOC-LOW-014: Document hook response format
+- [ ] DOC-LOW-015: Add architecture diagrams to docs/
 
-### Categories:
-- Documentation polish (15 findings)
-- Code style consistency (20 findings)
-- Test infrastructure improvements (12 findings)
-- Performance micro-optimizations (15 findings)
-- Rust idiom polish (15 findings)
-- Future architecture considerations (15 findings)
+### Code Style (20 findings)
+- [ ] STYLE-LOW-001: Consistent import ordering in `src/lib.rs`
+- [ ] STYLE-LOW-002: Consistent import ordering in `src/services/mod.rs`
+- [ ] STYLE-LOW-003: Consistent import ordering in `src/mcp/mod.rs`
+- [ ] STYLE-LOW-004: Consistent import ordering in `src/hooks/mod.rs`
+- [ ] STYLE-LOW-005: Consistent import ordering in `src/storage/mod.rs`
+- [ ] STYLE-LOW-006: Consistent function ordering (public first) in `src/services/capture.rs`
+- [ ] STYLE-LOW-007: Consistent function ordering (public first) in `src/services/recall.rs`
+- [ ] STYLE-LOW-008: Consistent function ordering (public first) in `src/mcp/server.rs`
+- [ ] STYLE-LOW-009: Consistent naming for builder methods
+- [ ] STYLE-LOW-010: Consistent naming for factory methods
+- [ ] STYLE-LOW-011: Consistent error variant naming
+- [ ] STYLE-LOW-012: Use `Self` in impl blocks consistently
+- [ ] STYLE-LOW-013: Consistent use of `#[must_use]` on getters
+- [ ] STYLE-LOW-014: Consistent use of `#[inline]` on small functions
+- [ ] STYLE-LOW-015: Remove dead code in `src/lib.rs`
+- [ ] STYLE-LOW-016: Remove dead code in `src/services/mod.rs`
+- [ ] STYLE-LOW-017: Remove unused imports
+- [ ] STYLE-LOW-018: Consistent module visibility declarations
+- [ ] STYLE-LOW-019: Consistent type alias usage
+- [ ] STYLE-LOW-020: Consistent const vs static usage
 
----
+### Test Infrastructure (12 findings)
+- [ ] INFRA-LOW-001: Add test fixtures for common scenarios
+- [ ] INFRA-LOW-002: Add test helpers for SQLite setup
+- [ ] INFRA-LOW-003: Add test helpers for mock LLM
+- [ ] INFRA-LOW-004: Add test helpers for mock embedder
+- [ ] INFRA-LOW-005: Improve test isolation
+- [ ] INFRA-LOW-006: Add test coverage reporting
+- [ ] INFRA-LOW-007: Add mutation testing
+- [ ] INFRA-LOW-008: Add fuzz testing for parsers
+- [ ] INFRA-LOW-009: Add benchmark baselines
+- [ ] INFRA-LOW-010: Add integration test CI matrix
+- [ ] INFRA-LOW-011: Add performance regression tests
+- [ ] INFRA-LOW-012: Document test patterns
 
-## Estimated Total Effort
+### Performance Micro-optimizations (15 findings)
+- [ ] MICRO-LOW-001: Use `SmallVec` for small collections
+- [ ] MICRO-LOW-002: Use `compact_str` for short strings
+- [ ] MICRO-LOW-003: Avoid temporary allocations in hot paths
+- [ ] MICRO-LOW-004: Use `parking_lot` mutexes
+- [ ] MICRO-LOW-005: Optimize JSON serialization with simd-json
+- [ ] MICRO-LOW-006: Pre-size string builders
+- [ ] MICRO-LOW-007: Use `Bytes` for binary data
+- [ ] MICRO-LOW-008: Avoid string formatting in hot paths
+- [ ] MICRO-LOW-009: Use `arrayvec` for fixed-size collections
+- [ ] MICRO-LOW-010: Optimize hash function selection
+- [ ] MICRO-LOW-011: Use `ahash` for HashMaps
+- [ ] MICRO-LOW-012: Profile and optimize startup time
+- [ ] MICRO-LOW-013: Profile and optimize first request latency
+- [ ] MICRO-LOW-014: Reduce binary size with LTO
+- [ ] MICRO-LOW-015: Enable PGO for release builds
 
-| Phase | Findings | Estimated Hours |
-|-------|----------|-----------------|
-| CRITICAL | 7 | ~10 hours |
-| HIGH | 30 | ~45 hours |
-| MEDIUM | 64 | ~30 hours |
-| LOW | 92 | ~20 hours |
-| **TOTAL** | **193** | **~105 hours** |
+### Rust Idiom Polish (15 findings)
+- [ ] IDIOM-LOW-001: Replace `Box<dyn Error>` with `anyhow` in CLI
+- [ ] IDIOM-LOW-002: Use `&str` parameters consistently
+- [ ] IDIOM-LOW-003: Add `#[non_exhaustive]` to public enums
+- [ ] IDIOM-LOW-004: Use `impl Into<T>` for flexible APIs
+- [ ] IDIOM-LOW-005: Use `AsRef<Path>` for path parameters
+- [ ] IDIOM-LOW-006: Use `Cow<str>` for conditional ownership
+- [ ] IDIOM-LOW-007: Implement `Default` for all config types
+- [ ] IDIOM-LOW-008: Implement `Clone` where appropriate
+- [ ] IDIOM-LOW-009: Use `derive_more` for boilerplate derives
+- [ ] IDIOM-LOW-010: Use `typed-builder` for complex builders
+- [ ] IDIOM-LOW-011: Use `bon` for simpler builders
+- [ ] IDIOM-LOW-012: Replace manual `Drop` impls where possible
+- [ ] IDIOM-LOW-013: Use `scopeguard` for cleanup
+- [ ] IDIOM-LOW-014: Use `ouroboros` for self-referential structs
+- [ ] IDIOM-LOW-015: Use `educe` for custom derive behavior
 
----
-
-## Remediation Order (Auto-Execute)
-
-When `--all` flag is active, execute in this order:
-
-1. **Critical fixes** (blocking issues)
-2. **Dependency updates** (quick wins)
-3. **Performance fixes** (measurable impact)
-4. **Test coverage** (quality gates)
-5. **Documentation** (knowledge capture)
-6. **Architecture improvements** (long-term health)
-7. **Low-priority polish** (opportunistic)
+### Future Architecture (15 findings)
+- [ ] FUTURE-LOW-001: Consider async trait migration
+- [ ] FUTURE-LOW-002: Consider tower middleware for MCP
+- [ ] FUTURE-LOW-003: Consider event sourcing for audit
+- [ ] FUTURE-LOW-004: Consider CQRS for read/write separation
+- [ ] FUTURE-LOW-005: Consider GraphQL for MCP queries
+- [ ] FUTURE-LOW-006: Consider gRPC transport option
+- [ ] FUTURE-LOW-007: Consider WebSocket transport option
+- [ ] FUTURE-LOW-008: Consider distributed tracing integration
+- [ ] FUTURE-LOW-009: Consider multi-tenancy support
+- [ ] FUTURE-LOW-010: Consider plugin architecture
+- [ ] FUTURE-LOW-011: Consider hot reload for config
+- [ ] FUTURE-LOW-012: Consider schema versioning
+- [ ] FUTURE-LOW-013: Consider backup/restore tooling
+- [ ] FUTURE-LOW-014: Consider admin CLI/UI
+- [ ] FUTURE-LOW-015: Consider SaaS deployment model
 
 ---
 
