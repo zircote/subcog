@@ -378,7 +378,7 @@ After remediation:
 - [x] Test coverage maintained or improved ✓
 - [x] Documentation updated where needed ✓
 - [x] CHANGELOG updated with security fixes ✓
-- [ ] Performance benchmarks validated
+- [x] Performance benchmarks validated ✓
 
 ---
 
