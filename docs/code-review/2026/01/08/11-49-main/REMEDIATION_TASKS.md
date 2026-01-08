@@ -375,7 +375,7 @@ When `--all` flag is active, execute in this order:
 After remediation:
 - [x] `make ci` passes (format, clippy, test, doc, deny) ✓
 - [x] No new warnings introduced ✓
-- [ ] Test coverage maintained or improved
+- [x] Test coverage maintained or improved ✓
 - [ ] Documentation updated where needed
 - [ ] CHANGELOG updated with security fixes
 - [ ] Performance benchmarks validated
