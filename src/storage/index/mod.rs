@@ -1,4 +1,20 @@
 //! Index backend implementations.
+//!
+//! This module contains backends that implement the [`IndexBackend`](crate::storage::traits::IndexBackend)
+//! trait, providing full-text search and filtering capabilities.
+//!
+//! ## Available Backends
+//!
+//! - [`SqliteBackend`]: `SQLite` FTS5 full-text search (local, high performance)
+//! - [`PostgresIndexBackend`]: PostgreSQL full-text search (enterprise, distributed)
+//! - [`RedisBackend`]: `RediSearch` for distributed indexing (requires `redis` feature)
+//!
+//! ## Design Notes
+//!
+//! - [`SqliteBackend`] implements ONLY the [`IndexBackend`](crate::storage::traits::IndexBackend) trait
+//! - For `SQLite` persistence operations, use [`crate::storage::persistence::SqlitePersistenceBackend`]
+//! - [`SqliteBackend`] uses shared infrastructure from [`crate::storage::sqlite`]
+//! - Index backends focus solely on search and retrieval, not content storage
 
 mod domain;
 mod postgresql;

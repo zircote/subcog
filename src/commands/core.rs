@@ -201,8 +201,8 @@ pub fn cmd_status(config: &SubcogConfig) -> Result<(), Box<dyn std::error::Error
 pub fn cmd_consolidate(config: &SubcogConfig) -> Result<(), Box<dyn std::error::Error>> {
     use subcog::config::StorageBackendType;
     use subcog::services::ConsolidationService;
-    use subcog::storage::index::SqliteBackend;
     use subcog::storage::persistence::FilesystemBackend;
+    use subcog::storage::persistence::SqlitePersistenceBackend;
 
     let data_dir = &config.data_dir;
     let storage_config = &config.storage.project;
@@ -226,7 +226,7 @@ pub fn cmd_consolidate(config: &SubcogConfig) -> Result<(), Box<dyn std::error::
                 .map_or_else(|| data_dir.join("memories.db"), std::path::PathBuf::from);
             println!("SQLite path: {}", db_path.display());
 
-            let backend = SqliteBackend::new(&db_path)?;
+            let backend = SqlitePersistenceBackend::new(&db_path)?;
             let mut service = ConsolidationService::new(backend);
             run_consolidation(&mut service)?;
         },

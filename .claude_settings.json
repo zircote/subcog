@@ -1,0 +1,34 @@
+{
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true
+  },
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Read(./**)",
+      "Write(./**)",
+      "Edit(./**)",
+      "Glob(./**)",
+      "Grep(./**)",
+      "Read(/Users/AllenR1_1/Projects/zircote/subcog/.worktrees/001-split-sqlitebackend-into-separate-index-and-persis/**)",
+      "Write(/Users/AllenR1_1/Projects/zircote/subcog/.worktrees/001-split-sqlitebackend-into-separate-index-and-persis/**)",
+      "Edit(/Users/AllenR1_1/Projects/zircote/subcog/.worktrees/001-split-sqlitebackend-into-separate-index-and-persis/**)",
+      "Glob(/Users/AllenR1_1/Projects/zircote/subcog/.worktrees/001-split-sqlitebackend-into-separate-index-and-persis/**)",
+      "Grep(/Users/AllenR1_1/Projects/zircote/subcog/.worktrees/001-split-sqlitebackend-into-separate-index-and-persis/**)",
+      "Read(/Users/AllenR1_1/Projects/zircote/subcog/.worktrees/001-split-sqlitebackend-into-separate-index-and-persis/.auto-claude/specs/001-split-sqlitebackend-into-separate-index-and-persis/**)",
+      "Write(/Users/AllenR1_1/Projects/zircote/subcog/.worktrees/001-split-sqlitebackend-into-separate-index-and-persis/.auto-claude/specs/001-split-sqlitebackend-into-separate-index-and-persis/**)",
+      "Edit(/Users/AllenR1_1/Projects/zircote/subcog/.worktrees/001-split-sqlitebackend-into-separate-index-and-persis/.auto-claude/specs/001-split-sqlitebackend-into-separate-index-and-persis/**)",
+      "Bash(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "mcp__context7__resolve-library-id(*)",
+      "mcp__context7__get-library-docs(*)",
+      "mcp__graphiti-memory__search_nodes(*)",
+      "mcp__graphiti-memory__search_facts(*)",
+      "mcp__graphiti-memory__add_episode(*)",
+      "mcp__graphiti-memory__get_episodes(*)",
+      "mcp__graphiti-memory__get_entity_edge(*)"
+    ]
+  }
+}

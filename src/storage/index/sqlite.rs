@@ -5,131 +5,21 @@
 use crate::models::{Memory, MemoryId, SearchFilter};
 use crate::storage::traits::IndexBackend;
 use crate::{Error, Result};
-use chrono::{TimeZone, Utc};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, params};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::sync::Mutex;
+use std::time::Instant;
 use tracing::instrument;
 
-/// Timeout for acquiring mutex lock (5 seconds).
-/// Reserved for future use when upgrading to `parking_lot::Mutex`.
-#[allow(dead_code)]
-const MUTEX_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
+// Import shared SQLite utilities
+use crate::storage::sqlite::{
+    MemoryRow, acquire_lock, build_filter_clause_numbered, build_memory_from_row,
+    configure_connection, fetch_memory_row, record_operation_metrics,
+};
 
-/// Helper to acquire mutex lock with poison recovery.
-///
-/// If the mutex is poisoned (due to a panic in a previous critical section),
-/// we recover the inner value and log a warning. This prevents cascading
-/// failures when one operation panics.
-fn acquire_lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    // First try to acquire lock normally
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            // Recover from poison - this is safe because we log the issue
-            // and the connection state should still be valid
-            tracing::warn!("SQLite mutex was poisoned, recovering");
-            metrics::counter!("sqlite_mutex_poison_recovery_total").increment(1);
-            poisoned.into_inner()
-        },
-    }
-}
-
-/// Alternative lock acquisition with spin-wait timeout.
-///
-/// Note: Rust's `std::sync::Mutex` doesn't have a native `try_lock_for`,
-/// so we implement a spin-wait with sleep. For production, consider
-/// using `parking_lot::Mutex` which has proper timed locking.
-///
-/// Reserved for future use - currently using simpler `acquire_lock` with poison recovery.
-#[allow(dead_code)]
-fn acquire_lock_with_timeout<T>(mutex: &Mutex<T>, timeout: Duration) -> Result<MutexGuard<'_, T>> {
-    let start = Instant::now();
-    let sleep_duration = Duration::from_millis(10);
-
-    loop {
-        match mutex.try_lock() {
-            Ok(guard) => return Ok(guard),
-            Err(std::sync::TryLockError::Poisoned(poisoned)) => {
-                tracing::warn!("SQLite mutex was poisoned, recovering");
-                metrics::counter!("sqlite_mutex_poison_recovery_total").increment(1);
-                return Ok(poisoned.into_inner());
-            },
-            Err(std::sync::TryLockError::WouldBlock) => {
-                if start.elapsed() > timeout {
-                    metrics::counter!("sqlite_mutex_timeout_total").increment(1);
-                    return Err(Error::OperationFailed {
-                        operation: "acquire_lock".to_string(),
-                        cause: format!("Lock acquisition timed out after {timeout:?}"),
-                    });
-                }
-                std::thread::sleep(sleep_duration);
-            },
-        }
-    }
-}
-
-/// Escapes SQL LIKE wildcards in a string (SEC-M4).
-///
-/// `SQLite` LIKE patterns treat `%` as "any characters" and `_` as "single character".
-/// If user input contains these characters, they must be escaped to be treated literally.
-/// Uses `\` as the escape character (requires `ESCAPE '\'` in LIKE clause).
-///
-/// # Examples
-///
-/// ```ignore
-/// assert_eq!(escape_like_wildcards("100%"), "100\\%");
-/// assert_eq!(escape_like_wildcards("user_name"), "user\\_name");
-/// assert_eq!(escape_like_wildcards("path\\file"), "path\\\\file");
-/// ```
-fn escape_like_wildcards(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '%' | '_' | '\\' => {
-                result.push('\\');
-                result.push(c);
-            },
-            _ => result.push(c),
-        }
-    }
-    result
-}
-
-/// Converts a glob pattern to a SQL LIKE pattern safely (HIGH-SEC-005).
-///
-/// First escapes existing SQL LIKE wildcards (`%`, `_`, `\`), then converts
-/// glob wildcards (`*` → `%`, `?` → `_`). This prevents SQL injection via
-/// patterns like `foo%bar` where `%` would otherwise be a SQL wildcard.
-///
-/// # Examples
-///
-/// ```ignore
-/// // Glob wildcards are converted
-/// assert_eq!(glob_to_like_pattern("src/*.rs"), "src/%\\.rs");
-/// // Literal % is escaped
-/// assert_eq!(glob_to_like_pattern("100%"), "100\\%");
-/// // Combined: literal % escaped, glob * converted
-/// assert_eq!(glob_to_like_pattern("foo%*bar"), "foo\\%%bar");
-/// ```
-fn glob_to_like_pattern(pattern: &str) -> String {
-    let mut result = String::with_capacity(pattern.len() * 2);
-    for c in pattern.chars() {
-        match c {
-            // Escape existing SQL LIKE wildcards (they're meant to be literal)
-            '%' | '_' | '\\' => {
-                result.push('\\');
-                result.push(c);
-            },
-            // Convert glob wildcards to SQL LIKE wildcards
-            '*' => result.push('%'),
-            '?' => result.push('_'),
-            _ => result.push(c),
-        }
-    }
-    result
-}
+// These are used in tests
+#[cfg(test)]
+use crate::storage::sqlite::{escape_like_wildcards, glob_to_like_pattern};
 
 /// `SQLite`-based index backend with FTS5.
 ///
@@ -154,21 +44,6 @@ pub struct SqliteBackend {
     conn: Mutex<Connection>,
     /// Path to the `SQLite` database (None for in-memory).
     db_path: Option<PathBuf>,
-}
-
-struct MemoryRow {
-    id: String,
-    namespace: String,
-    domain: Option<String>,
-    project_id: Option<String>,
-    branch: Option<String>,
-    file_path: Option<String>,
-    status: String,
-    created_at: i64,
-    tombstoned_at: Option<i64>,
-    tags: Option<String>,
-    source: Option<String>,
-    content: String,
 }
 
 impl SqliteBackend {
@@ -223,14 +98,8 @@ impl SqliteBackend {
     fn initialize(&self) -> Result<()> {
         let conn = acquire_lock(&self.conn);
 
-        // Enable WAL mode for better concurrent read performance
-        // Note: pragma_update returns the result which we ignore - journal_mode returns
-        // a string like "wal" which would cause execute_batch to fail
-        let _ = conn.pragma_update(None, "journal_mode", "WAL");
-        let _ = conn.pragma_update(None, "synchronous", "NORMAL");
-        // Set busy timeout to 5 seconds to handle lock contention gracefully
-        // This prevents SQLITE_BUSY errors during high concurrent access
-        let _ = conn.pragma_update(None, "busy_timeout", "5000");
+        // Configure connection with optimal settings (WAL mode, NORMAL synchronous, busy_timeout)
+        configure_connection(&conn)?;
 
         // Create the main table for memory metadata
         conn.execute(
@@ -357,159 +226,6 @@ impl SqliteBackend {
             "CREATE INDEX IF NOT EXISTS idx_memories_tombstoned ON memories(tombstoned_at) WHERE tombstoned_at IS NOT NULL",
             [],
         );
-    }
-
-    /// Builds a WHERE clause from a search filter with numbered parameters.
-    /// Returns the clause string, the parameters, and the next parameter index.
-    fn build_filter_clause_numbered(
-        &self,
-        filter: &SearchFilter,
-        start_param: usize,
-    ) -> (String, Vec<String>, usize) {
-        let mut conditions = Vec::new();
-        let mut params = Vec::new();
-        let mut param_idx = start_param;
-
-        if !filter.namespaces.is_empty() {
-            let placeholders: Vec<String> = filter
-                .namespaces
-                .iter()
-                .map(|_| {
-                    let p = format!("?{param_idx}");
-                    param_idx += 1;
-                    p
-                })
-                .collect();
-            conditions.push(format!("m.namespace IN ({})", placeholders.join(",")));
-            for ns in &filter.namespaces {
-                params.push(ns.as_str().to_string());
-            }
-        }
-
-        if !filter.statuses.is_empty() {
-            let placeholders: Vec<String> = filter
-                .statuses
-                .iter()
-                .map(|_| {
-                    let p = format!("?{param_idx}");
-                    param_idx += 1;
-                    p
-                })
-                .collect();
-            conditions.push(format!("m.status IN ({})", placeholders.join(",")));
-            for s in &filter.statuses {
-                params.push(s.as_str().to_string());
-            }
-        }
-
-        // Tag filtering (AND logic - must have ALL tags)
-        // Use ',tag,' pattern with wrapped column to match whole tags only
-        // Escape LIKE wildcards in tags to prevent SQL injection (SEC-M4)
-        for tag in &filter.tags {
-            conditions.push(format!(
-                "(',' || m.tags || ',') LIKE ?{param_idx} ESCAPE '\\'"
-            ));
-            param_idx += 1;
-            params.push(format!("%,{},%", escape_like_wildcards(tag)));
-        }
-
-        // Tag filtering (OR logic - must have ANY tag)
-        if !filter.tags_any.is_empty() {
-            let or_conditions: Vec<String> = filter
-                .tags_any
-                .iter()
-                .map(|tag| {
-                    let cond = format!("(',' || m.tags || ',') LIKE ?{param_idx} ESCAPE '\\'");
-                    param_idx += 1;
-                    params.push(format!("%,{},%", escape_like_wildcards(tag)));
-                    cond
-                })
-                .collect();
-            conditions.push(format!("({})", or_conditions.join(" OR ")));
-        }
-
-        // Excluded tags (NOT LIKE) - match whole tags only
-        // Escape LIKE wildcards (SEC-M4)
-        for tag in &filter.excluded_tags {
-            conditions.push(format!(
-                "(',' || m.tags || ',') NOT LIKE ?{param_idx} ESCAPE '\\'"
-            ));
-            param_idx += 1;
-            params.push(format!("%,{},%", escape_like_wildcards(tag)));
-        }
-
-        // Source pattern (glob-style converted to SQL LIKE)
-        // HIGH-SEC-005: Use glob_to_like_pattern to escape SQL wildcards before conversion
-        if let Some(ref pattern) = filter.source_pattern {
-            conditions.push(format!("m.source LIKE ?{param_idx} ESCAPE '\\'"));
-            param_idx += 1;
-            params.push(glob_to_like_pattern(pattern));
-        }
-
-        if let Some(ref project_id) = filter.project_id {
-            conditions.push(format!("m.project_id = ?{param_idx}"));
-            param_idx += 1;
-            params.push(project_id.clone());
-        }
-
-        if let Some(ref branch) = filter.branch {
-            conditions.push(format!("m.branch = ?{param_idx}"));
-            param_idx += 1;
-            params.push(branch.clone());
-        }
-
-        if let Some(ref file_path) = filter.file_path {
-            conditions.push(format!("m.file_path = ?{param_idx}"));
-            param_idx += 1;
-            params.push(file_path.clone());
-        }
-
-        if let Some(after) = filter.created_after {
-            conditions.push(format!("m.created_at >= ?{param_idx}"));
-            param_idx += 1;
-            params.push(after.to_string());
-        }
-
-        if let Some(before) = filter.created_before {
-            conditions.push(format!("m.created_at <= ?{param_idx}"));
-            param_idx += 1;
-            params.push(before.to_string());
-        }
-
-        // Exclude tombstoned memories by default (ADR-0053)
-        if !filter.include_tombstoned {
-            conditions.push("m.status != 'tombstoned'".to_string());
-        }
-
-        let clause = if conditions.is_empty() {
-            String::new()
-        } else {
-            format!(" AND {}", conditions.join(" AND "))
-        };
-
-        (clause, params, param_idx)
-    }
-
-    fn record_operation_metrics(
-        &self,
-        operation: &'static str,
-        start: Instant,
-        status: &'static str,
-    ) {
-        metrics::counter!(
-            "storage_operations_total",
-            "backend" => "sqlite",
-            "operation" => operation,
-            "status" => status
-        )
-        .increment(1);
-        metrics::histogram!(
-            "storage_operation_duration_ms",
-            "backend" => "sqlite",
-            "operation" => operation,
-            "status" => status
-        )
-        .record(start.elapsed().as_secs_f64() * 1000.0);
     }
 
     /// Performs a WAL checkpoint to merge WAL file into main database (RES-M3).
@@ -646,114 +362,6 @@ impl SqliteBackend {
     }
 }
 
-fn fetch_memory_row(conn: &Connection, id: &MemoryId) -> Result<Option<MemoryRow>> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT m.id, m.namespace, m.domain, m.project_id, m.branch, m.file_path, m.status, m.created_at,
-                    m.tombstoned_at, m.tags, m.source, f.content
-             FROM memories m
-             JOIN memories_fts f ON m.id = f.id
-             WHERE m.id = ?1",
-        )
-        .map_err(|e| Error::OperationFailed {
-            operation: "prepare_get_memory".to_string(),
-            cause: e.to_string(),
-        })?;
-
-    let result: std::result::Result<Option<_>, _> = stmt
-        .query_row(params![id.as_str()], |row| {
-            Ok(MemoryRow {
-                id: row.get(0)?,
-                namespace: row.get(1)?,
-                domain: row.get(2)?,
-                project_id: row.get(3)?,
-                branch: row.get(4)?,
-                file_path: row.get(5)?,
-                status: row.get(6)?,
-                created_at: row.get(7)?,
-                tombstoned_at: row.get(8)?,
-                tags: row.get(9)?,
-                source: row.get(10)?,
-                content: row.get(11)?,
-            })
-        })
-        .optional();
-
-    result.map_err(|e| Error::OperationFailed {
-        operation: "get_memory".to_string(),
-        cause: e.to_string(),
-    })
-}
-
-fn build_memory_from_row(row: MemoryRow) -> Memory {
-    use crate::models::{Domain, MemoryStatus, Namespace};
-
-    let namespace = Namespace::parse(&row.namespace).unwrap_or_default();
-    let domain = row.domain.map_or_else(Domain::new, |d: String| {
-        if d.is_empty() || d == "project" {
-            Domain::new()
-        } else {
-            let parts: Vec<&str> = d.split('/').collect();
-            match parts.len() {
-                1 => Domain {
-                    organization: Some(parts[0].to_string()),
-                    project: None,
-                    repository: None,
-                },
-                2 => Domain {
-                    organization: Some(parts[0].to_string()),
-                    project: None,
-                    repository: Some(parts[1].to_string()),
-                },
-                _ => Domain::new(),
-            }
-        }
-    });
-
-    let status = match row.status.to_lowercase().as_str() {
-        "active" => MemoryStatus::Active,
-        "archived" => MemoryStatus::Archived,
-        "superseded" => MemoryStatus::Superseded,
-        "pending" => MemoryStatus::Pending,
-        "deleted" => MemoryStatus::Deleted,
-        "tombstoned" => MemoryStatus::Tombstoned,
-        _ => MemoryStatus::Active,
-    };
-
-    let tags: Vec<String> = row
-        .tags
-        .map(|t| {
-            t.split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
-
-    #[allow(clippy::cast_sign_loss)]
-    let created_at_u64 = row.created_at as u64;
-    let tombstoned_at = row
-        .tombstoned_at
-        .and_then(|ts| Utc.timestamp_opt(ts, 0).single());
-
-    Memory {
-        id: MemoryId::new(row.id),
-        content: row.content,
-        namespace,
-        domain,
-        project_id: row.project_id,
-        branch: row.branch,
-        file_path: row.file_path,
-        status,
-        created_at: created_at_u64,
-        updated_at: created_at_u64,
-        tombstoned_at,
-        embedding: None,
-        tags,
-        source: row.source,
-    }
-}
-
 impl IndexBackend for SqliteBackend {
     #[instrument(
         skip(self, memory),
@@ -845,7 +453,7 @@ impl IndexBackend for SqliteBackend {
         })();
 
         let status = if result.is_ok() { "success" } else { "error" };
-        self.record_operation_metrics("index", start, status);
+        record_operation_metrics("sqlite", "index", start, status);
         result
     }
 
@@ -898,7 +506,7 @@ impl IndexBackend for SqliteBackend {
         })();
 
         let status = if result.is_ok() { "success" } else { "error" };
-        self.record_operation_metrics("remove", start, status);
+        record_operation_metrics("sqlite", "remove", start, status);
         result
     }
 
@@ -919,7 +527,7 @@ impl IndexBackend for SqliteBackend {
             // Build filter clause with numbered parameters starting from ?2
             // ?1 is the FTS query
             let (filter_clause, filter_params, next_param) =
-                self.build_filter_clause_numbered(filter, 2);
+                build_filter_clause_numbered(filter, 2);
 
             // Use FTS5 MATCH for search with BM25 ranking
             // Limit parameter comes after all filter parameters
@@ -1014,7 +622,7 @@ impl IndexBackend for SqliteBackend {
         })();
 
         let status = if result.is_ok() { "success" } else { "error" };
-        self.record_operation_metrics("search", start, status);
+        record_operation_metrics("sqlite", "search", start, status);
         result
     }
 
@@ -1062,7 +670,7 @@ impl IndexBackend for SqliteBackend {
         })();
 
         let status = if result.is_ok() { "success" } else { "error" };
-        self.record_operation_metrics("clear", start, status);
+        record_operation_metrics("sqlite", "clear", start, status);
         result
     }
 
@@ -1079,7 +687,7 @@ impl IndexBackend for SqliteBackend {
 
             // Build filter clause (starting at parameter 1, no FTS query)
             let (filter_clause, filter_params, next_param) =
-                self.build_filter_clause_numbered(filter, 1);
+                build_filter_clause_numbered(filter, 1);
 
             // Query all memories without FTS MATCH, ordered by created_at desc
             let sql = format!(
@@ -1129,7 +737,7 @@ impl IndexBackend for SqliteBackend {
         })();
 
         let status = if result.is_ok() { "success" } else { "error" };
-        self.record_operation_metrics("list_all", start, status);
+        record_operation_metrics("sqlite", "list_all", start, status);
         result
     }
 
@@ -1143,7 +751,7 @@ impl IndexBackend for SqliteBackend {
         })();
 
         let status = if result.is_ok() { "success" } else { "error" };
-        self.record_operation_metrics("get_memory", start, status);
+        record_operation_metrics("sqlite", "get_memory", start, status);
         result
     }
 
@@ -1222,7 +830,7 @@ impl IndexBackend for SqliteBackend {
         })();
 
         let status = if result.is_ok() { "success" } else { "error" };
-        self.record_operation_metrics("get_memories_batch", start, status);
+        record_operation_metrics("sqlite", "get_memories_batch", start, status);
         result
     }
 
@@ -1312,58 +920,7 @@ impl IndexBackend for SqliteBackend {
         })();
 
         let status = if result.is_ok() { "success" } else { "error" };
-        self.record_operation_metrics("reindex", start, status);
-        result
-    }
-}
-
-// Implement PersistenceBackend for SqliteBackend so it can be used with ConsolidationService
-impl crate::storage::traits::PersistenceBackend for SqliteBackend {
-    fn store(&self, memory: &Memory) -> Result<()> {
-        // Delegate to index() which stores the full memory
-        self.index(memory)
-    }
-
-    fn get(&self, id: &MemoryId) -> Result<Option<Memory>> {
-        self.get_memory(id)
-    }
-
-    fn delete(&self, id: &MemoryId) -> Result<bool> {
-        self.remove(id)
-    }
-
-    fn list_ids(&self) -> Result<Vec<MemoryId>> {
-        let start = Instant::now();
-        let result = (|| {
-            let conn = self.conn.lock().map_err(|e| Error::OperationFailed {
-                operation: "lock_connection".to_string(),
-                cause: e.to_string(),
-            })?;
-
-            let mut stmt =
-                conn.prepare("SELECT id FROM memories")
-                    .map_err(|e| Error::OperationFailed {
-                        operation: "prepare_list_ids".to_string(),
-                        cause: e.to_string(),
-                    })?;
-
-            let ids: Vec<MemoryId> = stmt
-                .query_map([], |row| {
-                    let id: String = row.get(0)?;
-                    Ok(MemoryId::new(&id))
-                })
-                .map_err(|e| Error::OperationFailed {
-                    operation: "list_ids".to_string(),
-                    cause: e.to_string(),
-                })?
-                .filter_map(std::result::Result::ok)
-                .collect();
-
-            Ok(ids)
-        })();
-
-        let status = if result.is_ok() { "success" } else { "error" };
-        self.record_operation_metrics("list_ids", start, status);
+        record_operation_metrics("sqlite", "reindex", start, status);
         result
     }
 }

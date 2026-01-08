@@ -4,6 +4,23 @@
 //! - **Persistence**: Authoritative storage (`SQLite`, PostgreSQL, Filesystem)
 //! - **Index**: Full-text search (`SQLite` + FTS5, PostgreSQL, `RediSearch`)
 //! - **Vector**: Embedding similarity search (usearch, pgvector, Redis)
+//!
+//! ## Architecture
+//!
+//! The storage layer follows a clean separation of concerns:
+//! - Each layer implements its own trait ([`PersistenceBackend`], [`IndexBackend`], [`VectorBackend`])
+//! - Backends are independent and can fail gracefully without affecting other layers
+//! - Shared infrastructure (e.g., [`sqlite`] module) provides common utilities for backends
+//!
+//! ## `SQLite` Backend Architecture
+//!
+//! The `SQLite` implementation uses a modular design:
+//! - **[`persistence::SqlitePersistenceBackend`]**: Content storage with full ACID transactions
+//! - **[`index::SqliteBackend`]**: FTS5 full-text search indexing
+//! - **[`sqlite`]**: Shared utilities (connection handling, SQL helpers, row conversion, metrics)
+//!
+//! This separation ensures each backend has a single responsibility and can be tested,
+//! maintained, and evolved independently.
 
 // Allow cast precision loss for score calculations where exact precision is not critical.
 #![allow(clippy::cast_precision_loss)]
@@ -23,6 +40,7 @@ pub mod index;
 pub mod migrations;
 pub mod persistence;
 pub mod prompt;
+pub mod sqlite;
 pub mod traits;
 pub mod vector;
 
