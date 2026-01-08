@@ -376,7 +376,7 @@ After remediation:
 - [x] `make ci` passes (format, clippy, test, doc, deny) ✓
 - [x] No new warnings introduced ✓
 - [x] Test coverage maintained or improved ✓
-- [ ] Documentation updated where needed
+- [x] Documentation updated where needed ✓
 - [ ] CHANGELOG updated with security fixes
 - [ ] Performance benchmarks validated
 
