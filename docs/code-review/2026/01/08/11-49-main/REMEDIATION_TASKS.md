@@ -377,7 +377,7 @@ After remediation:
 - [x] No new warnings introduced ✓
 - [x] Test coverage maintained or improved ✓
 - [x] Documentation updated where needed ✓
-- [ ] CHANGELOG updated with security fixes
+- [x] CHANGELOG updated with security fixes ✓
 - [ ] Performance benchmarks validated
 
 ---
