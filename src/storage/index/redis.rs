@@ -92,6 +92,43 @@ mod implementation {
             Self::new("redis://localhost:6379", "subcog_memories")
         }
 
+        /// Checks if the Redis connection is healthy (DB-HIGH-001).
+        ///
+        /// Performs a PING command to verify connectivity and responsiveness.
+        ///
+        /// # Returns
+        ///
+        /// `Ok(true)` if the connection is healthy, `Ok(false)` if unhealthy,
+        /// or `Err` if the health check itself fails unexpectedly.
+        ///
+        /// # Example
+        ///
+        /// ```rust,ignore
+        /// let backend = RedisBackend::new("redis://localhost:6379", "subcog")?;
+        /// if backend.health_check()? {
+        ///     println!("Redis is healthy");
+        /// } else {
+        ///     eprintln!("Redis is not responding");
+        /// }
+        /// ```
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the connection cannot be established.
+        pub fn health_check(&self) -> Result<bool> {
+            let mut conn = match self.get_connection() {
+                Ok(c) => c,
+                Err(_) => return Ok(false),
+            };
+
+            let result: redis::RedisResult<String> = redis::cmd("PING").query(&mut conn);
+
+            let healthy = result.is_ok_and(|response| response == "PONG");
+
+            self.return_connection(conn);
+            Ok(healthy)
+        }
+
         /// Gets a connection, reusing the cached one if available (DB-H6).
         ///
         /// This method reuses an existing connection when possible, falling back
@@ -635,6 +672,15 @@ mod stub {
         ///
         /// Always returns an error because the feature is not enabled.
         pub fn with_defaults() -> Result<Self> {
+            Err(Error::FeatureNotEnabled("redis".to_string()))
+        }
+
+        /// Health check stub (DB-HIGH-001).
+        ///
+        /// # Errors
+        ///
+        /// Always returns an error because the feature is not enabled.
+        pub fn health_check(&self) -> Result<bool> {
             Err(Error::FeatureNotEnabled("redis".to_string()))
         }
     }

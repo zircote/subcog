@@ -146,7 +146,8 @@ impl NamespaceWeights {
         intent_type: SearchIntentType,
         config: &NamespaceWeightsConfig,
     ) -> Self {
-        let mut weights = HashMap::new();
+        // Pre-allocate for max namespace count (14 namespaces)
+        let mut weights = HashMap::with_capacity(14);
 
         // Get the intent name for config lookup
         let intent_name = match intent_type {

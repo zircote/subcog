@@ -2,6 +2,48 @@
 //!
 //! Services orchestrate storage backends and provide high-level operations.
 //!
+//! # Examples
+//!
+//! Create a service container and capture a memory:
+//!
+//! ```rust,ignore
+//! use subcog::services::ServiceContainer;
+//! use subcog::models::{CaptureRequest, Namespace, Domain};
+//!
+//! let container = ServiceContainer::from_current_dir_or_user()?;
+//!
+//! let request = CaptureRequest {
+//!     content: "Use PostgreSQL for production storage".to_string(),
+//!     namespace: Namespace::Decisions,
+//!     domain: Domain::default(),
+//!     tags: vec!["database".to_string(), "architecture".to_string()],
+//!     source: Some("ARCHITECTURE.md".to_string()),
+//!     skip_security_check: false,
+//! };
+//!
+//! let result = container.capture().capture(request)?;
+//! println!("Captured: {}", result.urn);
+//! # Ok::<(), subcog::Error>(())
+//! ```
+//!
+//! Search for memories with the recall service:
+//!
+//! ```rust,ignore
+//! use subcog::services::ServiceContainer;
+//! use subcog::models::{SearchFilter, SearchMode};
+//!
+//! let container = ServiceContainer::from_current_dir_or_user()?;
+//! let recall = container.recall()?;
+//!
+//! let filter = SearchFilter::new().with_namespace(subcog::models::Namespace::Decisions);
+//! let results = recall.search("database storage", SearchMode::Hybrid, &filter, 10)?;
+//!
+//! for hit in &results.memories {
+//!     println!("{}: {:.2}", hit.memory.id.as_str(), hit.score);
+//! }
+//! # Ok::<(), subcog::Error>(())
+//! ```
+//!
 //! # Clippy Lints
 //!
 //! The following lints are allowed at module level due to their pervasive nature
@@ -57,7 +99,8 @@ pub use capture::CaptureService;
 pub use consolidation::ConsolidationService;
 pub use context::{ContextBuilderService, MemoryStatistics};
 pub use data_subject::{
-    DataSubjectService, DeletionResult, ExportMetadata, ExportedMemory, UserDataExport,
+    ConsentPurpose, ConsentRecord, ConsentStatus, DataSubjectService, DeletionResult,
+    ExportMetadata, ExportedMemory, UserDataExport,
 };
 pub use deduplication::{
     DeduplicationConfig, DeduplicationService, Deduplicator, DuplicateCheckResult, DuplicateReason,

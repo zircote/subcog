@@ -40,14 +40,43 @@ if [ ! -f "$SUBCOG_BIN" ]; then
     cargo build --release
 fi
 
-# Check push gateway is running
-if ! curl -s "${METRICS_URL}" > /dev/null 2>&1; then
+# Check push gateway is running by testing the push endpoint (not just scrape endpoint)
+echo -e "${YELLOW}Checking push gateway availability...${NC}"
+
+# First check if the metrics scrape endpoint responds
+if ! curl -s --connect-timeout 5 "${METRICS_URL}" > /dev/null 2>&1; then
     echo -e "${RED}Error: Push gateway not accessible at ${PUSH_GATEWAY}${NC}"
-    echo "Start it with: docker-compose -f docker/docker-compose.observability.yml up -d pushgateway"
+    echo ""
+    echo "The push gateway must be running for this test. Start it with:"
+    echo "  docker-compose -f docker/docker-compose.observability.yml up -d pushgateway"
+    echo ""
+    echo "Or run all observability services:"
+    echo "  docker-compose -f docker/docker-compose.observability.yml up -d"
     exit 1
 fi
 
-echo -e "${GREEN}Push gateway is accessible${NC}"
+# Test the actual push endpoint with a dummy metric (must end with newline)
+TEST_METRIC=$'e2e_test_probe 1\n'
+PUSH_RESULT=$(curl -s -w "%{http_code}" -o /dev/null --connect-timeout 5 \
+    -X POST "${PUSH_GATEWAY}/metrics/job/subcog_e2e_test" \
+    -H "Content-Type: text/plain" \
+    --data-binary "${TEST_METRIC}" 2>/dev/null)
+
+if [ "$PUSH_RESULT" != "200" ] && [ "$PUSH_RESULT" != "202" ]; then
+    echo -e "${RED}Error: Push gateway push endpoint not working (HTTP ${PUSH_RESULT})${NC}"
+    echo ""
+    echo "The scrape endpoint is accessible but push is failing."
+    echo "This may indicate the push gateway is starting up or misconfigured."
+    echo ""
+    echo "Try restarting the push gateway:"
+    echo "  docker-compose -f docker/docker-compose.observability.yml restart pushgateway"
+    exit 1
+fi
+
+# Clean up test metric
+curl -s -X DELETE "${PUSH_GATEWAY}/metrics/job/subcog_e2e_test" 2>/dev/null || true
+
+echo -e "${GREEN}Push gateway is accessible and push endpoint is working${NC}"
 echo ""
 
 # Clear existing metrics for clean test

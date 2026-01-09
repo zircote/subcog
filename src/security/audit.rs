@@ -377,6 +377,78 @@ impl AuditLogger {
         self.log_entry(entry);
     }
 
+    /// Logs a PII disclosure event for GDPR/SOC2 compliance.
+    ///
+    /// Records when data containing PII is disclosed to external systems such as:
+    /// - LLM providers (Anthropic, `OpenAI`, Ollama, etc.)
+    /// - Remote sync destinations
+    /// - External APIs
+    ///
+    /// The actual PII values are NOT logged to avoid storing sensitive data.
+    /// Only metadata about the disclosure is recorded.
+    ///
+    /// # Arguments
+    ///
+    /// * `destination` - The external system receiving the data (e.g., "anthropic", "openai")
+    /// * `pii_types` - Types of PII being disclosed
+    /// * `data_subject_id` - Optional identifier of the data subject (anonymized)
+    /// * `purpose` - The purpose of the disclosure
+    /// * `legal_basis` - Legal basis for disclosure (e.g., "consent", "`legitimate_interest`")
+    pub fn log_pii_disclosure(
+        &self,
+        destination: &str,
+        pii_types: &[String],
+        data_subject_id: Option<&str>,
+        purpose: &str,
+        legal_basis: &str,
+    ) {
+        let entry = AuditEntry::new("security.pii_disclosure", "disclose").with_metadata(
+            serde_json::json!({
+                "destination": destination,
+                "pii_types": pii_types,
+                "pii_count": pii_types.len(),
+                "data_subject_id": data_subject_id,
+                "purpose": purpose,
+                "legal_basis": legal_basis,
+                "timestamp_utc": Utc::now().to_rfc3339()
+            }),
+        );
+        self.log_entry(entry);
+    }
+
+    /// Logs a bulk PII disclosure event for batch operations.
+    ///
+    /// Similar to `log_pii_disclosure` but for bulk operations involving multiple
+    /// data subjects or records.
+    ///
+    /// # Arguments
+    ///
+    /// * `destination` - The external system receiving the data
+    /// * `record_count` - Number of records being disclosed
+    /// * `pii_categories` - Categories of PII being disclosed
+    /// * `purpose` - The purpose of the disclosure
+    /// * `legal_basis` - Legal basis for disclosure
+    pub fn log_bulk_pii_disclosure(
+        &self,
+        destination: &str,
+        record_count: usize,
+        pii_categories: &[String],
+        purpose: &str,
+        legal_basis: &str,
+    ) {
+        let entry = AuditEntry::new("security.pii_bulk_disclosure", "bulk_disclose").with_metadata(
+            serde_json::json!({
+                "destination": destination,
+                "record_count": record_count,
+                "pii_categories": pii_categories,
+                "purpose": purpose,
+                "legal_basis": legal_basis,
+                "timestamp_utc": Utc::now().to_rfc3339()
+            }),
+        );
+        self.log_entry(entry);
+    }
+
     /// Logs an access denied event.
     pub fn log_denied(&self, action: &str, reason: &str) {
         let entry = AuditEntry::new("security.denied", action)
@@ -1019,6 +1091,179 @@ impl Default for AuditLogger {
     }
 }
 
+// ============================================================================
+// Access Review Reports (COMP-HIGH-004)
+// ============================================================================
+
+/// Access review report for SOC2 compliance.
+///
+/// Aggregates audit entries into a structured report showing:
+/// - Who accessed what resources
+/// - When accesses occurred
+/// - What actions were taken
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccessReviewReport {
+    /// Report generation timestamp.
+    pub generated_at: DateTime<Utc>,
+    /// Start of the review period.
+    pub period_start: DateTime<Utc>,
+    /// End of the review period.
+    pub period_end: DateTime<Utc>,
+    /// Total number of access events.
+    pub total_events: usize,
+    /// Summary by actor (user or system).
+    pub by_actor: std::collections::HashMap<String, ActorAccessSummary>,
+    /// Summary by resource type.
+    pub by_resource_type: std::collections::HashMap<String, usize>,
+    /// Summary by action type.
+    pub by_action: std::collections::HashMap<String, usize>,
+    /// Summary by outcome.
+    pub by_outcome: OutcomeSummary,
+}
+
+/// Summary of access events for a single actor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActorAccessSummary {
+    /// Total events for this actor.
+    pub event_count: usize,
+    /// Distinct resources accessed.
+    pub resources_accessed: std::collections::HashSet<String>,
+    /// Actions performed.
+    pub actions: std::collections::HashMap<String, usize>,
+    /// First access timestamp.
+    pub first_access: DateTime<Utc>,
+    /// Last access timestamp.
+    pub last_access: DateTime<Utc>,
+}
+
+/// Summary of outcomes across all events.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OutcomeSummary {
+    /// Count of successful operations.
+    pub success: usize,
+    /// Count of failed operations.
+    pub failure: usize,
+    /// Count of denied operations.
+    pub denied: usize,
+}
+
+impl AccessReviewReport {
+    /// Generates an access review report from audit entries.
+    ///
+    /// # Arguments
+    ///
+    /// * `entries` - The audit entries to analyze
+    /// * `period_start` - Start of the review period
+    /// * `period_end` - End of the review period
+    #[must_use]
+    pub fn generate(
+        entries: &[AuditEntry],
+        period_start: DateTime<Utc>,
+        period_end: DateTime<Utc>,
+    ) -> Self {
+        let mut by_actor: std::collections::HashMap<String, ActorAccessSummary> =
+            std::collections::HashMap::new();
+        let mut by_resource_type: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        let mut by_action: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        let mut by_outcome = OutcomeSummary::default();
+
+        // Filter entries within the period
+        let filtered: Vec<_> = entries
+            .iter()
+            .filter(|e| e.timestamp >= period_start && e.timestamp <= period_end)
+            .collect();
+
+        for entry in &filtered {
+            // Update actor summary
+            let actor_summary =
+                by_actor
+                    .entry(entry.actor.clone())
+                    .or_insert_with(|| ActorAccessSummary {
+                        event_count: 0,
+                        resources_accessed: std::collections::HashSet::new(),
+                        actions: std::collections::HashMap::new(),
+                        first_access: entry.timestamp,
+                        last_access: entry.timestamp,
+                    });
+
+            actor_summary.event_count += 1;
+            if let Some(ref resource) = entry.resource {
+                actor_summary.resources_accessed.insert(resource.clone());
+            }
+            *actor_summary
+                .actions
+                .entry(entry.action.clone())
+                .or_insert(0) += 1;
+            if entry.timestamp < actor_summary.first_access {
+                actor_summary.first_access = entry.timestamp;
+            }
+            if entry.timestamp > actor_summary.last_access {
+                actor_summary.last_access = entry.timestamp;
+            }
+
+            // Update resource type count
+            *by_resource_type
+                .entry(entry.event_type.clone())
+                .or_insert(0) += 1;
+
+            // Update action count
+            *by_action.entry(entry.action.clone()).or_insert(0) += 1;
+
+            // Update outcome count
+            match entry.outcome {
+                AuditOutcome::Success => by_outcome.success += 1,
+                AuditOutcome::Failure => by_outcome.failure += 1,
+                AuditOutcome::Denied => by_outcome.denied += 1,
+            }
+        }
+
+        Self {
+            generated_at: Utc::now(),
+            period_start,
+            period_end,
+            total_events: filtered.len(),
+            by_actor,
+            by_resource_type,
+            by_action,
+            by_outcome,
+        }
+    }
+}
+
+impl AuditLogger {
+    /// Generates an access review report for the specified period.
+    ///
+    /// # Arguments
+    ///
+    /// * `period_start` - Start of the review period
+    /// * `period_end` - End of the review period
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use chrono::{Duration, Utc};
+    /// use subcog::security::AuditLogger;
+    ///
+    /// let logger = AuditLogger::new();
+    /// let end = Utc::now();
+    /// let start = end - Duration::days(30);
+    ///
+    /// let report = logger.generate_access_review(start, end);
+    /// println!("Total events: {}", report.total_events);
+    /// ```
+    #[must_use]
+    pub fn generate_access_review(
+        &self,
+        period_start: DateTime<Utc>,
+        period_end: DateTime<Utc>,
+    ) -> AccessReviewReport {
+        let entries = self.entries_since(period_start);
+        AccessReviewReport::generate(&entries, period_start, period_end)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1267,5 +1512,383 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].metadata["pii_count"], 1);
         assert!(entries[0].metadata["context"].is_null());
+    }
+
+    // Access Review Report Tests
+
+    #[test]
+    fn test_access_review_report_empty() {
+        let entries: Vec<AuditEntry> = vec![];
+        let start = Utc::now() - chrono::Duration::hours(1);
+        let end = Utc::now();
+
+        let report = AccessReviewReport::generate(&entries, start, end);
+
+        assert_eq!(report.total_events, 0);
+        assert!(report.by_actor.is_empty());
+        assert!(report.by_resource_type.is_empty());
+        assert!(report.by_action.is_empty());
+        assert_eq!(report.by_outcome.success, 0);
+        assert_eq!(report.by_outcome.failure, 0);
+        assert_eq!(report.by_outcome.denied, 0);
+    }
+
+    #[test]
+    fn test_access_review_report_single_entry() {
+        let entry = AuditEntry::new("memory.capture", "capture")
+            .with_actor("user1")
+            .with_resource("mem_123")
+            .with_outcome(AuditOutcome::Success);
+
+        let start = Utc::now() - chrono::Duration::hours(1);
+        let end = Utc::now() + chrono::Duration::hours(1);
+
+        let report = AccessReviewReport::generate(&[entry], start, end);
+
+        assert_eq!(report.total_events, 1);
+        assert_eq!(report.by_actor.len(), 1);
+        assert!(report.by_actor.contains_key("user1"));
+
+        let actor_summary = report.by_actor.get("user1").unwrap();
+        assert_eq!(actor_summary.event_count, 1);
+        assert!(actor_summary.resources_accessed.contains("mem_123"));
+        assert_eq!(actor_summary.actions.get("capture"), Some(&1));
+
+        assert_eq!(report.by_outcome.success, 1);
+        assert_eq!(report.by_outcome.failure, 0);
+        assert_eq!(report.by_outcome.denied, 0);
+    }
+
+    #[test]
+    fn test_access_review_report_multiple_actors() {
+        let entry1 = AuditEntry::new("memory.capture", "capture")
+            .with_actor("user1")
+            .with_outcome(AuditOutcome::Success);
+        let entry2 = AuditEntry::new("memory.recall", "recall")
+            .with_actor("user2")
+            .with_outcome(AuditOutcome::Success);
+        let entry3 = AuditEntry::new("memory.capture", "capture")
+            .with_actor("user1")
+            .with_outcome(AuditOutcome::Denied);
+
+        let start = Utc::now() - chrono::Duration::hours(1);
+        let end = Utc::now() + chrono::Duration::hours(1);
+
+        let report = AccessReviewReport::generate(&[entry1, entry2, entry3], start, end);
+
+        assert_eq!(report.total_events, 3);
+        assert_eq!(report.by_actor.len(), 2);
+
+        let user1_summary = report.by_actor.get("user1").unwrap();
+        assert_eq!(user1_summary.event_count, 2);
+        assert_eq!(user1_summary.actions.get("capture"), Some(&2));
+
+        let user2_summary = report.by_actor.get("user2").unwrap();
+        assert_eq!(user2_summary.event_count, 1);
+        assert_eq!(user2_summary.actions.get("recall"), Some(&1));
+    }
+
+    #[test]
+    fn test_access_review_report_outcome_counting() {
+        let entry1 = AuditEntry::new("test.event", "action").with_outcome(AuditOutcome::Success);
+        let entry2 = AuditEntry::new("test.event", "action").with_outcome(AuditOutcome::Success);
+        let entry3 = AuditEntry::new("test.event", "action").with_outcome(AuditOutcome::Failure);
+        let entry4 = AuditEntry::new("test.event", "action").with_outcome(AuditOutcome::Denied);
+        let entry5 = AuditEntry::new("test.event", "action").with_outcome(AuditOutcome::Denied);
+
+        let start = Utc::now() - chrono::Duration::hours(1);
+        let end = Utc::now() + chrono::Duration::hours(1);
+
+        let report =
+            AccessReviewReport::generate(&[entry1, entry2, entry3, entry4, entry5], start, end);
+
+        assert_eq!(report.by_outcome.success, 2);
+        assert_eq!(report.by_outcome.failure, 1);
+        assert_eq!(report.by_outcome.denied, 2);
+    }
+
+    #[test]
+    fn test_access_review_report_filters_by_period() {
+        let now = Utc::now();
+
+        // Create entries at different times
+        let mut entry_old = AuditEntry::new("memory.capture", "capture");
+        entry_old.timestamp = now - chrono::Duration::days(10);
+
+        let mut entry_in_range = AuditEntry::new("memory.recall", "recall");
+        entry_in_range.timestamp = now - chrono::Duration::hours(12);
+
+        let mut entry_future = AuditEntry::new("memory.delete", "delete");
+        entry_future.timestamp = now + chrono::Duration::days(10);
+
+        let start = now - chrono::Duration::days(1);
+        let end = now + chrono::Duration::days(1);
+
+        let report =
+            AccessReviewReport::generate(&[entry_old, entry_in_range, entry_future], start, end);
+
+        // Only entry_in_range should be included
+        assert_eq!(report.total_events, 1);
+        assert_eq!(report.by_action.get("recall"), Some(&1));
+        assert!(!report.by_action.contains_key("capture"));
+        assert!(!report.by_action.contains_key("delete"));
+    }
+
+    #[test]
+    fn test_access_review_report_resource_aggregation() {
+        let entry1 = AuditEntry::new("memory.capture", "capture")
+            .with_actor("user1")
+            .with_resource("mem_1");
+        let entry2 = AuditEntry::new("memory.capture", "capture")
+            .with_actor("user1")
+            .with_resource("mem_2");
+        let entry3 = AuditEntry::new("memory.recall", "recall")
+            .with_actor("user1")
+            .with_resource("mem_1"); // Same resource as entry1
+
+        let start = Utc::now() - chrono::Duration::hours(1);
+        let end = Utc::now() + chrono::Duration::hours(1);
+
+        let report = AccessReviewReport::generate(&[entry1, entry2, entry3], start, end);
+
+        let user1_summary = report.by_actor.get("user1").unwrap();
+        assert_eq!(user1_summary.event_count, 3);
+        // resources_accessed should dedupe: mem_1, mem_2
+        assert_eq!(user1_summary.resources_accessed.len(), 2);
+        assert!(user1_summary.resources_accessed.contains("mem_1"));
+        assert!(user1_summary.resources_accessed.contains("mem_2"));
+    }
+
+    #[test]
+    fn test_access_review_report_action_counting() {
+        let entry1 = AuditEntry::new("memory.capture", "capture");
+        let entry2 = AuditEntry::new("memory.capture", "capture");
+        let entry3 = AuditEntry::new("memory.recall", "recall");
+        let entry4 = AuditEntry::new("memory.delete", "delete");
+
+        let start = Utc::now() - chrono::Duration::hours(1);
+        let end = Utc::now() + chrono::Duration::hours(1);
+
+        let report = AccessReviewReport::generate(&[entry1, entry2, entry3, entry4], start, end);
+
+        assert_eq!(report.by_action.get("capture"), Some(&2));
+        assert_eq!(report.by_action.get("recall"), Some(&1));
+        assert_eq!(report.by_action.get("delete"), Some(&1));
+    }
+
+    #[test]
+    fn test_access_review_report_resource_type_counting() {
+        let entry1 = AuditEntry::new("memory.capture", "action");
+        let entry2 = AuditEntry::new("memory.capture", "action");
+        let entry3 = AuditEntry::new("memory.recall", "action");
+        let entry4 = AuditEntry::new("security.pii_detection", "action");
+
+        let start = Utc::now() - chrono::Duration::hours(1);
+        let end = Utc::now() + chrono::Duration::hours(1);
+
+        let report = AccessReviewReport::generate(&[entry1, entry2, entry3, entry4], start, end);
+
+        assert_eq!(report.by_resource_type.get("memory.capture"), Some(&2));
+        assert_eq!(report.by_resource_type.get("memory.recall"), Some(&1));
+        assert_eq!(
+            report.by_resource_type.get("security.pii_detection"),
+            Some(&1)
+        );
+    }
+
+    #[test]
+    fn test_audit_logger_generate_access_review() {
+        let logger = AuditLogger::new();
+
+        // Log some events
+        logger.log_capture("mem_1", "decisions");
+        logger.log_recall("test query", 5);
+        logger.log_denied("capture", "secrets detected");
+
+        let start = Utc::now() - chrono::Duration::hours(1);
+        let end = Utc::now() + chrono::Duration::hours(1);
+
+        let report = logger.generate_access_review(start, end);
+
+        assert_eq!(report.total_events, 3);
+        assert_eq!(report.by_outcome.success, 2);
+        assert_eq!(report.by_outcome.denied, 1);
+    }
+
+    #[test]
+    fn test_access_review_report_serialization() {
+        let entry = AuditEntry::new("memory.capture", "capture")
+            .with_actor("user1")
+            .with_outcome(AuditOutcome::Success);
+
+        let start = Utc::now() - chrono::Duration::hours(1);
+        let end = Utc::now() + chrono::Duration::hours(1);
+
+        let report = AccessReviewReport::generate(&[entry], start, end);
+
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains("generated_at"));
+        assert!(json.contains("period_start"));
+        assert!(json.contains("period_end"));
+        assert!(json.contains("total_events"));
+        assert!(json.contains("by_actor"));
+        assert!(json.contains("by_outcome"));
+
+        // Verify it can be deserialized
+        let deserialized: AccessReviewReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.total_events, report.total_events);
+    }
+
+    // PII Disclosure Logging Tests
+
+    #[test]
+    fn test_log_pii_disclosure() {
+        let logger = AuditLogger::new();
+        let pii_types = vec!["Email Address".to_string(), "Name".to_string()];
+
+        logger.log_pii_disclosure(
+            "anthropic",
+            &pii_types,
+            Some("user_hash_123"),
+            "llm_processing",
+            "consent",
+        );
+
+        let entries = logger.recent_entries(10);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].event_type, "security.pii_disclosure");
+        assert_eq!(entries[0].action, "disclose");
+
+        let metadata = &entries[0].metadata;
+        assert_eq!(metadata["destination"], "anthropic");
+        assert_eq!(metadata["pii_count"], 2);
+        assert_eq!(metadata["purpose"], "llm_processing");
+        assert_eq!(metadata["legal_basis"], "consent");
+        assert_eq!(metadata["data_subject_id"], "user_hash_123");
+    }
+
+    #[test]
+    fn test_log_pii_disclosure_without_data_subject() {
+        let logger = AuditLogger::new();
+        let pii_types = vec!["IP Address".to_string()];
+
+        logger.log_pii_disclosure(
+            "openai",
+            &pii_types,
+            None,
+            "embedding",
+            "legitimate_interest",
+        );
+
+        let entries = logger.recent_entries(10);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].metadata["destination"], "openai");
+        assert!(entries[0].metadata["data_subject_id"].is_null());
+        assert_eq!(entries[0].metadata["purpose"], "embedding");
+        assert_eq!(entries[0].metadata["legal_basis"], "legitimate_interest");
+    }
+
+    #[test]
+    fn test_log_pii_disclosure_multiple_destinations() {
+        let logger = AuditLogger::new();
+        let pii_types = vec!["Name".to_string()];
+
+        logger.log_pii_disclosure("anthropic", &pii_types, None, "enrichment", "consent");
+        logger.log_pii_disclosure("openai", &pii_types, None, "enrichment", "consent");
+        logger.log_pii_disclosure("ollama", &pii_types, None, "enrichment", "consent");
+
+        let entries = logger.recent_entries(10);
+        assert_eq!(entries.len(), 3);
+
+        // Verify different destinations
+        let destinations: Vec<_> = entries
+            .iter()
+            .map(|e| e.metadata["destination"].as_str().unwrap())
+            .collect();
+        assert!(destinations.contains(&"anthropic"));
+        assert!(destinations.contains(&"openai"));
+        assert!(destinations.contains(&"ollama"));
+    }
+
+    #[test]
+    fn test_log_bulk_pii_disclosure() {
+        let logger = AuditLogger::new();
+        let pii_categories = vec![
+            "Personal Identifiers".to_string(),
+            "Contact Information".to_string(),
+        ];
+
+        logger.log_bulk_pii_disclosure(
+            "remote_sync",
+            100,
+            &pii_categories,
+            "backup",
+            "legitimate_interest",
+        );
+
+        let entries = logger.recent_entries(10);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].event_type, "security.pii_bulk_disclosure");
+        assert_eq!(entries[0].action, "bulk_disclose");
+
+        let metadata = &entries[0].metadata;
+        assert_eq!(metadata["destination"], "remote_sync");
+        assert_eq!(metadata["record_count"], 100);
+        assert_eq!(metadata["purpose"], "backup");
+        assert_eq!(metadata["legal_basis"], "legitimate_interest");
+    }
+
+    #[test]
+    fn test_log_bulk_pii_disclosure_zero_records() {
+        let logger = AuditLogger::new();
+        let pii_categories = vec!["Names".to_string()];
+
+        logger.log_bulk_pii_disclosure("api_export", 0, &pii_categories, "export", "consent");
+
+        let entries = logger.recent_entries(10);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].metadata["record_count"], 0);
+    }
+
+    #[test]
+    fn test_pii_disclosure_timestamp_included() {
+        let logger = AuditLogger::new();
+        let pii_types = vec!["Email".to_string()];
+
+        let before = Utc::now();
+        logger.log_pii_disclosure("provider", &pii_types, None, "purpose", "basis");
+        let after = Utc::now();
+
+        let entries = logger.recent_entries(10);
+        assert_eq!(entries.len(), 1);
+
+        // Verify timestamp_utc is in metadata
+        let timestamp_str = entries[0].metadata["timestamp_utc"].as_str().unwrap();
+        let timestamp: DateTime<Utc> = timestamp_str.parse().unwrap();
+        assert!(timestamp >= before && timestamp <= after);
+    }
+
+    #[test]
+    fn test_pii_disclosure_in_access_review() {
+        let logger = AuditLogger::new();
+        let pii_types = vec!["SSN".to_string()];
+
+        logger.log_pii_disclosure("external_api", &pii_types, None, "verification", "consent");
+        logger.log_bulk_pii_disclosure("backup", 50, &pii_types, "archival", "legitimate_interest");
+
+        let start = Utc::now() - chrono::Duration::hours(1);
+        let end = Utc::now() + chrono::Duration::hours(1);
+
+        let report = logger.generate_access_review(start, end);
+
+        assert_eq!(report.total_events, 2);
+        assert_eq!(
+            report.by_resource_type.get("security.pii_disclosure"),
+            Some(&1)
+        );
+        assert_eq!(
+            report.by_resource_type.get("security.pii_bulk_disclosure"),
+            Some(&1)
+        );
     }
 }

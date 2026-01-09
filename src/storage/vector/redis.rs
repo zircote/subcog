@@ -188,6 +188,54 @@ impl RedisVectorBackend {
     pub fn index_name(&self) -> &str {
         &self.index_name
     }
+
+    /// Checks if the Redis connection is healthy (DB-HIGH-002).
+    ///
+    /// Performs a PING command to verify connectivity and responsiveness.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(true)` if the connection is healthy, `Ok(false)` if unhealthy,
+    /// or `Err` if the health check itself fails unexpectedly.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let backend = RedisVectorBackend::new("redis://localhost:6379", "subcog", 384)?;
+    /// if backend.health_check()? {
+    ///     println!("Redis vector backend is healthy");
+    /// } else {
+    ///     eprintln!("Redis vector backend is not responding");
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection cannot be established.
+    #[cfg(feature = "redis")]
+    pub fn health_check(&self) -> Result<bool> {
+        let mut conn = match self.get_connection() {
+            Ok(c) => c,
+            Err(_) => return Ok(false),
+        };
+
+        let result: redis::RedisResult<String> = redis::cmd("PING").query(&mut conn);
+
+        let healthy = result.is_ok_and(|response| response == "PONG");
+
+        self.return_connection(conn);
+        Ok(healthy)
+    }
+
+    /// Health check stub (DB-HIGH-002).
+    ///
+    /// # Errors
+    ///
+    /// Always returns an error because the feature is not enabled.
+    #[cfg(not(feature = "redis"))]
+    pub fn health_check(&self) -> Result<bool> {
+        Err(Error::FeatureNotEnabled("redis".to_string()))
+    }
 }
 
 #[cfg(feature = "redis")]

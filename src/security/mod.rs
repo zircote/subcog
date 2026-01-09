@@ -116,13 +116,18 @@
 mod audit;
 pub mod encryption;
 mod pii;
+pub mod rbac;
 mod redactor;
 mod secrets;
 
 pub use audit::{
-    AuditConfig, AuditEntry, AuditLogger, AuditOutcome, global_logger, init_global, record_event,
+    AccessReviewReport, ActorAccessSummary, AuditConfig, AuditEntry, AuditLogger, AuditOutcome,
+    OutcomeSummary, global_logger, init_global, record_event,
 };
 pub use encryption::{EncryptionConfig, Encryptor, is_encrypted};
 pub use pii::{PiiDetector, PiiMatch};
+pub use rbac::{
+    AccessControl, AccessResult, Permission, PermissionCategory, RbacSummary, Role, RoleSummary,
+};
 pub use redactor::{ContentRedactor, RedactionConfig, RedactionMode};
 pub use secrets::{SecretDetector, SecretMatch};

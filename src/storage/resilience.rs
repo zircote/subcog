@@ -322,6 +322,7 @@ fn calculate_jitter(delay_ms: u64) -> u64 {
 /// - Connection errors (network issues, DNS failures)
 /// - Lock/busy errors (database locked, pool exhausted)
 /// - Temporary I/O errors
+#[must_use]
 pub fn is_retryable_storage_error(err: &Error) -> bool {
     match err {
         Error::OperationFailed { cause, .. } => {
@@ -379,6 +380,10 @@ pub fn is_retryable_storage_error(err: &Error) -> bool {
 ///     || create_postgres_pool(connection_url),
 /// )?;
 /// ```
+///
+/// # Errors
+///
+/// Returns an error if all retry attempts are exhausted without success.
 pub fn retry_connection<T, F>(
     config: &StorageResilienceConfig,
     backend_name: &str,

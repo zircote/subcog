@@ -1,6 +1,42 @@
 //! Memory recall (search) service.
 //!
 //! Searches for memories using hybrid (vector + BM25) search with RRF fusion.
+//!
+//! # Examples
+//!
+//! Text search with BM25:
+//!
+//! ```
+//! use subcog::services::RecallService;
+//! use subcog::models::{SearchFilter, SearchMode};
+//! use subcog::storage::index::SqliteBackend;
+//!
+//! let index = SqliteBackend::in_memory()?;
+//! let service = RecallService::with_index(index);
+//!
+//! let filter = SearchFilter::new();
+//! let results = service.search("database architecture", SearchMode::Text, &filter, 10)?;
+//!
+//! for hit in &results.memories {
+//!     println!("{}: {:.2}", hit.memory.id.as_str(), hit.score);
+//! }
+//! # Ok::<(), subcog::Error>(())
+//! ```
+//!
+//! Filtering by namespace:
+//!
+//! ```
+//! use subcog::services::RecallService;
+//! use subcog::models::{Namespace, SearchFilter, SearchMode};
+//! use subcog::storage::index::SqliteBackend;
+//!
+//! let index = SqliteBackend::in_memory()?;
+//! let service = RecallService::with_index(index);
+//!
+//! let filter = SearchFilter::new().with_namespace(Namespace::Decisions);
+//! let results = service.search("PostgreSQL", SearchMode::Text, &filter, 5)?;
+//! # Ok::<(), subcog::Error>(())
+//! ```
 
 use crate::context::GitContext;
 use crate::current_timestamp;

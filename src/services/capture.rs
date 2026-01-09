@@ -2,6 +2,50 @@
 //!
 //! Handles capturing new memories, including validation, redaction, and storage.
 //! Now also generates embeddings and indexes memories for searchability.
+//!
+//! # Examples
+//!
+//! Basic capture:
+//!
+//! ```
+//! use subcog::services::CaptureService;
+//! use subcog::models::{CaptureRequest, Namespace, Domain};
+//!
+//! let service = CaptureService::default();
+//! let request = CaptureRequest {
+//!     content: "Use PostgreSQL for primary storage".to_string(),
+//!     namespace: Namespace::Decisions,
+//!     domain: Domain::default(),
+//!     tags: vec!["database".to_string()],
+//!     source: Some("ARCHITECTURE.md".to_string()),
+//!     skip_security_check: false,
+//! };
+//!
+//! let result = service.capture(request).expect("capture should succeed");
+//! assert!(result.urn.starts_with("subcog://"));
+//! ```
+//!
+//! Validation before capture:
+//!
+//! ```
+//! use subcog::services::CaptureService;
+//! use subcog::models::{CaptureRequest, Namespace, Domain};
+//!
+//! let service = CaptureService::default();
+//! let request = CaptureRequest {
+//!     content: "Important decision".to_string(),
+//!     namespace: Namespace::Decisions,
+//!     domain: Domain::default(),
+//!     tags: vec![],
+//!     source: None,
+//!     skip_security_check: false,
+//! };
+//!
+//! let validation = service.validate(&request).expect("validation should succeed");
+//! if validation.is_valid {
+//!     let _result = service.capture(request);
+//! }
+//! ```
 
 use crate::config::Config;
 use crate::context::GitContext;
@@ -53,6 +97,18 @@ impl CaptureService {
     ///
     /// For full searchability, use [`with_backends`](Self::with_backends) to
     /// also configure index and vector backends.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use subcog::config::Config;
+    /// use subcog::services::CaptureService;
+    ///
+    /// let config = Config::default();
+    /// let service = CaptureService::new(config);
+    /// assert!(!service.has_embedder());
+    /// assert!(!service.has_index());
+    /// ```
     #[must_use]
     pub fn new(config: Config) -> Self {
         Self {
@@ -135,6 +191,28 @@ impl CaptureService {
     /// - The content is empty
     /// - The content contains unredacted secrets (when blocking is enabled)
     /// - Storage fails
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use subcog::services::CaptureService;
+    /// use subcog::models::{CaptureRequest, Namespace, Domain};
+    ///
+    /// let service = CaptureService::default();
+    /// let request = CaptureRequest {
+    ///     content: "Use SQLite for local development".to_string(),
+    ///     namespace: Namespace::Decisions,
+    ///     domain: Domain::default(),
+    ///     tags: vec!["database".to_string(), "architecture".to_string()],
+    ///     source: Some("src/config.rs".to_string()),
+    ///     skip_security_check: false,
+    /// };
+    ///
+    /// let result = service.capture(request)?;
+    /// assert!(!result.memory_id.as_str().is_empty());
+    /// assert!(result.urn.starts_with("subcog://"));
+    /// # Ok::<(), subcog::Error>(())
+    /// ```
     #[instrument(
         name = "subcog.memory.capture",
         skip(self, request),
@@ -399,6 +477,40 @@ impl CaptureService {
     /// # Errors
     ///
     /// Returns an error if validation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use subcog::services::CaptureService;
+    /// use subcog::models::{CaptureRequest, Namespace, Domain};
+    ///
+    /// let service = CaptureService::default();
+    ///
+    /// // Valid request
+    /// let request = CaptureRequest {
+    ///     content: "Valid content".to_string(),
+    ///     namespace: Namespace::Learnings,
+    ///     domain: Domain::default(),
+    ///     tags: vec![],
+    ///     source: None,
+    ///     skip_security_check: false,
+    /// };
+    /// let result = service.validate(&request)?;
+    /// assert!(result.is_valid);
+    ///
+    /// // Empty content is invalid
+    /// let empty_request = CaptureRequest {
+    ///     content: "".to_string(),
+    ///     namespace: Namespace::Learnings,
+    ///     domain: Domain::default(),
+    ///     tags: vec![],
+    ///     source: None,
+    ///     skip_security_check: false,
+    /// };
+    /// let result = service.validate(&empty_request)?;
+    /// assert!(!result.is_valid);
+    /// # Ok::<(), subcog::Error>(())
+    /// ```
     pub fn validate(&self, request: &CaptureRequest) -> Result<ValidationResult> {
         let mut issues = Vec::new();
         let mut warnings = Vec::new();

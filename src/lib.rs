@@ -33,9 +33,8 @@
 #![warn(clippy::nursery)]
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
-// Allow todo! in stub implementations during development
-#![allow(clippy::todo)]
-// Allow multiple crate versions from transitive dependencies
+// multiple_crate_versions is inherently crate-level (detects duplicate transitive dependencies).
+// Cannot be moved to function level. Current duplicates: fastembed→ort transitive deps.
 #![allow(clippy::multiple_crate_versions)]
 
 use thiserror::Error as ThisError;
