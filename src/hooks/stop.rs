@@ -451,28 +451,20 @@ impl HookHandler for StopHandler {
             )
             .increment(1);
 
-            // Return minimal response on timeout
-            let timeout_response = serde_json::json!({
-                "hookSpecificOutput": {
-                    "hookEventName": "Stop",
-                    "additionalContext": format!(
-                        "**Subcog Session Summary** (truncated due to {}ms timeout)\n\nSession: `{}`\n\n<!-- subcog-metadata: {{\"timed_out\": true, \"elapsed_ms\": {}}} -->",
-                        self.timeout_ms,
-                        summary.session_id,
-                        start.elapsed().as_millis()
-                    )
-                }
-            });
+            // Return empty response on timeout
+            // Note: Stop hooks don't support hookSpecificOutput/additionalContext
+            // per Claude Code hook specification. Context is logged but not returned.
+            tracing::debug!(
+                session_id = %summary.session_id,
+                timed_out = true,
+                elapsed_ms = start.elapsed().as_millis(),
+                "Stop hook timed out, returning empty response"
+            );
             span.record("timed_out", true);
-            return serde_json::to_string(&timeout_response).map_err(|e| {
-                crate::Error::OperationFailed {
-                    operation: "serialize_response".to_string(),
-                    cause: e.to_string(),
-                }
-            });
+            return Ok("{}".to_string());
         }
 
-        // Build response components using helper methods
+        // Build response components for logging/debugging
         let mut metadata = Self::build_metadata(&summary, sync_result.as_ref());
         let context = Self::build_context_lines(&summary, sync_result.as_ref());
 
@@ -484,24 +476,22 @@ impl HookHandler for StopHandler {
         let elapsed_ms = start.elapsed().as_millis() as u64; // u128 to u64 safe for <584M years
         metadata["elapsed_ms"] = serde_json::json!(elapsed_ms);
 
-        // Build Claude Code hook response format
-        let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
-        let context_with_metadata =
-            format!("{context}\n\n<!-- subcog-metadata: {metadata_str} -->");
-
-        let response = serde_json::json!({
-            "hookSpecificOutput": {
-                "hookEventName": "Stop",
-                "additionalContext": context_with_metadata
-            }
-        });
+        // Log the session summary for debugging (Stop hooks don't support
+        // hookSpecificOutput/additionalContext per Claude Code hook specification)
+        tracing::info!(
+            session_id = %summary.session_id,
+            duration_seconds = summary.duration_seconds,
+            interaction_count = summary.interaction_count,
+            memories_captured = summary.memories_captured,
+            sync_performed = sync_result.is_some(),
+            "Session ended"
+        );
+        tracing::debug!(context = %context, metadata = ?metadata, "Stop hook context (not returned)");
 
         span.record("timed_out", timed_out);
 
-        let result = serde_json::to_string(&response).map_err(|e| crate::Error::OperationFailed {
-            operation: "serialize_response".to_string(),
-            cause: e.to_string(),
-        });
+        // Return empty response - Stop hooks don't support context injection
+        let result = Ok("{}".to_string());
 
         // Record metrics
         let status = if result.is_ok() { "success" } else { "error" };
@@ -601,23 +591,9 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        // Claude Code hook format - should have hookSpecificOutput
-        let hook_output = response.get("hookSpecificOutput").unwrap();
-        assert_eq!(
-            hook_output.get("hookEventName"),
-            Some(&serde_json::Value::String("Stop".to_string()))
-        );
-        // Should have additionalContext with session summary and metadata embedded
-        let context = hook_output
-            .get("additionalContext")
-            .unwrap()
-            .as_str()
-            .unwrap();
-        assert!(context.contains("Subcog Session Summary"));
-        assert!(context.contains("test-session"));
-        assert!(context.contains("subcog-metadata"));
-        assert!(context.contains("\"session_id\""));
-        assert!(context.contains("\"sync\""));
+        // Stop hooks don't support hookSpecificOutput per Claude Code spec
+        // Response should be empty JSON (context is logged only)
+        assert!(response.as_object().unwrap().is_empty());
     }
 
     #[test]
@@ -631,17 +607,8 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        // Claude Code hook format - should have hookSpecificOutput
-        let hook_output = response.get("hookSpecificOutput").unwrap();
-        let context = hook_output
-            .get("additionalContext")
-            .unwrap()
-            .as_str()
-            .unwrap();
-        // Context should contain tip
-        assert!(context.contains("Tip"));
-        // Hints should be in embedded metadata
-        assert!(context.contains("\"hints\""));
+        // Stop hooks return empty JSON - context is logged only
+        assert!(response.as_object().unwrap().is_empty());
     }
 
     #[test]
@@ -669,15 +636,8 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        // Claude Code hook format - should have hookSpecificOutput
-        let hook_output = response.get("hookSpecificOutput").unwrap();
-        let context = hook_output
-            .get("additionalContext")
-            .unwrap()
-            .as_str()
-            .unwrap();
-        // Session ID should be in embedded metadata with default "unknown"
-        assert!(context.contains("\"session_id\":\"unknown\""));
+        // Stop hooks return empty JSON - context is logged only
+        assert!(response.as_object().unwrap().is_empty());
     }
 
     #[test]
@@ -696,14 +656,8 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        let context = response["hookSpecificOutput"]["additionalContext"]
-            .as_str()
-            .unwrap();
-
-        // Should contain namespace breakdown table
-        assert!(context.contains("Namespace Breakdown"));
-        assert!(context.contains("decisions"));
-        assert!(context.contains("learnings"));
+        // Stop hooks return empty JSON - context is logged only
+        assert!(response.as_object().unwrap().is_empty());
     }
 
     #[test]
@@ -723,13 +677,8 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        let context = response["hookSpecificOutput"]["additionalContext"]
-            .as_str()
-            .unwrap();
-
-        // Should contain top tags
-        assert!(context.contains("Top Tags"));
-        assert!(context.contains("rust"));
+        // Stop hooks return empty JSON - context is logged only
+        assert!(response.as_object().unwrap().is_empty());
     }
 
     #[test]
@@ -745,12 +694,8 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        let context = response["hookSpecificOutput"]["additionalContext"]
-            .as_str()
-            .unwrap();
-
-        // Should contain query patterns
-        assert!(context.contains("Query Patterns"));
+        // Stop hooks return empty JSON - context is logged only
+        assert!(response.as_object().unwrap().is_empty());
     }
 
     #[test]
@@ -769,13 +714,8 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        let context = response["hookSpecificOutput"]["additionalContext"]
-            .as_str()
-            .unwrap();
-
-        // Should contain resources summary
-        assert!(context.contains("Resources Read"));
-        assert!(context.contains("2 unique resources"));
+        // Stop hooks return empty JSON - context is logged only
+        assert!(response.as_object().unwrap().is_empty());
     }
 
     #[test]
@@ -826,7 +766,7 @@ mod tests {
     }
 
     #[test]
-    fn test_timeout_metadata_included() {
+    fn test_returns_empty_json() {
         let handler = StopHandler::new();
         let input = r#"{"session_id": "test-session"}"#;
 
@@ -834,12 +774,8 @@ mod tests {
         assert!(result.is_ok());
 
         let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        let context = response["hookSpecificOutput"]["additionalContext"]
-            .as_str()
-            .unwrap();
-
-        // Should contain elapsed_ms in metadata
-        assert!(context.contains("\"elapsed_ms\""));
+        // Stop hooks return empty JSON - context and metadata logged only
+        assert!(response.as_object().unwrap().is_empty());
     }
 
     #[test]

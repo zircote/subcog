@@ -81,11 +81,16 @@ impl ResponseFormatter {
     }
 
     /// Builds the Claude Code hook response JSON.
+    ///
+    /// Note: `PreCompact` hooks don't support `hookSpecificOutput` per Claude Code
+    /// hook specification. The context message is logged for debugging but not
+    /// returned in the response. Returns empty JSON `{}`.
     #[must_use]
     pub fn build_hook_response(
         captured: &[CapturedMemory],
         skipped: &[SkippedDuplicate],
     ) -> serde_json::Value {
+        // Build metadata for logging/debugging purposes
         let metadata = serde_json::json!({
             "captured": !captured.is_empty(),
             "captures": captured.iter().map(|c| serde_json::json!({
@@ -102,20 +107,18 @@ impl ResponseFormatter {
             })).collect::<Vec<_>>()
         });
 
-        Self::build_context_message(captured, skipped).map_or_else(
-            || serde_json::json!({}),
-            |ctx| {
-                let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
-                let context_with_metadata =
-                    format!("{ctx}\n\n<!-- subcog-metadata: {metadata_str} -->");
-                serde_json::json!({
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreCompact",
-                        "additionalContext": context_with_metadata
-                    }
-                })
-            },
-        )
+        // Log the context for debugging (PreCompact hooks cannot inject context)
+        if let Some(ctx) = Self::build_context_message(captured, skipped) {
+            tracing::info!(
+                captures = captured.len(),
+                skipped = skipped.len(),
+                "PreCompact auto-capture completed"
+            );
+            tracing::debug!(context = %ctx, metadata = ?metadata, "PreCompact context (not returned)");
+        }
+
+        // PreCompact hooks don't support hookSpecificOutput - return empty
+        serde_json::json!({})
     }
 }
 
@@ -190,6 +193,7 @@ mod tests {
         let skipped: Vec<SkippedDuplicate> = vec![];
 
         let response = ResponseFormatter::build_hook_response(&captured, &skipped);
+        // PreCompact hooks don't support hookSpecificOutput - always empty
         assert!(response.as_object().unwrap().is_empty());
     }
 
@@ -203,17 +207,13 @@ mod tests {
         let skipped: Vec<SkippedDuplicate> = vec![];
 
         let response = ResponseFormatter::build_hook_response(&captured, &skipped);
-        assert!(response.get("hookSpecificOutput").is_some());
-        let hook_output = response.get("hookSpecificOutput").unwrap();
-        assert_eq!(
-            hook_output.get("hookEventName").unwrap().as_str().unwrap(),
-            "PreCompact"
-        );
-        assert!(hook_output.get("additionalContext").is_some());
+        // PreCompact hooks don't support hookSpecificOutput per Claude Code spec
+        // Context is logged but not returned
+        assert!(response.as_object().unwrap().is_empty());
     }
 
     #[test]
-    fn test_build_hook_response_contains_metadata() {
+    fn test_build_hook_response_returns_empty_json() {
         let captured = vec![CapturedMemory {
             memory_id: "mem-abc".to_string(),
             namespace: "blockers".to_string(),
@@ -222,15 +222,8 @@ mod tests {
         let skipped: Vec<SkippedDuplicate> = vec![];
 
         let response = ResponseFormatter::build_hook_response(&captured, &skipped);
-        let context = response
-            .get("hookSpecificOutput")
-            .unwrap()
-            .get("additionalContext")
-            .unwrap()
-            .as_str()
-            .unwrap();
-        assert!(context.contains("subcog-metadata"));
-        assert!(context.contains("mem-abc"));
+        // PreCompact hooks return empty JSON - context is logged only
+        assert!(response.as_object().unwrap().is_empty());
     }
 
     #[test]
@@ -248,17 +241,16 @@ mod tests {
         }];
 
         let response = ResponseFormatter::build_hook_response(&captured, &skipped);
-        let context = response
-            .get("hookSpecificOutput")
-            .unwrap()
-            .get("additionalContext")
-            .unwrap()
-            .as_str()
-            .unwrap();
+        // PreCompact hooks return empty JSON - context is logged only
+        assert!(response.as_object().unwrap().is_empty());
 
-        assert!(context.contains("Captured 1 memories"));
-        assert!(context.contains("Skipped 1 duplicates"));
-        assert!(context.contains("new-mem"));
-        assert!(context.contains("old-mem"));
+        // Verify context message generation still works (for logging)
+        let context = ResponseFormatter::build_context_message(&captured, &skipped);
+        assert!(context.is_some());
+        let ctx = context.unwrap();
+        assert!(ctx.contains("Captured 1 memories"));
+        assert!(ctx.contains("Skipped 1 duplicates"));
+        assert!(ctx.contains("new-mem"));
+        assert!(ctx.contains("old-mem"));
     }
 }

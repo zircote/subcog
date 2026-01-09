@@ -370,11 +370,9 @@ mod hook_handler_tests {
         let result = handler.handle(input);
 
         let output = result.expect("Stop hook should succeed");
-        assert!(
-            output.contains("hookSpecificOutput"),
-            "Should have hook output"
-        );
-        assert!(output.contains("Stop"), "Should identify as Stop");
+        // Stop hooks return empty JSON per Claude Code hook specification
+        // (hookSpecificOutput is not supported for Stop events)
+        assert_eq!(output, "{}", "Stop hook should return empty JSON");
     }
 
     #[test]

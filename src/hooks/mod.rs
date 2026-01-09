@@ -4,47 +4,46 @@
 //!
 //! # Hook Response JSON Format
 //!
-//! All hooks return responses in the Claude Code hook format:
+//! Claude Code hooks have different response formats depending on the event type.
+//! Only certain hooks support `hookSpecificOutput` with `additionalContext`.
 //!
-//! ```json
-//! {
-//!   "hookSpecificOutput": {
-//!     "hookEventName": "SessionStart",
-//!     "additionalContext": "# Memory Context\n\n..."
-//!   }
-//! }
-//! ```
+//! ## Hooks Supporting Context Injection
 //!
-//! ## Field Descriptions
-//!
-//! | Field | Type | Description |
-//! |-------|------|-------------|
-//! | `hookSpecificOutput` | object | Required wrapper for hook-specific data |
-//! | `hookEventName` | string | One of: `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `PreCompact`, `Stop` |
-//! | `additionalContext` | string | Markdown content to inject into context |
-//!
-//! ## Hook Event Responses
+//! The following hooks can inject context via `hookSpecificOutput.additionalContext`:
 //!
 //! | Event | `hookEventName` | `additionalContext` Content |
 //! |-------|-----------------|----------------------------|
 //! | Session start | `SessionStart` | Memory statistics, recent topics, tutorial info |
 //! | User prompt | `UserPromptSubmit` | Relevant memories based on search intent |
 //! | Post tool use | `PostToolUse` | Related memories surfaced by tool output |
-//! | Pre-compact | `PreCompact` | Auto-captured memories before context compaction |
-//! | Stop | `Stop` | Sync status, session summary |
 //!
-//! ## Empty Response
-//!
-//! When no context is available, return an empty object:
+//! Example response for context-supporting hooks:
 //!
 //! ```json
 //! {
 //!   "hookSpecificOutput": {
 //!     "hookEventName": "UserPromptSubmit",
-//!     "additionalContext": ""
+//!     "additionalContext": "# Memory Context\n\n..."
 //!   }
 //! }
 //! ```
+//!
+//! ## Hooks Without Context Injection
+//!
+//! The following hooks do NOT support `hookSpecificOutput`:
+//!
+//! | Event | Response | Notes |
+//! |-------|----------|-------|
+//! | Pre-compact | `{}` | Context logged only, auto-capture performed |
+//! | Stop | `{}` | Session summary logged only, sync performed |
+//!
+//! These hooks perform their side effects (auto-capture, sync) and log context
+//! for debugging, but return empty JSON since Claude Code's schema doesn't
+//! support `hookSpecificOutput` for these event types.
+//!
+//! ## Empty Response
+//!
+//! When no context is available, return an empty object `{}`.
 //!
 //! # Handler Configuration
 //!

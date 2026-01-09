@@ -908,8 +908,8 @@ mod tests {
 
         assert!(result.is_ok());
         let context = result.unwrap();
-        // Should include guidance content
-        assert!(context.content.contains("SUBCOG"));
+        // Should include guidance content (case-insensitive check)
+        assert!(context.content.to_lowercase().contains("subcog"));
     }
 
     #[test]
