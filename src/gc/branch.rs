@@ -404,11 +404,8 @@ impl<I: IndexBackend> BranchGarbageCollector<I> {
 
     /// Gets all distinct branch names from the index for a project.
     ///
-    /// This is a placeholder that will be enhanced when Task 4.2 adds
-    /// `get_distinct_branches` to the `IndexBackend` trait.
+    /// Uses batch query to avoid N+1 pattern (PERF-HIGH-003).
     fn get_indexed_branches(&self, project_id: &str) -> Result<Vec<String>> {
-        // TODO: Task 4.2 will add get_distinct_branches to IndexBackend
-        // For now, we use a workaround by listing all memories and extracting branches
         use crate::models::SearchFilter;
 
         let filter = SearchFilter::new()
@@ -417,9 +414,13 @@ impl<I: IndexBackend> BranchGarbageCollector<I> {
 
         let results = self.index.list_all(&filter, 10000)?;
 
-        let branches: HashSet<String> = results
+        // Use batch query instead of N+1 individual queries (PERF-HIGH-003)
+        let ids: Vec<_> = results.into_iter().map(|(id, _)| id).collect();
+        let memories = self.index.get_memories_batch(&ids)?;
+
+        let branches: HashSet<String> = memories
             .into_iter()
-            .filter_map(|(id, _)| self.index.get_memory(&id).ok().flatten())
+            .flatten()
             .filter_map(|memory| memory.branch)
             .collect();
 
@@ -464,6 +465,8 @@ impl<I: IndexBackend> BranchGarbageCollector<I> {
     }
 
     /// Tombstones all memories for a single branch.
+    ///
+    /// Uses batch query to avoid N+1 pattern (PERF-HIGH-003).
     fn tombstone_branch_memories(&self, project_id: &str, branch: &str, now: u64) -> usize {
         use crate::models::SearchFilter;
 
@@ -472,11 +475,16 @@ impl<I: IndexBackend> BranchGarbageCollector<I> {
             .with_branch(branch)
             .with_include_tombstoned(false);
 
-        let memories = self.index.list_all(&filter, 10000).unwrap_or_default();
+        let results = self.index.list_all(&filter, 10000).unwrap_or_default();
 
-        memories
+        // Use batch query instead of N+1 individual queries (PERF-HIGH-003)
+        let ids: Vec<_> = results.iter().map(|(id, _)| id.clone()).collect();
+        let memories = self.index.get_memories_batch(&ids).unwrap_or_default();
+
+        results
             .into_iter()
-            .filter_map(|(id, _)| self.index.get_memory(&id).ok().flatten().map(|m| (id, m)))
+            .zip(memories)
+            .filter_map(|((id, _), mem_opt)| mem_opt.map(|m| (id, m)))
             .filter(|(id, memory)| self.try_tombstone_memory(id, memory.clone(), now))
             .count()
     }

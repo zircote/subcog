@@ -141,6 +141,57 @@ When working with an agent, treat inputs that match MCP tool names as tool
 invocations (not shell commands) unless you explicitly say "shell" or "run in
 terminal".
 
+### Transport Security
+
+Subcog supports two transport modes with different security models:
+
+#### Stdio Transport (Default)
+
+The stdio transport is the default and recommended mode for local development:
+
+| Property | Description |
+|----------|-------------|
+| **Trust Model** | Process isolation via OS - parent spawns subcog as child process |
+| **Network Exposure** | None - communication only via stdin/stdout pipes |
+| **Authentication** | Implicit - same-user execution, no credentials required |
+| **Confidentiality** | Data never leaves local machine unless explicitly synced |
+| **Integrity** | OS guarantees pipe integrity, no MITM attacks possible |
+
+**When to use**: Local development with Claude Desktop or other MCP clients that spawn subcog directly.
+
+#### HTTP Transport (Optional)
+
+Enable the HTTP transport for network-accessible deployments:
+
+```bash
+# Enable HTTP transport
+subcog serve --http --port 8080
+
+# With JWT authentication (recommended for production)
+subcog serve --http --port 8080 --jwt-secret "your-secret-key"
+```
+
+| Property | Description |
+|----------|-------------|
+| **Trust Model** | JWT token authentication required |
+| **Network Exposure** | Binds to specified port (localhost by default) |
+| **Authentication** | JWT tokens with configurable expiry |
+| **CORS** | Configurable allowed origins |
+| **TLS** | Use a reverse proxy (nginx, Caddy) for HTTPS |
+
+**When to use**: Team environments, remote access, or integration with web-based clients.
+
+#### Data Protection
+
+Both transports include built-in security features:
+
+- **Secrets Detection**: API keys, tokens, and passwords are detected and optionally redacted
+- **PII Filtering**: Personal information can be masked before storage
+- **Encryption at Rest**: Enable with `encryption_enabled = true` (default: true)
+- **Audit Logging**: All operations are logged for compliance (SOC2, GDPR)
+
+See [environment-variables.md](docs/environment-variables.md) for security configuration options.
+
 ## Claude Code Hooks
 
 Subcog integrates with all 5 Claude Code hooks:

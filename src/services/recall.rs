@@ -328,16 +328,41 @@ impl RecallService {
         result
     }
 
+    /// Processes stale branch memories in search results.
+    ///
+    /// Orchestrates CQS-compliant lazy tombstoning:
+    /// 1. **Query**: Identifies and marks stale branch memories (pure transformation)
+    /// 2. **Command**: Persists tombstone status to index (side effect)
+    /// 3. **Query**: Filters out tombstoned if needed (pure transformation)
+    ///
+    /// This is the entry point that coordinates the separate concerns (ARCH-HIGH-001).
     fn lazy_tombstone_stale_branches(&self, hits: &mut Vec<SearchHit>, filter: &SearchFilter) {
-        let Some(index) = self.index.as_ref() else {
-            return;
-        };
-
         let ctx = GitContext::from_cwd();
         let Some(project_id) = ctx.project_id else {
             return;
         };
 
+        // Query: Mark stale branch hits (pure transformation, returns IDs to persist)
+        let tombstoned_ids = Self::mark_stale_branch_hits(hits, &project_id);
+
+        // Command: Persist tombstones to index (side effect)
+        if !tombstoned_ids.is_empty() {
+            self.persist_tombstones_to_index(hits, &tombstoned_ids);
+        }
+
+        // Query: Filter out tombstoned if needed (pure transformation)
+        if !filter.include_tombstoned {
+            hits.retain(|hit| hit.memory.status != MemoryStatus::Tombstoned);
+        }
+    }
+
+    /// Marks stale branch memories as tombstoned in search results.
+    ///
+    /// This is a **pure transformation** that modifies hits in place.
+    /// Returns the indices of hits that were tombstoned for later persistence.
+    ///
+    /// CQS: Query - transforms data, no side effects (ARCH-HIGH-001).
+    fn mark_stale_branch_hits(hits: &mut [SearchHit], project_id: &str) -> Vec<usize> {
         let now = current_timestamp();
         let now_i64 = i64::try_from(now).unwrap_or(i64::MAX);
         let now_dt = Utc
@@ -346,8 +371,9 @@ impl RecallService {
             .unwrap_or_else(Utc::now);
 
         let branch_names = Self::load_branch_names();
+        let mut tombstoned_indices = Vec::new();
 
-        for hit in hits.iter_mut() {
+        for (idx, hit) in hits.iter_mut().enumerate() {
             let Some(branch) = hit.memory.branch.as_deref() else {
                 continue;
             };
@@ -356,7 +382,7 @@ impl RecallService {
                 continue;
             }
 
-            if hit.memory.project_id.as_deref() != Some(&project_id) {
+            if hit.memory.project_id.as_deref() != Some(project_id) {
                 continue;
             }
 
@@ -369,25 +395,35 @@ impl RecallService {
                 continue;
             }
 
-            let mut updated = hit.memory.clone();
-            updated.status = MemoryStatus::Tombstoned;
-            updated.tombstoned_at = Some(now_dt);
-
-            if let Err(err) = index.index(&updated) {
-                warn!(
-                    error = %err,
-                    memory_id = %updated.id.as_str(),
-                    "Failed to tombstone stale branch memory during recall"
-                );
-                continue;
-            }
-
+            // Mark as tombstoned (PERF-HIGH-002: update in-place)
             hit.memory.status = MemoryStatus::Tombstoned;
             hit.memory.tombstoned_at = Some(now_dt);
+            tombstoned_indices.push(idx);
         }
 
-        if !filter.include_tombstoned {
-            hits.retain(|hit| hit.memory.status != MemoryStatus::Tombstoned);
+        tombstoned_indices
+    }
+
+    /// Persists tombstone status to the index for the given hit indices.
+    ///
+    /// CQS: Command - performs side effects, no return value (ARCH-HIGH-001).
+    fn persist_tombstones_to_index(&self, hits: &[SearchHit], indices: &[usize]) {
+        let Some(index) = self.index.as_ref() else {
+            return;
+        };
+
+        for &idx in indices {
+            // Reduce nesting by using guard clause
+            let Some(hit) = hits.get(idx) else {
+                continue;
+            };
+            if let Err(err) = index.index(&hit.memory) {
+                warn!(
+                    error = %err,
+                    memory_id = %hit.memory.id.as_str(),
+                    "Failed to persist tombstone to index during recall"
+                );
+            }
         }
     }
 

@@ -21,7 +21,7 @@ use clap::Subcommand;
 
 // Re-export command functions
 pub use config::cmd_config;
-pub use core::{cmd_capture, cmd_consolidate, cmd_recall, cmd_reindex, cmd_status, cmd_sync};
+pub use core::{cmd_capture, cmd_consolidate, cmd_recall, cmd_reindex, cmd_status};
 pub use enrich::cmd_enrich;
 pub use hook::cmd_hook;
 pub use migrate::cmd_migrate_embeddings;

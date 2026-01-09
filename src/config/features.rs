@@ -1,5 +1,7 @@
 //! Feature flags for optional functionality.
 
+use super::ConfigFileFeatures;
+
 /// Feature flags for controlling optional subcog features.
 #[derive(Debug, Clone, Default)]
 #[allow(clippy::struct_excessive_bools)]
@@ -65,6 +67,69 @@ impl FeatureFlags {
             auto_capture: true,
             consolidation: true,
             org_scope_enabled: true,
+        }
+    }
+
+    /// Creates feature flags from config file settings.
+    ///
+    /// ARCH-HIGH-002: Delegated from `SubcogConfig::apply_config_file`.
+    #[must_use]
+    pub fn from_config_file(file: &ConfigFileFeatures) -> Self {
+        let mut flags = Self::default();
+        if let Some(v) = file.secrets_filter {
+            flags.secrets_filter = v;
+        }
+        if let Some(v) = file.pii_filter {
+            flags.pii_filter = v;
+        }
+        if let Some(v) = file.multi_domain {
+            flags.multi_domain = v;
+        }
+        if let Some(v) = file.audit_log {
+            flags.audit_log = v;
+        }
+        if let Some(v) = file.llm_features {
+            flags.llm_features = v;
+        }
+        if let Some(v) = file.auto_capture {
+            flags.auto_capture = v;
+        }
+        if let Some(v) = file.consolidation {
+            flags.consolidation = v;
+        }
+        if let Some(v) = file.org_scope_enabled {
+            flags.org_scope_enabled = v;
+        }
+        flags
+    }
+
+    /// Merges another set of flags into this one.
+    ///
+    /// Only overrides fields that are set in the source.
+    pub const fn merge_from(&mut self, file: &ConfigFileFeatures) {
+        if let Some(v) = file.secrets_filter {
+            self.secrets_filter = v;
+        }
+        if let Some(v) = file.pii_filter {
+            self.pii_filter = v;
+        }
+        if let Some(v) = file.multi_domain {
+            self.multi_domain = v;
+        }
+        if let Some(v) = file.audit_log {
+            self.audit_log = v;
+        }
+        if let Some(v) = file.llm_features {
+            self.llm_features = v;
+        }
+        if let Some(v) = file.auto_capture {
+            self.auto_capture = v;
+        }
+        if let Some(v) = file.consolidation {
+            self.consolidation = v;
+        }
+        if let Some(v) = file.org_scope_enabled {
+            self.org_scope_enabled = v;
         }
     }
 }

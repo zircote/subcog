@@ -7,9 +7,11 @@
 // Allow cast possible truncation for hash index calculations on 32-bit platforms.
 #![allow(clippy::cast_possible_truncation)]
 
+mod bulkhead;
 mod fallback;
 mod fastembed;
 
+pub use bulkhead::{BulkheadEmbedder, EmbeddingBulkheadConfig};
 pub use fallback::FallbackEmbedder;
 pub use fastembed::{FastEmbedEmbedder, cosine_similarity};
 

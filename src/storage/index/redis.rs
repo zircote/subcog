@@ -18,6 +18,7 @@
 #[cfg(feature = "redis")]
 mod implementation {
     use crate::models::{Memory, MemoryId, MemoryStatus, Namespace, SearchFilter};
+    use crate::storage::resilience::{StorageResilienceConfig, retry_connection};
     use crate::storage::traits::IndexBackend;
     use crate::{Error, Result};
     use redis::{Client, Commands, Connection};
@@ -32,10 +33,11 @@ mod implementation {
     /// The connection is lazily initialized and reused across operations
     /// to avoid the overhead of establishing new connections for each command.
     ///
-    /// # Command Timeout (CHAOS-H2)
+    /// # Command Timeout (CHAOS-HIGH-005)
     ///
-    /// Connections are configured with a 5-second response timeout to prevent
-    /// indefinite blocking on unresponsive servers.
+    /// Connections are configured with a configurable response timeout (default 5s)
+    /// to prevent indefinite blocking on unresponsive servers.
+    /// Set `SUBCOG_TIMEOUT_REDIS_MS` to override.
     pub struct RedisBackend {
         /// Redis client.
         client: Client,
@@ -43,10 +45,15 @@ mod implementation {
         index_name: String,
         /// Cached connection for reuse (DB-H6).
         connection: Mutex<Option<Connection>>,
+        /// Operation timeout (CHAOS-HIGH-005).
+        timeout: Duration,
     }
 
-    /// Default timeout for Redis operations (CHAOS-H2).
-    const REDIS_TIMEOUT: Duration = Duration::from_secs(5);
+    /// Default timeout for Redis operations (CHAOS-HIGH-005).
+    /// Configurable via `SUBCOG_TIMEOUT_REDIS_MS` environment variable.
+    fn default_redis_timeout() -> Duration {
+        crate::config::OperationTimeoutConfig::from_env().get(crate::config::OperationType::Redis)
+    }
 
     impl RedisBackend {
         /// Creates a new Redis backend.
@@ -67,6 +74,7 @@ mod implementation {
                 client,
                 index_name: index_name.into(),
                 connection: Mutex::new(None),
+                timeout: default_redis_timeout(),
             };
 
             // Ensure index exists
@@ -93,6 +101,11 @@ mod implementation {
         /// # Timeout (CHAOS-H2)
         ///
         /// New connections are configured with a 5-second response timeout.
+        ///
+        /// # Connection Retry (CHAOS-HIGH-003)
+        ///
+        /// New connection attempts use exponential backoff with jitter for transient
+        /// failures (Redis starting up, network issues, etc.).
         fn get_connection(&self) -> Result<Connection> {
             // Try to reuse existing connection
             let mut guard = self.connection.lock().map_err(|e| Error::OperationFailed {
@@ -106,29 +119,35 @@ mod implementation {
                 // and next call will create fresh connection
                 return Ok(conn);
             }
+            drop(guard); // Release lock before potentially slow retry loop
 
-            // No cached connection, create a new one with timeout (CHAOS-H2)
-            let conn = self
-                .client
-                .get_connection()
-                .map_err(|e| Error::OperationFailed {
-                    operation: "redis_get_connection".to_string(),
-                    cause: e.to_string(),
-                })?;
+            // No cached connection, create a new one with retry (CHAOS-HIGH-003)
+            let resilience_config = StorageResilienceConfig::from_env();
+            let timeout = self.timeout;
 
-            // Set response timeout to prevent indefinite blocking
-            conn.set_read_timeout(Some(REDIS_TIMEOUT))
-                .map_err(|e| Error::OperationFailed {
-                    operation: "redis_set_read_timeout".to_string(),
-                    cause: e.to_string(),
-                })?;
-            conn.set_write_timeout(Some(REDIS_TIMEOUT))
-                .map_err(|e| Error::OperationFailed {
-                    operation: "redis_set_write_timeout".to_string(),
-                    cause: e.to_string(),
-                })?;
+            retry_connection(&resilience_config, "redis_index", "get_connection", || {
+                let conn = self
+                    .client
+                    .get_connection()
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "redis_get_connection".to_string(),
+                        cause: e.to_string(),
+                    })?;
 
-            Ok(conn)
+                // Set response timeout to prevent indefinite blocking (CHAOS-HIGH-005)
+                conn.set_read_timeout(Some(timeout))
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "redis_set_read_timeout".to_string(),
+                        cause: e.to_string(),
+                    })?;
+                conn.set_write_timeout(Some(timeout))
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "redis_set_write_timeout".to_string(),
+                        cause: e.to_string(),
+                    })?;
+
+                Ok(conn)
+            })
         }
 
         /// Returns a connection to the cache for reuse (DB-H6).

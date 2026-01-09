@@ -15,7 +15,7 @@
 //!
 //! This module includes protections against YAML-based attacks:
 //! - **Size limits**: Front matter limited to 64KB to prevent memory exhaustion
-//! - **Billion laughs**: Entity expansion limited by `serde_yaml`'s safe defaults
+//! - **Billion laughs**: Entity expansion limited by `serde_yaml_ng`'s safe defaults
 
 use crate::{Error, Result};
 
@@ -78,8 +78,8 @@ impl YamlFrontMatterParser {
             let body = after_first[body_start..].trim_start_matches(['\r', '\n']);
 
             // Parse YAML to serde_json::Value
-            // Note: serde_yaml uses safe-yaml crate which limits entity expansion
-            let metadata: serde_json::Value = serde_yaml::from_str(yaml_content)
+            // Note: serde_yaml_ng uses safe-yaml crate which limits entity expansion
+            let metadata: serde_json::Value = serde_yaml_ng::from_str(yaml_content)
                 .map_err(|e| Error::InvalidInput(format!("Invalid YAML front matter: {e}")))?;
 
             Ok((metadata, body.to_string()))
@@ -117,7 +117,7 @@ impl YamlFrontMatterParser {
             return Ok(content.to_string());
         }
 
-        let yaml = serde_yaml::to_string(metadata).map_err(|e| Error::OperationFailed {
+        let yaml = serde_yaml_ng::to_string(metadata).map_err(|e| Error::OperationFailed {
             operation: "serialize_yaml".to_string(),
             cause: e.to_string(),
         })?;

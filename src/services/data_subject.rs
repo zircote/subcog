@@ -170,8 +170,8 @@ pub struct DeletionFailure {
 /// # Storage Layers
 ///
 /// Operations affect all three storage layers:
-/// 1. **Persistence** (SQLite) - Authoritative storage
-/// 2. **Index** (SQLite FTS5) - Full-text search index
+/// 1. **Persistence** (`SQLite`) - Authoritative storage
+/// 2. **Index** (`SQLite` FTS5) - Full-text search index
 /// 3. **Vector** (usearch) - Embedding vectors
 ///
 /// # Audit Logging
@@ -180,7 +180,7 @@ pub struct DeletionFailure {
 /// - `gdpr.export` - Data export requests
 /// - `gdpr.delete` - Data deletion requests
 pub struct DataSubjectService {
-    /// SQLite index backend for listing and deleting memories.
+    /// `SQLite` index backend for listing and deleting memories.
     index: SqliteBackend,
     /// Optional vector backend for deleting embeddings.
     vector: Option<Arc<dyn VectorBackend + Send + Sync>>,
@@ -191,7 +191,7 @@ impl DataSubjectService {
     ///
     /// # Arguments
     ///
-    /// * `index` - SQLite index backend for memory operations
+    /// * `index` - `SQLite` index backend for memory operations
     #[must_use]
     pub const fn new(index: SqliteBackend) -> Self {
         Self {
@@ -291,9 +291,9 @@ impl DataSubjectService {
     ///
     /// # Storage Layers Affected
     ///
-    /// 1. **Index** (SQLite) - Memory metadata and FTS index
+    /// 1. **Index** (`SQLite`) - Memory metadata and FTS index
     /// 2. **Vector** (usearch) - Embedding vectors (if configured)
-    /// 3. **Persistence** (SQLite) - Authoritative storage (if configured)
+    /// 3. **Persistence** (`SQLite`) - Authoritative storage (if configured)
     ///
     /// # Returns
     ///
@@ -412,14 +412,14 @@ impl DataSubjectService {
     /// # Deletion Order
     ///
     /// 1. Vector backend (if configured) - Delete embedding
-    /// 2. SQLite Index - Delete from search index (authoritative)
+    /// 2. `SQLite` Index - Delete from search index (authoritative)
     fn delete_memory_from_all_layers(&self, id: &MemoryId) -> Result<()> {
         // 1. Delete from vector backend (best-effort)
-        if let Some(ref vector) = self.vector {
-            if let Err(e) = vector.remove(id) {
-                tracing::debug!(memory_id = %id, error = %e, "Vector deletion failed (continuing)");
-                // Continue - vector is a derived store
-            }
+        if let Some(ref vector) = self.vector
+            && let Err(e) = vector.remove(id)
+        {
+            tracing::debug!(memory_id = %id, error = %e, "Vector deletion failed (continuing)");
+            // Continue - vector is a derived store
         }
 
         // 2. Delete from index (authoritative storage)

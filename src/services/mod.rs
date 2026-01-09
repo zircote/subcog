@@ -37,6 +37,7 @@ mod backend_factory;
 mod capture;
 mod consolidation;
 mod context;
+mod data_subject;
 pub mod deduplication;
 mod enrichment;
 pub mod migration;
@@ -55,6 +56,9 @@ pub use backend_factory::{BackendFactory, BackendSet};
 pub use capture::CaptureService;
 pub use consolidation::ConsolidationService;
 pub use context::{ContextBuilderService, MemoryStatistics};
+pub use data_subject::{
+    DataSubjectService, DeletionResult, ExportMetadata, ExportedMemory, UserDataExport,
+};
 pub use deduplication::{
     DeduplicationConfig, DeduplicationService, Deduplicator, DuplicateCheckResult, DuplicateReason,
 };
@@ -591,6 +595,24 @@ impl ServiceContainer {
         Ok(deduplication::DeduplicationService::without_embeddings(
             recall, config,
         ))
+    }
+
+    /// Creates a data subject service for GDPR operations.
+    ///
+    /// Provides:
+    /// - `export_user_data()` - Export all user data (GDPR Article 20)
+    /// - `delete_user_data()` - Delete all user data (GDPR Article 17)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the index backend cannot be initialized.
+    pub fn data_subject(&self) -> Result<DataSubjectService> {
+        let index = self.index()?;
+        let mut service = DataSubjectService::new(index);
+        if let Some(ref vector) = self.vector {
+            service = service.with_vector(Arc::clone(vector));
+        }
+        Ok(service)
     }
 
     /// Gets the index path for a domain scope.

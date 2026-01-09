@@ -162,6 +162,8 @@ pub struct SubcogConfig {
     pub prompt: PromptConfig,
     /// Storage configuration.
     pub storage: StorageConfig,
+    /// Operation timeout configuration (CHAOS-HIGH-005).
+    pub timeouts: OperationTimeoutConfig,
     /// Config files that were loaded (for debugging).
     pub config_sources: Vec<PathBuf>,
 }
@@ -197,6 +199,102 @@ pub struct LlmConfig {
     pub error_budget_ratio: Option<f64>,
     /// Error budget window in seconds.
     pub error_budget_window_secs: Option<u64>,
+}
+
+impl LlmConfig {
+    /// Creates LLM config from config file settings.
+    ///
+    /// ARCH-HIGH-002: Delegated from `SubcogConfig::apply_config_file`.
+    #[must_use]
+    pub fn from_config_file(file: &ConfigFileLlm) -> Self {
+        let mut config = Self::default();
+
+        if let Some(ref provider) = file.provider {
+            config.provider = LlmProvider::parse(provider);
+        }
+        if let Some(ref model) = file.model
+            && !model.trim().is_empty()
+        {
+            config.model = Some(model.clone());
+        }
+        if let Some(ref api_key) = file.api_key
+            && !api_key.trim().is_empty()
+        {
+            // Expand environment variable references like ${OPENAI_API_KEY}
+            config.api_key = Some(expand_env_vars(api_key).into_owned());
+        }
+        if let Some(ref base_url) = file.base_url
+            && !base_url.trim().is_empty()
+        {
+            config.base_url = Some(base_url.clone());
+        }
+        config.timeout_ms = file.timeout_ms;
+        config.connect_timeout_ms = file.connect_timeout_ms;
+        config.max_retries = file.max_retries;
+        config.retry_backoff_ms = file.retry_backoff_ms;
+        config.breaker_failure_threshold = file.breaker_failure_threshold;
+        config.breaker_reset_ms = file.breaker_reset_ms;
+        config.breaker_half_open_max_calls = file.breaker_half_open_max_calls;
+        config.latency_slo_ms = file.latency_slo_ms;
+        config.error_budget_ratio = file.error_budget_ratio;
+        config.error_budget_window_secs = file.error_budget_window_secs;
+
+        config
+    }
+
+    /// Merges another config into this one.
+    ///
+    /// Only overrides fields that are set in the source.
+    pub fn merge_from(&mut self, file: &ConfigFileLlm) {
+        if let Some(ref provider) = file.provider {
+            self.provider = LlmProvider::parse(provider);
+        }
+        if let Some(ref model) = file.model
+            && !model.trim().is_empty()
+        {
+            self.model = Some(model.clone());
+        }
+        if let Some(ref api_key) = file.api_key
+            && !api_key.trim().is_empty()
+        {
+            self.api_key = Some(expand_env_vars(api_key).into_owned());
+        }
+        if let Some(ref base_url) = file.base_url
+            && !base_url.trim().is_empty()
+        {
+            self.base_url = Some(base_url.clone());
+        }
+        if file.timeout_ms.is_some() {
+            self.timeout_ms = file.timeout_ms;
+        }
+        if file.connect_timeout_ms.is_some() {
+            self.connect_timeout_ms = file.connect_timeout_ms;
+        }
+        if file.max_retries.is_some() {
+            self.max_retries = file.max_retries;
+        }
+        if file.retry_backoff_ms.is_some() {
+            self.retry_backoff_ms = file.retry_backoff_ms;
+        }
+        if file.breaker_failure_threshold.is_some() {
+            self.breaker_failure_threshold = file.breaker_failure_threshold;
+        }
+        if file.breaker_reset_ms.is_some() {
+            self.breaker_reset_ms = file.breaker_reset_ms;
+        }
+        if file.breaker_half_open_max_calls.is_some() {
+            self.breaker_half_open_max_calls = file.breaker_half_open_max_calls;
+        }
+        if file.latency_slo_ms.is_some() {
+            self.latency_slo_ms = file.latency_slo_ms;
+        }
+        if file.error_budget_ratio.is_some() {
+            self.error_budget_ratio = file.error_budget_ratio;
+        }
+        if file.error_budget_window_secs.is_some() {
+            self.error_budget_window_secs = file.error_budget_window_secs;
+        }
+    }
 }
 
 /// Observability configuration settings.
@@ -886,6 +984,9 @@ pub struct ConfigFileStorageBackend {
     pub connection_string: Option<String>,
     /// Redis URL for redis backend.
     pub redis_url: Option<String>,
+    /// Enable encryption at rest (COMP-CRIT-002).
+    /// Defaults to true when not specified.
+    pub encryption_enabled: Option<bool>,
 }
 
 /// Runtime storage configuration.
@@ -900,7 +1001,7 @@ pub struct StorageConfig {
 }
 
 /// Runtime storage backend configuration.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct StorageBackendConfig {
     /// Backend type.
     pub backend: StorageBackendType,
@@ -911,6 +1012,22 @@ pub struct StorageBackendConfig {
     /// Maximum connection pool size for database backends (PostgreSQL).
     /// Defaults to 20 if not specified.
     pub pool_max_size: Option<usize>,
+    /// Enable encryption at rest (COMP-CRIT-002).
+    /// Defaults to true for security-by-default.
+    pub encryption_enabled: bool,
+}
+
+impl Default for StorageBackendConfig {
+    fn default() -> Self {
+        Self {
+            backend: StorageBackendType::default(),
+            path: None,
+            connection_string: None,
+            pool_max_size: None,
+            // COMP-CRIT-002: Enable encryption by default for security
+            encryption_enabled: true,
+        }
+    }
 }
 
 /// Storage backend types.
@@ -943,6 +1060,220 @@ impl StorageBackendType {
     }
 }
 
+/// Operation-level timeout configuration (CHAOS-HIGH-005).
+///
+/// Provides configurable timeouts for different operation types to prevent
+/// indefinite blocking and ensure predictable latency behavior.
+///
+/// # Environment Variables
+///
+/// | Variable | Description | Default |
+/// |----------|-------------|---------|
+/// | `SUBCOG_TIMEOUT_DEFAULT_MS` | Default timeout for all operations | 30000 |
+/// | `SUBCOG_TIMEOUT_CAPTURE_MS` | Capture operation timeout | 30000 |
+/// | `SUBCOG_TIMEOUT_RECALL_MS` | Recall/search operation timeout | 30000 |
+/// | `SUBCOG_TIMEOUT_SYNC_MS` | Git sync operation timeout | 60000 |
+/// | `SUBCOG_TIMEOUT_EMBED_MS` | Embedding generation timeout | 30000 |
+/// | `SUBCOG_TIMEOUT_REDIS_MS` | Redis operation timeout | 5000 |
+/// | `SUBCOG_TIMEOUT_SQLITE_MS` | `SQLite` operation timeout | 5000 |
+/// | `SUBCOG_TIMEOUT_POSTGRES_MS` | PostgreSQL operation timeout | 10000 |
+#[derive(Debug, Clone)]
+pub struct OperationTimeoutConfig {
+    /// Default timeout in milliseconds for all operations.
+    pub default_ms: u64,
+    /// Timeout for capture operations in milliseconds.
+    pub capture_ms: u64,
+    /// Timeout for recall/search operations in milliseconds.
+    pub recall_ms: u64,
+    /// Timeout for sync operations in milliseconds.
+    pub sync_ms: u64,
+    /// Timeout for embedding operations in milliseconds.
+    pub embed_ms: u64,
+    /// Timeout for Redis operations in milliseconds.
+    pub redis_ms: u64,
+    /// Timeout for `SQLite` operations in milliseconds.
+    pub sqlite_ms: u64,
+    /// Timeout for PostgreSQL operations in milliseconds.
+    pub postgres_ms: u64,
+}
+
+impl Default for OperationTimeoutConfig {
+    fn default() -> Self {
+        Self {
+            default_ms: 30_000,
+            capture_ms: 30_000,
+            recall_ms: 30_000,
+            sync_ms: 60_000, // Sync can be slower
+            embed_ms: 30_000,
+            redis_ms: 5_000,
+            sqlite_ms: 5_000,
+            postgres_ms: 10_000,
+        }
+    }
+}
+
+impl OperationTimeoutConfig {
+    /// Creates a new configuration with default values.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            default_ms: 30_000,
+            capture_ms: 30_000,
+            recall_ms: 30_000,
+            sync_ms: 60_000,
+            embed_ms: 30_000,
+            redis_ms: 5_000,
+            sqlite_ms: 5_000,
+            postgres_ms: 10_000,
+        }
+    }
+
+    /// Loads configuration from environment variables.
+    #[must_use]
+    pub fn from_env() -> Self {
+        Self::new().with_env_overrides()
+    }
+
+    /// Applies environment variable overrides.
+    #[must_use]
+    pub fn with_env_overrides(mut self) -> Self {
+        if let Ok(v) = std::env::var("SUBCOG_TIMEOUT_DEFAULT_MS")
+            && let Ok(parsed) = v.parse::<u64>()
+        {
+            self.default_ms = parsed.max(100); // Minimum 100ms
+        }
+        if let Ok(v) = std::env::var("SUBCOG_TIMEOUT_CAPTURE_MS")
+            && let Ok(parsed) = v.parse::<u64>()
+        {
+            self.capture_ms = parsed.max(100);
+        }
+        if let Ok(v) = std::env::var("SUBCOG_TIMEOUT_RECALL_MS")
+            && let Ok(parsed) = v.parse::<u64>()
+        {
+            self.recall_ms = parsed.max(100);
+        }
+        if let Ok(v) = std::env::var("SUBCOG_TIMEOUT_SYNC_MS")
+            && let Ok(parsed) = v.parse::<u64>()
+        {
+            self.sync_ms = parsed.max(100);
+        }
+        if let Ok(v) = std::env::var("SUBCOG_TIMEOUT_EMBED_MS")
+            && let Ok(parsed) = v.parse::<u64>()
+        {
+            self.embed_ms = parsed.max(100);
+        }
+        if let Ok(v) = std::env::var("SUBCOG_TIMEOUT_REDIS_MS")
+            && let Ok(parsed) = v.parse::<u64>()
+        {
+            self.redis_ms = parsed.max(100);
+        }
+        if let Ok(v) = std::env::var("SUBCOG_TIMEOUT_SQLITE_MS")
+            && let Ok(parsed) = v.parse::<u64>()
+        {
+            self.sqlite_ms = parsed.max(100);
+        }
+        if let Ok(v) = std::env::var("SUBCOG_TIMEOUT_POSTGRES_MS")
+            && let Ok(parsed) = v.parse::<u64>()
+        {
+            self.postgres_ms = parsed.max(100);
+        }
+        self
+    }
+
+    /// Gets the timeout for a specific operation type.
+    #[must_use]
+    pub const fn get(&self, operation: OperationType) -> std::time::Duration {
+        let ms = match operation {
+            OperationType::Capture => self.capture_ms,
+            OperationType::Recall => self.recall_ms,
+            OperationType::Sync => self.sync_ms,
+            OperationType::Embed => self.embed_ms,
+            OperationType::Redis => self.redis_ms,
+            OperationType::Sqlite => self.sqlite_ms,
+            OperationType::Postgres => self.postgres_ms,
+            OperationType::Default => self.default_ms,
+        };
+        std::time::Duration::from_millis(ms)
+    }
+
+    /// Builder method to set default timeout.
+    #[must_use]
+    pub const fn with_default_ms(mut self, ms: u64) -> Self {
+        self.default_ms = ms;
+        self
+    }
+
+    /// Builder method to set capture timeout.
+    #[must_use]
+    pub const fn with_capture_ms(mut self, ms: u64) -> Self {
+        self.capture_ms = ms;
+        self
+    }
+
+    /// Builder method to set recall timeout.
+    #[must_use]
+    pub const fn with_recall_ms(mut self, ms: u64) -> Self {
+        self.recall_ms = ms;
+        self
+    }
+
+    /// Builder method to set sync timeout.
+    #[must_use]
+    pub const fn with_sync_ms(mut self, ms: u64) -> Self {
+        self.sync_ms = ms;
+        self
+    }
+
+    /// Builder method to set embed timeout.
+    #[must_use]
+    pub const fn with_embed_ms(mut self, ms: u64) -> Self {
+        self.embed_ms = ms;
+        self
+    }
+
+    /// Builder method to set Redis timeout.
+    #[must_use]
+    pub const fn with_redis_ms(mut self, ms: u64) -> Self {
+        self.redis_ms = ms;
+        self
+    }
+
+    /// Builder method to set `SQLite` timeout.
+    #[must_use]
+    pub const fn with_sqlite_ms(mut self, ms: u64) -> Self {
+        self.sqlite_ms = ms;
+        self
+    }
+
+    /// Builder method to set PostgreSQL timeout.
+    #[must_use]
+    pub const fn with_postgres_ms(mut self, ms: u64) -> Self {
+        self.postgres_ms = ms;
+        self
+    }
+}
+
+/// Operation types for timeout configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperationType {
+    /// Memory capture operations.
+    Capture,
+    /// Memory recall/search operations.
+    Recall,
+    /// Git sync operations.
+    Sync,
+    /// Embedding generation.
+    Embed,
+    /// Redis operations.
+    Redis,
+    /// `SQLite` operations.
+    Sqlite,
+    /// PostgreSQL operations.
+    Postgres,
+    /// Default/fallback timeout.
+    Default,
+}
+
 impl StorageConfig {
     /// Creates storage config from config file settings.
     #[must_use]
@@ -958,6 +1289,10 @@ impl StorageConfig {
                 .project
                 .connection_string
                 .clone_from(&project.connection_string);
+            // COMP-CRIT-002: Allow explicit override, default is true
+            if let Some(encryption) = project.encryption_enabled {
+                config.project.encryption_enabled = encryption;
+            }
         }
 
         if let Some(ref user) = file.user {
@@ -969,6 +1304,10 @@ impl StorageConfig {
                 .user
                 .connection_string
                 .clone_from(&user.connection_string);
+            // COMP-CRIT-002: Allow explicit override, default is true
+            if let Some(encryption) = user.encryption_enabled {
+                config.user.encryption_enabled = encryption;
+            }
         }
 
         if let Some(ref org) = file.org {
@@ -980,6 +1319,10 @@ impl StorageConfig {
                 .org
                 .connection_string
                 .clone_from(&org.connection_string);
+            // COMP-CRIT-002: Allow explicit override, default is true
+            if let Some(encryption) = org.encryption_enabled {
+                config.org.encryption_enabled = encryption;
+            }
         }
 
         config
@@ -1077,6 +1420,7 @@ impl Default for SubcogConfig {
             observability: ObservabilitySettings::default(),
             prompt: PromptConfig::default(),
             storage: StorageConfig::default(),
+            timeouts: OperationTimeoutConfig::from_env(),
             config_sources: Vec::new(),
         }
     }
@@ -1163,12 +1507,34 @@ impl SubcogConfig {
                 tracing::info!("Org-scope enabled via SUBCOG_ORG_SCOPE_ENABLED");
             }
         }
+
+        // COMP-CRIT-002: Allow env var override for encryption (applies to all scopes)
+        if let Ok(value) = std::env::var("SUBCOG_STORAGE_ENCRYPTION_ENABLED") {
+            if let Some(enabled) = parse_bool_env(&value) {
+                self.storage.project.encryption_enabled = enabled;
+                self.storage.user.encryption_enabled = enabled;
+                self.storage.org.encryption_enabled = enabled;
+                tracing::info!(
+                    enabled = enabled,
+                    "Storage encryption configured via SUBCOG_STORAGE_ENCRYPTION_ENABLED"
+                );
+            } else {
+                tracing::warn!(
+                    value = %value,
+                    "Invalid SUBCOG_STORAGE_ENCRYPTION_ENABLED value, keeping default (true)"
+                );
+            }
+        }
+
         self.search_intent = self.search_intent.clone().with_env_overrides();
         self.prompt = self.prompt.clone().with_env_overrides();
     }
 
     /// Applies a `ConfigFile` to the current configuration.
+    ///
+    /// ARCH-HIGH-002: Delegates to sub-config `merge_from`/`from_config_file` methods.
     fn apply_config_file(&mut self, file: ConfigFile) {
+        // Core settings
         if let Some(repo_path) = file.repo_path {
             self.repo_path = PathBuf::from(expand_config_path(&repo_path));
         }
@@ -1185,88 +1551,25 @@ impl SubcogConfig {
                 _ => crate::models::SearchMode::Hybrid,
             };
         }
-        if let Some(features) = file.features {
-            if let Some(v) = features.secrets_filter {
-                self.features.secrets_filter = v;
-            }
-            if let Some(v) = features.pii_filter {
-                self.features.pii_filter = v;
-            }
-            if let Some(v) = features.multi_domain {
-                self.features.multi_domain = v;
-            }
-            if let Some(v) = features.audit_log {
-                self.features.audit_log = v;
-            }
-            if let Some(v) = features.llm_features {
-                self.features.llm_features = v;
-            }
-            if let Some(v) = features.auto_capture {
-                self.features.auto_capture = v;
-            }
-            if let Some(v) = features.consolidation {
-                self.features.consolidation = v;
-            }
-            if let Some(v) = features.org_scope_enabled {
-                self.features.org_scope_enabled = v;
-            }
+
+        // Delegate to sub-config types (ARCH-HIGH-002)
+        if let Some(ref features) = file.features {
+            self.features.merge_from(features);
         }
-        if let Some(llm) = file.llm {
-            if let Some(provider) = llm.provider {
-                self.llm.provider = LlmProvider::parse(&provider);
-            }
-            if let Some(model) = llm.model.filter(|value| !value.trim().is_empty()) {
-                self.llm.model = Some(model);
-            }
-            if let Some(api_key) = llm.api_key.filter(|value| !value.trim().is_empty()) {
-                // Expand environment variable references like ${OPENAI_API_KEY}
-                self.llm.api_key = Some(expand_env_vars(&api_key).into_owned());
-            }
-            if let Some(base_url) = llm.base_url.filter(|value| !value.trim().is_empty()) {
-                self.llm.base_url = Some(base_url);
-            }
-            if llm.timeout_ms.is_some() {
-                self.llm.timeout_ms = llm.timeout_ms;
-            }
-            if llm.connect_timeout_ms.is_some() {
-                self.llm.connect_timeout_ms = llm.connect_timeout_ms;
-            }
-            if llm.max_retries.is_some() {
-                self.llm.max_retries = llm.max_retries;
-            }
-            if llm.retry_backoff_ms.is_some() {
-                self.llm.retry_backoff_ms = llm.retry_backoff_ms;
-            }
-            if llm.breaker_failure_threshold.is_some() {
-                self.llm.breaker_failure_threshold = llm.breaker_failure_threshold;
-            }
-            if llm.breaker_reset_ms.is_some() {
-                self.llm.breaker_reset_ms = llm.breaker_reset_ms;
-            }
-            if llm.breaker_half_open_max_calls.is_some() {
-                self.llm.breaker_half_open_max_calls = llm.breaker_half_open_max_calls;
-            }
-            if llm.latency_slo_ms.is_some() {
-                self.llm.latency_slo_ms = llm.latency_slo_ms;
-            }
-            if llm.error_budget_ratio.is_some() {
-                self.llm.error_budget_ratio = llm.error_budget_ratio;
-            }
-            if llm.error_budget_window_secs.is_some() {
-                self.llm.error_budget_window_secs = llm.error_budget_window_secs;
-            }
+        if let Some(ref llm) = file.llm {
+            self.llm.merge_from(llm);
         }
-        if let Some(search_intent) = file.search_intent {
-            self.search_intent = SearchIntentConfig::from_config_file(&search_intent);
+        if let Some(ref search_intent) = file.search_intent {
+            self.search_intent = SearchIntentConfig::from_config_file(search_intent);
         }
         if let Some(observability) = file.observability {
             self.observability = observability;
         }
-        if let Some(prompt) = file.prompt {
-            self.prompt = PromptConfig::from_config_file(&prompt);
+        if let Some(ref prompt) = file.prompt {
+            self.prompt = PromptConfig::from_config_file(prompt);
         }
-        if let Some(storage) = file.storage {
-            self.storage = StorageConfig::from_config_file(&storage);
+        if let Some(ref storage) = file.storage {
+            self.storage = StorageConfig::from_config_file(storage);
         }
     }
 

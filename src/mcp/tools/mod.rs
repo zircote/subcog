@@ -48,6 +48,10 @@ impl ToolRegistry {
         tools.insert("subcog_sync".to_string(), definitions::sync_tool());
         tools.insert("subcog_reindex".to_string(), definitions::reindex_tool());
         tools.insert(
+            "subcog_gdpr_export".to_string(),
+            definitions::gdpr_export_tool(),
+        );
+        tools.insert(
             "prompt_understanding".to_string(),
             definitions::prompt_understanding_tool(),
         );
@@ -91,9 +95,8 @@ impl ToolRegistry {
             "subcog_namespaces" => handlers::execute_namespaces(arguments),
             "subcog_consolidate" => handlers::execute_consolidate(arguments),
             "subcog_enrich" => handlers::execute_enrich(arguments),
-            "subcog_sync" => handlers::execute_sync(arguments),
             "subcog_reindex" => handlers::execute_reindex(arguments),
-            "prompt_understanding" => handlers::execute_prompt_understanding(arguments),
+            "subcog_gdpr_export" => handlers::execute_gdpr_export(arguments),
             // Prompt management tools
             "prompt_save" => handlers::execute_prompt_save(arguments),
             "prompt_list" => handlers::execute_prompt_list(arguments),

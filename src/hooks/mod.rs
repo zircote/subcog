@@ -85,7 +85,7 @@ pub use search_intent::{
     DetectionSource, SearchIntent, SearchIntentType, classify_intent_with_llm,
     detect_search_intent, detect_search_intent_hybrid, detect_search_intent_with_timeout,
 };
-pub use session_start::SessionStartHandler;
+pub use session_start::{GuidanceLevel, SessionStartHandler};
 pub use stop::StopHandler;
 pub use user_prompt::UserPromptHandler;
 

@@ -2,11 +2,61 @@
 //!
 //! Implements an rmcp-based MCP server over stdio or HTTP transport.
 //!
-//! ## Transport Authentication
+//! ## Transport Security Model (COMP-CRIT-003)
 //!
-//! - **Stdio**: No authentication required (trusted local process).
-//! - **HTTP**: JWT bearer token authentication required (SEC-H1).
-//!   Requires `http` feature and `SUBCOG_MCP_JWT_SECRET` environment variable.
+//! ### Stdio Transport (Default)
+//!
+//! The stdio transport is the default and recommended transport for local use with
+//! Claude Desktop and other MCP-compatible clients. Its security model is based on:
+//!
+//! **Trust Assumptions:**
+//! - **Process isolation**: The parent process (Claude Desktop) spawns subcog as a child
+//!   process. Communication happens exclusively over stdin/stdout pipes.
+//! - **No network exposure**: Stdio transport never binds to a network port, eliminating
+//!   remote attack vectors entirely.
+//! - **Same-user execution**: The spawned process inherits the parent's user context,
+//!   meaning file system and secret access is limited to what the invoking user can access.
+//! - **No authentication required**: Since only the parent process can communicate over
+//!   the pipes, authentication is implicit through OS process isolation.
+//!
+//! **Security Properties:**
+//! - **Confidentiality**: Data never leaves the local machine unless explicitly requested
+//!   (e.g., git sync to remote).
+//! - **Integrity**: OS guarantees pipe integrity; no MITM attacks possible.
+//! - **Availability**: Process lifecycle is controlled by the parent.
+//!
+//! **Threat Mitigations:**
+//! - **Malicious input**: Content is sanitized before storage (secrets detection, PII redaction).
+//! - **Resource exhaustion**: Rate limits and memory caps protect against `DoS`.
+//! - **Privilege escalation**: Subcog runs with user privileges, never elevated.
+//!
+//! ### HTTP Transport (Optional)
+//!
+//! The HTTP transport exposes subcog over a network socket and requires explicit security:
+//!
+//! - **JWT bearer token authentication** (SEC-H1): All requests must include a valid JWT.
+//!   Requires `SUBCOG_MCP_JWT_SECRET` environment variable (min 32 characters).
+//! - **Per-client rate limiting** (ARCH-H1): Prevents abuse via configurable request limits.
+//! - **CORS protection** (HIGH-SEC-006): Restrictive by default; origins must be explicitly allowed.
+//! - **Security headers**: X-Content-Type-Options, X-Frame-Options, CSP, no-cache directives.
+//!
+//! **When to use HTTP transport:**
+//! - Remote access to subcog server (e.g., from containerized environments)
+//! - Shared team server with multi-user access
+//! - Integration with web-based MCP clients
+//!
+//! **Configuration:**
+//! ```bash
+//! # Required for HTTP transport
+//! export SUBCOG_MCP_JWT_SECRET="your-32-char-minimum-secret-key"
+//!
+//! # Optional: customize rate limits
+//! export SUBCOG_MCP_RATE_LIMIT_MAX_REQUESTS=1000
+//! export SUBCOG_MCP_RATE_LIMIT_WINDOW_SECS=60
+//!
+//! # Optional: configure CORS for web clients
+//! export SUBCOG_MCP_CORS_ALLOWED_ORIGINS="https://your-app.com"
+//! ```
 
 use crate::mcp::{
     ResourceContent, ResourceDefinition, ResourceHandler, ToolContent, ToolDefinition,
@@ -1178,6 +1228,7 @@ impl McpServer {
 
     /// Runs the server over HTTP (feature not enabled).
     #[cfg(not(feature = "http"))]
+    #[allow(clippy::unused_async)] // Matches async signature of enabled version
     async fn run_http(&self) -> SubcogResult<()> {
         Err(Error::FeatureNotEnabled("http".to_string()))
     }

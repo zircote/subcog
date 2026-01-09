@@ -52,15 +52,21 @@ use crate::storage::traits::{VectorBackend, VectorFilter};
 use crate::{Error, Result};
 
 #[cfg(feature = "redis")]
+use crate::storage::resilience::{StorageResilienceConfig, retry_connection};
+#[cfg(feature = "redis")]
 use redis::{Client, Commands, Connection, RedisResult};
 #[cfg(feature = "redis")]
 use std::sync::Mutex;
 #[cfg(feature = "redis")]
 use std::time::Duration;
 
-/// Default timeout for Redis operations (CHAOS-H2).
+/// Default timeout for Redis operations (CHAOS-HIGH-005).
+///
+/// Configurable via `SUBCOG_TIMEOUT_REDIS_MS` environment variable.
 #[cfg(feature = "redis")]
-const REDIS_TIMEOUT: Duration = Duration::from_secs(5);
+fn default_redis_timeout() -> Duration {
+    crate::config::OperationTimeoutConfig::from_env().get(crate::config::OperationType::Redis)
+}
 
 /// Redis-based vector backend using `RediSearch` Vector Similarity Search.
 ///
@@ -71,6 +77,11 @@ const REDIS_TIMEOUT: Duration = Duration::from_secs(5);
 ///
 /// Uses interior mutability via `Mutex` for mutable state, enabling the backend
 /// to be shared via `Arc<dyn VectorBackend>` across threads.
+///
+/// # Timeout Configuration (CHAOS-HIGH-005)
+///
+/// Redis operation timeouts are configurable via `SUBCOG_TIMEOUT_REDIS_MS`.
+/// Default: 5000ms.
 pub struct RedisVectorBackend {
     /// Redis connection URL.
     connection_url: String,
@@ -87,6 +98,9 @@ pub struct RedisVectorBackend {
     /// Whether the index has been created (interior mutability).
     #[cfg(feature = "redis")]
     index_created: Mutex<bool>,
+    /// Operation timeout (CHAOS-HIGH-005).
+    #[cfg(feature = "redis")]
+    timeout: Duration,
 }
 
 impl RedisVectorBackend {
@@ -119,6 +133,7 @@ impl RedisVectorBackend {
             client,
             connection: Mutex::new(None),
             index_created: Mutex::new(false),
+            timeout: default_redis_timeout(),
         })
     }
 
@@ -213,6 +228,11 @@ impl RedisVectorBackend {
     /// # Timeout (CHAOS-H2)
     ///
     /// New connections are configured with a 5-second response timeout.
+    ///
+    /// # Connection Retry (CHAOS-HIGH-003)
+    ///
+    /// New connection attempts use exponential backoff with jitter for transient
+    /// failures (Redis starting up, network issues, etc.).
     fn get_connection(&self) -> Result<Connection> {
         // Try to reuse existing connection
         let mut guard = self.connection.lock().map_err(|e| Error::OperationFailed {
@@ -224,29 +244,35 @@ impl RedisVectorBackend {
         if let Some(conn) = guard.take() {
             return Ok(conn);
         }
+        drop(guard); // Release lock before potentially slow retry loop
 
-        // No cached connection, create a new one with timeout (CHAOS-H2)
-        let conn = self
-            .client
-            .get_connection()
-            .map_err(|e| Error::OperationFailed {
-                operation: "redis_get_connection".to_string(),
-                cause: e.to_string(),
-            })?;
+        // No cached connection, create a new one with retry (CHAOS-HIGH-003)
+        let resilience_config = StorageResilienceConfig::from_env();
+        let timeout = self.timeout;
 
-        // Set response timeout to prevent indefinite blocking
-        conn.set_read_timeout(Some(REDIS_TIMEOUT))
-            .map_err(|e| Error::OperationFailed {
-                operation: "redis_set_read_timeout".to_string(),
-                cause: e.to_string(),
-            })?;
-        conn.set_write_timeout(Some(REDIS_TIMEOUT))
-            .map_err(|e| Error::OperationFailed {
-                operation: "redis_set_write_timeout".to_string(),
-                cause: e.to_string(),
-            })?;
+        retry_connection(&resilience_config, "redis_vector", "get_connection", || {
+            let conn = self
+                .client
+                .get_connection()
+                .map_err(|e| Error::OperationFailed {
+                    operation: "redis_get_connection".to_string(),
+                    cause: e.to_string(),
+                })?;
 
-        Ok(conn)
+            // Set response timeout to prevent indefinite blocking (CHAOS-HIGH-005)
+            conn.set_read_timeout(Some(timeout))
+                .map_err(|e| Error::OperationFailed {
+                    operation: "redis_set_read_timeout".to_string(),
+                    cause: e.to_string(),
+                })?;
+            conn.set_write_timeout(Some(timeout))
+                .map_err(|e| Error::OperationFailed {
+                    operation: "redis_set_write_timeout".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            Ok(conn)
+        })
     }
 
     /// Returns a connection to the cache for reuse (DB-H6).

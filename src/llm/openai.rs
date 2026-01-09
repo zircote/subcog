@@ -79,6 +79,13 @@ impl OpenAiClient {
         self
     }
 
+    /// Clears the API key (for testing scenarios).
+    #[must_use]
+    pub fn without_api_key(mut self) -> Self {
+        self.api_key = None;
+        self
+    }
+
     /// Sets HTTP client timeouts for LLM requests.
     #[must_use]
     pub fn with_http_config(mut self, config: LlmHttpConfig) -> Self {

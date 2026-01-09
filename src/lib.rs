@@ -52,13 +52,12 @@ pub mod llm;
 pub mod mcp;
 pub mod models;
 pub mod observability;
-pub mod ux_prompts;
 pub mod security;
 pub mod services;
 pub mod storage;
 
 // Re-exports for convenience
-pub use config::{FeatureFlags, SubcogConfig};
+pub use config::{FeatureFlags, OperationTimeoutConfig, OperationType, SubcogConfig};
 pub use embedding::Embedder;
 pub use llm::LlmProvider;
 pub use models::{

@@ -188,21 +188,215 @@ pub fn execute_recall(arguments: Value) -> Result<ToolResult> {
     })
 }
 
-/// Executes the status tool.
+/// Health status for a backend component.
+#[derive(Debug, Clone, serde::Serialize)]
+struct ComponentHealth {
+    /// Component name.
+    name: String,
+    /// Health status: "healthy", "degraded", or "unhealthy".
+    status: String,
+    /// Optional details about the health check.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    details: Option<String>,
+    /// Response time in milliseconds (if applicable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_time_ms: Option<u64>,
+}
+
+impl ComponentHealth {
+    fn healthy(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            status: "healthy".to_string(),
+            details: None,
+            response_time_ms: None,
+        }
+    }
+
+    fn healthy_with_time(name: impl Into<String>, elapsed: std::time::Duration) -> Self {
+        // Convert duration to ms, saturating at u64::MAX for safety
+        let response_time_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+        Self {
+            name: name.into(),
+            status: "healthy".to_string(),
+            details: None,
+            response_time_ms: Some(response_time_ms),
+        }
+    }
+
+    fn unhealthy(name: impl Into<String>, details: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            status: "unhealthy".to_string(),
+            details: Some(details.into()),
+            response_time_ms: None,
+        }
+    }
+
+    fn degraded(name: impl Into<String>, details: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            status: "degraded".to_string(),
+            details: Some(details.into()),
+            response_time_ms: None,
+        }
+    }
+}
+
+/// Checks health of the persistence layer by attempting a simple operation.
+fn check_persistence_health(services: &ServiceContainer) -> ComponentHealth {
+    let start = std::time::Instant::now();
+    match services.recall() {
+        Ok(recall) => {
+            // Try a simple list operation with limit 1
+            let filter = SearchFilter::new();
+            match recall.list_all(&filter, 1) {
+                Ok(_) => {
+                    ComponentHealth::healthy_with_time("persistence (sqlite)", start.elapsed())
+                },
+                Err(e) => ComponentHealth::degraded("persistence (sqlite)", e.to_string()),
+            }
+        },
+        Err(e) => ComponentHealth::unhealthy("persistence (sqlite)", e.to_string()),
+    }
+}
+
+/// Checks health of the index layer.
+fn check_index_health(services: &ServiceContainer) -> ComponentHealth {
+    let start = std::time::Instant::now();
+    match services.recall() {
+        Ok(recall) => {
+            // Try a simple search operation
+            let filter = SearchFilter::new();
+            match recall.search("health_check_probe", SearchMode::Text, &filter, 1) {
+                Ok(_) => ComponentHealth::healthy_with_time("index (sqlite-fts5)", start.elapsed()),
+                Err(e) => ComponentHealth::degraded("index (sqlite-fts5)", e.to_string()),
+            }
+        },
+        Err(e) => ComponentHealth::unhealthy("index (sqlite-fts5)", e.to_string()),
+    }
+}
+
+/// Checks health of the vector layer (embedding search).
+fn check_vector_health(services: &ServiceContainer) -> ComponentHealth {
+    let start = std::time::Instant::now();
+    match services.recall() {
+        Ok(recall) => {
+            // Try a vector search - this will work even without embeddings
+            let filter = SearchFilter::new();
+            match recall.search("health_check_probe", SearchMode::Vector, &filter, 1) {
+                Ok(_) => ComponentHealth::healthy_with_time("vector (usearch)", start.elapsed()),
+                Err(e) => {
+                    // Vector search may fail if no embeddings exist - that's degraded, not unhealthy
+                    if e.to_string().contains("no embeddings")
+                        || e.to_string().contains("not configured")
+                    {
+                        ComponentHealth::degraded("vector (usearch)", "No embeddings available")
+                    } else {
+                        ComponentHealth::degraded("vector (usearch)", e.to_string())
+                    }
+                },
+            }
+        },
+        Err(e) => ComponentHealth::unhealthy("vector (usearch)", e.to_string()),
+    }
+}
+
+/// Checks health of the capture service.
+fn check_capture_health(services: &ServiceContainer) -> ComponentHealth {
+    // capture() returns &CaptureService directly (infallible)
+    // Just verify the service exists
+    let _capture = services.capture();
+    ComponentHealth::healthy("capture_service")
+}
+
+/// Executes the status tool with comprehensive health checks (CHAOS-HIGH-006).
+///
+/// Performs actual health probes against all backend components:
+/// - Persistence layer (`SQLite`)
+/// - Index layer (`SQLite` FTS5)
+/// - Vector layer (usearch)
+/// - Capture service
+///
+/// Returns overall system health based on component health:
+/// - "healthy": All components operational
+/// - "degraded": Some components have issues but system is functional
+/// - "unhealthy": Critical components are down
 pub fn execute_status(_arguments: Value) -> Result<ToolResult> {
-    // For now, return basic status
+    let mut components = Vec::new();
+    let mut any_unhealthy = false;
+    let mut any_degraded = false;
+
+    // Try to get services - if this fails, the system is unhealthy
+    let services_result = ServiceContainer::from_current_dir_or_user();
+
+    match services_result {
+        Ok(services) => {
+            // Check persistence health
+            let persistence = check_persistence_health(&services);
+            if persistence.status == "unhealthy" {
+                any_unhealthy = true;
+            } else if persistence.status == "degraded" {
+                any_degraded = true;
+            }
+            components.push(persistence);
+
+            // Check index health
+            let index = check_index_health(&services);
+            if index.status == "unhealthy" {
+                any_unhealthy = true;
+            } else if index.status == "degraded" {
+                any_degraded = true;
+            }
+            components.push(index);
+
+            // Check vector health
+            let vector = check_vector_health(&services);
+            if vector.status == "unhealthy" {
+                any_unhealthy = true;
+            } else if vector.status == "degraded" {
+                any_degraded = true;
+            }
+            components.push(vector);
+
+            // Check capture service health
+            let capture = check_capture_health(&services);
+            if capture.status == "unhealthy" {
+                any_unhealthy = true;
+            } else if capture.status == "degraded" {
+                any_degraded = true;
+            }
+            components.push(capture);
+        },
+        Err(e) => {
+            any_unhealthy = true;
+            components.push(ComponentHealth::unhealthy(
+                "service_container",
+                e.to_string(),
+            ));
+        },
+    }
+
+    // Determine overall status
+    let overall_status = if any_unhealthy {
+        "unhealthy"
+    } else if any_degraded {
+        "degraded"
+    } else {
+        "healthy"
+    };
+
     let status = serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
-        "status": "operational",
-        "backends": {
-            "persistence": "sqlite",
-            "index": "sqlite-fts5",
-            "vector": "usearch"
-        },
+        "status": overall_status,
+        "components": components,
         "features": {
             "semantic_search": true,
             "secret_detection": true,
-            "hooks": true
+            "hooks": true,
+            "circuit_breakers": true,
+            "bulkhead_isolation": true,
+            "configurable_timeouts": true
         }
     });
 
@@ -425,6 +619,51 @@ pub fn execute_reindex(arguments: Value) -> Result<ToolResult> {
         Err(e) => Ok(ToolResult {
             content: vec![ToolContent::Text {
                 text: format!("Reindex failed: {e}"),
+            }],
+            is_error: true,
+        }),
+    }
+}
+
+/// Executes the GDPR data export tool.
+///
+/// Implements GDPR Article 20 (Right to Data Portability).
+/// Returns all user data in a portable JSON format.
+pub fn execute_gdpr_export(_arguments: Value) -> Result<ToolResult> {
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let data_subject = services.data_subject()?;
+
+    match data_subject.export_user_data() {
+        Ok(export) => {
+            // Format the export as pretty JSON for readability
+            let json =
+                serde_json::to_string_pretty(&export).map_err(|e| Error::OperationFailed {
+                    operation: "serialize_export".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: format!(
+                        "GDPR Data Export (Article 20 - Right to Data Portability)\n\n\
+                         Exported {} memories at {}\n\
+                         Format: {}\n\
+                         Generator: {} v{}\n\n\
+                         ---\n\n{}",
+                        export.memory_count,
+                        export.exported_at,
+                        export.metadata.format,
+                        export.metadata.generator,
+                        export.metadata.generator_version,
+                        json
+                    ),
+                }],
+                is_error: false,
+            })
+        },
+        Err(e) => Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!("GDPR export failed: {e}"),
             }],
             is_error: true,
         }),

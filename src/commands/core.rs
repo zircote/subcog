@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use subcog::config::SubcogConfig;
 use subcog::storage::PersistenceBackend;
-use subcog::{CaptureRequest, Domain, Namespace, SearchFilter, SearchMode, SyncService};
+use subcog::{CaptureRequest, Domain, Namespace, SearchFilter, SearchMode};
 
 /// Parses namespace string.
 pub fn parse_namespace(s: &str) -> Namespace {
@@ -193,60 +193,6 @@ pub fn cmd_status(config: &SubcogConfig) -> Result<(), Box<dyn std::error::Error
 
     println!();
     println!("Use 'subcog config --show' to view full configuration");
-
-    Ok(())
-}
-
-/// Sync command.
-pub fn cmd_sync(
-    config: &SubcogConfig,
-    push: bool,
-    fetch: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Get current directory as repo path, or use config
-    let cwd = std::env::current_dir()?;
-    let service_config = subcog::config::Config::from(config.clone()).with_repo_path(&cwd);
-    let service = SyncService::new(service_config);
-
-    if push && fetch {
-        // Full sync
-        match service.sync() {
-            Ok(stats) => {
-                println!("Sync completed: {}", stats.summary());
-            },
-            Err(e) => {
-                eprintln!("Sync failed: {e}");
-            },
-        }
-    } else if push {
-        match service.push() {
-            Ok(stats) => {
-                println!("Push completed: {} memories pushed", stats.pushed);
-            },
-            Err(e) => {
-                eprintln!("Push failed: {e}");
-            },
-        }
-    } else if fetch {
-        match service.fetch() {
-            Ok(stats) => {
-                println!("Fetch completed: {} memories pulled", stats.pulled);
-            },
-            Err(e) => {
-                eprintln!("Fetch failed: {e}");
-            },
-        }
-    } else {
-        // Default to full sync
-        match service.sync() {
-            Ok(stats) => {
-                println!("Sync completed: {}", stats.summary());
-            },
-            Err(e) => {
-                eprintln!("Sync failed: {e}");
-            },
-        }
-    }
 
     Ok(())
 }

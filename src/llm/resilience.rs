@@ -30,7 +30,7 @@ pub struct LlmResilienceConfig {
 impl Default for LlmResilienceConfig {
     fn default() -> Self {
         Self {
-            max_retries: 0,
+            max_retries: 3,
             retry_backoff_ms: 100,
             breaker_failure_threshold: 3,
             breaker_reset_timeout_ms: 30_000,
@@ -394,7 +394,8 @@ impl<P: LlmProvider> ResilientLlmProvider<P> {
         max_attempts: u32,
     ) -> FailureAction {
         let is_timeout = is_timeout_error(&err);
-        let retryable = is_timeout && attempts < max_attempts;
+        // CHAOS-CRIT-001/002/003: Retry on all transient errors, not just timeouts
+        let retryable = is_retryable_error(&err) && attempts < max_attempts;
 
         self.record_failure(provider, operation, elapsed, is_timeout, retryable);
         let mut breaker = self
@@ -430,7 +431,8 @@ impl<P: LlmProvider> ResilientLlmProvider<P> {
             )
             .increment(1);
             if self.config.retry_backoff_ms > 0 {
-                std::thread::sleep(Duration::from_millis(self.config.retry_backoff_ms));
+                let delay = Self::calculate_retry_delay(self.config.retry_backoff_ms, attempts);
+                std::thread::sleep(Duration::from_millis(delay));
             }
             return FailureAction::Retry(err);
         }
@@ -544,6 +546,52 @@ impl<P: LlmProvider> ResilientLlmProvider<P> {
         metrics::gauge!("llm_circuit_breaker_state", "provider" => provider)
             .set(f64::from(breaker_state));
     }
+
+    /// Calculates retry delay with exponential backoff and jitter (CHAOS-CRIT-001/002/003).
+    ///
+    /// Formula: `base_delay * 2^(attempt-1) + jitter`
+    /// - Exponential growth prevents overwhelming a recovering service
+    /// - Jitter (0-50% of delay) prevents thundering herd problem
+    /// - Maximum delay capped at 10 seconds
+    fn calculate_retry_delay(base_delay_ms: u64, attempt: u32) -> u64 {
+        // Exponential: base * 2^(attempt-1), so attempt 1 = base, attempt 2 = 2x, attempt 3 = 4x
+        let exponent = attempt.saturating_sub(1);
+        let exponential_delay = base_delay_ms.saturating_mul(1u64 << exponent.min(10));
+
+        // Cap at 10 seconds max delay
+        let capped_delay = exponential_delay.min(10_000);
+
+        // Add jitter: use system time nanoseconds as pseudo-random source
+        // Jitter range: 0-50% of capped delay to prevent thundering herd
+        let jitter = Self::calculate_jitter(capped_delay);
+        let total_delay = capped_delay.saturating_add(jitter);
+
+        tracing::debug!(
+            "Retry backoff: attempt={}, base={}ms, exponential={}ms, jitter={}ms, total={}ms",
+            attempt,
+            base_delay_ms,
+            capped_delay,
+            jitter,
+            total_delay
+        );
+
+        total_delay
+    }
+
+    /// Calculates jitter for retry backoff using system time as pseudo-random source.
+    fn calculate_jitter(delay_ms: u64) -> u64 {
+        let jitter_max = delay_ms / 2;
+        if jitter_max == 0 {
+            return 0;
+        }
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+
+        u64::from(nanos) % jitter_max
+    }
 }
 
 impl<P: LlmProvider> LlmProvider for ResilientLlmProvider<P> {
@@ -562,6 +610,7 @@ impl<P: LlmProvider> LlmProvider for ResilientLlmProvider<P> {
     }
 }
 
+/// Checks if an error is a timeout error.
 fn is_timeout_error(err: &Error) -> bool {
     match err {
         Error::OperationFailed { cause, .. } => {
@@ -570,6 +619,47 @@ fn is_timeout_error(err: &Error) -> bool {
                 || lower.contains("timed out")
                 || lower.contains("deadline")
                 || lower.contains("elapsed")
+        },
+        _ => false,
+    }
+}
+
+/// Checks if an error is retryable (transient failures that may succeed on retry).
+///
+/// Retryable errors include:
+/// - Timeouts
+/// - Connection errors (network issues, DNS failures)
+/// - Server errors (5xx)
+/// - Rate limiting (429)
+fn is_retryable_error(err: &Error) -> bool {
+    match err {
+        Error::OperationFailed { cause, .. } => {
+            let lower = cause.to_lowercase();
+            // Timeout errors
+            lower.contains("timeout")
+                || lower.contains("timed out")
+                || lower.contains("deadline")
+                || lower.contains("elapsed")
+                // Connection errors
+                || lower.contains("connect")
+                || lower.contains("connection")
+                || lower.contains("network")
+                || lower.contains("dns")
+                || lower.contains("resolve")
+                // Server errors (5xx)
+                || lower.contains("500")
+                || lower.contains("502")
+                || lower.contains("503")
+                || lower.contains("504")
+                || lower.contains("internal server error")
+                || lower.contains("bad gateway")
+                || lower.contains("service unavailable")
+                || lower.contains("gateway timeout")
+                // Rate limiting
+                || lower.contains("429")
+                || lower.contains("rate limit")
+                || lower.contains("too many requests")
+                || lower.contains("overloaded")
         },
         _ => false,
     }
@@ -805,7 +895,7 @@ mod tests {
     #[test]
     fn test_config_default_values() {
         let config = LlmResilienceConfig::default();
-        assert_eq!(config.max_retries, 0);
+        assert_eq!(config.max_retries, 3); // CHAOS-CRIT-001/002/003: 3 retries by default
         assert_eq!(config.retry_backoff_ms, 100);
         assert_eq!(config.breaker_failure_threshold, 3);
         assert_eq!(config.breaker_reset_timeout_ms, 30_000);
@@ -913,5 +1003,109 @@ mod tests {
             cause: "TIMEOUT ERROR".to_string(),
         };
         assert!(is_timeout_error(&err));
+    }
+
+    // =========================================================================
+    // Retryable Error Detection Tests (CHAOS-CRIT-001/002/003)
+    // =========================================================================
+
+    #[test]
+    fn test_is_retryable_error_detects_connection_errors() {
+        let test_cases = [
+            "connect error: connection refused",
+            "Connection reset by peer",
+            "network error: no route to host",
+            "DNS lookup failed",
+            "Failed to resolve hostname",
+        ];
+
+        for cause in test_cases {
+            let err = Error::OperationFailed {
+                operation: "test".to_string(),
+                cause: cause.to_string(),
+            };
+            assert!(is_retryable_error(&err), "Should be retryable: {cause}");
+        }
+    }
+
+    #[test]
+    fn test_is_retryable_error_detects_server_errors() {
+        let test_cases = [
+            "API returned status: 500",
+            "502 Bad Gateway",
+            "503 Service Unavailable",
+            "504 Gateway Timeout",
+            "Internal Server Error",
+            "Bad Gateway error",
+            "Service unavailable",
+            "Gateway timeout exceeded",
+        ];
+
+        for cause in test_cases {
+            let err = Error::OperationFailed {
+                operation: "test".to_string(),
+                cause: cause.to_string(),
+            };
+            assert!(is_retryable_error(&err), "Should be retryable: {cause}");
+        }
+    }
+
+    #[test]
+    fn test_is_retryable_error_detects_rate_limiting() {
+        let test_cases = [
+            "API returned status: 429",
+            "Rate limit exceeded",
+            "Too many requests",
+            "Server overloaded",
+        ];
+
+        for cause in test_cases {
+            let err = Error::OperationFailed {
+                operation: "test".to_string(),
+                cause: cause.to_string(),
+            };
+            assert!(is_retryable_error(&err), "Should be retryable: {cause}");
+        }
+    }
+
+    #[test]
+    fn test_is_retryable_error_includes_timeout_errors() {
+        let err = Error::OperationFailed {
+            operation: "test".to_string(),
+            cause: "Request timeout".to_string(),
+        };
+        assert!(is_retryable_error(&err));
+    }
+
+    #[test]
+    fn test_is_retryable_error_returns_false_for_client_errors() {
+        let test_cases = [
+            "API returned status: 400 - Bad Request",
+            "401 Unauthorized",
+            "403 Forbidden",
+            "404 Not Found",
+            "Invalid API key format",
+            "Malformed JSON in request",
+        ];
+
+        for cause in test_cases {
+            let err = Error::OperationFailed {
+                operation: "test".to_string(),
+                cause: cause.to_string(),
+            };
+            assert!(
+                !is_retryable_error(&err),
+                "Should NOT be retryable: {cause}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_retryable_error_is_case_insensitive() {
+        let err = Error::OperationFailed {
+            operation: "test".to_string(),
+            cause: "CONNECTION REFUSED".to_string(),
+        };
+        assert!(is_retryable_error(&err));
     }
 }

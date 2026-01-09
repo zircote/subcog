@@ -6,6 +6,7 @@
 mod implementation {
     use crate::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace};
     use crate::storage::migrations::{Migration, MigrationRunner};
+    use crate::storage::resilience::{StorageResilienceConfig, retry_connection};
     use crate::storage::traits::PersistenceBackend;
     use crate::{Error, Result};
     use chrono::{TimeZone, Utc};
@@ -119,7 +120,13 @@ mod implementation {
         ///
         /// # Errors
         ///
-        /// Returns an error if the connection pool fails to initialize.
+        /// Returns an error if the connection pool fails to initialize after retries.
+        ///
+        /// # Connection Retry (CHAOS-HIGH-003)
+        ///
+        /// Connection establishment uses exponential backoff with jitter for transient
+        /// failures. This handles scenarios where the database is starting up or
+        /// temporarily unavailable.
         pub fn with_pool_size(
             connection_url: &str,
             table_name: impl Into<String>,
@@ -129,11 +136,14 @@ mod implementation {
             let config = Self::parse_connection_url(connection_url)?;
             let cfg = Self::build_pool_config(&config, pool_max_size);
 
-            let pool = cfg.create_pool(Some(Runtime::Tokio1), NoTls).map_err(|e| {
-                Error::OperationFailed {
-                    operation: "postgres_persistence_create_pool".to_string(),
-                    cause: e.to_string(),
-                }
+            // Use connection retry with exponential backoff (CHAOS-HIGH-003)
+            let resilience_config = StorageResilienceConfig::from_env();
+            let pool = retry_connection(&resilience_config, "postgres", "create_pool", || {
+                cfg.create_pool(Some(Runtime::Tokio1), NoTls)
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "postgres_persistence_create_pool".to_string(),
+                        cause: e.to_string(),
+                    })
             })?;
 
             let backend = Self { pool, table_name };

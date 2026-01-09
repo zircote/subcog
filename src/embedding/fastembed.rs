@@ -134,13 +134,16 @@ mod native {
                 operation: "lock_embedding_model".to_string(),
                 cause: e.to_string(),
             })?;
-            let text_owned = text.to_string();
+
+            // PERF-HIGH-004: Use slice reference instead of allocating String.
+            // fastembed accepts impl AsRef<[S]> where S: AsRef<str>, so &[&str] works.
+            let texts = [text];
 
             // Wrap ONNX runtime call in catch_unwind for graceful degradation (RES-M1).
             // ONNX runtime can panic on malformed inputs or internal errors.
             // AssertUnwindSafe is safe here because we don't access any mutable state
             // after the panic, and fastembed::TextEmbedding is Send + Sync.
-            let result = catch_unwind(AssertUnwindSafe(|| model.embed(vec![text_owned], None)));
+            let result = catch_unwind(AssertUnwindSafe(|| model.embed(texts, None)));
 
             let embeddings = result
                 .map_err(|panic_info| {
@@ -187,11 +190,11 @@ mod native {
                 cause: e.to_string(),
             })?;
 
-            // Convert &[&str] to Vec<String> for fastembed
-            let texts_owned: Vec<String> = texts.iter().map(|s| (*s).to_string()).collect();
+            // PERF-HIGH-004: Pass slice directly instead of allocating Vec<String>.
+            // fastembed accepts impl AsRef<[S]> where S: AsRef<str>, so &[&str] works.
 
             // Wrap ONNX runtime call in catch_unwind for graceful degradation (RES-M1).
-            let result = catch_unwind(AssertUnwindSafe(|| model.embed(texts_owned, None)));
+            let result = catch_unwind(AssertUnwindSafe(|| model.embed(texts, None)));
 
             result
                 .map_err(|panic_info| {

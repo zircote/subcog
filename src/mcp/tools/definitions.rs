@@ -153,20 +153,6 @@ pub fn consolidate_tool() -> ToolDefinition {
     }
 }
 
-/// Defines the prompt understanding tool.
-pub fn prompt_understanding_tool() -> ToolDefinition {
-    ToolDefinition {
-        name: "prompt_understanding".to_string(),
-        description: "Provide detailed guidance on using Subcog MCP tools and workflows"
-            .to_string(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "properties": {},
-            "required": []
-        }),
-    }
-}
-
 /// Defines the enrich tool.
 pub fn enrich_tool() -> ToolDefinition {
     ToolDefinition {
@@ -233,6 +219,21 @@ pub fn reindex_tool() -> ToolDefinition {
                     "description": "Path to git repository (default: current directory)"
                 }
             },
+            "required": []
+        }),
+    }
+}
+
+/// Defines the GDPR data export tool.
+///
+/// Implements GDPR Article 20 (Right to Data Portability).
+pub fn gdpr_export_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_gdpr_export".to_string(),
+        description: "Export all user data in a portable JSON format (GDPR Article 20 - Right to Data Portability). Returns all memories with metadata for download or transfer to another system.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {},
             "required": []
         }),
     }

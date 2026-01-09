@@ -170,7 +170,7 @@ pub fn write_yaml<W: Write>(
     writer: &mut W,
     namespaces: &[NamespaceInfo],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let yaml = serde_yaml::to_string(namespaces)?;
+    let yaml = serde_yaml_ng::to_string(namespaces)?;
     write!(writer, "{yaml}")?;
     Ok(())
 }

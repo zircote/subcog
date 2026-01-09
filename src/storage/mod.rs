@@ -19,17 +19,26 @@
 // Allow unused_self for methods kept for API consistency.
 #![allow(clippy::unused_self)]
 
+pub mod bulkhead;
 pub mod index;
 pub mod migrations;
 pub mod persistence;
 pub mod prompt;
+pub mod resilience;
 pub mod traits;
 pub mod vector;
 
+pub use bulkhead::{
+    BulkheadIndexBackend, BulkheadPersistenceBackend, BulkheadVectorBackend, StorageBulkheadConfig,
+};
 pub use index::get_user_data_dir;
 pub use prompt::{
     FilesystemPromptStorage, PostgresPromptStorage, PromptBackendType, PromptStorage,
     PromptStorageFactory, RedisPromptStorage, SqlitePromptStorage,
+};
+pub use resilience::{
+    ResilientIndexBackend, ResilientPersistenceBackend, ResilientVectorBackend,
+    StorageResilienceConfig, is_retryable_storage_error, retry_connection,
 };
 pub use traits::{IndexBackend, PersistenceBackend, VectorBackend};
 

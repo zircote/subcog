@@ -9,29 +9,29 @@
 
 ## Phase 1: CRITICAL (7 findings)
 
-- [ ] CHAOS-CRIT-001: Add retry logic to `src/llm/anthropic.rs` - exponential backoff with jitter, max 3 retries
-- [ ] CHAOS-CRIT-002: Add retry logic to `src/llm/openai.rs` - exponential backoff with jitter, max 3 retries
-- [ ] CHAOS-CRIT-003: Add retry logic to `src/llm/ollama.rs` - exponential backoff with jitter, max 3 retries
-- [ ] COMP-CRIT-002: Enable encryption by default in `src/config/mod.rs` - change default from false to true
-- [ ] COMP-CRIT-003: Document stdio transport security model in `src/mcp/transport/stdio.rs` and README
-- [ ] TEST-CRIT-001: Add CaptureService integration tests in `tests/capture_integration.rs`
-- [ ] COMP-CRIT-001: Implement GDPR data export in `src/services/export.rs` with MCP tool
+- [x] CHAOS-CRIT-001: Add retry logic to `src/llm/anthropic.rs` - exponential backoff with jitter, max 3 retries
+- [x] CHAOS-CRIT-002: Add retry logic to `src/llm/openai.rs` - exponential backoff with jitter, max 3 retries
+- [x] CHAOS-CRIT-003: Add retry logic to `src/llm/ollama.rs` - exponential backoff with jitter, max 3 retries
+- [x] COMP-CRIT-002: Enable encryption by default in `src/config/mod.rs` - change default from false to true
+- [x] COMP-CRIT-003: Document stdio transport security model in `src/mcp/transport/stdio.rs` and README
+- [x] TEST-CRIT-001: Add CaptureService integration tests in `tests/capture_integration.rs`
+- [x] COMP-CRIT-001: Implement GDPR data export in `src/services/data_subject.rs` with MCP tool `subcog_gdpr_export`
 
 ---
 
 ## Phase 2: HIGH (30 findings)
 
-- [ ] DEP-HIGH-002: Replace serde_yaml with serde_yml in Cargo.toml and all imports
-- [ ] DEP-HIGH-001: Acknowledge RUSTSEC-2023-0071 in deny.toml with justification
-- [ ] PERF-HIGH-001: Optimize SearchHit cloning in RRF fusion (`src/services/recall.rs`)
-- [ ] PERF-HIGH-002: Optimize Memory cloning in lazy tombstone (`src/services/recall.rs`)
-- [ ] PERF-HIGH-003: Fix N+1 query in branch GC (`src/gc/branch.rs`)
-- [ ] PERF-HIGH-004: Reduce string allocation in embed_batch (`src/embedding/fastembed.rs`)
-- [ ] ARCH-HIGH-001: Fix CQS violation in lazy_tombstone_stale_branches (`src/services/recall.rs`)
-- [ ] ARCH-HIGH-002: Split SubcogConfig god object (`src/config/mod.rs`)
-- [ ] CHAOS-HIGH-001: Add circuit breakers to LLM clients (`src/llm/*.rs`)
-- [ ] CHAOS-HIGH-002: Add embedding fallback to BM25-only
-- [ ] CHAOS-HIGH-003: Add database connection retry with backoff
+- [x] DEP-HIGH-002: Replace serde_yaml with serde_yaml_ng in Cargo.toml and all imports
+- [x] DEP-HIGH-001: Resolved by using serde_yaml_ng (no advisories)
+- [x] PERF-HIGH-001: Already optimized - uses indices during merge, only clones final results (PERF-C2)
+- [x] PERF-HIGH-002: Optimize Memory cloning in lazy tombstone - update in-place, avoid clone
+- [x] PERF-HIGH-003: Fix N+1 query in branch GC - use get_memories_batch
+- [x] PERF-HIGH-004: Reduce string allocation in embed_batch - pass `&[&str]` directly instead of `Vec<String>`
+- [x] ARCH-HIGH-001: Fix CQS violation - split into `mark_stale_branch_hits` (query) + `persist_tombstones_to_index` (command)
+- [x] ARCH-HIGH-002: Split SubcogConfig god object (`src/config/mod.rs`)
+- [x] CHAOS-HIGH-001: Add circuit breakers to LLM clients (`src/llm/*.rs`)
+- [x] CHAOS-HIGH-002: Add embedding fallback to BM25-only
+- [x] CHAOS-HIGH-003: Add database connection retry with backoff ✓
 - [ ] CHAOS-HIGH-004: Add service isolation with bulkhead pattern
 - [ ] CHAOS-HIGH-005: Add configurable timeouts per operation
 - [ ] CHAOS-HIGH-006: Add health check endpoints for all services

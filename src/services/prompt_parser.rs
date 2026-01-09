@@ -263,7 +263,7 @@ impl PromptParser {
 
     /// Parses YAML format.
     fn parse_yaml(content: &str) -> Result<PromptTemplate> {
-        let value: serde_json::Value = serde_yaml::from_str(content)
+        let value: serde_json::Value = serde_yaml_ng::from_str(content)
             .map_err(|e| Error::InvalidInput(format!("Invalid YAML: {e}")))?;
 
         Self::parse_structured(&value)
@@ -416,7 +416,7 @@ impl PromptParser {
 
     /// Serializes to YAML.
     fn serialize_yaml(template: &PromptTemplate) -> Result<String> {
-        serde_yaml::to_string(template).map_err(|e| Error::OperationFailed {
+        serde_yaml_ng::to_string(template).map_err(|e| Error::OperationFailed {
             operation: "serialize_yaml".to_string(),
             cause: e.to_string(),
         })

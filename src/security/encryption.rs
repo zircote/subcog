@@ -402,7 +402,7 @@ mod stub {
 
         /// Always returns None.
         #[must_use]
-        pub fn try_from_env() -> Option<Self> {
+        pub const fn try_from_env() -> Option<Self> {
             None
         }
     }
