@@ -14,6 +14,14 @@
 //! - **Memory**: Large batch operations can exhaust memory
 //! - **I/O bandwidth**: Prevents I/O saturation
 //!
+//! # Architecture
+//!
+//! This module uses a generic [`Bulkhead<T>`] struct that provides the core
+//! concurrency limiting logic. Backend-specific wrappers (`BulkheadPersistenceBackend`,
+//! `BulkheadIndexBackend`, `BulkheadVectorBackend`) delegate to this shared
+//! implementation while providing trait implementations for their respective
+//! backend traits.
+//!
 //! # Usage
 //!
 //! ```rust,ignore
@@ -35,7 +43,7 @@ use crate::models::{Memory, MemoryId, SearchFilter};
 use crate::{Error, Result};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 /// Configuration for the storage bulkhead pattern.
 #[derive(Debug, Clone)]
@@ -131,21 +139,29 @@ impl StorageBulkheadConfig {
 }
 
 // ============================================================================
-// Bulkhead Persistence Backend
+// Generic Bulkhead Implementation
 // ============================================================================
 
-/// Persistence backend wrapper with bulkhead (concurrency limiting) pattern.
-pub struct BulkheadPersistenceBackend<P: PersistenceBackend> {
-    inner: P,
+/// Generic bulkhead wrapper providing concurrency limiting for any type.
+///
+/// This struct implements the core bulkhead pattern logic that is shared across
+/// all backend-specific wrappers. It uses a semaphore to limit concurrent
+/// operations and provides configurable timeout and fail-fast behaviors.
+///
+/// # Type Parameters
+///
+/// * `T` - The inner type being wrapped (e.g., a persistence or vector backend)
+pub struct Bulkhead<T> {
+    inner: T,
     config: StorageBulkheadConfig,
     semaphore: Arc<Semaphore>,
     backend_name: &'static str,
 }
 
-impl<P: PersistenceBackend> BulkheadPersistenceBackend<P> {
-    /// Creates a new bulkhead-wrapped persistence backend.
+impl<T> Bulkhead<T> {
+    /// Creates a new bulkhead wrapper around the given inner value.
     #[must_use]
-    pub fn new(inner: P, config: StorageBulkheadConfig, backend_name: &'static str) -> Self {
+    pub fn new(inner: T, config: StorageBulkheadConfig, backend_name: &'static str) -> Self {
         let semaphore = Arc::new(Semaphore::new(config.max_concurrent.max(1)));
         Self {
             inner,
@@ -155,6 +171,18 @@ impl<P: PersistenceBackend> BulkheadPersistenceBackend<P> {
         }
     }
 
+    /// Returns a reference to the inner value.
+    #[must_use]
+    pub const fn inner(&self) -> &T {
+        &self.inner
+    }
+
+    /// Returns the backend name for metrics and logging.
+    #[must_use]
+    pub const fn backend_name(&self) -> &'static str {
+        self.backend_name
+    }
+
     /// Returns the current number of available permits.
     #[must_use]
     pub fn available_permits(&self) -> usize {
@@ -162,7 +190,7 @@ impl<P: PersistenceBackend> BulkheadPersistenceBackend<P> {
     }
 
     /// Acquires a permit, respecting the configured timeout and fail-fast settings.
-    fn acquire_permit(&self) -> Result<tokio::sync::OwnedSemaphorePermit> {
+    fn acquire_permit(&self, operation_prefix: &str) -> Result<OwnedSemaphorePermit> {
         let semaphore = &self.semaphore;
         let available = semaphore.available_permits();
 
@@ -173,7 +201,7 @@ impl<P: PersistenceBackend> BulkheadPersistenceBackend<P> {
         .set(available as f64);
 
         if self.config.fail_fast {
-            return self.acquire_permit_fail_fast(semaphore, available);
+            return self.acquire_permit_fail_fast(semaphore, available, operation_prefix);
         }
 
         let timeout_ms = if self.config.acquire_timeout_ms == 0 {
@@ -182,7 +210,7 @@ impl<P: PersistenceBackend> BulkheadPersistenceBackend<P> {
             self.config.acquire_timeout_ms
         };
 
-        self.acquire_permit_with_timeout(timeout_ms)
+        self.acquire_permit_with_timeout(timeout_ms, operation_prefix)
     }
 
     /// Fast-fail acquisition that returns error immediately if bulkhead is full.
@@ -190,7 +218,8 @@ impl<P: PersistenceBackend> BulkheadPersistenceBackend<P> {
         &self,
         semaphore: &Arc<Semaphore>,
         available: usize,
-    ) -> Result<tokio::sync::OwnedSemaphorePermit> {
+        operation_prefix: &str,
+    ) -> Result<OwnedSemaphorePermit> {
         Arc::clone(semaphore).try_acquire_owned().map_or_else(
             |_| {
                 metrics::counter!(
@@ -200,9 +229,10 @@ impl<P: PersistenceBackend> BulkheadPersistenceBackend<P> {
                 )
                 .increment(1);
                 Err(Error::OperationFailed {
-                    operation: "storage_bulkhead_acquire".to_string(),
+                    operation: format!("{operation_prefix}_bulkhead_acquire"),
                     cause: format!(
-                        "Storage bulkhead full: {} concurrent operations (max: {})",
+                        "{} bulkhead full: {} concurrent operations (max: {})",
+                        capitalize_first(operation_prefix),
                         self.config.max_concurrent - available,
                         self.config.max_concurrent
                     ),
@@ -223,7 +253,8 @@ impl<P: PersistenceBackend> BulkheadPersistenceBackend<P> {
     fn acquire_permit_with_timeout(
         &self,
         timeout_ms: u64,
-    ) -> Result<tokio::sync::OwnedSemaphorePermit> {
+        operation_prefix: &str,
+    ) -> Result<OwnedSemaphorePermit> {
         let timeout = Duration::from_millis(timeout_ms);
         let start = std::time::Instant::now();
 
@@ -245,8 +276,11 @@ impl<P: PersistenceBackend> BulkheadPersistenceBackend<P> {
                 )
                 .increment(1);
                 return Err(Error::OperationFailed {
-                    operation: "storage_bulkhead_acquire".to_string(),
-                    cause: format!("Storage bulkhead acquire timed out after {timeout_ms}ms"),
+                    operation: format!("{operation_prefix}_bulkhead_acquire"),
+                    cause: format!(
+                        "{} bulkhead acquire timed out after {timeout_ms}ms",
+                        capitalize_first(operation_prefix)
+                    ),
                 });
             }
 
@@ -255,58 +289,126 @@ impl<P: PersistenceBackend> BulkheadPersistenceBackend<P> {
     }
 
     /// Executes an operation with bulkhead protection.
-    fn execute<T, F>(&self, operation: &'static str, call: F) -> Result<T>
+    ///
+    /// Acquires a permit before executing the closure and releases it after.
+    /// Includes tracing for debugging concurrent access patterns.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if permit acquisition times out or the inner operation fails.
+    pub fn execute<R, F>(
+        &self,
+        operation: &'static str,
+        operation_prefix: &str,
+        call: F,
+    ) -> Result<R>
     where
-        F: FnOnce() -> Result<T>,
+        F: FnOnce(&T) -> Result<R>,
     {
-        let _permit = self.acquire_permit()?;
+        let _permit = self.acquire_permit(operation_prefix)?;
 
         tracing::trace!(
             backend = self.backend_name,
             operation = operation,
-            "Acquired storage bulkhead permit"
+            "Acquired bulkhead permit"
         );
 
-        let result = call();
+        let result = call(&self.inner);
 
         tracing::trace!(
             backend = self.backend_name,
             operation = operation,
             success = result.is_ok(),
-            "Released storage bulkhead permit"
+            "Released bulkhead permit"
         );
 
         result
     }
+
+    /// Executes an operation with bulkhead protection (no tracing).
+    ///
+    /// Lighter-weight version without tracing overhead for high-frequency operations.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if permit acquisition times out or the inner operation fails.
+    pub fn execute_quiet<R, F>(&self, operation_prefix: &str, call: F) -> Result<R>
+    where
+        F: FnOnce(&T) -> Result<R>,
+    {
+        let _permit = self.acquire_permit(operation_prefix)?;
+        call(&self.inner)
+    }
 }
 
+/// Capitalizes the first letter of a string.
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
+// ============================================================================
+// Bulkhead Persistence Backend
+// ============================================================================
+
+/// Persistence backend wrapper with bulkhead (concurrency limiting) pattern.
+pub struct BulkheadPersistenceBackend<P: PersistenceBackend> {
+    bulkhead: Bulkhead<P>,
+}
+
+impl<P: PersistenceBackend> BulkheadPersistenceBackend<P> {
+    /// Creates a new bulkhead-wrapped persistence backend.
+    #[must_use]
+    pub fn new(inner: P, config: StorageBulkheadConfig, backend_name: &'static str) -> Self {
+        Self {
+            bulkhead: Bulkhead::new(inner, config, backend_name),
+        }
+    }
+
+    /// Returns the current number of available permits.
+    #[must_use]
+    pub fn available_permits(&self) -> usize {
+        self.bulkhead.available_permits()
+    }
+}
+
+#[allow(clippy::redundant_closure_for_method_calls)]
 impl<P: PersistenceBackend> PersistenceBackend for BulkheadPersistenceBackend<P> {
     fn store(&self, memory: &Memory) -> Result<()> {
-        self.execute("store", || self.inner.store(memory))
+        self.bulkhead
+            .execute("store", "storage", |inner| inner.store(memory))
     }
 
     fn get(&self, id: &MemoryId) -> Result<Option<Memory>> {
-        self.execute("get", || self.inner.get(id))
+        self.bulkhead
+            .execute("get", "storage", |inner| inner.get(id))
     }
 
     fn get_batch(&self, ids: &[MemoryId]) -> Result<Vec<Memory>> {
-        self.execute("get_batch", || self.inner.get_batch(ids))
+        self.bulkhead
+            .execute("get_batch", "storage", |inner| inner.get_batch(ids))
     }
 
     fn delete(&self, id: &MemoryId) -> Result<bool> {
-        self.execute("delete", || self.inner.delete(id))
+        self.bulkhead
+            .execute("delete", "storage", |inner| inner.delete(id))
     }
 
     fn exists(&self, id: &MemoryId) -> Result<bool> {
-        self.execute("exists", || self.inner.exists(id))
+        self.bulkhead
+            .execute("exists", "storage", |inner| inner.exists(id))
     }
 
     fn list_ids(&self) -> Result<Vec<MemoryId>> {
-        self.execute("list_ids", || self.inner.list_ids())
+        self.bulkhead
+            .execute("list_ids", "storage", |inner| inner.list_ids())
     }
 
     fn count(&self) -> Result<usize> {
-        self.execute("count", || self.inner.count())
+        self.bulkhead
+            .execute("count", "storage", |inner| inner.count())
     }
 }
 
@@ -316,140 +418,35 @@ impl<P: PersistenceBackend> PersistenceBackend for BulkheadPersistenceBackend<P>
 
 /// Index backend wrapper with bulkhead (concurrency limiting) pattern.
 pub struct BulkheadIndexBackend<I: IndexBackend> {
-    inner: I,
-    config: StorageBulkheadConfig,
-    semaphore: Arc<Semaphore>,
-    backend_name: &'static str,
+    bulkhead: Bulkhead<I>,
 }
 
 impl<I: IndexBackend> BulkheadIndexBackend<I> {
     /// Creates a new bulkhead-wrapped index backend.
     #[must_use]
     pub fn new(inner: I, config: StorageBulkheadConfig, backend_name: &'static str) -> Self {
-        let semaphore = Arc::new(Semaphore::new(config.max_concurrent.max(1)));
         Self {
-            inner,
-            config,
-            semaphore,
-            backend_name,
+            bulkhead: Bulkhead::new(inner, config, backend_name),
         }
     }
 
     /// Returns the current number of available permits.
     #[must_use]
     pub fn available_permits(&self) -> usize {
-        self.semaphore.available_permits()
-    }
-
-    /// Acquires a permit with the same logic as persistence backend.
-    fn acquire_permit(&self) -> Result<tokio::sync::OwnedSemaphorePermit> {
-        let semaphore = &self.semaphore;
-        let available = semaphore.available_permits();
-
-        metrics::gauge!(
-            "storage_bulkhead_available_permits",
-            "backend" => self.backend_name
-        )
-        .set(available as f64);
-
-        if self.config.fail_fast {
-            return self.acquire_permit_fail_fast(semaphore, available);
-        }
-
-        let timeout_ms = if self.config.acquire_timeout_ms == 0 {
-            60_000
-        } else {
-            self.config.acquire_timeout_ms
-        };
-
-        self.acquire_permit_with_timeout(timeout_ms)
-    }
-
-    /// Fast-fail acquisition for index backend.
-    fn acquire_permit_fail_fast(
-        &self,
-        semaphore: &Arc<Semaphore>,
-        available: usize,
-    ) -> Result<tokio::sync::OwnedSemaphorePermit> {
-        Arc::clone(semaphore).try_acquire_owned().map_or_else(
-            |_| {
-                metrics::counter!(
-                    "storage_bulkhead_rejections_total",
-                    "backend" => self.backend_name,
-                    "reason" => "full"
-                )
-                .increment(1);
-                Err(Error::OperationFailed {
-                    operation: "index_bulkhead_acquire".to_string(),
-                    cause: format!(
-                        "Index bulkhead full: {} concurrent operations (max: {})",
-                        self.config.max_concurrent - available,
-                        self.config.max_concurrent
-                    ),
-                })
-            },
-            |permit| {
-                metrics::counter!(
-                    "storage_bulkhead_permits_acquired_total",
-                    "backend" => self.backend_name
-                )
-                .increment(1);
-                Ok(permit)
-            },
-        )
-    }
-
-    /// Acquisition with timeout for index backend.
-    fn acquire_permit_with_timeout(
-        &self,
-        timeout_ms: u64,
-    ) -> Result<tokio::sync::OwnedSemaphorePermit> {
-        let timeout = Duration::from_millis(timeout_ms);
-        let start = std::time::Instant::now();
-
-        loop {
-            if let Ok(permit) = Arc::clone(&self.semaphore).try_acquire_owned() {
-                metrics::counter!(
-                    "storage_bulkhead_permits_acquired_total",
-                    "backend" => self.backend_name
-                )
-                .increment(1);
-                return Ok(permit);
-            }
-
-            if start.elapsed() >= timeout {
-                metrics::counter!(
-                    "storage_bulkhead_rejections_total",
-                    "backend" => self.backend_name,
-                    "reason" => "timeout"
-                )
-                .increment(1);
-                return Err(Error::OperationFailed {
-                    operation: "index_bulkhead_acquire".to_string(),
-                    cause: format!("Index bulkhead acquire timed out after {timeout_ms}ms"),
-                });
-            }
-
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    }
-
-    fn execute<T, F>(&self, _operation: &'static str, call: F) -> Result<T>
-    where
-        F: FnOnce() -> Result<T>,
-    {
-        let _permit = self.acquire_permit()?;
-        call()
+        self.bulkhead.available_permits()
     }
 }
 
+#[allow(clippy::redundant_closure_for_method_calls)]
 impl<I: IndexBackend> IndexBackend for BulkheadIndexBackend<I> {
     fn index(&self, memory: &Memory) -> Result<()> {
-        self.execute("index", || self.inner.index(memory))
+        self.bulkhead
+            .execute_quiet("index", |inner| inner.index(memory))
     }
 
     fn remove(&self, id: &MemoryId) -> Result<bool> {
-        self.execute("remove", || self.inner.remove(id))
+        self.bulkhead
+            .execute_quiet("index", |inner| inner.remove(id))
     }
 
     fn search(
@@ -458,27 +455,32 @@ impl<I: IndexBackend> IndexBackend for BulkheadIndexBackend<I> {
         filter: &SearchFilter,
         limit: usize,
     ) -> Result<Vec<(MemoryId, f32)>> {
-        self.execute("search", || self.inner.search(query, filter, limit))
+        self.bulkhead
+            .execute_quiet("index", |inner| inner.search(query, filter, limit))
     }
 
     fn reindex(&self, memories: &[Memory]) -> Result<()> {
-        self.execute("reindex", || self.inner.reindex(memories))
+        self.bulkhead
+            .execute_quiet("index", |inner| inner.reindex(memories))
     }
 
     fn clear(&self) -> Result<()> {
-        self.execute("clear", || self.inner.clear())
+        self.bulkhead.execute_quiet("index", |inner| inner.clear())
     }
 
     fn list_all(&self, filter: &SearchFilter, limit: usize) -> Result<Vec<(MemoryId, f32)>> {
-        self.execute("list_all", || self.inner.list_all(filter, limit))
+        self.bulkhead
+            .execute_quiet("index", |inner| inner.list_all(filter, limit))
     }
 
     fn get_memory(&self, id: &MemoryId) -> Result<Option<Memory>> {
-        self.execute("get_memory", || self.inner.get_memory(id))
+        self.bulkhead
+            .execute_quiet("index", |inner| inner.get_memory(id))
     }
 
     fn get_memories_batch(&self, ids: &[MemoryId]) -> Result<Vec<Option<Memory>>> {
-        self.execute("get_memories_batch", || self.inner.get_memories_batch(ids))
+        self.bulkhead
+            .execute_quiet("index", |inner| inner.get_memories_batch(ids))
     }
 }
 
@@ -488,150 +490,39 @@ impl<I: IndexBackend> IndexBackend for BulkheadIndexBackend<I> {
 
 /// Vector backend wrapper with bulkhead (concurrency limiting) pattern.
 pub struct BulkheadVectorBackend<V: VectorBackend> {
-    inner: V,
-    config: StorageBulkheadConfig,
-    semaphore: Arc<Semaphore>,
-    backend_name: &'static str,
+    bulkhead: Bulkhead<V>,
 }
 
 impl<V: VectorBackend> BulkheadVectorBackend<V> {
     /// Creates a new bulkhead-wrapped vector backend.
     #[must_use]
     pub fn new(inner: V, config: StorageBulkheadConfig, backend_name: &'static str) -> Self {
-        let semaphore = Arc::new(Semaphore::new(config.max_concurrent.max(1)));
         Self {
-            inner,
-            config,
-            semaphore,
-            backend_name,
+            bulkhead: Bulkhead::new(inner, config, backend_name),
         }
     }
 
     /// Returns the current number of available permits.
     #[must_use]
     pub fn available_permits(&self) -> usize {
-        self.semaphore.available_permits()
-    }
-
-    fn acquire_permit(&self) -> Result<tokio::sync::OwnedSemaphorePermit> {
-        let semaphore = &self.semaphore;
-        let available = semaphore.available_permits();
-
-        metrics::gauge!(
-            "storage_bulkhead_available_permits",
-            "backend" => self.backend_name
-        )
-        .set(available as f64);
-
-        if self.config.fail_fast {
-            return self.acquire_permit_fail_fast(semaphore, available);
-        }
-
-        let timeout_ms = if self.config.acquire_timeout_ms == 0 {
-            60_000
-        } else {
-            self.config.acquire_timeout_ms
-        };
-
-        self.acquire_permit_with_timeout(timeout_ms)
-    }
-
-    /// Fast-fail acquisition for vector backend.
-    fn acquire_permit_fail_fast(
-        &self,
-        semaphore: &Arc<Semaphore>,
-        available: usize,
-    ) -> Result<tokio::sync::OwnedSemaphorePermit> {
-        Arc::clone(semaphore).try_acquire_owned().map_or_else(
-            |_| {
-                metrics::counter!(
-                    "storage_bulkhead_rejections_total",
-                    "backend" => self.backend_name,
-                    "reason" => "full"
-                )
-                .increment(1);
-                Err(Error::OperationFailed {
-                    operation: "vector_bulkhead_acquire".to_string(),
-                    cause: format!(
-                        "Vector bulkhead full: {} concurrent operations (max: {})",
-                        self.config.max_concurrent - available,
-                        self.config.max_concurrent
-                    ),
-                })
-            },
-            |permit| {
-                metrics::counter!(
-                    "storage_bulkhead_permits_acquired_total",
-                    "backend" => self.backend_name
-                )
-                .increment(1);
-                Ok(permit)
-            },
-        )
-    }
-
-    /// Acquisition with timeout for vector backend.
-    fn acquire_permit_with_timeout(
-        &self,
-        timeout_ms: u64,
-    ) -> Result<tokio::sync::OwnedSemaphorePermit> {
-        let timeout = Duration::from_millis(timeout_ms);
-        let start = std::time::Instant::now();
-
-        loop {
-            if let Ok(permit) = Arc::clone(&self.semaphore).try_acquire_owned() {
-                metrics::counter!(
-                    "storage_bulkhead_permits_acquired_total",
-                    "backend" => self.backend_name
-                )
-                .increment(1);
-                return Ok(permit);
-            }
-
-            if start.elapsed() >= timeout {
-                metrics::counter!(
-                    "storage_bulkhead_rejections_total",
-                    "backend" => self.backend_name,
-                    "reason" => "timeout"
-                )
-                .increment(1);
-                return Err(Error::OperationFailed {
-                    operation: "vector_bulkhead_acquire".to_string(),
-                    cause: format!("Vector bulkhead acquire timed out after {timeout_ms}ms"),
-                });
-            }
-
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    }
-
-    fn execute<T, F>(&self, operation: &'static str, call: F) -> Result<T>
-    where
-        F: FnOnce() -> Result<T>,
-    {
-        let _permit = self.acquire_permit()?;
-
-        tracing::trace!(
-            backend = self.backend_name,
-            operation = operation,
-            "Acquired vector bulkhead permit"
-        );
-
-        call()
+        self.bulkhead.available_permits()
     }
 }
 
+#[allow(clippy::redundant_closure_for_method_calls)]
 impl<V: VectorBackend> VectorBackend for BulkheadVectorBackend<V> {
     fn dimensions(&self) -> usize {
-        self.inner.dimensions()
+        self.bulkhead.inner().dimensions()
     }
 
     fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()> {
-        self.execute("upsert", || self.inner.upsert(id, embedding))
+        self.bulkhead
+            .execute("upsert", "vector", |inner| inner.upsert(id, embedding))
     }
 
     fn remove(&self, id: &MemoryId) -> Result<bool> {
-        self.execute("remove", || self.inner.remove(id))
+        self.bulkhead
+            .execute("remove", "vector", |inner| inner.remove(id))
     }
 
     fn search(
@@ -640,17 +531,19 @@ impl<V: VectorBackend> VectorBackend for BulkheadVectorBackend<V> {
         filter: &VectorFilter,
         limit: usize,
     ) -> Result<Vec<(MemoryId, f32)>> {
-        self.execute("search", || {
-            self.inner.search(query_embedding, filter, limit)
+        self.bulkhead.execute("search", "vector", |inner| {
+            inner.search(query_embedding, filter, limit)
         })
     }
 
     fn count(&self) -> Result<usize> {
-        self.execute("count", || self.inner.count())
+        self.bulkhead
+            .execute("count", "vector", |inner| inner.count())
     }
 
     fn clear(&self) -> Result<()> {
-        self.execute("clear", || self.inner.clear())
+        self.bulkhead
+            .execute("clear", "vector", |inner| inner.clear())
     }
 }
 

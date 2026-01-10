@@ -264,36 +264,23 @@ impl LlmConfig {
         {
             self.base_url = Some(base_url.clone());
         }
-        if file.timeout_ms.is_some() {
-            self.timeout_ms = file.timeout_ms;
-        }
-        if file.connect_timeout_ms.is_some() {
-            self.connect_timeout_ms = file.connect_timeout_ms;
-        }
-        if file.max_retries.is_some() {
-            self.max_retries = file.max_retries;
-        }
-        if file.retry_backoff_ms.is_some() {
-            self.retry_backoff_ms = file.retry_backoff_ms;
-        }
-        if file.breaker_failure_threshold.is_some() {
-            self.breaker_failure_threshold = file.breaker_failure_threshold;
-        }
-        if file.breaker_reset_ms.is_some() {
-            self.breaker_reset_ms = file.breaker_reset_ms;
-        }
-        if file.breaker_half_open_max_calls.is_some() {
-            self.breaker_half_open_max_calls = file.breaker_half_open_max_calls;
-        }
-        if file.latency_slo_ms.is_some() {
-            self.latency_slo_ms = file.latency_slo_ms;
-        }
-        if file.error_budget_ratio.is_some() {
-            self.error_budget_ratio = file.error_budget_ratio;
-        }
-        if file.error_budget_window_secs.is_some() {
-            self.error_budget_window_secs = file.error_budget_window_secs;
-        }
+        // Use file value if present, otherwise keep existing value
+        self.timeout_ms = file.timeout_ms.or(self.timeout_ms);
+        self.connect_timeout_ms = file.connect_timeout_ms.or(self.connect_timeout_ms);
+        self.max_retries = file.max_retries.or(self.max_retries);
+        self.retry_backoff_ms = file.retry_backoff_ms.or(self.retry_backoff_ms);
+        self.breaker_failure_threshold = file
+            .breaker_failure_threshold
+            .or(self.breaker_failure_threshold);
+        self.breaker_reset_ms = file.breaker_reset_ms.or(self.breaker_reset_ms);
+        self.breaker_half_open_max_calls = file
+            .breaker_half_open_max_calls
+            .or(self.breaker_half_open_max_calls);
+        self.latency_slo_ms = file.latency_slo_ms.or(self.latency_slo_ms);
+        self.error_budget_ratio = file.error_budget_ratio.or(self.error_budget_ratio);
+        self.error_budget_window_secs = file
+            .error_budget_window_secs
+            .or(self.error_budget_window_secs);
     }
 }
 
