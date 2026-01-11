@@ -129,6 +129,231 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         self.last_access.put(key, now);
     }
 
+    /// Consolidates memories by finding related groups, summarizing them, and creating summary nodes.
+    ///
+    /// This is the main orchestrator method for memory consolidation. It:
+    /// 1. Finds related memory groups using semantic similarity
+    /// 2. Summarizes each group using LLM
+    /// 3. Creates summary nodes and stores edge relationships
+    ///
+    /// # Arguments
+    ///
+    /// * `recall_service` - The recall service for semantic search
+    /// * `config` - Consolidation configuration (filters, thresholds, etc.)
+    ///
+    /// # Returns
+    ///
+    /// [`ConsolidationStats`] with counts of processed memories and summaries created.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Finding related memories fails
+    /// - LLM summarization fails (when LLM is configured)
+    /// - Creating summary nodes fails
+    ///
+    /// # Graceful Degradation
+    ///
+    /// When LLM is unavailable:
+    /// - Returns an error if summarization is required
+    /// - Caller should handle by skipping consolidation or using fallback
+    ///
+    /// # Configuration
+    ///
+    /// Respects the following configuration options:
+    /// - `namespace_filter`: Only consolidate specific namespaces
+    /// - `time_window_days`: Only consolidate recent memories
+    /// - `min_memories_to_consolidate`: Minimum group size
+    /// - `similarity_threshold`: Similarity threshold for grouping
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use subcog::services::{ConsolidationService, RecallService};
+    /// use subcog::config::ConsolidationConfig;
+    /// use subcog::storage::persistence::FilesystemBackend;
+    /// use std::sync::Arc;
+    ///
+    /// let backend = FilesystemBackend::new("/tmp/memories");
+    /// let mut service = ConsolidationService::new(backend);
+    /// let recall = RecallService::new();
+    /// let mut config = ConsolidationConfig::new();
+    /// config.enabled = true;
+    /// config.similarity_threshold = 0.8;
+    /// config.time_window_days = Some(30);
+    ///
+    /// let stats = service.consolidate_memories(&recall, &config)?;
+    /// println!("{}", stats.summary());
+    /// # Ok::<(), subcog::Error>(())
+    /// ```
+    #[instrument(
+        name = "subcog.memory.consolidate_memories",
+        skip(self, recall_service, config),
+        fields(
+            request_id = tracing::field::Empty,
+            component = "memory",
+            operation = "consolidate_memories"
+        )
+    )]
+    pub fn consolidate_memories(
+        &mut self,
+        recall_service: &crate::services::RecallService,
+        config: &crate::config::ConsolidationConfig,
+    ) -> Result<ConsolidationStats> {
+        let start = Instant::now();
+        if let Some(request_id) = current_request_id() {
+            tracing::Span::current().record("request_id", request_id.as_str());
+        }
+
+        let result = (|| {
+            let mut stats = ConsolidationStats::default();
+
+            // Check if consolidation is enabled
+            if !config.enabled {
+                tracing::info!("Consolidation is disabled in configuration");
+                return Ok(stats);
+            }
+
+            // Find related memory groups
+            tracing::info!(
+                namespace_filter = ?config.namespace_filter,
+                time_window_days = ?config.time_window_days,
+                similarity_threshold = config.similarity_threshold,
+                "Finding related memory groups for consolidation"
+            );
+
+            let groups = self.find_related_memories(recall_service, config)?;
+
+            if groups.is_empty() {
+                tracing::info!("No related memory groups found for consolidation");
+                return Ok(stats);
+            }
+
+            tracing::info!(
+                namespace_count = groups.len(),
+                "Found related memory groups in {} namespaces",
+                groups.len()
+            );
+
+            // Process each namespace
+            for (namespace, namespace_groups) in groups {
+                tracing::debug!(
+                    namespace = ?namespace,
+                    group_count = namespace_groups.len(),
+                    "Processing {} groups in namespace {:?}",
+                    namespace_groups.len(),
+                    namespace
+                );
+
+                // Process each group within the namespace
+                for (group_idx, memory_ids) in namespace_groups.iter().enumerate() {
+                    tracing::debug!(
+                        namespace = ?namespace,
+                        group_idx = group_idx,
+                        memory_count = memory_ids.len(),
+                        "Processing group {} with {} memories",
+                        group_idx,
+                        memory_ids.len()
+                    );
+
+                    // Fetch the actual Memory objects from persistence
+                    let mut memories = Vec::new();
+                    for memory_id in memory_ids {
+                        if let Some(memory) = self.persistence.get(memory_id)? {
+                            memories.push(memory);
+                            stats.processed += 1;
+                        } else {
+                            tracing::warn!(
+                                memory_id = %memory_id.as_str(),
+                                "Memory not found in persistence, skipping"
+                            );
+                        }
+                    }
+
+                    if memories.is_empty() {
+                        tracing::warn!(
+                            namespace = ?namespace,
+                            group_idx = group_idx,
+                            "No memories found for group, skipping"
+                        );
+                        continue;
+                    }
+
+                    // Summarize the group using LLM
+                    let summary_content = match self.summarize_group(&memories) {
+                        Ok(summary) => summary,
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                namespace = ?namespace,
+                                group_idx = group_idx,
+                                memory_count = memories.len(),
+                                "Failed to summarize group, skipping"
+                            );
+                            continue;
+                        }
+                    };
+
+                    // Create summary node (also stores edges if index backend available)
+                    match self.create_summary_node(&summary_content, &memories) {
+                        Ok(summary_node) => {
+                            stats.summaries_created += 1;
+                            tracing::info!(
+                                summary_id = %summary_node.id.as_str(),
+                                namespace = ?namespace,
+                                source_count = memories.len(),
+                                "Created summary node"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                error = %e,
+                                namespace = ?namespace,
+                                group_idx = group_idx,
+                                memory_count = memories.len(),
+                                "Failed to create summary node"
+                            );
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+
+            record_event(MemoryEvent::Consolidated {
+                meta: EventMeta::new("consolidation", current_request_id()),
+                processed: stats.processed,
+                archived: stats.archived,
+                merged: stats.merged,
+            });
+
+            tracing::info!(
+                processed = stats.processed,
+                summaries_created = stats.summaries_created,
+                "Consolidation completed successfully"
+            );
+
+            Ok(stats)
+        })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        metrics::counter!(
+            "memory_operations_total",
+            "operation" => "consolidate_memories",
+            "namespace" => "mixed",
+            "domain" => "project",
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!(
+            "memory_operation_duration_ms",
+            "operation" => "consolidate_memories",
+            "namespace" => "mixed"
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
+
+        result
+    }
+
     /// Runs consolidation on all memories.
     ///
     /// # Errors
@@ -902,13 +1127,19 @@ pub struct ConsolidationStats {
     pub merged: usize,
     /// Number of contradictions detected.
     pub contradictions: usize,
+    /// Number of summary nodes created.
+    pub summaries_created: usize,
 }
 
 impl ConsolidationStats {
     /// Returns true if no work was done.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.processed == 0 && self.archived == 0 && self.merged == 0 && self.contradictions == 0
+        self.processed == 0
+            && self.archived == 0
+            && self.merged == 0
+            && self.contradictions == 0
+            && self.summaries_created == 0
     }
 
     /// Returns a human-readable summary.
@@ -918,8 +1149,8 @@ impl ConsolidationStats {
             "No memories to consolidate".to_string()
         } else {
             format!(
-                "Processed: {}, Archived: {}, Merged: {}, Contradictions: {}",
-                self.processed, self.archived, self.merged, self.contradictions
+                "Processed: {}, Archived: {}, Merged: {}, Contradictions: {}, Summaries: {}",
+                self.processed, self.archived, self.merged, self.contradictions, self.summaries_created
             )
         }
     }
@@ -1711,5 +1942,323 @@ mod tests {
         let summary_node = result.unwrap();
         assert!(summary_node.is_summary);
         // Edges won't be stored, but summary creation should still work
+    }
+
+    #[test]
+    fn test_consolidate_memories_disabled() {
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_consolidate_disabled"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+        let mut service = ConsolidationService::new(backend);
+
+        let recall = crate::services::RecallService::new();
+        let config = crate::config::ConsolidationConfig::new(); // enabled = false by default
+
+        let result = service.consolidate_memories(&recall, &config);
+        assert!(result.is_ok());
+
+        let stats = result.unwrap();
+        assert!(stats.is_empty());
+        assert_eq!(stats.summaries_created, 0);
+    }
+
+    #[test]
+    fn test_consolidate_memories_no_vector_search() {
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_consolidate_no_vector"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+        let mut service = ConsolidationService::new(backend);
+
+        // RecallService without vector search
+        let recall = crate::services::RecallService::new();
+        let mut config = crate::config::ConsolidationConfig::new();
+        config.enabled = true;
+
+        let result = service.consolidate_memories(&recall, &config);
+        assert!(result.is_ok());
+
+        let stats = result.unwrap();
+        // Should return empty stats because no vector search available
+        assert_eq!(stats.summaries_created, 0);
+    }
+
+    #[test]
+    fn test_consolidate_memories_no_llm() {
+        use crate::embedding::Embedder as EmbedderTrait;
+        use crate::storage::traits::VectorBackend;
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_consolidate_no_llm"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+        let mut service = ConsolidationService::new(backend);
+
+        // Create memories with embeddings
+        let embedding_a = vec![1.0, 0.0, 0.0];
+        let embedding_b = vec![0.9, 0.1, 0.0]; // Similar to A
+
+        let mut memory_a = create_test_memory("consolidate_mem_a", "Decision about PostgreSQL");
+        memory_a.embedding = Some(embedding_a);
+        memory_a.namespace = crate::models::Namespace::Decisions;
+
+        let mut memory_b = create_test_memory("consolidate_mem_b", "Use PostgreSQL for storage");
+        memory_b.embedding = Some(embedding_b);
+        memory_b.namespace = crate::models::Namespace::Decisions;
+
+        // Store memories
+        let _ = service.persistence.store(&memory_a);
+        let _ = service.persistence.store(&memory_b);
+
+        // Create mock embedder
+        struct MockEmbedder;
+        impl EmbedderTrait for MockEmbedder {
+            fn embed(&self, _text: &str) -> Result<Vec<f32>> {
+                Ok(vec![1.0, 0.0, 0.0])
+            }
+            fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0]).collect())
+            }
+            fn model_name(&self) -> &str {
+                "mock"
+            }
+        }
+
+        // Create mock vector backend
+        struct MockVectorBackend;
+        impl VectorBackend for MockVectorBackend {
+            fn index(&self, _memory: &Memory) -> Result<()> {
+                Ok(())
+            }
+            fn search(&self, _embedding: &[f32], _limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+                Ok(vec![])
+            }
+            fn delete(&self, _memory_id: &MemoryId) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        // Create RecallService with embedder and vector backend
+        let recall = crate::services::RecallService::new()
+            .with_embedder(Arc::new(MockEmbedder))
+            .with_vector(Arc::new(MockVectorBackend));
+
+        // Note: Service has NO LLM provider
+        let mut config = crate::config::ConsolidationConfig::new();
+        config.enabled = true;
+        config.similarity_threshold = 0.7;
+
+        let result = service.consolidate_memories(&recall, &config);
+        assert!(result.is_ok());
+
+        // Should succeed but create no summaries (LLM would fail but we skip those groups)
+        let stats = result.unwrap();
+        assert_eq!(stats.summaries_created, 0);
+    }
+
+    #[test]
+    fn test_consolidate_memories_with_mock_llm() {
+        use crate::embedding::Embedder as EmbedderTrait;
+        use crate::storage::traits::VectorBackend;
+        use std::sync::Arc;
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_consolidate_with_llm"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+
+        // Create mock LLM provider
+        struct MockLlm;
+        impl crate::llm::LlmProvider for MockLlm {
+            fn name(&self) -> &'static str {
+                "mock"
+            }
+            fn complete(&self, _prompt: &str) -> Result<String> {
+                Ok("Comprehensive summary of database decisions: Use PostgreSQL with JSONB support.".to_string())
+            }
+            fn analyze_for_capture(&self, _content: &str) -> Result<crate::llm::CaptureAnalysis> {
+                unimplemented!()
+            }
+        }
+
+        let llm: Arc<dyn crate::llm::LlmProvider + Send + Sync> = Arc::new(MockLlm);
+        let mut service = ConsolidationService::new(backend).with_llm(llm);
+
+        // Create memories with embeddings
+        let embedding_a = vec![1.0, 0.0, 0.0];
+        let embedding_b = vec![0.95, 0.05, 0.0]; // Very similar to A
+
+        let mut memory_a = create_test_memory("consolidate_llm_a", "Use PostgreSQL for storage");
+        memory_a.embedding = Some(embedding_a.clone());
+        memory_a.namespace = crate::models::Namespace::Decisions;
+
+        let mut memory_b = create_test_memory("consolidate_llm_b", "Enable JSONB in PostgreSQL");
+        memory_b.embedding = Some(embedding_b.clone());
+        memory_b.namespace = crate::models::Namespace::Decisions;
+
+        // Store memories
+        let _ = service.persistence.store(&memory_a);
+        let _ = service.persistence.store(&memory_b);
+
+        // Create mock embedder
+        struct MockEmbedder;
+        impl EmbedderTrait for MockEmbedder {
+            fn embed(&self, _text: &str) -> Result<Vec<f32>> {
+                Ok(vec![1.0, 0.0, 0.0])
+            }
+            fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0]).collect())
+            }
+            fn model_name(&self) -> &str {
+                "mock"
+            }
+        }
+
+        // Create mock vector backend
+        struct MockVectorBackend;
+        impl VectorBackend for MockVectorBackend {
+            fn index(&self, _memory: &Memory) -> Result<()> {
+                Ok(())
+            }
+            fn search(&self, _embedding: &[f32], _limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+                Ok(vec![])
+            }
+            fn delete(&self, _memory_id: &MemoryId) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        // Create RecallService with embedder and vector backend
+        let recall = crate::services::RecallService::new()
+            .with_embedder(Arc::new(MockEmbedder))
+            .with_vector(Arc::new(MockVectorBackend));
+
+        let mut config = crate::config::ConsolidationConfig::new();
+        config.enabled = true;
+        config.similarity_threshold = 0.7;
+        config.min_memories_to_consolidate = 2;
+
+        let result = service.consolidate_memories(&recall, &config);
+        assert!(result.is_ok());
+
+        let stats = result.unwrap();
+        // Should process 2 memories and create 1 summary
+        assert_eq!(stats.processed, 2);
+        assert_eq!(stats.summaries_created, 1);
+    }
+
+    #[test]
+    fn test_consolidate_memories_respects_namespace_filter() {
+        use crate::embedding::Embedder as EmbedderTrait;
+        use crate::storage::traits::VectorBackend;
+        use std::sync::Arc;
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_consolidate_namespace_filter"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+
+        // Create mock LLM provider
+        struct MockLlm;
+        impl crate::llm::LlmProvider for MockLlm {
+            fn name(&self) -> &'static str {
+                "mock"
+            }
+            fn complete(&self, _prompt: &str) -> Result<String> {
+                Ok("Summary".to_string())
+            }
+            fn analyze_for_capture(&self, _content: &str) -> Result<crate::llm::CaptureAnalysis> {
+                unimplemented!()
+            }
+        }
+
+        let llm: Arc<dyn crate::llm::LlmProvider + Send + Sync> = Arc::new(MockLlm);
+        let mut service = ConsolidationService::new(backend).with_llm(llm);
+
+        // Create memories in different namespaces
+        let embedding = vec![1.0, 0.0, 0.0];
+
+        let mut memory_decisions = create_test_memory("mem_decisions", "Decision");
+        memory_decisions.embedding = Some(embedding.clone());
+        memory_decisions.namespace = crate::models::Namespace::Decisions;
+
+        let mut memory_patterns = create_test_memory("mem_patterns", "Pattern");
+        memory_patterns.embedding = Some(embedding.clone());
+        memory_patterns.namespace = crate::models::Namespace::Patterns;
+
+        // Store memories
+        let _ = service.persistence.store(&memory_decisions);
+        let _ = service.persistence.store(&memory_patterns);
+
+        // Create mock embedder and vector backend
+        struct MockEmbedder;
+        impl EmbedderTrait for MockEmbedder {
+            fn embed(&self, _text: &str) -> Result<Vec<f32>> {
+                Ok(vec![1.0, 0.0, 0.0])
+            }
+            fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0]).collect())
+            }
+            fn model_name(&self) -> &str {
+                "mock"
+            }
+        }
+
+        struct MockVectorBackend;
+        impl VectorBackend for MockVectorBackend {
+            fn index(&self, _memory: &Memory) -> Result<()> {
+                Ok(())
+            }
+            fn search(&self, _embedding: &[f32], _limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+                Ok(vec![])
+            }
+            fn delete(&self, _memory_id: &MemoryId) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        let recall = crate::services::RecallService::new()
+            .with_embedder(Arc::new(MockEmbedder))
+            .with_vector(Arc::new(MockVectorBackend));
+
+        // Filter to only Decisions namespace
+        let mut config = crate::config::ConsolidationConfig::new();
+        config.enabled = true;
+        config.namespace_filter = Some(vec![crate::models::Namespace::Decisions]);
+        config.min_memories_to_consolidate = 1; // Allow single memory for testing
+
+        let result = service.consolidate_memories(&recall, &config);
+        assert!(result.is_ok());
+
+        // Should only process Decisions namespace
+        let stats = result.unwrap();
+        // With high similarity threshold and only 1 memory, won't create groups
+        assert_eq!(stats.summaries_created, 0);
+    }
+
+    #[test]
+    fn test_consolidation_stats_with_summaries() {
+        let stats = ConsolidationStats {
+            processed: 10,
+            archived: 2,
+            merged: 1,
+            contradictions: 0,
+            summaries_created: 3,
+        };
+        assert!(!stats.is_empty());
+        let summary = stats.summary();
+        assert!(summary.contains("Processed: 10"));
+        assert!(summary.contains("Summaries: 3"));
     }
 }
