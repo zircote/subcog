@@ -199,10 +199,23 @@ pub fn cmd_status(config: &SubcogConfig) -> Result<(), Box<dyn std::error::Error
 
 /// Consolidate command.
 pub fn cmd_consolidate(config: &SubcogConfig) -> Result<(), Box<dyn std::error::Error>> {
-    use subcog::config::StorageBackendType;
-    use subcog::services::ConsolidationService;
+    use crate::cli::{build_anthropic_client, build_lmstudio_client, build_ollama_client, build_openai_client, build_resilience_config};
+    use subcog::config::{LlmProvider, StorageBackendType};
+    use subcog::llm::ResilientLlmProvider;
+    use subcog::services::{ConsolidationService, ServiceContainer};
     use subcog::storage::index::SqliteBackend;
     use subcog::storage::persistence::FilesystemBackend;
+    use std::sync::Arc;
+
+    println!("Running memory consolidation...");
+    println!();
+
+    // Check if consolidation is enabled
+    if !config.consolidation.enabled {
+        println!("Consolidation is disabled in configuration.");
+        println!("To enable, set [consolidation] enabled = true in your config file");
+        return Ok(());
+    }
 
     let data_dir = &config.data_dir;
     let storage_config = &config.storage.project;
@@ -212,28 +225,91 @@ pub fn cmd_consolidate(config: &SubcogConfig) -> Result<(), Box<dyn std::error::
         std::fs::create_dir_all(data_dir)?;
     }
 
-    println!("Running memory consolidation...");
-    println!("Data directory: {}", data_dir.display());
-    println!("Storage backend: {:?}", storage_config.backend);
+    // Create service container for recall service
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let recall_service = services.recall()?;
+
+    // Get index backend
+    let index = Arc::new(services.index()?);
+
+    // Build LLM provider (optional, for summarization)
+    let llm_provider: Option<Arc<dyn subcog::llm::LlmProvider>> = {
+        let llm_config = &config.llm;
+        let resilience_config = build_resilience_config(llm_config);
+
+        match llm_config.provider {
+            LlmProvider::OpenAi => {
+                let client = build_openai_client(llm_config);
+                Some(Arc::new(ResilientLlmProvider::new(client, resilience_config)))
+            },
+            LlmProvider::Anthropic => {
+                let client = build_anthropic_client(llm_config);
+                Some(Arc::new(ResilientLlmProvider::new(client, resilience_config)))
+            },
+            LlmProvider::Ollama => {
+                let client = build_ollama_client(llm_config);
+                Some(Arc::new(ResilientLlmProvider::new(client, resilience_config)))
+            },
+            LlmProvider::LmStudio => {
+                let client = build_lmstudio_client(llm_config);
+                Some(Arc::new(ResilientLlmProvider::new(client, resilience_config)))
+            },
+            LlmProvider::None => None,
+        }
+    };
+
+    // Display configuration
+    println!("Configuration:");
+    println!("  Storage backend: {:?}", storage_config.backend);
+    if let Some(llm) = &llm_provider {
+        println!("  LLM provider: {:?}", config.llm.provider);
+    } else {
+        println!("  LLM provider: None (will skip summarization)");
+    }
+    if let Some(ref namespaces) = config.consolidation.namespace_filter {
+        println!("  Namespaces: {:?}", namespaces);
+    } else {
+        println!("  Namespaces: all");
+    }
+    if let Some(days) = config.consolidation.time_window_days {
+        println!("  Time window: {} days", days);
+    } else {
+        println!("  Time window: all time");
+    }
+    println!("  Similarity threshold: {}", config.consolidation.similarity_threshold);
+    println!("  Minimum memories: {}", config.consolidation.min_memories_to_consolidate);
     println!();
 
-    // Run consolidation based on configured backend
+    // Create consolidation service based on configured backend
+    println!("Finding related memory groups...");
+
     match storage_config.backend {
         StorageBackendType::Sqlite => {
             let db_path = storage_config
                 .path
                 .as_ref()
                 .map_or_else(|| data_dir.join("memories.db"), std::path::PathBuf::from);
-            println!("SQLite path: {}", db_path.display());
 
             let backend = SqliteBackend::new(&db_path)?;
-            let mut service = ConsolidationService::new(backend);
-            run_consolidation(&mut service)?;
+            let mut service = ConsolidationService::new(backend)
+                .with_index(index.clone());
+
+            if let Some(llm) = llm_provider {
+                service = service.with_llm(llm);
+            }
+
+            run_consolidation(&mut service, &recall_service, &config.consolidation)?;
         },
         StorageBackendType::Filesystem => {
             let backend = FilesystemBackend::new(data_dir);
-            let mut service = ConsolidationService::new(backend);
-            run_consolidation(&mut service)?;
+            let mut service = ConsolidationService::new(backend)
+                .with_index(index.clone());
+
+            if let Some(llm) = llm_provider {
+                service = service.with_llm(llm);
+            }
+
+            run_consolidation(&mut service, &recall_service, &config.consolidation)?;
         },
         StorageBackendType::PostgreSQL => {
             eprintln!("PostgreSQL consolidation not yet implemented");
@@ -248,20 +324,33 @@ pub fn cmd_consolidate(config: &SubcogConfig) -> Result<(), Box<dyn std::error::
     Ok(())
 }
 
-/// Runs consolidation and prints results.
+/// Runs consolidation with the new API and prints results.
 fn run_consolidation<P: PersistenceBackend>(
     service: &mut subcog::services::ConsolidationService<P>,
+    recall_service: &subcog::services::RecallService,
+    consolidation_config: &subcog::config::ConsolidationConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    match service.consolidate() {
+    match service.consolidate_memories(recall_service, consolidation_config) {
         Ok(stats) => {
+            println!();
             println!("Consolidation completed:");
             println!("  {}", stats.summary());
+
+            if stats.summaries_created > 0 {
+                println!("  ✓ Created {} summary node(s)", stats.summaries_created);
+            }
+
             if stats.contradictions > 0 {
                 println!(
-                    "  Note: {} potential contradiction(s) detected - review recommended",
+                    "  ⚠ {} potential contradiction(s) detected - review recommended",
                     stats.contradictions
                 );
             }
+
+            if stats.is_empty() {
+                println!("  No memories were consolidated (no related groups found)");
+            }
+
             Ok(())
         },
         Err(e) => {
