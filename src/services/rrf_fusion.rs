@@ -263,6 +263,9 @@ mod tests {
             embedding: None,
             tags: Vec::new(),
             source: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
         }
     }
 

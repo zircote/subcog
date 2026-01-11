@@ -369,6 +369,7 @@ mod implementation {
                 "pending" => MemoryStatus::Pending,
                 "deleted" => MemoryStatus::Deleted,
                 "tombstoned" => MemoryStatus::Tombstoned,
+                "consolidated" => MemoryStatus::Consolidated,
                 _ => MemoryStatus::Active,
             };
 
@@ -396,6 +397,9 @@ mod implementation {
                 created_at: created_at as u64,
                 updated_at: updated_at as u64,
                 tombstoned_at,
+                is_summary: false,
+                source_memory_ids: None,
+                consolidation_timestamp: None,
             }
         }
 
@@ -603,6 +607,9 @@ mod tests {
             embedding: None,
             tags: vec!["test".to_string(), "integration".to_string()],
             source: Some("test.rs".to_string()),
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
         }
     }
 
@@ -837,6 +844,9 @@ mod stub_tests {
             embedding: None,
             tags: vec![],
             source: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
         }
     }
 

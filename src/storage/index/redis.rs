@@ -530,6 +530,9 @@ mod implementation {
                         embedding: None,
                         tags,
                         source: None,
+                        is_summary: false,
+                        source_memory_ids: None,
+                        consolidation_timestamp: None,
                     }))
                 },
                 Err(e) => Err(Error::OperationFailed {

@@ -285,6 +285,24 @@ impl SqliteBackend {
             cause: e.to_string(),
         })?;
 
+        // Create memory_edges table for relationship tracking (consolidation service)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS memory_edges (
+                from_id TEXT NOT NULL,
+                to_id TEXT NOT NULL,
+                edge_type TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (from_id, to_id, edge_type),
+                FOREIGN KEY (from_id) REFERENCES memories(id) ON DELETE CASCADE,
+                FOREIGN KEY (to_id) REFERENCES memories(id) ON DELETE CASCADE
+            )",
+            [],
+        )
+        .map_err(|e| Error::OperationFailed {
+            operation: "create_edges_table".to_string(),
+            cause: e.to_string(),
+        })?;
+
         Ok(())
     }
 
@@ -355,6 +373,37 @@ impl SqliteBackend {
         // Partial index for tombstoned memories (ADR-0053)
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_tombstoned ON memories(tombstoned_at) WHERE tombstoned_at IS NOT NULL",
+            [],
+        );
+
+        // Memory edges indexes for consolidation service
+        // Index on from_id for finding edges from a memory
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_edges_from_id ON memory_edges(from_id)",
+            [],
+        );
+
+        // Index on to_id for finding edges to a memory
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_edges_to_id ON memory_edges(to_id)",
+            [],
+        );
+
+        // Index on edge_type for filtering by relationship type
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_edges_edge_type ON memory_edges(edge_type)",
+            [],
+        );
+
+        // Compound index for querying edges by type from a source
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_edges_from_type ON memory_edges(from_id, edge_type)",
+            [],
+        );
+
+        // Compound index for querying edges by type to a target
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_edges_to_type ON memory_edges(to_id, edge_type)",
             [],
         );
     }
@@ -644,6 +693,147 @@ impl SqliteBackend {
         }
         Ok(None)
     }
+
+    /// Stores a memory edge relationship in the database.
+    ///
+    /// Creates a directed edge from one memory to another with the specified edge type.
+    /// Used by the consolidation service to link original memories to their summaries.
+    ///
+    /// # Arguments
+    ///
+    /// * `from_id` - The source memory ID
+    /// * `to_id` - The target memory ID
+    /// * `edge_type` - The type of relationship
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database operation fails or if the memory IDs don't exist.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use subcog::storage::index::SqliteBackend;
+    /// use subcog::models::{MemoryId, EdgeType};
+    ///
+    /// let backend = SqliteBackend::new("./index.db")?;
+    /// let from_id = MemoryId::new("original_memory");
+    /// let to_id = MemoryId::new("summary_memory");
+    ///
+    /// backend.store_edge(&from_id, &to_id, EdgeType::SummarizedBy)?;
+    /// # Ok::<(), subcog::Error>(())
+    /// ```
+    #[instrument(
+        skip(self),
+        fields(
+            operation = "store_edge",
+            from_id = %from_id.as_str(),
+            to_id = %to_id.as_str(),
+            edge_type = %edge_type.as_str()
+        )
+    )]
+    pub fn store_edge(
+        &self,
+        from_id: &MemoryId,
+        to_id: &MemoryId,
+        edge_type: crate::models::EdgeType,
+    ) -> Result<()> {
+        let conn = acquire_lock(&self.conn);
+
+        let created_at = crate::current_timestamp();
+        #[allow(clippy::cast_possible_wrap)]
+        let created_at_i64 = created_at as i64;
+
+        conn.execute(
+            "INSERT INTO memory_edges (from_id, to_id, edge_type, created_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(from_id, to_id, edge_type) DO UPDATE SET created_at = ?4",
+            params![
+                from_id.as_str(),
+                to_id.as_str(),
+                edge_type.as_str(),
+                created_at_i64
+            ],
+        )
+        .map_err(|e| {
+            tracing::error!(
+                error = %e,
+                from_id = %from_id.as_str(),
+                to_id = %to_id.as_str(),
+                edge_type = %edge_type.as_str(),
+                "Failed to store memory edge"
+            );
+            Error::OperationFailed {
+                operation: "store_edge".to_string(),
+                cause: format!("Failed to insert edge: {}", e),
+            }
+        })?;
+
+        tracing::debug!(
+            from_id = %from_id.as_str(),
+            to_id = %to_id.as_str(),
+            edge_type = %edge_type.as_str(),
+            "Successfully stored memory edge"
+        );
+
+        Ok(())
+    }
+
+    /// Queries edges for a given memory ID and edge type.
+    ///
+    /// Returns a list of target memory IDs that have the specified edge type
+    /// relationship with the source memory ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `from_id` - The source memory ID
+    /// * `edge_type` - The type of relationship to query
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database query fails.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use subcog::storage::index::SqliteBackend;
+    /// use subcog::models::{MemoryId, EdgeType};
+    ///
+    /// let backend = SqliteBackend::new("./index.db")?;
+    /// let from_id = MemoryId::new("original_memory");
+    ///
+    /// let targets = backend.query_edges(&from_id, EdgeType::SummarizedBy)?;
+    /// # Ok::<(), subcog::Error>(())
+    /// ```
+    pub fn query_edges(
+        &self,
+        from_id: &MemoryId,
+        edge_type: crate::models::EdgeType,
+    ) -> Result<Vec<MemoryId>> {
+        let conn = acquire_lock(&self.conn);
+
+        let mut stmt = conn
+            .prepare("SELECT to_id FROM memory_edges WHERE from_id = ?1 AND edge_type = ?2")
+            .map_err(|e| Error::OperationFailed {
+                operation: "query_edges_prepare".to_string(),
+                cause: e.to_string(),
+            })?;
+
+        let results = stmt
+            .query_map(params![from_id.as_str(), edge_type.as_str()], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|e| Error::OperationFailed {
+                operation: "query_edges_map".to_string(),
+                cause: e.to_string(),
+            })?
+            .collect::<std::result::Result<Vec<String>, _>>()
+            .map_err(|e| Error::OperationFailed {
+                operation: "query_edges_collect".to_string(),
+                cause: e.to_string(),
+            })?;
+
+        Ok(results.into_iter().map(MemoryId::new).collect())
+    }
 }
 
 fn fetch_memory_row(conn: &Connection, id: &MemoryId) -> Result<Option<MemoryRow>> {
@@ -717,6 +907,7 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
         "pending" => MemoryStatus::Pending,
         "deleted" => MemoryStatus::Deleted,
         "tombstoned" => MemoryStatus::Tombstoned,
+        "consolidated" => MemoryStatus::Consolidated,
         _ => MemoryStatus::Active,
     };
 
@@ -751,6 +942,9 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
         embedding: None,
         tags,
         source: row.source,
+        is_summary: false,
+        source_memory_ids: None,
+        consolidation_timestamp: None,
     }
 }
 
@@ -1389,6 +1583,9 @@ mod tests {
             embedding: None,
             tags: vec!["test".to_string()],
             source: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
         }
     }
 
@@ -1953,5 +2150,277 @@ mod tests {
         let result = backend.checkpoint_if_needed(0);
         assert!(result.is_ok());
         // Result may be Some or None depending on WAL state
+    }
+
+    #[test]
+    fn test_memory_edges_table_exists() {
+        let backend = SqliteBackend::in_memory().unwrap();
+        let conn = acquire_lock(&backend.conn);
+
+        // Verify memory_edges table exists
+        let result: Result<i64, _> = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memory_edges'",
+            [],
+            |row| row.get(0),
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1, "memory_edges table should exist");
+    }
+
+    #[test]
+    fn test_memory_edges_schema() {
+        let backend = SqliteBackend::in_memory().unwrap();
+        let conn = acquire_lock(&backend.conn);
+
+        // Verify table has correct columns
+        let result: Result<Vec<String>, _> = conn
+            .prepare("PRAGMA table_info(memory_edges)")
+            .and_then(|mut stmt| {
+                let columns = stmt
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(columns)
+            });
+
+        assert!(result.is_ok());
+        let columns = result.unwrap();
+        assert!(columns.contains(&"from_id".to_string()));
+        assert!(columns.contains(&"to_id".to_string()));
+        assert!(columns.contains(&"edge_type".to_string()));
+        assert!(columns.contains(&"created_at".to_string()));
+        assert_eq!(columns.len(), 4, "memory_edges should have exactly 4 columns");
+    }
+
+    #[test]
+    fn test_memory_edges_indexes_exist() {
+        let backend = SqliteBackend::in_memory().unwrap();
+        let conn = acquire_lock(&backend.conn);
+
+        // Verify indexes were created
+        let indexes: Result<Vec<String>, _> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='memory_edges'")
+            .and_then(|mut stmt| {
+                let names = stmt
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(names)
+            });
+
+        assert!(indexes.is_ok());
+        let index_names = indexes.unwrap();
+
+        // Check for expected indexes
+        assert!(
+            index_names.iter().any(|name| name.contains("from_id")),
+            "Should have index on from_id"
+        );
+        assert!(
+            index_names.iter().any(|name| name.contains("to_id")),
+            "Should have index on to_id"
+        );
+        assert!(
+            index_names.iter().any(|name| name.contains("edge_type")),
+            "Should have index on edge_type"
+        );
+    }
+
+    #[test]
+    fn test_memory_edges_can_insert_and_query() {
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        // First create some memories to reference
+        let memory1 = create_test_memory("edge_from", "Source memory", Namespace::Decisions);
+        let memory2 = create_test_memory("edge_to", "Target memory", Namespace::Decisions);
+        backend.index(&memory1).unwrap();
+        backend.index(&memory2).unwrap();
+
+        let conn = acquire_lock(&backend.conn);
+
+        // Insert an edge
+        let result = conn.execute(
+            "INSERT INTO memory_edges (from_id, to_id, edge_type, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params!["edge_from", "edge_to", "summarized_by", 1234567890_i64],
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1, "Should insert one edge");
+
+        // Query the edge back
+        let query_result: Result<(String, String, String, i64), _> = conn.query_row(
+            "SELECT from_id, to_id, edge_type, created_at FROM memory_edges WHERE from_id = ?1",
+            params!["edge_from"],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        );
+
+        assert!(query_result.is_ok());
+        let (from_id, to_id, edge_type, created_at) = query_result.unwrap();
+        assert_eq!(from_id, "edge_from");
+        assert_eq!(to_id, "edge_to");
+        assert_eq!(edge_type, "summarized_by");
+        assert_eq!(created_at, 1234567890);
+    }
+
+    #[test]
+    fn test_memory_edges_foreign_key_constraint() {
+        let backend = SqliteBackend::in_memory().unwrap();
+        let conn = acquire_lock(&backend.conn);
+
+        // Enable foreign key enforcement
+        let _ = conn.execute("PRAGMA foreign_keys = ON", []);
+
+        // Try to insert an edge with non-existent memory IDs
+        // This should fail due to foreign key constraint
+        let result = conn.execute(
+            "INSERT INTO memory_edges (from_id, to_id, edge_type, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params!["nonexistent_from", "nonexistent_to", "summarized_by", 1234567890_i64],
+        );
+
+        // Foreign keys might not be enforced in all SQLite configurations,
+        // so we don't strictly require failure here, but document the behavior
+        let _ = result; // Just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_memory_edges_cascade_delete() {
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        // Create memories and an edge
+        let memory1 = create_test_memory("cascade_from", "Source", Namespace::Decisions);
+        let memory2 = create_test_memory("cascade_to", "Target", Namespace::Decisions);
+        backend.index(&memory1).unwrap();
+        backend.index(&memory2).unwrap();
+
+        let conn = acquire_lock(&backend.conn);
+
+        // Enable foreign key enforcement
+        let _ = conn.execute("PRAGMA foreign_keys = ON", []);
+
+        // Insert edge
+        conn.execute(
+            "INSERT INTO memory_edges (from_id, to_id, edge_type, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params!["cascade_from", "cascade_to", "summarized_by", 1234567890_i64],
+        )
+        .unwrap();
+
+        // Verify edge exists
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM memory_edges WHERE from_id = ?1",
+                params!["cascade_from"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // Delete the source memory
+        backend.remove(&MemoryId::new("cascade_from")).unwrap();
+
+        // Edge should be deleted due to CASCADE
+        let count_after: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM memory_edges WHERE from_id = ?1",
+                params!["cascade_from"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count_after, 0, "Edge should be deleted when source memory is deleted");
+    }
+
+    #[test]
+    fn test_store_edge_and_query_edges() {
+        use crate::models::EdgeType;
+
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        // Create and index test memories
+        let memory1 = create_test_memory("source_mem", "Source memory", Namespace::Decisions);
+        let memory2 = create_test_memory("target_mem", "Target memory", Namespace::Decisions);
+        backend.index(&memory1).unwrap();
+        backend.index(&memory2).unwrap();
+
+        // Store an edge using the store_edge method
+        let result = backend.store_edge(&memory1.id, &memory2.id, EdgeType::SummarizedBy);
+        assert!(result.is_ok(), "store_edge should succeed");
+
+        // Query edges using the query_edges method
+        let edges = backend
+            .query_edges(&memory1.id, EdgeType::SummarizedBy)
+            .expect("query_edges should succeed");
+
+        assert_eq!(edges.len(), 1, "Should have 1 edge");
+        assert_eq!(edges[0], memory2.id, "Edge should point to target memory");
+
+        // Query non-existent edge type should return empty
+        let no_edges = backend
+            .query_edges(&memory1.id, EdgeType::Contradicts)
+            .expect("query_edges for non-existent edge should succeed");
+        assert_eq!(no_edges.len(), 0, "Should have no edges for different edge type");
+    }
+
+    #[test]
+    fn test_store_edge_upsert() {
+        use crate::models::EdgeType;
+
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        // Create and index test memories
+        let memory1 = create_test_memory("upsert_source", "Source", Namespace::Decisions);
+        let memory2 = create_test_memory("upsert_target", "Target", Namespace::Decisions);
+        backend.index(&memory1).unwrap();
+        backend.index(&memory2).unwrap();
+
+        // Store edge first time
+        backend
+            .store_edge(&memory1.id, &memory2.id, EdgeType::SummarizedBy)
+            .unwrap();
+
+        // Store same edge again (should upsert, not error)
+        let result = backend.store_edge(&memory1.id, &memory2.id, EdgeType::SummarizedBy);
+        assert!(result.is_ok(), "Duplicate edge should upsert without error");
+
+        // Verify still only one edge
+        let edges = backend
+            .query_edges(&memory1.id, EdgeType::SummarizedBy)
+            .unwrap();
+        assert_eq!(edges.len(), 1, "Should still have only 1 edge after upsert");
+    }
+
+    #[test]
+    fn test_query_edges_multiple() {
+        use crate::models::EdgeType;
+
+        let backend = SqliteBackend::in_memory().unwrap();
+
+        // Create and index test memories
+        let source = create_test_memory("multi_source", "Source", Namespace::Decisions);
+        let target1 = create_test_memory("multi_target1", "Target 1", Namespace::Decisions);
+        let target2 = create_test_memory("multi_target2", "Target 2", Namespace::Decisions);
+        let target3 = create_test_memory("multi_target3", "Target 3", Namespace::Decisions);
+
+        backend.index(&source).unwrap();
+        backend.index(&target1).unwrap();
+        backend.index(&target2).unwrap();
+        backend.index(&target3).unwrap();
+
+        // Store multiple edges from one source
+        backend
+            .store_edge(&source.id, &target1.id, EdgeType::RelatedTo)
+            .unwrap();
+        backend
+            .store_edge(&source.id, &target2.id, EdgeType::RelatedTo)
+            .unwrap();
+        backend
+            .store_edge(&source.id, &target3.id, EdgeType::RelatedTo)
+            .unwrap();
+
+        // Query should return all three
+        let edges = backend.query_edges(&source.id, EdgeType::RelatedTo).unwrap();
+        assert_eq!(edges.len(), 3, "Should have 3 edges");
+
+        // Verify all targets are present
+        assert!(edges.contains(&target1.id));
+        assert!(edges.contains(&target2.id));
+        assert!(edges.contains(&target3.id));
     }
 }

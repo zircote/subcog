@@ -4,6 +4,9 @@ mod features;
 
 pub use features::FeatureFlags;
 
+// Re-export consolidation config for public use
+pub use ConsolidationConfig;
+
 use serde::Deserialize;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -162,6 +165,8 @@ pub struct SubcogConfig {
     pub prompt: PromptConfig,
     /// Storage configuration.
     pub storage: StorageConfig,
+    /// Consolidation configuration.
+    pub consolidation: ConsolidationConfig,
     /// Operation timeout configuration (CHAOS-HIGH-005).
     pub timeouts: OperationTimeoutConfig,
     /// Config files that were loaded (for debugging).
@@ -791,6 +796,8 @@ pub struct ConfigFile {
     pub prompt: Option<ConfigFilePrompt>,
     /// Storage configuration.
     pub storage: Option<ConfigFileStorage>,
+    /// Consolidation configuration.
+    pub consolidation: Option<ConfigFileConsolidation>,
 }
 
 /// Features section in config file.
@@ -917,6 +924,21 @@ pub struct ConfigFileIntentWeights {
     pub performance: Option<f32>,
     /// Weight for testing namespace.
     pub testing: Option<f32>,
+}
+
+/// Consolidation configuration section in config file.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ConfigFileConsolidation {
+    /// Whether consolidation is enabled.
+    pub enabled: Option<bool>,
+    /// Filter to specific namespaces (None = all namespaces).
+    pub namespace_filter: Option<Vec<String>>,
+    /// Time window in days for consolidation (None = no time limit).
+    pub time_window_days: Option<u32>,
+    /// Minimum number of memories required to trigger consolidation.
+    pub min_memories_to_consolidate: Option<usize>,
+    /// Similarity threshold for grouping related memories (0.0-1.0).
+    pub similarity_threshold: Option<f32>,
 }
 
 /// Prompt customization section in config file.
@@ -1340,6 +1362,204 @@ pub struct PromptOperationConfig {
     pub consolidation: Option<String>,
 }
 
+/// Runtime consolidation configuration.
+///
+/// Controls LLM-powered memory consolidation that summarizes related memories
+/// while preserving original details.
+///
+/// # Defaults
+///
+/// - `enabled`: false (requires LLM provider to be useful)
+/// - `namespace_filter`: None (all namespaces)
+/// - `time_window_days`: Some(30) (last 30 days)
+/// - `min_memories_to_consolidate`: 3 (need at least 3 related memories)
+/// - `similarity_threshold`: 0.7 (70% semantic similarity)
+///
+/// # Environment Variables
+///
+/// | Variable | Description | Default |
+/// |----------|-------------|---------|
+/// | `SUBCOG_CONSOLIDATION_ENABLED` | Enable consolidation | false |
+/// | `SUBCOG_CONSOLIDATION_TIME_WINDOW_DAYS` | Time window in days | 30 |
+/// | `SUBCOG_CONSOLIDATION_MIN_MEMORIES` | Minimum memories to consolidate | 3 |
+/// | `SUBCOG_CONSOLIDATION_SIMILARITY_THRESHOLD` | Similarity threshold (0.0-1.0) | 0.7 |
+#[derive(Debug, Clone)]
+pub struct ConsolidationConfig {
+    /// Whether consolidation is enabled.
+    pub enabled: bool,
+    /// Filter to specific namespaces (None = all namespaces).
+    pub namespace_filter: Option<Vec<crate::models::Namespace>>,
+    /// Time window in days for consolidation (None = no time limit).
+    pub time_window_days: Option<u32>,
+    /// Minimum number of memories required to trigger consolidation.
+    pub min_memories_to_consolidate: usize,
+    /// Similarity threshold for grouping related memories (0.0-1.0).
+    pub similarity_threshold: f32,
+}
+
+impl Default for ConsolidationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            namespace_filter: None,
+            time_window_days: Some(30),
+            min_memories_to_consolidate: 3,
+            similarity_threshold: 0.7,
+        }
+    }
+}
+
+impl ConsolidationConfig {
+    /// Creates a new consolidation configuration with defaults.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates configuration from config file settings.
+    #[must_use]
+    pub fn from_config_file(file: &ConfigFileConsolidation) -> Self {
+        let mut config = Self::default();
+
+        if let Some(enabled) = file.enabled {
+            config.enabled = enabled;
+        }
+
+        if let Some(ref namespace_filter) = file.namespace_filter {
+            let namespaces: Vec<crate::models::Namespace> = namespace_filter
+                .iter()
+                .filter_map(|s| s.parse().ok())
+                .collect();
+            if !namespaces.is_empty() {
+                config.namespace_filter = Some(namespaces);
+            }
+        }
+
+        if let Some(time_window_days) = file.time_window_days {
+            config.time_window_days = Some(time_window_days);
+        }
+
+        if let Some(min_memories) = file.min_memories_to_consolidate {
+            config.min_memories_to_consolidate = min_memories.max(2); // At least 2 memories
+        }
+
+        if let Some(threshold) = file.similarity_threshold {
+            config.similarity_threshold = threshold.clamp(0.0, 1.0);
+        }
+
+        config
+    }
+
+    /// Loads configuration from environment variables.
+    #[must_use]
+    pub fn from_env() -> Self {
+        Self::default().with_env_overrides()
+    }
+
+    /// Applies environment variable overrides.
+    #[must_use]
+    pub fn with_env_overrides(mut self) -> Self {
+        if let Ok(v) = std::env::var("SUBCOG_CONSOLIDATION_ENABLED") {
+            self.enabled = v.to_lowercase() == "true" || v == "1";
+        }
+
+        if let Ok(v) = std::env::var("SUBCOG_CONSOLIDATION_TIME_WINDOW_DAYS")
+            && let Ok(days) = v.parse::<u32>()
+        {
+            self.time_window_days = Some(days);
+        }
+
+        if let Ok(v) = std::env::var("SUBCOG_CONSOLIDATION_MIN_MEMORIES")
+            && let Ok(min) = v.parse::<usize>()
+        {
+            self.min_memories_to_consolidate = min.max(2);
+        }
+
+        if let Ok(v) = std::env::var("SUBCOG_CONSOLIDATION_SIMILARITY_THRESHOLD")
+            && let Ok(threshold) = v.parse::<f32>()
+        {
+            self.similarity_threshold = threshold.clamp(0.0, 1.0);
+        }
+
+        self
+    }
+
+    /// Sets whether consolidation is enabled.
+    #[must_use]
+    pub const fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    /// Sets the namespace filter.
+    #[must_use]
+    pub fn with_namespace_filter(mut self, filter: Vec<crate::models::Namespace>) -> Self {
+        self.namespace_filter = Some(filter);
+        self
+    }
+
+    /// Sets the time window in days.
+    #[must_use]
+    pub const fn with_time_window_days(mut self, days: Option<u32>) -> Self {
+        self.time_window_days = days;
+        self
+    }
+
+    /// Sets the minimum number of memories to consolidate.
+    #[must_use]
+    pub const fn with_min_memories(mut self, min: usize) -> Self {
+        self.min_memories_to_consolidate = min;
+        self
+    }
+
+    /// Sets the similarity threshold.
+    ///
+    /// Value is clamped to the range [0.0, 1.0].
+    #[must_use]
+    pub const fn with_similarity_threshold(mut self, threshold: f32) -> Self {
+        self.similarity_threshold = threshold.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Validates the configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - `min_memories_to_consolidate` is less than 2
+    /// - `similarity_threshold` is not in range [0.0, 1.0]
+    /// - `time_window_days` is 0 (if set)
+    pub fn build(self) -> Result<Self, ConfigValidationError> {
+        if self.min_memories_to_consolidate < 2 {
+            return Err(ConfigValidationError::InvalidValue {
+                field: "min_memories_to_consolidate".to_string(),
+                message: "min_memories_to_consolidate must be at least 2".to_string(),
+            });
+        }
+
+        if !(0.0..=1.0).contains(&self.similarity_threshold) {
+            return Err(ConfigValidationError::InvalidValue {
+                field: "similarity_threshold".to_string(),
+                message: format!(
+                    "similarity_threshold must be in range [0.0, 1.0], got {}",
+                    self.similarity_threshold
+                ),
+            });
+        }
+
+        if let Some(days) = self.time_window_days
+            && days == 0
+        {
+            return Err(ConfigValidationError::InvalidValue {
+                field: "time_window_days".to_string(),
+                message: "time_window_days must be greater than 0".to_string(),
+            });
+        }
+
+        Ok(self)
+    }
+}
+
 impl PromptConfig {
     /// Creates a new prompt configuration from config file settings.
     #[must_use]
@@ -1407,6 +1627,7 @@ impl Default for SubcogConfig {
             observability: ObservabilitySettings::default(),
             prompt: PromptConfig::default(),
             storage: StorageConfig::default(),
+            consolidation: ConsolidationConfig::default(),
             timeouts: OperationTimeoutConfig::from_env(),
             config_sources: Vec::new(),
         }
@@ -1515,6 +1736,7 @@ impl SubcogConfig {
 
         self.search_intent = self.search_intent.clone().with_env_overrides();
         self.prompt = self.prompt.clone().with_env_overrides();
+        self.consolidation = self.consolidation.clone().with_env_overrides();
     }
 
     /// Applies a `ConfigFile` to the current configuration.
@@ -1557,6 +1779,9 @@ impl SubcogConfig {
         }
         if let Some(ref storage) = file.storage {
             self.storage = StorageConfig::from_config_file(storage);
+        }
+        if let Some(ref consolidation) = file.consolidation {
+            self.consolidation = ConsolidationConfig::from_config_file(consolidation);
         }
     }
 
@@ -1812,5 +2037,168 @@ mod tests {
         // Should not panic on non-existent file
         let path = Path::new("/nonexistent/path/to/config.toml");
         warn_if_world_readable(path);
+    }
+
+    #[test]
+    fn test_consolidation_config_defaults() {
+        let config = ConsolidationConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.namespace_filter, None);
+        assert_eq!(config.time_window_days, Some(30));
+        assert_eq!(config.min_memories_to_consolidate, 3);
+        assert_eq!(config.similarity_threshold, 0.7);
+    }
+
+    #[test]
+    fn test_consolidation_config_builder() {
+        let config = ConsolidationConfig::new()
+            .with_enabled(true)
+            .with_time_window_days(Some(60))
+            .with_min_memories(5)
+            .with_similarity_threshold(0.8);
+
+        assert!(config.enabled);
+        assert_eq!(config.time_window_days, Some(60));
+        assert_eq!(config.min_memories_to_consolidate, 5);
+        assert_eq!(config.similarity_threshold, 0.8);
+    }
+
+    #[test]
+    fn test_consolidation_config_similarity_threshold_clamping() {
+        let config = ConsolidationConfig::new()
+            .with_similarity_threshold(1.5); // Above max
+        assert_eq!(config.similarity_threshold, 1.0);
+
+        let config = ConsolidationConfig::new()
+            .with_similarity_threshold(-0.5); // Below min
+        assert_eq!(config.similarity_threshold, 0.0);
+    }
+
+    #[test]
+    fn test_consolidation_config_validation_min_memories() {
+        let config = ConsolidationConfig::new()
+            .with_min_memories(1);
+
+        let result = config.build();
+        assert!(result.is_err());
+        if let Err(ConfigValidationError::InvalidValue { field, .. }) = result {
+            assert_eq!(field, "min_memories_to_consolidate");
+        }
+    }
+
+    #[test]
+    fn test_consolidation_config_validation_similarity_threshold() {
+        let mut config = ConsolidationConfig::new();
+        config.similarity_threshold = 1.5; // Bypass builder clamping
+
+        let result = config.build();
+        assert!(result.is_err());
+        if let Err(ConfigValidationError::InvalidValue { field, .. }) = result {
+            assert_eq!(field, "similarity_threshold");
+        }
+    }
+
+    #[test]
+    fn test_consolidation_config_validation_time_window() {
+        let config = ConsolidationConfig::new()
+            .with_time_window_days(Some(0));
+
+        let result = config.build();
+        assert!(result.is_err());
+        if let Err(ConfigValidationError::InvalidValue { field, .. }) = result {
+            assert_eq!(field, "time_window_days");
+        }
+    }
+
+    #[test]
+    fn test_consolidation_config_validation_success() {
+        let config = ConsolidationConfig::new()
+            .with_enabled(true)
+            .with_min_memories(3)
+            .with_similarity_threshold(0.7);
+
+        let result = config.build();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_consolidation_config_from_env() {
+        // Set environment variables
+        std::env::set_var("SUBCOG_CONSOLIDATION_ENABLED", "true");
+        std::env::set_var("SUBCOG_CONSOLIDATION_TIME_WINDOW_DAYS", "45");
+        std::env::set_var("SUBCOG_CONSOLIDATION_MIN_MEMORIES", "5");
+        std::env::set_var("SUBCOG_CONSOLIDATION_SIMILARITY_THRESHOLD", "0.85");
+
+        let config = ConsolidationConfig::from_env();
+
+        assert!(config.enabled);
+        assert_eq!(config.time_window_days, Some(45));
+        assert_eq!(config.min_memories_to_consolidate, 5);
+        assert_eq!(config.similarity_threshold, 0.85);
+
+        // Clean up
+        std::env::remove_var("SUBCOG_CONSOLIDATION_ENABLED");
+        std::env::remove_var("SUBCOG_CONSOLIDATION_TIME_WINDOW_DAYS");
+        std::env::remove_var("SUBCOG_CONSOLIDATION_MIN_MEMORIES");
+        std::env::remove_var("SUBCOG_CONSOLIDATION_SIMILARITY_THRESHOLD");
+    }
+
+    #[test]
+    fn test_consolidation_config_from_config_file() {
+        let file = ConfigFileConsolidation {
+            enabled: Some(true),
+            namespace_filter: Some(vec![
+                "decisions".to_string(),
+                "patterns".to_string(),
+            ]),
+            time_window_days: Some(60),
+            min_memories_to_consolidate: Some(4),
+            similarity_threshold: Some(0.8),
+        };
+
+        let config = ConsolidationConfig::from_config_file(&file);
+
+        assert!(config.enabled);
+        assert_eq!(config.time_window_days, Some(60));
+        assert_eq!(config.min_memories_to_consolidate, 4);
+        assert_eq!(config.similarity_threshold, 0.8);
+
+        // Check namespace filter was parsed
+        if let Some(ref namespaces) = config.namespace_filter {
+            assert_eq!(namespaces.len(), 2);
+        } else {
+            panic!("Expected namespace_filter to be Some");
+        }
+    }
+
+    #[test]
+    fn test_consolidation_config_min_memories_enforcement() {
+        let file = ConfigFileConsolidation {
+            min_memories_to_consolidate: Some(1), // Too low
+            ..Default::default()
+        };
+
+        let config = ConsolidationConfig::from_config_file(&file);
+        // Should be clamped to minimum of 2
+        assert_eq!(config.min_memories_to_consolidate, 2);
+    }
+
+    #[test]
+    fn test_consolidation_config_threshold_clamping_in_from_file() {
+        let file = ConfigFileConsolidation {
+            similarity_threshold: Some(1.5), // Above max
+            ..Default::default()
+        };
+
+        let config = ConsolidationConfig::from_config_file(&file);
+        assert_eq!(config.similarity_threshold, 1.0);
+
+        let file = ConfigFileConsolidation {
+            similarity_threshold: Some(-0.5), // Below min
+            ..Default::default()
+        };
+
+        let config = ConsolidationConfig::from_config_file(&file);
+        assert_eq!(config.similarity_threshold, 0.0);
     }
 }

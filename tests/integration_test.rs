@@ -427,3 +427,766 @@ mod hook_handler_tests {
         assert_eq!(StopHandler::new().event_type(), "Stop");
     }
 }
+
+/// Consolidation service integration tests with LLM providers.
+///
+/// Tests verify that consolidation works with different LLM providers:
+/// - OpenAI (API key required, skipped if not available)
+/// - Ollama (local server required, skipped if not running)
+/// - Mock providers (always run)
+mod consolidation_integration_tests {
+    use std::sync::Arc;
+    use subcog::config::ConsolidationConfig;
+    use subcog::llm::{LlmProvider, OllamaClient, OpenAiClient};
+    use subcog::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace};
+    use subcog::services::ConsolidationService;
+    use subcog::storage::index::SqliteBackend as SqliteIndexBackend;
+    use subcog::storage::persistence::FilesystemBackend;
+    use subcog::Result;
+
+    /// Helper to create a test memory with specified ID and content.
+    fn create_test_memory(id: &str, content: &str, embedding: Option<Vec<f32>>) -> Memory {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        Memory {
+            id: MemoryId::new(id),
+            content: content.to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
+            status: MemoryStatus::Active,
+            created_at: now,
+            updated_at: now,
+            tombstoned_at: None,
+            embedding,
+            tags: vec!["test".to_string()],
+            source: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
+        }
+    }
+
+    /// Mock LLM provider that returns predefined summaries.
+    struct MockLlmProvider {
+        summary: String,
+    }
+
+    impl MockLlmProvider {
+        fn new(summary: impl Into<String>) -> Self {
+            Self {
+                summary: summary.into(),
+            }
+        }
+    }
+
+    impl LlmProvider for MockLlmProvider {
+        fn name(&self) -> &'static str {
+            "mock"
+        }
+
+        fn complete(&self, _prompt: &str) -> Result<String> {
+            Ok(self.summary.clone())
+        }
+
+        fn analyze_for_capture(
+            &self,
+            _content: &str,
+        ) -> Result<subcog::llm::CaptureAnalysis> {
+            Ok(subcog::llm::CaptureAnalysis {
+                should_capture: true,
+                confidence: 0.8,
+                suggested_namespace: Some("decisions".to_string()),
+                suggested_tags: vec![],
+                reasoning: "Mock analysis".to_string(),
+            })
+        }
+    }
+
+    #[test]
+    fn test_consolidation_with_mock_provider() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let backend = FilesystemBackend::new(temp_dir.path());
+
+        // Create and store test memories with embeddings for similarity matching
+        let memory1 = create_test_memory(
+            "mem_1",
+            "Use PostgreSQL for primary storage with connection pooling",
+            Some(vec![0.1, 0.2, 0.3]),
+        );
+        let memory2 = create_test_memory(
+            "mem_2",
+            "Enable JSONB support for flexible schema",
+            Some(vec![0.1, 0.2, 0.35]),
+        );
+        let memory3 = create_test_memory(
+            "mem_3",
+            "Configure pgbouncer for connection management",
+            Some(vec![0.15, 0.2, 0.3]),
+        );
+
+        backend
+            .store(&memory1)
+            .expect("Failed to store memory1");
+        backend
+            .store(&memory2)
+            .expect("Failed to store memory2");
+        backend
+            .store(&memory3)
+            .expect("Failed to store memory3");
+
+        // Create consolidation service with mock LLM
+        let llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(MockLlmProvider::new(
+            "Summary: Database architecture using PostgreSQL with JSONB support and connection pooling via pgbouncer.",
+        ));
+        let service = ConsolidationService::new(backend).with_llm(llm);
+
+        // Create recall service for finding related memories
+        let recall = subcog::services::RecallService::new();
+
+        // Use default config with low similarity threshold for testing
+        let config = ConsolidationConfig::new()
+            .with_similarity_threshold(0.7)
+            .with_min_memories_to_consolidate(2);
+
+        // Find related memories
+        let groups = service
+            .find_related_memories(&recall, &config)
+            .expect("Failed to find related memories");
+
+        assert!(
+            !groups.is_empty(),
+            "Should find at least one group of related memories"
+        );
+
+        // Summarize the first group
+        if let Some(group) = groups.first() {
+            let summary = service
+                .summarize_group(group)
+                .expect("Failed to summarize group");
+
+            assert!(
+                summary.contains("PostgreSQL") || summary.contains("database"),
+                "Summary should contain relevant terms: {summary}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_consolidation_with_openai_provider() {
+        // Skip if OPENAI_API_KEY not set
+        if std::env::var("OPENAI_API_KEY").is_err() {
+            eprintln!("Skipping OpenAI consolidation test - OPENAI_API_KEY not set");
+            return;
+        }
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let backend = FilesystemBackend::new(temp_dir.path());
+
+        // Create test memories about database decisions with embeddings
+        let memory1 = create_test_memory(
+            "openai_mem_1",
+            "Decision: Use PostgreSQL as the primary database for better JSONB support and ACID compliance",
+            Some(vec![0.5, 0.6, 0.7]),
+        );
+        let memory2 = create_test_memory(
+            "openai_mem_2",
+            "Decision: Enable pgbouncer for connection pooling to handle high concurrency",
+            Some(vec![0.5, 0.6, 0.75]),
+        );
+
+        backend
+            .store(&memory1)
+            .expect("Failed to store memory1");
+        backend
+            .store(&memory2)
+            .expect("Failed to store memory2");
+
+        // Create OpenAI client with resilience wrapper (circuit breaker + retries)
+        let openai_client = OpenAiClient::new();
+        let resilience_config = subcog::llm::LlmResilienceConfig::default();
+        let resilient_client = subcog::llm::ResilientLlmProvider::new(openai_client, resilience_config);
+        let llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(resilient_client);
+
+        let service = ConsolidationService::new(backend).with_llm(llm);
+
+        // Create test memories for summarization
+        let memories = vec![memory1, memory2];
+
+        // Test summarization with OpenAI
+        let result = service.summarize_group(&memories);
+
+        match result {
+            Ok(summary) => {
+                assert!(!summary.is_empty(), "Summary should not be empty");
+                assert!(
+                    summary.len() > 20,
+                    "Summary should be reasonably detailed"
+                );
+                // Check that summary contains relevant terms
+                let summary_lower = summary.to_lowercase();
+                assert!(
+                    summary_lower.contains("postgresql")
+                        || summary_lower.contains("database")
+                        || summary_lower.contains("connection"),
+                    "Summary should contain relevant database terms: {summary}"
+                );
+                println!("OpenAI consolidation test passed. Summary: {summary}");
+            },
+            Err(e) => {
+                panic!("OpenAI consolidation failed: {e}");
+            },
+        }
+    }
+
+    #[test]
+    fn test_consolidation_end_to_end_with_openai() {
+        // Skip if OPENAI_API_KEY not set
+        if std::env::var("OPENAI_API_KEY").is_err() {
+            eprintln!("Skipping OpenAI end-to-end consolidation test - OPENAI_API_KEY not set");
+            return;
+        }
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let backend = FilesystemBackend::new(temp_dir.path());
+
+        // Create SQLite index backend for edge storage
+        let index_path = temp_dir.path().join("index.db");
+        let index_backend = SqliteIndexBackend::new(&index_path).expect("Failed to create index backend");
+
+        // Create and store test memories with embeddings
+        let memory1 = create_test_memory(
+            "e2e_mem_1",
+            "Use Redis for caching to reduce database load",
+            Some(vec![0.8, 0.9, 1.0]),
+        );
+        let memory2 = create_test_memory(
+            "e2e_mem_2",
+            "Configure Redis with persistence enabled for durability",
+            Some(vec![0.8, 0.9, 1.05]),
+        );
+        let memory3 = create_test_memory(
+            "e2e_mem_3",
+            "Set up Redis sentinel for high availability",
+            Some(vec![0.85, 0.9, 1.0]),
+        );
+
+        backend
+            .store(&memory1)
+            .expect("Failed to store memory1");
+        backend
+            .store(&memory2)
+            .expect("Failed to store memory2");
+        backend
+            .store(&memory3)
+            .expect("Failed to store memory3");
+
+        // Create consolidation service with OpenAI (with resilience wrapper) and index backend
+        let openai_client = OpenAiClient::new();
+        let resilience_config = subcog::llm::LlmResilienceConfig::default();
+        let resilient_client = subcog::llm::ResilientLlmProvider::new(openai_client, resilience_config);
+        let llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(resilient_client);
+        let service = ConsolidationService::new(backend)
+            .with_llm(llm)
+            .with_index(Arc::new(index_backend));
+
+        // Create recall service
+        let recall = subcog::services::RecallService::new();
+
+        // Configure consolidation
+        let config = ConsolidationConfig::new()
+            .with_similarity_threshold(0.7)
+            .with_min_memories_to_consolidate(2)
+            .with_namespace_filter(vec![Namespace::Decisions]);
+
+        // Run end-to-end consolidation
+        let result = service.consolidate_memories(&recall, &config);
+
+        match result {
+            Ok(stats) => {
+                println!("Consolidation stats: {}", stats.summary());
+                assert!(
+                    stats.processed > 0,
+                    "Should have processed some memories"
+                );
+                // Note: summaries_created may be 0 if LLM fails or similarity threshold not met
+                println!("OpenAI end-to-end consolidation test passed");
+            },
+            Err(e) => {
+                panic!("End-to-end consolidation failed: {e}");
+            },
+        }
+    }
+
+    #[test]
+    fn test_consolidation_creates_summary_with_source_ids() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let backend = FilesystemBackend::new(temp_dir.path());
+
+        // Create test memories
+        let memory1 = create_test_memory("sum_mem_1", "First decision", None);
+        let memory2 = create_test_memory("sum_mem_2", "Second decision", None);
+
+        let mem1_id = memory1.id.clone();
+        let mem2_id = memory2.id.clone();
+
+        backend
+            .store(&memory1)
+            .expect("Failed to store memory1");
+        backend
+            .store(&memory2)
+            .expect("Failed to store memory2");
+
+        // Create mock LLM
+        let llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(MockLlmProvider::new(
+            "Combined summary of both decisions",
+        ));
+        let service = ConsolidationService::new(backend.clone()).with_llm(llm);
+
+        // Create summary node
+        let summary_content = "This is a test summary";
+        let source_memories = vec![memory1, memory2];
+
+        let result = service.create_summary_node(summary_content, &source_memories);
+
+        assert!(result.is_ok(), "Failed to create summary node");
+
+        let summary = result.expect("Should have summary");
+
+        // Verify summary fields
+        assert!(summary.is_summary, "Should be marked as summary");
+        assert_eq!(summary.content, summary_content);
+        assert!(
+            summary.source_memory_ids.is_some(),
+            "Should have source memory IDs"
+        );
+
+        let source_ids = summary.source_memory_ids.expect("Should have source IDs");
+        assert_eq!(source_ids.len(), 2, "Should have 2 source IDs");
+        assert!(
+            source_ids.contains(&mem1_id),
+            "Should contain first memory ID"
+        );
+        assert!(
+            source_ids.contains(&mem2_id),
+            "Should contain second memory ID"
+        );
+
+        // Verify it was stored
+        let retrieved = backend.get(&summary.id);
+        assert!(retrieved.is_ok(), "Failed to retrieve summary from backend");
+        let retrieved_summary = retrieved.expect("Should retrieve summary");
+        assert_eq!(retrieved_summary.id, summary.id);
+        assert!(retrieved_summary.is_summary);
+    }
+
+    #[test]
+    fn test_consolidation_with_ollama_provider() {
+        // Create Ollama client and check if available
+        let ollama_client = OllamaClient::new();
+        if !ollama_client.is_available() {
+            eprintln!("Skipping Ollama consolidation test - Ollama server not running");
+            eprintln!("To run this test: start Ollama server with 'ollama serve' or Docker");
+            return;
+        }
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let backend = FilesystemBackend::new(temp_dir.path());
+
+        // Create test memories about caching decisions with embeddings
+        let memory1 = create_test_memory(
+            "ollama_mem_1",
+            "Decision: Use Redis for caching with LRU eviction policy for better memory management",
+            Some(vec![0.3, 0.4, 0.5]),
+        );
+        let memory2 = create_test_memory(
+            "ollama_mem_2",
+            "Decision: Configure Redis with maxmemory-policy allkeys-lru for automatic eviction",
+            Some(vec![0.3, 0.4, 0.55]),
+        );
+
+        backend
+            .store(&memory1)
+            .expect("Failed to store memory1");
+        backend
+            .store(&memory2)
+            .expect("Failed to store memory2");
+
+        // Create Ollama client with resilience wrapper (circuit breaker + retries)
+        let resilience_config = subcog::llm::LlmResilienceConfig::default();
+        let resilient_client = subcog::llm::ResilientLlmProvider::new(ollama_client, resilience_config);
+        let llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(resilient_client);
+
+        let service = ConsolidationService::new(backend).with_llm(llm);
+
+        // Create test memories for summarization
+        let memories = vec![memory1, memory2];
+
+        // Test summarization with Ollama
+        let result = service.summarize_group(&memories);
+
+        match result {
+            Ok(summary) => {
+                assert!(!summary.is_empty(), "Summary should not be empty");
+                assert!(
+                    summary.len() > 20,
+                    "Summary should be reasonably detailed"
+                );
+                // Check that summary contains relevant terms
+                let summary_lower = summary.to_lowercase();
+                assert!(
+                    summary_lower.contains("redis")
+                        || summary_lower.contains("cache")
+                        || summary_lower.contains("lru")
+                        || summary_lower.contains("memory"),
+                    "Summary should contain relevant caching terms: {summary}"
+                );
+                println!("Ollama consolidation test passed. Summary: {summary}");
+            },
+            Err(e) => {
+                panic!("Ollama consolidation failed: {e}");
+            },
+        }
+    }
+
+    #[test]
+    fn test_consolidation_end_to_end_with_ollama() {
+        // Create Ollama client and check if available
+        let ollama_client = OllamaClient::new();
+        if !ollama_client.is_available() {
+            eprintln!("Skipping Ollama end-to-end consolidation test - Ollama server not running");
+            eprintln!("To run this test: start Ollama server with 'ollama serve' or Docker");
+            return;
+        }
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let backend = FilesystemBackend::new(temp_dir.path());
+
+        // Create SQLite index backend for edge storage
+        let index_path = temp_dir.path().join("index.db");
+        let index_backend = SqliteIndexBackend::new(&index_path).expect("Failed to create index backend");
+
+        // Create and store test memories with embeddings
+        let memory1 = create_test_memory(
+            "e2e_ollama_mem_1",
+            "Use in-memory caching to reduce API latency",
+            Some(vec![0.6, 0.7, 0.8]),
+        );
+        let memory2 = create_test_memory(
+            "e2e_ollama_mem_2",
+            "Configure cache TTL to 300 seconds for optimal performance",
+            Some(vec![0.6, 0.7, 0.85]),
+        );
+        let memory3 = create_test_memory(
+            "e2e_ollama_mem_3",
+            "Implement cache warming on service startup",
+            Some(vec![0.65, 0.7, 0.8]),
+        );
+
+        backend
+            .store(&memory1)
+            .expect("Failed to store memory1");
+        backend
+            .store(&memory2)
+            .expect("Failed to store memory2");
+        backend
+            .store(&memory3)
+            .expect("Failed to store memory3");
+
+        // Create consolidation service with Ollama (with resilience wrapper) and index backend
+        let resilience_config = subcog::llm::LlmResilienceConfig::default();
+        let resilient_client = subcog::llm::ResilientLlmProvider::new(ollama_client, resilience_config);
+        let llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(resilient_client);
+        let service = ConsolidationService::new(backend)
+            .with_llm(llm)
+            .with_index(Arc::new(index_backend));
+
+        // Create recall service
+        let recall = subcog::services::RecallService::new();
+
+        // Configure consolidation
+        let config = ConsolidationConfig::new()
+            .with_similarity_threshold(0.7)
+            .with_min_memories_to_consolidate(2)
+            .with_namespace_filter(vec![Namespace::Decisions]);
+
+        // Run end-to-end consolidation
+        let result = service.consolidate_memories(&recall, &config);
+
+        match result {
+            Ok(stats) => {
+                println!("Consolidation stats: {}", stats.summary());
+                assert!(
+                    stats.processed > 0,
+                    "Should have processed some memories"
+                );
+                // Note: summaries_created may be 0 if LLM fails or similarity threshold not met
+                println!("Ollama end-to-end consolidation test passed");
+            },
+            Err(e) => {
+                panic!("End-to-end consolidation with Ollama failed: {e}");
+            },
+        }
+    }
+
+    /// End-to-end integration test: capture -> consolidate -> verify
+    ///
+    /// This test simulates the complete user flow:
+    /// 1. Capture memories using `CaptureService`
+    /// 2. Consolidate them using `ConsolidationService` with mock LLM
+    /// 3. Verify summaries are created
+    /// 4. Verify edges are stored (SummarizedBy relationships)
+    /// 5. Verify original memories are preserved (not deleted/modified)
+    #[test]
+    fn test_end_to_end_capture_consolidate_verify() {
+        use subcog::config::Config;
+        use subcog::models::CaptureRequest;
+        use subcog::services::CaptureService;
+        use subcog::storage::traits::PersistenceBackend;
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        // Create SQLite index backend for storage
+        let index_path = temp_dir.path().join("index.db");
+        let index_backend = Arc::new(
+            SqliteIndexBackend::new(&index_path).expect("Failed to create index backend"),
+        );
+
+        // Create filesystem backend for persistence
+        let persistence_backend = FilesystemBackend::new(temp_dir.path());
+
+        // Create config for capture service
+        let config = Config::default();
+
+        // Create capture service with index backend
+        let capture_service = CaptureService::new(config)
+            .with_index(Arc::clone(&index_backend) as Arc<dyn subcog::storage::traits::IndexBackend + Send + Sync>);
+
+        // Step 1: Capture several related memories using CaptureService
+        let capture_requests = vec![
+            CaptureRequest {
+                namespace: Namespace::Decisions,
+                content: "Decision: Use Redis for session storage to improve performance and scalability".to_string(),
+                domain: Domain::new(),
+                tags: vec!["redis".to_string(), "caching".to_string()],
+                source: Some("architecture-decision.md".to_string()),
+                skip_security_check: true,
+            },
+            CaptureRequest {
+                namespace: Namespace::Decisions,
+                content: "Decision: Configure Redis with persistence enabled using AOF for durability".to_string(),
+                domain: Domain::new(),
+                tags: vec!["redis".to_string(), "persistence".to_string()],
+                source: Some("architecture-decision.md".to_string()),
+                skip_security_check: true,
+            },
+            CaptureRequest {
+                namespace: Namespace::Decisions,
+                content: "Decision: Set Redis maxmemory-policy to allkeys-lru for automatic eviction".to_string(),
+                domain: Domain::new(),
+                tags: vec!["redis".to_string(), "configuration".to_string()],
+                source: Some("architecture-decision.md".to_string()),
+                skip_security_check: true,
+            },
+        ];
+
+        let mut captured_ids = Vec::new();
+        for request in capture_requests {
+            let result = capture_service
+                .capture(request)
+                .expect("Failed to capture memory");
+            captured_ids.push(result.memory_id.clone());
+        }
+
+        assert_eq!(captured_ids.len(), 3, "Should have captured 3 memories");
+
+        // Retrieve captured memories and add embeddings for similarity matching
+        let mut memories = Vec::new();
+        for memory_id in &captured_ids {
+            let mut memory = persistence_backend
+                .get(memory_id)
+                .expect("Failed to retrieve memory");
+
+            // Add similar embeddings so they cluster together (threshold 0.7)
+            memory.embedding = Some(vec![0.8, 0.9, 1.0 + (memories.len() as f32) * 0.05]);
+            persistence_backend
+                .store(&memory)
+                .expect("Failed to update memory with embedding");
+
+            memories.push(memory);
+        }
+
+        // Step 2: Create consolidation service with mock LLM and index backend
+        let mock_llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(MockLlmProvider::new(
+            "Summary: Redis architecture decisions including session storage, AOF persistence, and LRU eviction policy.",
+        ));
+
+        let mut consolidation_service = ConsolidationService::new(persistence_backend.clone())
+            .with_llm(mock_llm)
+            .with_index(Arc::clone(&index_backend));
+
+        // Create recall service for finding related memories
+        let recall = subcog::services::RecallService::new();
+
+        // Configure consolidation with low threshold for testing
+        let consolidation_config = ConsolidationConfig::new()
+            .with_similarity_threshold(0.7)
+            .with_min_memories_to_consolidate(2)
+            .with_namespace_filter(vec![Namespace::Decisions]);
+
+        // Step 3: Run consolidation
+        let stats = consolidation_service
+            .consolidate_memories(&recall, &consolidation_config)
+            .expect("Failed to consolidate memories");
+
+        // Step 4: Verify consolidation results
+        assert!(
+            stats.processed > 0,
+            "Should have processed memories: {:?}",
+            stats
+        );
+        assert!(
+            stats.summaries_created > 0,
+            "Should have created at least one summary: {:?}",
+            stats
+        );
+
+        // Step 5: Verify original memories are preserved (not deleted or modified)
+        for (idx, original_id) in captured_ids.iter().enumerate() {
+            let memory = persistence_backend
+                .get(original_id)
+                .expect("Original memory should still exist");
+
+            assert_eq!(
+                memory.id, *original_id,
+                "Memory ID should match"
+            );
+            assert!(
+                !memory.is_summary,
+                "Original memory should not be marked as summary"
+            );
+            assert_eq!(
+                memory.status,
+                MemoryStatus::Active,
+                "Original memory should remain active"
+            );
+            assert!(
+                memory.tombstoned_at.is_none(),
+                "Original memory should not be tombstoned"
+            );
+            // Verify the memory still has content (not deleted)
+            assert!(
+                !memory.content.is_empty(),
+                "Original memory {idx} should still have content"
+            );
+        }
+
+        // Step 6: Find and verify summary node
+        let all_memories = persistence_backend
+            .list()
+            .expect("Failed to list all memories");
+
+        let summaries: Vec<_> = all_memories
+            .iter()
+            .filter(|m| m.is_summary)
+            .collect();
+
+        assert!(
+            !summaries.is_empty(),
+            "Should have at least one summary node"
+        );
+
+        let summary = summaries[0];
+        assert!(
+            summary.is_summary,
+            "Summary should be marked as summary"
+        );
+        assert!(
+            summary.consolidation_timestamp.is_some(),
+            "Summary should have consolidation timestamp"
+        );
+        assert!(
+            summary.source_memory_ids.is_some(),
+            "Summary should have source memory IDs"
+        );
+
+        let source_ids = summary
+            .source_memory_ids
+            .as_ref()
+            .expect("Should have source IDs");
+        assert_eq!(
+            source_ids.len(),
+            3,
+            "Summary should reference all 3 original memories"
+        );
+
+        // Verify source IDs match the captured memories
+        for captured_id in &captured_ids {
+            assert!(
+                source_ids.contains(captured_id),
+                "Summary should reference captured memory {captured_id}"
+            );
+        }
+
+        // Verify summary content contains relevant terms
+        let summary_lower = summary.content.to_lowercase();
+        assert!(
+            summary_lower.contains("redis") || summary_lower.contains("summary"),
+            "Summary should contain relevant terms: {}",
+            summary.content
+        );
+
+        // Step 7: Verify edges are stored (SummarizedBy relationships)
+        for original_id in &captured_ids {
+            let edges = index_backend
+                .query_edges(original_id, EdgeType::SummarizedBy)
+                .expect("Failed to query edges");
+
+            assert!(
+                !edges.is_empty(),
+                "Original memory {} should have SummarizedBy edge",
+                original_id
+            );
+
+            // Verify edge points to the summary
+            assert_eq!(
+                edges.len(),
+                1,
+                "Should have exactly one SummarizedBy edge"
+            );
+            assert_eq!(
+                edges[0], summary.id,
+                "Edge should point to the summary node"
+            );
+        }
+
+        // Step 8: Verify reverse edges (SourceOf from summary to originals)
+        let reverse_edges = index_backend
+            .query_edges(&summary.id, EdgeType::SourceOf)
+            .expect("Failed to query reverse edges");
+
+        assert_eq!(
+            reverse_edges.len(),
+            3,
+            "Summary should have SourceOf edges to all 3 originals"
+        );
+
+        for original_id in &captured_ids {
+            assert!(
+                reverse_edges.contains(original_id),
+                "Summary should have SourceOf edge to original memory {original_id}"
+            );
+        }
+
+        println!("✓ End-to-end integration test passed:");
+        println!("  - Captured 3 memories using CaptureService");
+        println!("  - Consolidated into {} summary node(s)", stats.summaries_created);
+        println!("  - Verified original memories preserved");
+        println!("  - Verified {} edges stored", captured_ids.len() * 2);
+    }
+}

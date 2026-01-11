@@ -102,7 +102,27 @@ enum Commands {
     Status,
 
     /// Run consolidation.
-    Consolidate,
+    Consolidate {
+        /// Filter by namespace (can be specified multiple times).
+        #[arg(short, long)]
+        namespace: Vec<String>,
+
+        /// Time window in days for memories to consolidate.
+        #[arg(short, long)]
+        days: Option<u32>,
+
+        /// Show what would be consolidated without making changes.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Minimum number of memories required to form a group.
+        #[arg(long)]
+        min_memories: Option<usize>,
+
+        /// Similarity threshold (0.0-1.0) for grouping related memories.
+        #[arg(long)]
+        similarity: Option<f32>,
+    },
 
     /// Rebuild search index from stored memories.
     Reindex {
@@ -261,7 +281,7 @@ async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::
         Commands::Capture { .. } => "capture",
         Commands::Recall { .. } => "recall",
         Commands::Status => "status",
-        Commands::Consolidate => "consolidate",
+        Commands::Consolidate { .. } => "consolidate",
         Commands::Reindex { .. } => "reindex",
         Commands::Enrich { .. } => "enrich",
         Commands::Config { .. } => "config",
@@ -332,10 +352,18 @@ async fn dispatch_command(
             let config = config.clone();
             run_blocking_cmd!(move || commands::cmd_status(&config).map_err(|e| e.to_string()))
         },
-        Commands::Consolidate => {
+        Commands::Consolidate {
+            namespace,
+            days,
+            dry_run,
+            min_memories,
+            similarity,
+        } => {
             let config = config.clone();
+            let namespace = namespace.clone();
             run_blocking_cmd!(move || {
-                commands::cmd_consolidate(&config).map_err(|e| e.to_string())
+                commands::cmd_consolidate(&config, namespace, days, dry_run, min_memories, similarity)
+                    .map_err(|e| e.to_string())
             })
         },
         Commands::Reindex { repo } => {
