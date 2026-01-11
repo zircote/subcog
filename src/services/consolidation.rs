@@ -154,7 +154,35 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         self
     }
 
-    /// Records an access to a memory.
+    /// Records an access to a memory for retention scoring.
+    ///
+    /// This updates the internal LRU caches tracking access frequency and recency.
+    /// These metrics are used by [`get_suggested_tier`](Self::get_suggested_tier) to
+    /// determine memory retention tier.
+    ///
+    /// # Arguments
+    ///
+    /// * `memory_id` - The ID of the memory that was accessed
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use subcog::services::ConsolidationService;
+    /// use subcog::storage::persistence::FilesystemBackend;
+    /// use subcog::models::MemoryTier;
+    ///
+    /// let backend = FilesystemBackend::new("/tmp/memories");
+    /// let mut service = ConsolidationService::new(backend);
+    ///
+    /// // Record multiple accesses to a memory
+    /// service.record_access("mem_123");
+    /// service.record_access("mem_123");
+    /// service.record_access("mem_123");
+    ///
+    /// // The tier will reflect high access frequency
+    /// let tier = service.get_suggested_tier("mem_123");
+    /// assert!(matches!(tier, MemoryTier::Hot | MemoryTier::Warm));
+    /// ```
     pub fn record_access(&mut self, memory_id: &str) {
         let now = current_timestamp();
         let key = memory_id.to_string();
@@ -433,11 +461,46 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         result
     }
 
-    /// Runs consolidation on all memories.
+    /// Runs lifecycle consolidation on all memories based on retention scoring.
+    ///
+    /// This method performs the following operations:
+    /// 1. Calculates retention scores for all memories
+    /// 2. Archives memories with scores below the Archive tier threshold
+    /// 3. Detects contradictions within namespaces
+    ///
+    /// **Note**: This is different from [`consolidate_memories`](Self::consolidate_memories),
+    /// which groups related memories and creates LLM-powered summaries. This method focuses
+    /// on lifecycle management and archival.
+    ///
+    /// # Returns
+    ///
+    /// [`ConsolidationStats`] with counts of processed, archived, and contradictory memories.
     ///
     /// # Errors
     ///
-    /// Returns an error if consolidation fails.
+    /// Returns an error if:
+    /// - Listing memory IDs fails
+    /// - Retrieving or storing memories fails
+    /// - Contradiction detection fails
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use subcog::services::ConsolidationService;
+    /// use subcog::storage::persistence::FilesystemBackend;
+    ///
+    /// let backend = FilesystemBackend::new("/tmp/memories");
+    /// let mut service = ConsolidationService::new(backend);
+    ///
+    /// // Record some accesses to influence retention scores
+    /// service.record_access("mem_old");
+    ///
+    /// // Run consolidation to archive old, unused memories
+    /// let stats = service.consolidate()?;
+    /// println!("Archived {} memories", stats.archived);
+    /// println!("Detected {} contradictions", stats.contradictions);
+    /// # Ok::<(), subcog::Error>(())
+    /// ```
     #[instrument(
         name = "subcog.memory.consolidate",
         skip(self),
@@ -593,11 +656,90 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         Ok(contradiction_count)
     }
 
-    /// Merges two memories into one.
+    /// Merges two memories into one, combining their content and metadata.
+    ///
+    /// The merge operation:
+    /// - Combines content with a separator (`---`)
+    /// - Merges tags without duplicates
+    /// - Keeps target's namespace and domain
+    /// - Preserves earliest creation timestamp
+    /// - Sets status to Active
+    /// - Marks source memory as Archived
+    /// - Requires re-embedding (embedding set to None)
+    ///
+    /// # Arguments
+    ///
+    /// * `source_id` - The memory to merge from (will be archived)
+    /// * `target_id` - The memory to merge into (will be updated)
+    ///
+    /// # Returns
+    ///
+    /// The merged memory with combined content and metadata.
     ///
     /// # Errors
     ///
-    /// Returns an error if merging fails.
+    /// Returns an error if:
+    /// - Source or target memory not found
+    /// - Storing the merged or archived memories fails
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use subcog::services::ConsolidationService;
+    /// use subcog::storage::persistence::FilesystemBackend;
+    /// use subcog::models::{Memory, MemoryId, Namespace, Domain, MemoryStatus};
+    /// use subcog::current_timestamp;
+    ///
+    /// let backend = FilesystemBackend::new("/tmp/memories");
+    /// let mut service = ConsolidationService::new(backend);
+    ///
+    /// // Create and store two memories (implementation detail omitted)
+    /// # let mem1 = Memory {
+    /// #     id: MemoryId::new("mem_1"),
+    /// #     content: "Use PostgreSQL".to_string(),
+    /// #     namespace: Namespace::Decisions,
+    /// #     domain: Domain::new(),
+    /// #     project_id: None,
+    /// #     branch: None,
+    /// #     file_path: None,
+    /// #     status: MemoryStatus::Active,
+    /// #     created_at: current_timestamp(),
+    /// #     updated_at: current_timestamp(),
+    /// #     tombstoned_at: None,
+    /// #     embedding: None,
+    /// #     tags: vec!["database".to_string()],
+    /// #     source: None,
+    /// #     is_summary: false,
+    /// #     source_memory_ids: None,
+    /// #     consolidation_timestamp: None,
+    /// # };
+    /// # let mem2 = Memory {
+    /// #     id: MemoryId::new("mem_2"),
+    /// #     content: "With connection pooling".to_string(),
+    /// #     namespace: Namespace::Decisions,
+    /// #     domain: Domain::new(),
+    /// #     project_id: None,
+    /// #     branch: None,
+    /// #     file_path: None,
+    /// #     status: MemoryStatus::Active,
+    /// #     created_at: current_timestamp(),
+    /// #     updated_at: current_timestamp(),
+    /// #     tombstoned_at: None,
+    /// #     embedding: None,
+    /// #     tags: vec!["performance".to_string()],
+    /// #     source: None,
+    /// #     is_summary: false,
+    /// #     source_memory_ids: None,
+    /// #     consolidation_timestamp: None,
+    /// # };
+    ///
+    /// // Merge mem_1 into mem_2
+    /// let merged = service.merge_memories(&mem1.id, &mem2.id)?;
+    /// assert!(merged.content.contains("Use PostgreSQL"));
+    /// assert!(merged.content.contains("With connection pooling"));
+    /// assert_eq!(merged.tags.len(), 2); // Combined tags
+    /// # Ok::<(), subcog::Error>(())
+    /// ```
     pub fn merge_memories(
         &mut self,
         source_id: &crate::models::MemoryId,
@@ -672,11 +814,44 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         Ok(merged)
     }
 
-    /// Links two memories with a relationship.
+    /// Links two memories with a relationship edge.
+    ///
+    /// **Note**: This is currently a placeholder that always succeeds. Full
+    /// edge relationship functionality is provided via the index backend when
+    /// using [`with_index`](Self::with_index). Use [`create_summary_node`](Self::create_summary_node)
+    /// for automatic edge creation during consolidation.
+    ///
+    /// # Arguments
+    ///
+    /// * `_from_id` - Source memory ID (currently unused)
+    /// * `_to_id` - Target memory ID (currently unused)
+    /// * `_edge_type` - Type of relationship edge (currently unused)
+    ///
+    /// # Returns
+    ///
+    /// Always returns `Ok(())` as this is a placeholder implementation.
     ///
     /// # Errors
     ///
-    /// Returns an error if linking fails.
+    /// This placeholder implementation never returns an error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use subcog::services::ConsolidationService;
+    /// use subcog::storage::persistence::FilesystemBackend;
+    /// use subcog::models::{MemoryId, EdgeType};
+    ///
+    /// let backend = FilesystemBackend::new("/tmp/memories");
+    /// let service = ConsolidationService::new(backend);
+    ///
+    /// let from = MemoryId::new("mem_1");
+    /// let to = MemoryId::new("mem_2");
+    ///
+    /// // Currently a no-op placeholder
+    /// service.link_memories(&from, &to, EdgeType::RelatedTo)?;
+    /// # Ok::<(), subcog::Error>(())
+    /// ```
     pub const fn link_memories(
         &self,
         _from_id: &crate::models::MemoryId,
@@ -688,7 +863,49 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         Ok(())
     }
 
-    /// Gets the suggested tier for a memory.
+    /// Gets the suggested retention tier for a memory based on access patterns.
+    ///
+    /// Calculates a retention score from access frequency, recency, and importance,
+    /// then maps it to a tier:
+    ///
+    /// | Tier | Score Range | Use Case |
+    /// |------|-------------|----------|
+    /// | Hot | ≥ 0.7 | Frequently accessed, keep in fast storage |
+    /// | Warm | 0.4 - 0.7 | Moderate access, default tier |
+    /// | Cold | 0.2 - 0.4 | Rarely accessed, candidate for compression |
+    /// | Archive | < 0.2 | Unused, move to cold storage |
+    ///
+    /// # Arguments
+    ///
+    /// * `memory_id` - The ID of the memory to assess
+    ///
+    /// # Returns
+    ///
+    /// The suggested [`MemoryTier`] for the memory.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use subcog::services::ConsolidationService;
+    /// use subcog::storage::persistence::FilesystemBackend;
+    /// use subcog::models::MemoryTier;
+    ///
+    /// let backend = FilesystemBackend::new("/tmp/memories");
+    /// let mut service = ConsolidationService::new(backend);
+    ///
+    /// // Record frequent accesses
+    /// for _ in 0..10 {
+    ///     service.record_access("mem_popular");
+    /// }
+    ///
+    /// // Check tier - should be Hot or Warm due to high access frequency
+    /// let tier = service.get_suggested_tier("mem_popular");
+    /// assert!(matches!(tier, MemoryTier::Hot | MemoryTier::Warm));
+    ///
+    /// // Never accessed memory defaults to Warm tier
+    /// let tier_new = service.get_suggested_tier("mem_never_seen");
+    /// assert_eq!(tier_new, MemoryTier::Warm);
+    /// ```
     #[must_use]
     pub fn get_suggested_tier(&self, memory_id: &str) -> MemoryTier {
         let now = current_timestamp();
@@ -1301,6 +1518,26 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 }
 
 /// Statistics from a consolidation operation.
+///
+/// Tracks the outcome of consolidation operations including memory processing,
+/// archival, merging, summary creation, and contradiction detection.
+///
+/// # Examples
+///
+/// ```
+/// use subcog::services::ConsolidationStats;
+///
+/// let stats = ConsolidationStats {
+///     processed: 10,
+///     archived: 2,
+///     merged: 1,
+///     contradictions: 0,
+///     summaries_created: 3,
+/// };
+///
+/// println!("{}", stats.summary());
+/// assert!(!stats.is_empty());
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct ConsolidationStats {
     /// Number of memories processed.
@@ -1316,7 +1553,24 @@ pub struct ConsolidationStats {
 }
 
 impl ConsolidationStats {
-    /// Returns true if no work was done.
+    /// Returns `true` if no consolidation work was performed.
+    ///
+    /// A stats instance is considered empty if all counters are zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use subcog::services::ConsolidationStats;
+    ///
+    /// let empty_stats = ConsolidationStats::default();
+    /// assert!(empty_stats.is_empty());
+    ///
+    /// let stats = ConsolidationStats {
+    ///     processed: 5,
+    ///     ..Default::default()
+    /// };
+    /// assert!(!stats.is_empty());
+    /// ```
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.processed == 0
@@ -1326,7 +1580,31 @@ impl ConsolidationStats {
             && self.summaries_created == 0
     }
 
-    /// Returns a human-readable summary.
+    /// Returns a human-readable summary of the consolidation operation.
+    ///
+    /// Provides a formatted string with all statistics for display purposes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use subcog::services::ConsolidationStats;
+    ///
+    /// let stats = ConsolidationStats {
+    ///     processed: 10,
+    ///     archived: 2,
+    ///     merged: 1,
+    ///     contradictions: 1,
+    ///     summaries_created: 3,
+    /// };
+    ///
+    /// let summary = stats.summary();
+    /// assert!(summary.contains("Processed: 10"));
+    /// assert!(summary.contains("Summaries: 3"));
+    ///
+    /// // Empty stats show special message
+    /// let empty = ConsolidationStats::default();
+    /// assert_eq!(empty.summary(), "No memories to consolidate");
+    /// ```
     #[must_use]
     pub fn summary(&self) -> String {
         if self.is_empty() {
