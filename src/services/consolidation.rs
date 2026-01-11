@@ -540,6 +540,139 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
 
         Ok(groups)
     }
+
+    /// Summarizes a group of related memories using LLM.
+    ///
+    /// Creates a concise summary from a group of related memories while preserving
+    /// all key details. Uses the LLM provider to generate an intelligent summary
+    /// that combines related information into a cohesive narrative.
+    ///
+    /// # Arguments
+    ///
+    /// * `memories` - A slice of memories to summarize together.
+    ///
+    /// # Returns
+    ///
+    /// A summary string that preserves key details from all source memories.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No LLM provider is configured (graceful degradation required)
+    /// - The LLM call fails
+    /// - The response cannot be processed
+    ///
+    /// # Graceful Degradation
+    ///
+    /// When LLM is unavailable:
+    /// - Returns an error with a clear message
+    /// - Caller should handle by either skipping summarization or using fallback logic
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use subcog::services::ConsolidationService;
+    /// use subcog::storage::persistence::FilesystemBackend;
+    /// use std::sync::Arc;
+    /// use subcog::llm::AnthropicClient;
+    ///
+    /// let backend = FilesystemBackend::new("/tmp/memories");
+    /// let llm = Arc::new(AnthropicClient::new());
+    /// let service = ConsolidationService::new(backend).with_llm(llm);
+    ///
+    /// let memories = vec![/* ... */];
+    /// let summary = service.summarize_group(&memories)?;
+    /// println!("Summary: {}", summary);
+    /// # Ok::<(), subcog::Error>(())
+    /// ```
+    #[instrument(skip(self, memories), fields(memory_count = memories.len()))]
+    pub fn summarize_group(&self, memories: &[Memory]) -> Result<String> {
+        use crate::llm::{BASE_SYSTEM_PROMPT, MEMORY_SUMMARIZATION_PROMPT};
+
+        // Check if LLM provider is available
+        let llm = self.llm.as_ref().ok_or_else(|| {
+            tracing::warn!("No LLM provider configured for memory summarization");
+            crate::Error::OperationFailed {
+                operation: "summarize_group".to_string(),
+                cause: "LLM provider not configured. Use with_llm() to set provider.".to_string(),
+            }
+        })?;
+
+        // Handle empty input
+        if memories.is_empty() {
+            tracing::warn!("Attempted to summarize empty group of memories");
+            return Err(crate::Error::OperationFailed {
+                operation: "summarize_group".to_string(),
+                cause: "No memories provided for summarization".to_string(),
+            });
+        }
+
+        // Format memories into a user prompt
+        let memories_text = memories
+            .iter()
+            .enumerate()
+            .map(|(i, memory)| {
+                format!(
+                    "Memory {}: [ID: {}, Namespace: {:?}, Tags: {}]\n{}",
+                    i + 1,
+                    memory.id.as_str(),
+                    memory.namespace,
+                    memory.tags.join(", "),
+                    memory.content
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n---\n\n");
+
+        let user_prompt = format!(
+            "Summarize the following {} related memories into a cohesive summary:\n\n{}",
+            memories.len(),
+            memories_text
+        );
+
+        // Build system prompt
+        let system_prompt = format!("{}\n\n{}", BASE_SYSTEM_PROMPT, MEMORY_SUMMARIZATION_PROMPT);
+
+        // Call LLM
+        tracing::debug!(
+            memory_count = memories.len(),
+            "Calling LLM for memory summarization"
+        );
+
+        let summary = llm
+            .complete_with_system(&system_prompt, &user_prompt)
+            .map_err(|e| {
+                tracing::error!(
+                    error = %e,
+                    memory_count = memories.len(),
+                    "LLM summarization failed"
+                );
+                crate::Error::OperationFailed {
+                    operation: "summarize_group".to_string(),
+                    cause: format!("LLM summarization failed: {}", e),
+                }
+            })?;
+
+        // Trim whitespace from response
+        let summary = summary.trim().to_string();
+
+        // Validate that we got a meaningful response
+        if summary.is_empty() {
+            tracing::warn!("LLM returned empty summary");
+            return Err(crate::Error::OperationFailed {
+                operation: "summarize_group".to_string(),
+                cause: "LLM returned empty summary".to_string(),
+            });
+        }
+
+        tracing::info!(
+            memory_count = memories.len(),
+            summary_length = summary.len(),
+            "Successfully generated memory summary"
+        );
+
+        Ok(summary)
+    }
 }
 
 /// Calculates cosine similarity between two embedding vectors.
@@ -898,5 +1031,198 @@ mod tests {
         let groups = result.unwrap();
         // Should have no groups due to high threshold
         assert!(groups.is_empty());
+    }
+
+    #[test]
+    fn test_summarize_group_no_llm() {
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_summarize_no_llm"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+        let service = ConsolidationService::new(backend);
+
+        // Create test memories
+        let memory_a = create_test_memory("mem_a", "First decision");
+        let memory_b = create_test_memory("mem_b", "Second decision");
+
+        let memories = vec![memory_a, memory_b];
+
+        // Should fail without LLM provider
+        let result = service.summarize_group(&memories);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("LLM provider not configured"));
+    }
+
+    #[test]
+    fn test_summarize_group_empty_memories() {
+        use std::sync::Arc;
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_summarize_empty"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+
+        // Create mock LLM provider
+        struct MockLlm;
+        impl crate::llm::LlmProvider for MockLlm {
+            fn name(&self) -> &'static str {
+                "mock"
+            }
+            fn complete(&self, _prompt: &str) -> Result<String> {
+                Ok("Mock summary".to_string())
+            }
+            fn analyze_for_capture(&self, _content: &str) -> Result<crate::llm::CaptureAnalysis> {
+                unimplemented!()
+            }
+        }
+
+        let llm: Arc<dyn crate::llm::LlmProvider + Send + Sync> = Arc::new(MockLlm);
+        let service = ConsolidationService::new(backend).with_llm(llm);
+
+        // Should fail with empty memories
+        let result = service.summarize_group(&[]);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No memories provided"));
+    }
+
+    #[test]
+    fn test_summarize_group_with_mock_llm() {
+        use std::sync::Arc;
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_summarize_mock"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+
+        // Create mock LLM provider
+        struct MockLlm;
+        impl crate::llm::LlmProvider for MockLlm {
+            fn name(&self) -> &'static str {
+                "mock"
+            }
+            fn complete(&self, _prompt: &str) -> Result<String> {
+                Ok("This is a comprehensive summary of the related decisions, preserving all key technical details.".to_string())
+            }
+            fn analyze_for_capture(&self, _content: &str) -> Result<crate::llm::CaptureAnalysis> {
+                unimplemented!()
+            }
+        }
+
+        let llm: Arc<dyn crate::llm::LlmProvider + Send + Sync> = Arc::new(MockLlm);
+        let service = ConsolidationService::new(backend).with_llm(llm);
+
+        // Create test memories
+        let memory_a = create_test_memory("mem_a", "Use PostgreSQL for primary storage");
+        let memory_b = create_test_memory("mem_b", "Enable JSONB for flexible schemas");
+
+        let memories = vec![memory_a, memory_b];
+
+        // Should succeed with mock LLM
+        let result = service.summarize_group(&memories);
+        assert!(result.is_ok());
+
+        let summary = result.unwrap();
+        assert!(!summary.is_empty());
+        assert!(summary.contains("comprehensive summary"));
+    }
+
+    #[test]
+    fn test_summarize_group_llm_failure() {
+        use std::sync::Arc;
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_summarize_fail"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+
+        // Create failing mock LLM provider
+        struct FailingMockLlm;
+        impl crate::llm::LlmProvider for FailingMockLlm {
+            fn name(&self) -> &'static str {
+                "failing_mock"
+            }
+            fn complete(&self, _prompt: &str) -> Result<String> {
+                Err(crate::Error::OperationFailed {
+                    operation: "llm_complete".to_string(),
+                    cause: "Mock LLM failure".to_string(),
+                })
+            }
+            fn analyze_for_capture(&self, _content: &str) -> Result<crate::llm::CaptureAnalysis> {
+                unimplemented!()
+            }
+        }
+
+        let llm: Arc<dyn crate::llm::LlmProvider + Send + Sync> = Arc::new(FailingMockLlm);
+        let service = ConsolidationService::new(backend).with_llm(llm);
+
+        // Create test memories
+        let memory_a = create_test_memory("mem_a", "First decision");
+        let memory_b = create_test_memory("mem_b", "Second decision");
+
+        let memories = vec![memory_a, memory_b];
+
+        // Should propagate LLM failure
+        let result = service.summarize_group(&memories);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("LLM summarization failed"));
+    }
+
+    #[test]
+    fn test_summarize_group_empty_response() {
+        use std::sync::Arc;
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_summarize_empty_resp"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+
+        // Create mock LLM that returns empty string
+        struct EmptyMockLlm;
+        impl crate::llm::LlmProvider for EmptyMockLlm {
+            fn name(&self) -> &'static str {
+                "empty_mock"
+            }
+            fn complete(&self, _prompt: &str) -> Result<String> {
+                Ok("   ".to_string()) // Only whitespace
+            }
+            fn analyze_for_capture(&self, _content: &str) -> Result<crate::llm::CaptureAnalysis> {
+                unimplemented!()
+            }
+        }
+
+        let llm: Arc<dyn crate::llm::LlmProvider + Send + Sync> = Arc::new(EmptyMockLlm);
+        let service = ConsolidationService::new(backend).with_llm(llm);
+
+        // Create test memories
+        let memory_a = create_test_memory("mem_a", "First decision");
+
+        let memories = vec![memory_a];
+
+        // Should fail with empty response
+        let result = service.summarize_group(&memories);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("empty summary"));
     }
 }

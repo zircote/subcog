@@ -356,6 +356,36 @@ Analyze the provided memories for potential consolidation actions:
 }
 </output_format>"#;
 
+/// Operation mode for memory summarization.
+///
+/// Used when creating a summary from a group of related memories.
+pub const MEMORY_SUMMARIZATION_PROMPT: &str = r#"<operation_mode>memory_summarization</operation_mode>
+
+<task>
+Create a concise summary from a group of related memories while preserving all key details.
+The summary should:
+- Capture the essence of all memories in the group
+- Preserve critical information, decisions, and context
+- Maintain technical accuracy
+- Be coherent and well-structured
+- Avoid losing important details through over-compression
+</task>
+
+<guidelines>
+- Combine related information into a cohesive narrative
+- Preserve specific technical details, numbers, versions, and decisions
+- Maintain chronological or logical ordering where relevant
+- Include key tags and topics from source memories
+- Flag any contradictions found within the group
+- Keep the summary focused but comprehensive
+</guidelines>
+
+<output_format>
+Respond with ONLY the summary text, no JSON formatting.
+The summary should be a well-structured paragraph or set of paragraphs that preserves
+all important information from the source memories.
+</output_format>"#;
+
 /// Builds the complete system prompt for a specific operation.
 ///
 /// # Arguments

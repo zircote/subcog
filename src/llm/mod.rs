@@ -164,8 +164,9 @@ pub use resilience::{LlmResilienceConfig, ResilientLlmProvider};
 pub use system_prompt::{
     ArchiveCandidate, BASE_SYSTEM_PROMPT, CAPTURE_ANALYSIS_PROMPT, CONSOLIDATION_PROMPT,
     ConsolidationAnalysis, ContradictionAssessment, ContradictionDetail, ENRICHMENT_PROMPT,
-    ExtendedCaptureAnalysis, ExtendedSearchIntent, MergeCandidate, OperationMode,
-    SEARCH_INTENT_PROMPT, SecurityAssessment, build_system_prompt, build_system_prompt_with_config,
+    ExtendedCaptureAnalysis, ExtendedSearchIntent, MEMORY_SUMMARIZATION_PROMPT, MergeCandidate,
+    OperationMode, SEARCH_INTENT_PROMPT, SecurityAssessment, build_system_prompt,
+    build_system_prompt_with_config,
 };
 
 use crate::Result;
