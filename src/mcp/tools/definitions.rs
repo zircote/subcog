@@ -123,32 +123,41 @@ pub fn namespaces_tool() -> ToolDefinition {
 pub fn consolidate_tool() -> ToolDefinition {
     ToolDefinition {
         name: "subcog_consolidate".to_string(),
-        description: "Consolidate related memories using LLM to merge and summarize. Uses MCP sampling to request LLM completion.".to_string(),
+        description: "Consolidate related memories by finding semantic clusters and creating summary nodes. Returns consolidation statistics.".to_string(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
-                "namespace": {
-                    "type": "string",
-                    "description": "Namespace to consolidate",
-                    "enum": ["decisions", "patterns", "learnings", "context", "tech-debt", "apis", "config", "security", "performance", "testing"]
+                "namespaces": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["decisions", "patterns", "learnings", "context", "tech-debt", "apis", "config", "security", "performance", "testing"]
+                    },
+                    "description": "Namespaces to consolidate (optional, defaults to all)"
                 },
-                "query": {
-                    "type": "string",
-                    "description": "Optional query to filter memories for consolidation"
-                },
-                "strategy": {
-                    "type": "string",
-                    "description": "Consolidation strategy: merge (combine similar), summarize (create summary), dedupe (remove duplicates)",
-                    "enum": ["merge", "summarize", "dedupe"],
-                    "default": "merge"
+                "days": {
+                    "type": "integer",
+                    "description": "Time window in days for memories to consolidate (optional)",
+                    "minimum": 1
                 },
                 "dry_run": {
                     "type": "boolean",
                     "description": "If true, show what would be consolidated without making changes",
                     "default": false
+                },
+                "min_memories": {
+                    "type": "integer",
+                    "description": "Minimum number of memories required to form a group (optional, default: 3)",
+                    "minimum": 2
+                },
+                "similarity": {
+                    "type": "number",
+                    "description": "Similarity threshold 0.0-1.0 for grouping related memories (optional, default: 0.7)",
+                    "minimum": 0.0,
+                    "maximum": 1.0
                 }
             },
-            "required": ["namespace"]
+            "required": []
         }),
     }
 }

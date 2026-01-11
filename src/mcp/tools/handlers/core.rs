@@ -446,109 +446,196 @@ pub fn execute_namespaces(_arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the consolidate tool.
-/// Returns a sampling request for the LLM to perform consolidation.
+/// Triggers memory consolidation and returns statistics.
 pub fn execute_consolidate(arguments: Value) -> Result<ToolResult> {
+    use crate::config::{ConsolidationConfig, StorageBackendType};
+    use crate::services::ConsolidationService;
+    use crate::storage::index::SqliteBackend;
+    use crate::storage::persistence::FilesystemBackend;
+    use std::str::FromStr;
+    use std::sync::Arc;
+
     let args: ConsolidateArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
-    // SEC-M5: Validate query length if provided
-    if let Some(ref query) = args.query {
-        validate_input_length(query, "query", MAX_QUERY_LENGTH)?;
-    }
-
-    let namespace = parse_namespace(&args.namespace);
-    let strategy = args.strategy.as_deref().unwrap_or("merge");
     let dry_run = args.dry_run.unwrap_or(false);
 
-    // Fetch memories for consolidation
-    let services = ServiceContainer::from_current_dir_or_user()?;
-    let filter = SearchFilter::new().with_namespace(namespace);
-    let recall = services.recall()?;
-    let result = fetch_consolidation_candidates(&recall, &filter, args.query.as_deref(), 50)?;
+    // Load config to check if consolidation is enabled
+    let config = crate::config::SubcogConfig::load()?;
 
-    if result.memories.is_empty() {
+    if !config.consolidation.enabled {
         return Ok(ToolResult {
             content: vec![ToolContent::Text {
-                text: format!(
-                    "No memories found in namespace '{}' to consolidate.",
-                    args.namespace
-                ),
+                text: "Consolidation is disabled in configuration. To enable, set [consolidation] enabled = true in your config file.".to_string(),
             }],
             is_error: false,
         });
     }
 
-    // Build context for sampling request - use full URNs
-    let memories_text: String = result
-        .memories
-        .iter()
-        .enumerate()
-        .map(|(i, hit)| {
-            let domain_part = if hit.memory.domain.is_project_scoped() {
-                "project".to_string()
-            } else {
-                hit.memory.domain.to_string()
-            };
-            let urn = format!(
-                "subcog://{}/{}/{}",
-                domain_part,
-                hit.memory.namespace.as_str(),
-                hit.memory.id.as_str()
-            );
-            format!("{}. [{}] {}", i + 1, urn, hit.memory.content)
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
+    // Build effective consolidation config from config file + MCP args
+    let mut consolidation_config = config.consolidation.clone();
 
-    let sampling_prompt = match strategy {
-        "merge" => format!(
-            "Analyze these {} memories from the '{}' namespace and identify groups that should be merged:\n\n{}\n\nFor each group, provide:\n1. URNs to merge\n2. Merged content\n3. Rationale",
-            result.memories.len(),
-            args.namespace,
-            memories_text
-        ),
-        "summarize" => format!(
-            "Create a comprehensive summary of these {} memories from the '{}' namespace:\n\n{}\n\nProvide a structured summary that captures key themes, decisions, and patterns.",
-            result.memories.len(),
-            args.namespace,
-            memories_text
-        ),
-        "dedupe" => format!(
-            "Identify duplicate or near-duplicate memories from these {} entries in the '{}' namespace:\n\n{}\n\nFor each duplicate set, identify which to keep and which to remove.",
-            result.memories.len(),
-            args.namespace,
-            memories_text
-        ),
-        _ => format!(
-            "Analyze these {} memories from the '{}' namespace:\n\n{}",
-            result.memories.len(),
-            args.namespace,
-            memories_text
-        ),
+    // Override namespace filter if provided
+    if let Some(ref namespaces) = args.namespaces {
+        let parsed_namespaces: Result<Vec<Namespace>, _> = namespaces
+            .iter()
+            .map(|ns| Namespace::from_str(ns))
+            .collect();
+
+        match parsed_namespaces {
+            Ok(ns) => {
+                consolidation_config.namespace_filter = Some(ns);
+            },
+            Err(e) => {
+                return Ok(ToolResult {
+                    content: vec![ToolContent::Text {
+                        text: format!("Invalid namespace: {e}"),
+                    }],
+                    is_error: true,
+                });
+            },
+        }
+    }
+
+    // Override time window if provided
+    if let Some(d) = args.days {
+        consolidation_config.time_window_days = Some(d);
+    }
+
+    // Override min memories if provided
+    if let Some(min) = args.min_memories {
+        consolidation_config.min_memories_to_consolidate = min;
+    }
+
+    // Override similarity threshold if provided
+    if let Some(sim) = args.similarity {
+        if !(0.0..=1.0).contains(&sim) {
+            return Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: "Similarity threshold must be between 0.0 and 1.0".to_string(),
+                }],
+                is_error: true,
+            });
+        }
+        consolidation_config.similarity_threshold = sim;
+    }
+
+    let data_dir = &config.data_dir;
+    let storage_config = &config.storage.project;
+
+    // Create service container for recall service and index
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let recall_service = services.recall()?;
+    let index = Arc::new(services.index()?);
+
+    // Build LLM provider (optional, for summarization)
+    let llm_provider = services.llm_provider();
+
+    // Run consolidation based on configured backend
+    let result_text = match storage_config.backend {
+        StorageBackendType::Sqlite => {
+            let db_path = storage_config
+                .path
+                .as_ref()
+                .map_or_else(|| data_dir.join("memories.db"), std::path::PathBuf::from);
+
+            let backend = SqliteBackend::new(&db_path)?;
+            let mut service = ConsolidationService::new(backend)
+                .with_index(index);
+
+            if let Some(llm) = llm_provider {
+                service = service.with_llm(llm);
+            }
+
+            run_mcp_consolidation(&mut service, &recall_service, &consolidation_config, dry_run)?
+        },
+        StorageBackendType::Filesystem => {
+            let backend = FilesystemBackend::new(data_dir);
+            let mut service = ConsolidationService::new(backend)
+                .with_index(index);
+
+            if let Some(llm) = llm_provider {
+                service = service.with_llm(llm);
+            }
+
+            run_mcp_consolidation(&mut service, &recall_service, &consolidation_config, dry_run)?
+        },
+        StorageBackendType::PostgreSQL | StorageBackendType::Redis => {
+            return Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: format!("{:?} consolidation not yet implemented", storage_config.backend),
+                }],
+                is_error: true,
+            });
+        },
     };
 
-    // Return sampling request
     Ok(ToolResult {
-        content: vec![ToolContent::Text {
-            text: if dry_run {
-                format!(
-                    "DRY RUN: Would consolidate {} memories using '{}' strategy.\n\nSampling prompt:\n{}",
-                    result.memories.len(),
-                    strategy,
-                    sampling_prompt
-                )
-            } else {
-                format!(
-                    "SAMPLING_REQUEST\n\nstrategy: {}\nnamespace: {}\nmemory_count: {}\n\nprompt: {}",
-                    strategy,
-                    args.namespace,
-                    result.memories.len(),
-                    sampling_prompt
-                )
-            },
-        }],
+        content: vec![ToolContent::Text { text: result_text }],
         is_error: false,
     })
+}
+
+/// Helper function to run consolidation and format results for MCP tool response.
+fn run_mcp_consolidation<P: crate::storage::PersistenceBackend>(
+    service: &mut ConsolidationService<P>,
+    recall_service: &crate::services::RecallService,
+    consolidation_config: &ConsolidationConfig,
+    dry_run: bool,
+) -> Result<String> {
+    if dry_run {
+        // Dry-run mode: show what would be consolidated
+        let groups = service.find_related_memories(recall_service, consolidation_config)?;
+
+        let mut output = String::from("**Dry-run results (no changes made)**\n\n");
+
+        let mut total_groups = 0;
+        let mut total_memories = 0;
+
+        for (namespace, namespace_groups) in &groups {
+            if namespace_groups.is_empty() {
+                continue;
+            }
+
+            output.push_str(&format!("**{:?}**: {} group(s)\n", namespace, namespace_groups.len()));
+            for (idx, group) in namespace_groups.iter().enumerate() {
+                output.push_str(&format!("  - Group {}: {} memories\n", idx + 1, group.len()));
+                total_groups += 1;
+                total_memories += group.len();
+            }
+            output.push('\n');
+        }
+
+        if total_groups == 0 {
+            output.push_str("No related memory groups found.\n");
+        } else {
+            output.push_str(&format!("**Summary:**\n"));
+            output.push_str(&format!("  - Would create {} summary node(s)\n", total_groups));
+            output.push_str(&format!("  - Would consolidate {} memory/memories\n", total_memories));
+        }
+
+        Ok(output)
+    } else {
+        // Normal mode: perform actual consolidation
+        let stats = service.consolidate_memories(recall_service, consolidation_config)?;
+
+        let mut output = String::from("**Consolidation completed**\n\n");
+
+        if stats.processed == 0 {
+            output.push_str("No memories found to consolidate.\n");
+        } else {
+            output.push_str(&format!("**Statistics:**\n"));
+            output.push_str(&format!("  - Processed: {} memories\n", stats.processed));
+            output.push_str(&format!("  - Summary nodes created: {}\n", stats.summaries_created));
+            output.push_str(&format!("  - Merged: {}\n", stats.merged));
+            output.push_str(&format!("  - Archived: {}\n", stats.archived));
+            if stats.contradictions > 0 {
+                output.push_str(&format!("  - Contradictions detected: {}\n", stats.contradictions));
+            }
+        }
+
+        Ok(output)
+    }
 }
 
 /// Executes the enrich tool.

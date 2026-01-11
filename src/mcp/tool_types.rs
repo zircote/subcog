@@ -49,14 +49,16 @@ pub struct RecallArgs {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConsolidateArgs {
-    /// Namespace to consolidate (required).
-    pub namespace: String,
-    /// Optional query to filter memories for consolidation.
-    pub query: Option<String>,
-    /// Consolidation strategy: "merge", "summarize", or "dedupe".
-    pub strategy: Option<String>,
+    /// Namespaces to consolidate (optional, defaults to all).
+    pub namespaces: Option<Vec<String>>,
+    /// Time window in days (optional).
+    pub days: Option<u32>,
     /// If true, show what would be consolidated without making changes.
     pub dry_run: Option<bool>,
+    /// Minimum number of memories required to form a group (optional).
+    pub min_memories: Option<usize>,
+    /// Similarity threshold 0.0-1.0 for grouping memories (optional).
+    pub similarity: Option<f32>,
 }
 
 /// Arguments for the enrich tool.
@@ -412,7 +414,7 @@ mod tests {
 
     #[test]
     fn test_consolidate_args_rejects_unknown_fields() {
-        let json = r#"{"namespace": "decisions", "extra": true}"#;
+        let json = r#"{"namespaces": ["decisions"], "extra": true}"#;
         let result: Result<ConsolidateArgs, _> = serde_json::from_str(json);
         assert!(result.is_err());
     }
