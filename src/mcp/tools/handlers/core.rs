@@ -638,6 +638,90 @@ fn run_mcp_consolidation<P: crate::storage::PersistenceBackend>(
     }
 }
 
+/// Executes the get summary tool.
+/// Retrieves a summary memory and its linked source memories.
+pub fn execute_get_summary(arguments: Value) -> Result<ToolResult> {
+    use crate::mcp::tool_types::GetSummaryArgs;
+    use crate::models::{EdgeType, MemoryId};
+
+    let args: GetSummaryArgs =
+        serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let persistence = services.persistence()?;
+    let index = services.index()?;
+
+    // Get the summary memory
+    let memory_id = MemoryId::new(args.memory_id.clone());
+    let memory = persistence.get(&memory_id)?.ok_or_else(|| {
+        Error::InvalidInput(format!("Memory not found: {}", args.memory_id))
+    })?;
+
+    // Check if this is actually a summary
+    if !memory.is_summary {
+        return Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!(
+                    "Memory '{}' is not a summary node.\n\nTo retrieve a regular memory, use subcog_recall instead.",
+                    args.memory_id
+                ),
+            }],
+            is_error: true,
+        });
+    }
+
+    let mut output = String::from("**Summary Memory**\n\n");
+
+    // Display summary content
+    output.push_str(&format!("**ID:** {}\n", memory.id.as_str()));
+    output.push_str(&format!("**Namespace:** {:?}\n", memory.namespace));
+    if !memory.tags.is_empty() {
+        output.push_str(&format!("**Tags:** {}\n", memory.tags.join(", ")));
+    }
+    if let Some(ts) = memory.consolidation_timestamp {
+        output.push_str(&format!("**Consolidated at:** {}\n", ts));
+    }
+    output.push_str(&format!("\n**Summary:**\n{}\n\n", memory.content));
+
+    // Query for source memories using SourceOf edges
+    let source_ids = index.query_edges(&memory_id, EdgeType::SourceOf)?;
+
+    if source_ids.is_empty() {
+        output.push_str("**Source Memories:** None (edges not stored or summary created without service)\n");
+    } else {
+        output.push_str(&format!("**Source Memories ({}):**\n\n", source_ids.len()));
+
+        // Retrieve each source memory
+        for (idx, source_id) in source_ids.iter().enumerate() {
+            match persistence.get(source_id)? {
+                Some(source_memory) => {
+                    output.push_str(&format!("{}. **{}**\n", idx + 1, source_id.as_str()));
+                    output.push_str(&format!("   - Namespace: {:?}\n", source_memory.namespace));
+                    if !source_memory.tags.is_empty() {
+                        output.push_str(&format!("   - Tags: {}\n", source_memory.tags.join(", ")));
+                    }
+                    // Show truncated content (first 150 chars)
+                    let preview = if source_memory.content.len() > 150 {
+                        format!("{}...", &source_memory.content[..150])
+                    } else {
+                        source_memory.content.clone()
+                    };
+                    output.push_str(&format!("   - Content: {}\n", preview));
+                    output.push('\n');
+                }
+                None => {
+                    output.push_str(&format!("{}. {} (not found)\n\n", idx + 1, source_id.as_str()));
+                }
+            }
+        }
+    }
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text { text: output }],
+        is_error: false,
+    })
+}
+
 /// Executes the enrich tool.
 /// Returns a sampling request for the LLM to enrich a memory.
 pub fn execute_enrich(arguments: Value) -> Result<ToolResult> {

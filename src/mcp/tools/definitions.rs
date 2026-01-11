@@ -162,6 +162,24 @@ pub fn consolidate_tool() -> ToolDefinition {
     }
 }
 
+/// Defines the get summary tool.
+pub fn get_summary_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_get_summary".to_string(),
+        description: "Retrieve a summary node and its linked source memories. Uses edge relationships to show which memories were consolidated into the summary.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "memory_id": {
+                    "type": "string",
+                    "description": "ID of the summary memory to retrieve"
+                }
+            },
+            "required": ["memory_id"]
+        }),
+    }
+}
+
 /// Defines the enrich tool.
 pub fn enrich_tool() -> ToolDefinition {
     ToolDefinition {

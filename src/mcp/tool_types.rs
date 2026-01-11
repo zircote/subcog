@@ -61,6 +61,14 @@ pub struct ConsolidateArgs {
     pub similarity: Option<f32>,
 }
 
+/// Arguments for the get summary tool.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GetSummaryArgs {
+    /// ID of the summary memory to retrieve.
+    pub memory_id: String,
+}
+
 /// Arguments for the enrich tool.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -416,6 +424,13 @@ mod tests {
     fn test_consolidate_args_rejects_unknown_fields() {
         let json = r#"{"namespaces": ["decisions"], "extra": true}"#;
         let result: Result<ConsolidateArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_summary_args_rejects_unknown_fields() {
+        let json = r#"{"memory_id": "123", "include_private": true}"#;
+        let result: Result<GetSummaryArgs, _> = serde_json::from_str(json);
         assert!(result.is_err());
     }
 
