@@ -607,9 +607,11 @@ mod consolidation_integration_tests {
             .store(&memory2)
             .expect("Failed to store memory2");
 
-        // Create OpenAI client with default configuration
+        // Create OpenAI client with resilience wrapper (circuit breaker + retries)
         let openai_client = OpenAiClient::new();
-        let llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(openai_client);
+        let resilience_config = subcog::llm::LlmResilienceConfig::default();
+        let resilient_client = subcog::llm::ResilientLlmProvider::new(openai_client, resilience_config);
+        let llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(resilient_client);
 
         let service = ConsolidationService::new(backend).with_llm(llm);
 
@@ -684,9 +686,11 @@ mod consolidation_integration_tests {
             .store(&memory3)
             .expect("Failed to store memory3");
 
-        // Create consolidation service with OpenAI and index backend
+        // Create consolidation service with OpenAI (with resilience wrapper) and index backend
         let openai_client = OpenAiClient::new();
-        let llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(openai_client);
+        let resilience_config = subcog::llm::LlmResilienceConfig::default();
+        let resilient_client = subcog::llm::ResilientLlmProvider::new(openai_client, resilience_config);
+        let llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(resilient_client);
         let service = ConsolidationService::new(backend)
             .with_llm(llm)
             .with_index(Arc::new(index_backend));
@@ -813,8 +817,10 @@ mod consolidation_integration_tests {
             .store(&memory2)
             .expect("Failed to store memory2");
 
-        // Create Ollama client
-        let llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(ollama_client);
+        // Create Ollama client with resilience wrapper (circuit breaker + retries)
+        let resilience_config = subcog::llm::LlmResilienceConfig::default();
+        let resilient_client = subcog::llm::ResilientLlmProvider::new(ollama_client, resilience_config);
+        let llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(resilient_client);
 
         let service = ConsolidationService::new(backend).with_llm(llm);
 
@@ -892,8 +898,10 @@ mod consolidation_integration_tests {
             .store(&memory3)
             .expect("Failed to store memory3");
 
-        // Create consolidation service with Ollama and index backend
-        let llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(ollama_client);
+        // Create consolidation service with Ollama (with resilience wrapper) and index backend
+        let resilience_config = subcog::llm::LlmResilienceConfig::default();
+        let resilient_client = subcog::llm::ResilientLlmProvider::new(ollama_client, resilience_config);
+        let llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(resilient_client);
         let service = ConsolidationService::new(backend)
             .with_llm(llm)
             .with_index(Arc::new(index_backend));

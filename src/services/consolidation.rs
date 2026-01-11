@@ -1,6 +1,18 @@
 //! Memory consolidation service.
 //!
 //! Manages memory lifecycle, clustering, and archival.
+//!
+//! # Circuit Breaker Pattern
+//!
+//! LLM calls in consolidation should be wrapped with [`ResilientLlmProvider`] for:
+//! - **Automatic retries**: Transient failures (timeouts, 5xx errors) retry with exponential backoff
+//! - **Circuit breaker**: Opens after consecutive failures to prevent cascading failures
+//! - **Error budget**: Tracks error rate and latency SLO violations
+//!
+//! See [`with_llm`] for usage examples.
+//!
+//! [`ResilientLlmProvider`]: crate::llm::ResilientLlmProvider
+//! [`with_llm`]: ConsolidationService::with_llm
 
 use crate::Result;
 use crate::current_timestamp;
@@ -69,11 +81,31 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
 
     /// Sets the LLM provider for intelligent consolidation.
     ///
+    /// **Recommended**: Wrap the LLM provider with [`ResilientLlmProvider`] for automatic
+    /// retries, circuit breaker pattern, and error budget tracking.
+    ///
     /// # Arguments
     ///
     /// * `llm` - The LLM provider to use for summarization and analysis.
     ///
     /// # Examples
+    ///
+    /// ## With Resilience Wrapper (Recommended)
+    ///
+    /// ```rust,ignore
+    /// use subcog::services::ConsolidationService;
+    /// use subcog::llm::{AnthropicClient, ResilientLlmProvider, LlmResilienceConfig};
+    /// use subcog::storage::persistence::FilesystemBackend;
+    /// use std::sync::Arc;
+    ///
+    /// let backend = FilesystemBackend::new("/tmp/memories");
+    /// let client = AnthropicClient::new();
+    /// let resilience_config = LlmResilienceConfig::default();
+    /// let llm = Arc::new(ResilientLlmProvider::new(client, resilience_config));
+    /// let service = ConsolidationService::new(backend).with_llm(llm);
+    /// ```
+    ///
+    /// ## Without Resilience Wrapper
     ///
     /// ```rust,ignore
     /// use subcog::services::ConsolidationService;
@@ -85,6 +117,8 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     /// let llm = Arc::new(AnthropicClient::new());
     /// let service = ConsolidationService::new(backend).with_llm(llm);
     /// ```
+    ///
+    /// [`ResilientLlmProvider`]: crate::llm::ResilientLlmProvider
     #[must_use]
     pub fn with_llm(mut self, llm: Arc<dyn LlmProvider + Send + Sync>) -> Self {
         self.llm = Some(llm);
@@ -157,6 +191,13 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     /// When LLM is unavailable:
     /// - Returns an error if summarization is required
     /// - Caller should handle by skipping consolidation or using fallback
+    ///
+    /// **Circuit Breaker**: If using [`ResilientLlmProvider`], LLM failures will:
+    /// - Retry with exponential backoff (3 attempts by default)
+    /// - Open circuit after consecutive failures (prevents cascading failures)
+    /// - Return circuit breaker errors when circuit is open
+    ///
+    /// [`ResilientLlmProvider`]: crate::llm::ResilientLlmProvider
     ///
     /// # Configuration
     ///
