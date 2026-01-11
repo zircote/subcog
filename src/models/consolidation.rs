@@ -23,6 +23,7 @@
 //! - `RelatedTo` - Memory A is contextually related to memory B
 //! - `Refines` - Memory A adds detail to memory B
 //! - `ParentOf` / `ChildOf` - Hierarchical relationships
+//! - `SummarizedBy` / `SourceOf` - Consolidation relationships (original → summary, summary → originals)
 //!
 //! # Retention Scoring
 //!
@@ -95,6 +96,10 @@ pub enum EdgeType {
     ParentOf,
     /// Memory A is a child of memory B (hierarchy).
     ChildOf,
+    /// Memory A is summarized by memory B (A is an original, B is the summary).
+    SummarizedBy,
+    /// Memory A is a source of memory B (A is a summary, B is an original).
+    SourceOf,
 }
 
 impl EdgeType {
@@ -108,6 +113,8 @@ impl EdgeType {
             Self::Refines => "refines",
             Self::ParentOf => "parent_of",
             Self::ChildOf => "child_of",
+            Self::SummarizedBy => "summarized_by",
+            Self::SourceOf => "source_of",
         }
     }
 
@@ -121,6 +128,8 @@ impl EdgeType {
             Self::Refines => Self::Refines, // No inverse defined
             Self::ParentOf => Self::ChildOf,
             Self::ChildOf => Self::ParentOf,
+            Self::SummarizedBy => Self::SourceOf,
+            Self::SourceOf => Self::SummarizedBy,
         }
     }
 }
