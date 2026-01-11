@@ -358,6 +358,214 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         let score = self.calculate_retention_score(memory_id, now);
         score.suggested_tier()
     }
+
+    /// Finds related memories grouped by namespace and semantic similarity.
+    ///
+    /// Uses semantic search to find memories that are related to each other based on
+    /// embeddings. Groups results by namespace and filters by similarity threshold.
+    ///
+    /// # Arguments
+    ///
+    /// * `recall_service` - The recall service to use for semantic search
+    /// * `config` - Consolidation configuration containing similarity threshold and filters
+    ///
+    /// # Returns
+    ///
+    /// A map of namespace to vectors of memory IDs that are related above the threshold.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the semantic search fails.
+    ///
+    /// # Graceful Degradation
+    ///
+    /// If embeddings are not available:
+    /// - Returns empty result without error
+    /// - Logs a warning for visibility
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use subcog::services::{ConsolidationService, RecallService};
+    /// use subcog::config::ConsolidationConfig;
+    /// use subcog::storage::persistence::FilesystemBackend;
+    ///
+    /// let backend = FilesystemBackend::new("/tmp/memories");
+    /// let service = ConsolidationService::new(backend);
+    /// let recall = RecallService::new();
+    /// let config = ConsolidationConfig::new().with_similarity_threshold(0.7);
+    ///
+    /// let groups = service.find_related_memories(&recall, &config)?;
+    /// for (namespace, memory_ids) in groups {
+    ///     println!("{:?}: {} related memories", namespace, memory_ids.len());
+    /// }
+    /// # Ok::<(), subcog::Error>(())
+    /// ```
+    pub fn find_related_memories(
+        &self,
+        recall_service: &crate::services::RecallService,
+        config: &crate::config::ConsolidationConfig,
+    ) -> Result<HashMap<Namespace, Vec<Vec<crate::models::MemoryId>>>> {
+        use crate::models::{SearchFilter, SearchMode};
+
+        // Check if vector search is available
+        if !recall_service.has_vector_search() {
+            tracing::warn!(
+                "Vector search not available for consolidation. \
+                 Embeddings required for semantic grouping. Returning empty result."
+            );
+            return Ok(HashMap::new());
+        }
+
+        // Get all memory IDs from persistence
+        let memory_ids = self.persistence.list_ids()?;
+
+        // Apply time window filter if configured
+        let now = current_timestamp();
+        let cutoff_timestamp = config.time_window_days.map(|days| {
+            let days_in_seconds = u64::from(days) * 86400;
+            now.saturating_sub(days_in_seconds)
+        });
+
+        // Group by namespace while filtering by time window
+        let mut namespace_groups: HashMap<Namespace, Vec<Memory>> = HashMap::new();
+
+        for id in &memory_ids {
+            if let Some(memory) = self.persistence.get(id)? {
+                // Skip if outside time window
+                if let Some(cutoff) = cutoff_timestamp
+                    && memory.created_at < cutoff
+                {
+                    continue;
+                }
+
+                // Apply namespace filter if configured
+                if let Some(ref filter_namespaces) = config.namespace_filter {
+                    if !filter_namespaces.contains(&memory.namespace) {
+                        continue;
+                    }
+                }
+
+                // Skip if embedding is missing (needed for similarity comparison)
+                if memory.embedding.is_none() {
+                    tracing::debug!(
+                        memory_id = %memory.id.as_str(),
+                        "Skipping memory without embedding for consolidation"
+                    );
+                    continue;
+                }
+
+                namespace_groups
+                    .entry(memory.namespace)
+                    .or_default()
+                    .push(memory);
+            }
+        }
+
+        // For each namespace, find clusters of related memories
+        let mut result: HashMap<Namespace, Vec<Vec<crate::models::MemoryId>>> = HashMap::new();
+
+        for (namespace, memories) in namespace_groups {
+            // Need at least min_memories_to_consolidate to form a group
+            if memories.len() < config.min_memories_to_consolidate {
+                tracing::debug!(
+                    namespace = ?namespace,
+                    count = memories.len(),
+                    min_required = config.min_memories_to_consolidate,
+                    "Skipping namespace with insufficient memories"
+                );
+                continue;
+            }
+
+            // Find related memory groups using semantic similarity
+            let groups = self.cluster_by_similarity(&memories, config.similarity_threshold)?;
+
+            if !groups.is_empty() {
+                result.insert(namespace, groups);
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Clusters memories by semantic similarity using embeddings.
+    ///
+    /// Uses cosine similarity between embeddings to group related memories.
+    /// Memories are grouped if their similarity is >= threshold.
+    fn cluster_by_similarity(
+        &self,
+        memories: &[Memory],
+        threshold: f32,
+    ) -> Result<Vec<Vec<crate::models::MemoryId>>> {
+        let mut groups: Vec<Vec<crate::models::MemoryId>> = Vec::new();
+        let mut assigned: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for (i, memory) in memories.iter().enumerate() {
+            // Skip if already assigned to a group
+            if assigned.contains(memory.id.as_str()) {
+                continue;
+            }
+
+            let Some(ref embedding_i) = memory.embedding else {
+                continue;
+            };
+
+            let mut group = vec![memory.id.clone()];
+            assigned.insert(memory.id.as_str().to_string());
+
+            // Find all other memories similar to this one
+            for (j, other_memory) in memories.iter().enumerate() {
+                if i == j || assigned.contains(other_memory.id.as_str()) {
+                    continue;
+                }
+
+                let Some(ref embedding_j) = other_memory.embedding else {
+                    continue;
+                };
+
+                // Calculate cosine similarity
+                let similarity = cosine_similarity(embedding_i, embedding_j);
+
+                if similarity >= threshold {
+                    group.push(other_memory.id.clone());
+                    assigned.insert(other_memory.id.as_str().to_string());
+                }
+            }
+
+            // Only add groups with multiple memories
+            if group.len() >= 2 {
+                groups.push(group);
+            }
+        }
+
+        Ok(groups)
+    }
+}
+
+/// Calculates cosine similarity between two embedding vectors.
+///
+/// Returns a value in the range [0.0, 1.0] where:
+/// - 1.0 = identical vectors
+/// - 0.0 = orthogonal vectors
+///
+/// # Panics
+///
+/// This function does not panic. If vectors have different lengths or zero magnitude,
+/// it returns 0.0 to indicate no similarity.
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() {
+        return 0.0;
+    }
+
+    let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let magnitude_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let magnitude_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+
+    if magnitude_a == 0.0 || magnitude_b == 0.0 {
+        return 0.0;
+    }
+
+    (dot_product / (magnitude_a * magnitude_b)).clamp(0.0, 1.0)
 }
 
 /// Statistics from a consolidation operation.
@@ -545,5 +753,150 @@ mod tests {
         // Default score should be around 0.5 (importance) with low access/recency
         assert!(score.score() >= 0.0);
         assert!(score.score() <= 1.0);
+    }
+
+    #[test]
+    fn test_cosine_similarity_identical_vectors() {
+        let vec_a = vec![1.0, 2.0, 3.0];
+        let vec_b = vec![1.0, 2.0, 3.0];
+        let similarity = super::cosine_similarity(&vec_a, &vec_b);
+        assert!((similarity - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_cosine_similarity_orthogonal_vectors() {
+        let vec_a = vec![1.0, 0.0, 0.0];
+        let vec_b = vec![0.0, 1.0, 0.0];
+        let similarity = super::cosine_similarity(&vec_a, &vec_b);
+        assert!(similarity.abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_cosine_similarity_different_lengths() {
+        let vec_a = vec![1.0, 2.0, 3.0];
+        let vec_b = vec![1.0, 2.0];
+        let similarity = super::cosine_similarity(&vec_a, &vec_b);
+        assert_eq!(similarity, 0.0);
+    }
+
+    #[test]
+    fn test_cosine_similarity_zero_vectors() {
+        let vec_a = vec![0.0, 0.0, 0.0];
+        let vec_b = vec![1.0, 2.0, 3.0];
+        let similarity = super::cosine_similarity(&vec_a, &vec_b);
+        assert_eq!(similarity, 0.0);
+    }
+
+    #[test]
+    fn test_find_related_memories_no_vector_search() {
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_find_related"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+        let service = ConsolidationService::new(backend);
+
+        // Create recall service without vector search
+        let recall = crate::services::RecallService::new();
+        let config = crate::config::ConsolidationConfig::new();
+
+        let result = service.find_related_memories(&recall, &config);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_cluster_by_similarity() {
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_cluster"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+        let service = ConsolidationService::new(backend);
+
+        // Create memories with embeddings
+        let embedding_a = vec![1.0, 0.0, 0.0];
+        let embedding_b = vec![0.9, 0.1, 0.0]; // Similar to A
+        let embedding_c = vec![0.0, 1.0, 0.0]; // Different
+
+        let mut memory_a = create_test_memory("mem_a", "Content A");
+        memory_a.embedding = Some(embedding_a);
+
+        let mut memory_b = create_test_memory("mem_b", "Content B");
+        memory_b.embedding = Some(embedding_b);
+
+        let mut memory_c = create_test_memory("mem_c", "Content C");
+        memory_c.embedding = Some(embedding_c);
+
+        let memories = vec![memory_a, memory_b, memory_c];
+
+        // Use a threshold that should group A and B together
+        let result = service.cluster_by_similarity(&memories, 0.7);
+        assert!(result.is_ok());
+
+        let groups = result.unwrap();
+        // Should have at least one group with A and B
+        assert!(!groups.is_empty());
+
+        // Check that we have a group with at least 2 memories
+        let has_group = groups.iter().any(|g| g.len() >= 2);
+        assert!(has_group);
+    }
+
+    #[test]
+    fn test_cluster_by_similarity_no_embeddings() {
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_cluster_no_emb"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+        let service = ConsolidationService::new(backend);
+
+        // Create memories without embeddings
+        let memory_a = create_test_memory("mem_a", "Content A");
+        let memory_b = create_test_memory("mem_b", "Content B");
+
+        let memories = vec![memory_a, memory_b];
+
+        let result = service.cluster_by_similarity(&memories, 0.7);
+        assert!(result.is_ok());
+
+        let groups = result.unwrap();
+        // Should have no groups since no embeddings
+        assert!(groups.is_empty());
+    }
+
+    #[test]
+    fn test_cluster_by_similarity_high_threshold() {
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_cluster_high"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+        let service = ConsolidationService::new(backend);
+
+        // Create memories with similar but not identical embeddings
+        let embedding_a = vec![1.0, 0.0, 0.0];
+        let embedding_b = vec![0.9, 0.1, 0.0];
+
+        let mut memory_a = create_test_memory("mem_a", "Content A");
+        memory_a.embedding = Some(embedding_a);
+
+        let mut memory_b = create_test_memory("mem_b", "Content B");
+        memory_b.embedding = Some(embedding_b);
+
+        let memories = vec![memory_a, memory_b];
+
+        // Use very high threshold (0.99) - should not group them
+        let result = service.cluster_by_similarity(&memories, 0.99);
+        assert!(result.is_ok());
+
+        let groups = result.unwrap();
+        // Should have no groups due to high threshold
+        assert!(groups.is_empty());
     }
 }
