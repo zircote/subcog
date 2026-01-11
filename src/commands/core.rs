@@ -198,13 +198,23 @@ pub fn cmd_status(config: &SubcogConfig) -> Result<(), Box<dyn std::error::Error
 }
 
 /// Consolidate command.
-pub fn cmd_consolidate(config: &SubcogConfig) -> Result<(), Box<dyn std::error::Error>> {
+#[allow(clippy::too_many_arguments)]
+pub fn cmd_consolidate(
+    config: &SubcogConfig,
+    namespace: Vec<String>,
+    days: Option<u32>,
+    dry_run: bool,
+    min_memories: Option<usize>,
+    similarity: Option<f32>,
+) -> Result<(), Box<dyn std::error::Error>> {
     use crate::cli::{build_anthropic_client, build_lmstudio_client, build_ollama_client, build_openai_client, build_resilience_config};
-    use subcog::config::{LlmProvider, StorageBackendType};
+    use subcog::config::{ConsolidationConfig, LlmProvider, StorageBackendType};
     use subcog::llm::ResilientLlmProvider;
+    use subcog::models::Namespace;
     use subcog::services::{ConsolidationService, ServiceContainer};
     use subcog::storage::index::SqliteBackend;
     use subcog::storage::persistence::FilesystemBackend;
+    use std::str::FromStr;
     use std::sync::Arc;
 
     println!("Running memory consolidation...");
@@ -215,6 +225,52 @@ pub fn cmd_consolidate(config: &SubcogConfig) -> Result<(), Box<dyn std::error::
         println!("Consolidation is disabled in configuration.");
         println!("To enable, set [consolidation] enabled = true in your config file");
         return Ok(());
+    }
+
+    // Build effective consolidation config from config file + CLI overrides
+    let mut consolidation_config = config.consolidation.clone();
+
+    // Override namespace filter if provided
+    if !namespace.is_empty() {
+        let parsed_namespaces: Result<Vec<Namespace>, _> = namespace
+            .iter()
+            .map(|ns| Namespace::from_str(ns))
+            .collect();
+
+        match parsed_namespaces {
+            Ok(namespaces) => {
+                consolidation_config.namespace_filter = Some(namespaces);
+            },
+            Err(e) => {
+                eprintln!("Error: Invalid namespace: {e}");
+                return Err(e.into());
+            },
+        }
+    }
+
+    // Override time window if provided
+    if let Some(d) = days {
+        consolidation_config.time_window_days = Some(d);
+    }
+
+    // Override min memories if provided
+    if let Some(min) = min_memories {
+        consolidation_config.min_memories_to_consolidate = min;
+    }
+
+    // Override similarity threshold if provided
+    if let Some(sim) = similarity {
+        if !(0.0..=1.0).contains(&sim) {
+            eprintln!("Error: Similarity threshold must be between 0.0 and 1.0");
+            return Err("Invalid similarity threshold".into());
+        }
+        consolidation_config.similarity_threshold = sim;
+    }
+
+    // Handle dry-run mode
+    if dry_run {
+        println!("DRY RUN MODE - No changes will be made");
+        println!();
     }
 
     let data_dir = &config.data_dir;
@@ -266,18 +322,18 @@ pub fn cmd_consolidate(config: &SubcogConfig) -> Result<(), Box<dyn std::error::
     } else {
         println!("  LLM provider: None (will skip summarization)");
     }
-    if let Some(ref namespaces) = config.consolidation.namespace_filter {
+    if let Some(ref namespaces) = consolidation_config.namespace_filter {
         println!("  Namespaces: {:?}", namespaces);
     } else {
         println!("  Namespaces: all");
     }
-    if let Some(days) = config.consolidation.time_window_days {
-        println!("  Time window: {} days", days);
+    if let Some(d) = consolidation_config.time_window_days {
+        println!("  Time window: {} days", d);
     } else {
         println!("  Time window: all time");
     }
-    println!("  Similarity threshold: {}", config.consolidation.similarity_threshold);
-    println!("  Minimum memories: {}", config.consolidation.min_memories_to_consolidate);
+    println!("  Similarity threshold: {}", consolidation_config.similarity_threshold);
+    println!("  Minimum memories: {}", consolidation_config.min_memories_to_consolidate);
     println!();
 
     // Create consolidation service based on configured backend
@@ -298,7 +354,7 @@ pub fn cmd_consolidate(config: &SubcogConfig) -> Result<(), Box<dyn std::error::
                 service = service.with_llm(llm);
             }
 
-            run_consolidation(&mut service, &recall_service, &config.consolidation)?;
+            run_consolidation(&mut service, &recall_service, &consolidation_config, dry_run)?;
         },
         StorageBackendType::Filesystem => {
             let backend = FilesystemBackend::new(data_dir);
@@ -309,7 +365,7 @@ pub fn cmd_consolidate(config: &SubcogConfig) -> Result<(), Box<dyn std::error::
                 service = service.with_llm(llm);
             }
 
-            run_consolidation(&mut service, &recall_service, &config.consolidation)?;
+            run_consolidation(&mut service, &recall_service, &consolidation_config, dry_run)?;
         },
         StorageBackendType::PostgreSQL => {
             eprintln!("PostgreSQL consolidation not yet implemented");
@@ -329,34 +385,76 @@ fn run_consolidation<P: PersistenceBackend>(
     service: &mut subcog::services::ConsolidationService<P>,
     recall_service: &subcog::services::RecallService,
     consolidation_config: &subcog::config::ConsolidationConfig,
+    dry_run: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    match service.consolidate_memories(recall_service, consolidation_config) {
-        Ok(stats) => {
-            println!();
-            println!("Consolidation completed:");
-            println!("  {}", stats.summary());
+    if dry_run {
+        // Dry-run mode: show what would be consolidated without making changes
+        match service.find_related_memories(recall_service, consolidation_config) {
+            Ok(groups) => {
+                println!();
+                println!("Dry-run results (no changes made):");
+                println!();
 
-            if stats.summaries_created > 0 {
-                println!("  ✓ Created {} summary node(s)", stats.summaries_created);
-            }
+                let mut total_groups = 0;
+                let mut total_memories = 0;
 
-            if stats.contradictions > 0 {
-                println!(
-                    "  ⚠ {} potential contradiction(s) detected - review recommended",
-                    stats.contradictions
-                );
-            }
+                for (namespace, namespace_groups) in &groups {
+                    if namespace_groups.is_empty() {
+                        continue;
+                    }
 
-            if stats.is_empty() {
-                println!("  No memories were consolidated (no related groups found)");
-            }
+                    println!("Namespace: {:?}", namespace);
+                    for (idx, group) in namespace_groups.iter().enumerate() {
+                        println!("  Group {}: {} memories", idx + 1, group.len());
+                        total_groups += 1;
+                        total_memories += group.len();
+                    }
+                    println!();
+                }
 
-            Ok(())
-        },
-        Err(e) => {
-            eprintln!("Consolidation failed: {e}");
-            Err(e.into())
-        },
+                println!("Summary:");
+                println!("  Would create {} summary node(s)", total_groups);
+                println!("  Would consolidate {} memory/memories", total_memories);
+                println!();
+                println!("Run without --dry-run to apply changes");
+
+                Ok(())
+            },
+            Err(e) => {
+                eprintln!("Failed to find related memories: {e}");
+                Err(e.into())
+            },
+        }
+    } else {
+        // Normal mode: perform actual consolidation
+        match service.consolidate_memories(recall_service, consolidation_config) {
+            Ok(stats) => {
+                println!();
+                println!("Consolidation completed:");
+                println!("  {}", stats.summary());
+
+                if stats.summaries_created > 0 {
+                    println!("  ✓ Created {} summary node(s)", stats.summaries_created);
+                }
+
+                if stats.contradictions > 0 {
+                    println!(
+                        "  ⚠ {} potential contradiction(s) detected - review recommended",
+                        stats.contradictions
+                    );
+                }
+
+                if stats.is_empty() {
+                    println!("  No memories were consolidated (no related groups found)");
+                }
+
+                Ok(())
+            },
+            Err(e) => {
+                eprintln!("Consolidation failed: {e}");
+                Err(e.into())
+            },
+        }
     }
 }
 
