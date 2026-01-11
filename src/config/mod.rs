@@ -4,9 +4,6 @@ mod features;
 
 pub use features::FeatureFlags;
 
-// Re-export consolidation config for public use
-pub use ConsolidationConfig;
-
 use serde::Deserialize;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -758,6 +755,8 @@ pub enum LlmProvider {
     Ollama,
     /// LM Studio (local).
     LmStudio,
+    /// No LLM provider configured (skips LLM-powered features).
+    None,
 }
 
 impl LlmProvider {
@@ -768,8 +767,15 @@ impl LlmProvider {
             "openai" => Self::OpenAi,
             "ollama" => Self::Ollama,
             "lmstudio" | "lm_studio" | "lm-studio" => Self::LmStudio,
+            "none" | "disabled" | "" => Self::None,
             _ => Self::Anthropic,
         }
+    }
+
+    /// Returns `true` if this provider is configured (not `None`).
+    #[must_use]
+    pub const fn is_configured(&self) -> bool {
+        !matches!(self, Self::None)
     }
 }
 
