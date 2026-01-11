@@ -426,32 +426,82 @@ fn run_consolidation<P: PersistenceBackend>(
             },
         }
     } else {
-        // Normal mode: perform actual consolidation
-        match service.consolidate_memories(recall_service, consolidation_config) {
-            Ok(stats) => {
+        // Normal mode: perform actual consolidation with progress reporting
+
+        // Step 1: Find related memory groups and show progress
+        println!();
+        print!("Analyzing memories... ");
+        match service.find_related_memories(recall_service, consolidation_config) {
+            Ok(groups) => {
+                let mut total_groups = 0;
+                let mut total_memories = 0;
+                let mut namespaces_with_groups = 0;
+
+                for (_, namespace_groups) in &groups {
+                    if !namespace_groups.is_empty() {
+                        namespaces_with_groups += 1;
+                        for group in namespace_groups {
+                            total_groups += 1;
+                            total_memories += group.len();
+                        }
+                    }
+                }
+
+                println!("done");
                 println!();
-                println!("Consolidation completed:");
-                println!("  {}", stats.summary());
 
-                if stats.summaries_created > 0 {
-                    println!("  ✓ Created {} summary node(s)", stats.summaries_created);
+                if total_groups == 0 {
+                    println!("No related memory groups found.");
+                    println!("  No memories to consolidate");
+                    return Ok(());
                 }
 
-                if stats.contradictions > 0 {
-                    println!(
-                        "  ⚠ {} potential contradiction(s) detected - review recommended",
-                        stats.contradictions
-                    );
-                }
+                println!("Found {} group(s) across {} namespace(s)", total_groups, namespaces_with_groups);
+                println!("  Total memories to consolidate: {}", total_memories);
+                println!();
 
-                if stats.is_empty() {
-                    println!("  No memories were consolidated (no related groups found)");
+                // Show breakdown by namespace
+                for (namespace, namespace_groups) in &groups {
+                    if namespace_groups.is_empty() {
+                        continue;
+                    }
+                    let ns_memories: usize = namespace_groups.iter().map(Vec::len).sum();
+                    println!("  {:?}: {} group(s), {} memories", namespace, namespace_groups.len(), ns_memories);
                 }
+                println!();
 
-                Ok(())
+                // Step 2: Perform consolidation
+                println!("Creating summaries...");
+
+                match service.consolidate_memories(recall_service, consolidation_config) {
+                    Ok(stats) => {
+                        println!();
+                        println!("Consolidation completed:");
+                        println!("  {}", stats.summary());
+
+                        if stats.summaries_created > 0 {
+                            println!("  ✓ Created {} summary node(s)", stats.summaries_created);
+                            println!("  ✓ Linked {} source memories via edges", total_memories);
+                        }
+
+                        if stats.contradictions > 0 {
+                            println!(
+                                "  ⚠ {} potential contradiction(s) detected - review recommended",
+                                stats.contradictions
+                            );
+                        }
+
+                        Ok(())
+                    },
+                    Err(e) => {
+                        eprintln!("Consolidation failed: {e}");
+                        Err(e.into())
+                    },
+                }
             },
             Err(e) => {
-                eprintln!("Consolidation failed: {e}");
+                println!("failed");
+                eprintln!("Failed to find related memories: {e}");
                 Err(e.into())
             },
         }
