@@ -2677,4 +2677,325 @@ mod tests {
         assert_eq!(stats.processed, 2);
         assert_eq!(stats.summaries_created, 0);
     }
+
+    #[test]
+    fn test_cluster_by_similarity_empty_list() {
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_cluster_empty_list"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+        let service = ConsolidationService::new(backend);
+
+        // Empty memories list should return empty groups
+        let result = service.cluster_by_similarity(&[], 0.7);
+        assert!(result.is_ok());
+
+        let groups = result.unwrap();
+        assert!(groups.is_empty());
+    }
+
+    #[test]
+    fn test_create_summary_node_no_tags() {
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_create_summary_no_tags"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+        let mut service = ConsolidationService::new(backend);
+
+        // Create memories with no tags
+        let mut memory_a = create_test_memory("mem_a", "Content A");
+        memory_a.tags = vec![];
+
+        let mut memory_b = create_test_memory("mem_b", "Content B");
+        memory_b.tags = vec![];
+
+        let source_memories = vec![memory_a, memory_b];
+        let summary_content = "Summary of untagged memories";
+
+        let result = service.create_summary_node(summary_content, &source_memories);
+        assert!(result.is_ok());
+
+        let summary_node = result.unwrap();
+        // Should have no tags
+        assert!(summary_node.tags.is_empty());
+    }
+
+    #[test]
+    fn test_edge_storage_idempotency() {
+        use crate::storage::index::SqliteBackend;
+        use crate::storage::traits::IndexBackend;
+        use std::sync::Arc;
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_edge_idempotency"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+
+        // Create SQLite index backend
+        let index = SqliteBackend::in_memory().expect("Failed to create in-memory SQLite");
+        let index_arc = Arc::new(index);
+
+        let mut service = ConsolidationService::new(backend).with_index(index_arc.clone());
+
+        // Create test memories
+        let memory_a = create_test_memory("idempotent_a", "First memory");
+        let memory_b = create_test_memory("idempotent_b", "Second memory");
+
+        // Index memories first
+        index_arc.index(&memory_a).expect("Failed to index memory_a");
+        index_arc.index(&memory_b).expect("Failed to index memory_b");
+
+        let source_memories = vec![memory_a.clone(), memory_b.clone()];
+        let summary_content = "Summary for idempotency test";
+
+        // Create summary node (stores edges)
+        let result1 = service.create_summary_node(summary_content, &source_memories);
+        assert!(result1.is_ok());
+        let summary1 = result1.unwrap();
+
+        // Index summary so we can query edges
+        index_arc.index(&summary1).expect("Failed to index summary");
+
+        // Create same summary again (should handle duplicate edges gracefully)
+        let result2 = service.create_summary_node(summary_content, &source_memories);
+        assert!(result2.is_ok());
+        let summary2 = result2.unwrap();
+
+        // Both summaries should be created successfully
+        assert!(summary1.is_summary);
+        assert!(summary2.is_summary);
+
+        // Edges should still exist (upsert handles duplicates)
+        let edges_from_a = index_arc
+            .query_edges(&memory_a.id, EdgeType::SummarizedBy)
+            .expect("Failed to query edges");
+
+        // Should have at least one edge (could be multiple if both summaries stored edges)
+        assert!(!edges_from_a.is_empty());
+    }
+
+    #[test]
+    fn test_find_related_memories_with_time_window() {
+        use crate::embedding::Embedder as EmbedderTrait;
+        use crate::storage::traits::VectorBackend;
+        use std::sync::Arc;
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_find_time_window"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+        let service = ConsolidationService::new(backend);
+
+        // Create mock embedder and vector backend
+        struct MockEmbedder;
+        impl EmbedderTrait for MockEmbedder {
+            fn embed(&self, _text: &str) -> Result<Vec<f32>> {
+                Ok(vec![1.0, 0.0, 0.0])
+            }
+            fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0]).collect())
+            }
+            fn model_name(&self) -> &str {
+                "mock"
+            }
+        }
+
+        struct MockVectorBackend;
+        impl VectorBackend for MockVectorBackend {
+            fn index(&self, _memory: &Memory) -> Result<()> {
+                Ok(())
+            }
+            fn search(&self, _embedding: &[f32], _limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+                Ok(vec![])
+            }
+            fn delete(&self, _memory_id: &MemoryId) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        let recall = crate::services::RecallService::new()
+            .with_embedder(Arc::new(MockEmbedder))
+            .with_vector(Arc::new(MockVectorBackend));
+
+        // Test with time window filter
+        let mut config = crate::config::ConsolidationConfig::new();
+        config.time_window_days = Some(7); // Only last 7 days
+
+        let result = service.find_related_memories(&recall, &config);
+        assert!(result.is_ok());
+
+        // Should return empty (no vector search results)
+        let groups = result.unwrap();
+        assert!(groups.is_empty());
+    }
+
+    #[test]
+    fn test_consolidate_memories_multiple_namespaces() {
+        use crate::embedding::Embedder as EmbedderTrait;
+        use crate::storage::traits::VectorBackend;
+        use std::sync::Arc;
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_consolidate_multi_namespace"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+
+        // Create mock LLM
+        struct MockLlm;
+        impl crate::llm::LlmProvider for MockLlm {
+            fn name(&self) -> &'static str {
+                "mock"
+            }
+            fn complete(&self, _prompt: &str) -> Result<String> {
+                Ok("Summary of memories".to_string())
+            }
+            fn analyze_for_capture(&self, _content: &str) -> Result<crate::llm::CaptureAnalysis> {
+                unimplemented!()
+            }
+        }
+
+        let llm: Arc<dyn crate::llm::LlmProvider + Send + Sync> = Arc::new(MockLlm);
+        let mut service = ConsolidationService::new(backend).with_llm(llm);
+
+        // Create memories in different namespaces with embeddings
+        let embedding = vec![1.0, 0.0, 0.0];
+
+        let mut mem_decisions_1 = create_test_memory("dec_1", "Decision 1");
+        mem_decisions_1.embedding = Some(embedding.clone());
+        mem_decisions_1.namespace = crate::models::Namespace::Decisions;
+
+        let mut mem_decisions_2 = create_test_memory("dec_2", "Decision 2");
+        mem_decisions_2.embedding = Some(embedding.clone());
+        mem_decisions_2.namespace = crate::models::Namespace::Decisions;
+
+        let mut mem_patterns_1 = create_test_memory("pat_1", "Pattern 1");
+        mem_patterns_1.embedding = Some(embedding.clone());
+        mem_patterns_1.namespace = crate::models::Namespace::Patterns;
+
+        let mut mem_patterns_2 = create_test_memory("pat_2", "Pattern 2");
+        mem_patterns_2.embedding = Some(embedding.clone());
+        mem_patterns_2.namespace = crate::models::Namespace::Patterns;
+
+        // Store all memories
+        let _ = service.persistence.store(&mem_decisions_1);
+        let _ = service.persistence.store(&mem_decisions_2);
+        let _ = service.persistence.store(&mem_patterns_1);
+        let _ = service.persistence.store(&mem_patterns_2);
+
+        // Create mock embedder and vector backend
+        struct MockEmbedder;
+        impl EmbedderTrait for MockEmbedder {
+            fn embed(&self, _text: &str) -> Result<Vec<f32>> {
+                Ok(vec![1.0, 0.0, 0.0])
+            }
+            fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0]).collect())
+            }
+            fn model_name(&self) -> &str {
+                "mock"
+            }
+        }
+
+        struct MockVectorBackend;
+        impl VectorBackend for MockVectorBackend {
+            fn index(&self, _memory: &Memory) -> Result<()> {
+                Ok(())
+            }
+            fn search(&self, _embedding: &[f32], _limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+                Ok(vec![])
+            }
+            fn delete(&self, _memory_id: &MemoryId) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        let recall = crate::services::RecallService::new()
+            .with_embedder(Arc::new(MockEmbedder))
+            .with_vector(Arc::new(MockVectorBackend));
+
+        // Configure to process multiple namespaces
+        let mut config = crate::config::ConsolidationConfig::new();
+        config.enabled = true;
+        config.namespace_filter = Some(vec![
+            crate::models::Namespace::Decisions,
+            crate::models::Namespace::Patterns,
+        ]);
+        config.similarity_threshold = 0.9;
+        config.min_memories_to_consolidate = 2;
+
+        let result = service.consolidate_memories(&recall, &config);
+        assert!(result.is_ok());
+
+        // Should process memories from both namespaces
+        let stats = result.unwrap();
+        assert_eq!(stats.processed, 4);
+    }
+
+    #[test]
+    fn test_summarize_group_preserves_memory_details() {
+        use std::sync::Arc;
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_summarize_details"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+
+        // Create mock LLM that echoes the input to verify details are passed
+        struct DetailCheckingMockLlm;
+        impl crate::llm::LlmProvider for DetailCheckingMockLlm {
+            fn name(&self) -> &'static str {
+                "detail_checking_mock"
+            }
+            fn complete(&self, prompt: &str) -> Result<String> {
+                // Verify prompt contains key details
+                if prompt.contains("mem_detail_1")
+                    && prompt.contains("mem_detail_2")
+                    && prompt.contains("Decisions")
+                    && prompt.contains("Important detail 1")
+                    && prompt.contains("Important detail 2")
+                {
+                    Ok("Summary preserving all key technical details from both memories".to_string())
+                } else {
+                    Err(crate::Error::OperationFailed {
+                        operation: "llm_complete".to_string(),
+                        cause: "Details not found in prompt".to_string(),
+                    })
+                }
+            }
+            fn analyze_for_capture(&self, _content: &str) -> Result<crate::llm::CaptureAnalysis> {
+                unimplemented!()
+            }
+        }
+
+        let llm: Arc<dyn crate::llm::LlmProvider + Send + Sync> = Arc::new(DetailCheckingMockLlm);
+        let service = ConsolidationService::new(backend).with_llm(llm);
+
+        // Create memories with specific details
+        let mut memory_a = create_test_memory("mem_detail_1", "Important detail 1");
+        memory_a.namespace = crate::models::Namespace::Decisions;
+
+        let mut memory_b = create_test_memory("mem_detail_2", "Important detail 2");
+        memory_b.namespace = crate::models::Namespace::Decisions;
+
+        let memories = vec![memory_a, memory_b];
+
+        // Should succeed and preserve details in the summary
+        let result = service.summarize_group(&memories);
+        assert!(result.is_ok());
+
+        let summary = result.unwrap();
+        assert!(summary.contains("preserving all key technical details"));
+    }
 }
