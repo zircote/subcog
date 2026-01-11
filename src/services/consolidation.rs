@@ -324,6 +324,13 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
                     let summary_content = match self.summarize_group(&memories) {
                         Ok(summary) => summary,
                         Err(e) => {
+                            // Track LLM failures
+                            metrics::counter!(
+                                "consolidation_llm_failures",
+                                "namespace" => namespace.as_str()
+                            )
+                            .increment(1);
+
                             tracing::warn!(
                                 error = %e,
                                 namespace = ?namespace,
@@ -407,6 +414,21 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             "namespace" => "mixed"
         )
         .record(start.elapsed().as_secs_f64() * 1000.0);
+
+        // Consolidation-specific metrics
+        metrics::counter!(
+            "consolidation_operations_total",
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!("consolidation_duration_ms")
+            .record(start.elapsed().as_secs_f64() * 1000.0);
+
+        // Record summaries created if successful
+        if let Ok(ref stats) = result {
+            metrics::counter!("consolidation_summaries_created")
+                .increment(stats.summaries_created as u64);
+        }
 
         result
     }
@@ -1111,6 +1133,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
                 "Storing edge relationships for summary node"
             );
 
+            let mut edges_created = 0u64;
             for source_id in &source_memory_ids {
                 // Create SummarizedBy edge from source to summary
                 if let Err(e) = index.store_edge(source_id, &summary_node.id, EdgeType::SummarizedBy) {
@@ -1121,8 +1144,17 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
                         "Failed to store edge relationship, continuing"
                     );
                     // Continue even if one edge fails - we still have the summary
+                } else {
+                    edges_created += 1;
                 }
             }
+
+            // Track edge creation metrics
+            metrics::counter!(
+                "consolidation_edges_created",
+                "edge_type" => "summarized_by"
+            )
+            .increment(edges_created);
 
             tracing::info!(
                 summary_id = %summary_node.id.as_str(),
@@ -1224,6 +1256,13 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
                 }
             }
         }
+
+        // Track edge creation metrics
+        metrics::counter!(
+            "consolidation_edges_created",
+            "edge_type" => "related_to"
+        )
+        .increment(edge_count as u64);
 
         tracing::info!(
             memory_count = memories.len(),
