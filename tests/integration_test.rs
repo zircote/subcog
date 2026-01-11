@@ -437,7 +437,7 @@ mod hook_handler_tests {
 mod consolidation_integration_tests {
     use std::sync::Arc;
     use subcog::config::ConsolidationConfig;
-    use subcog::llm::{LlmProvider, OpenAiClient};
+    use subcog::llm::{LlmProvider, OllamaClient, OpenAiClient};
     use subcog::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace};
     use subcog::services::ConsolidationService;
     use subcog::storage::index::SqliteBackend as SqliteIndexBackend;
@@ -779,5 +779,150 @@ mod consolidation_integration_tests {
         let retrieved_summary = retrieved.expect("Should retrieve summary");
         assert_eq!(retrieved_summary.id, summary.id);
         assert!(retrieved_summary.is_summary);
+    }
+
+    #[test]
+    fn test_consolidation_with_ollama_provider() {
+        // Create Ollama client and check if available
+        let ollama_client = OllamaClient::new();
+        if !ollama_client.is_available() {
+            eprintln!("Skipping Ollama consolidation test - Ollama server not running");
+            eprintln!("To run this test: start Ollama server with 'ollama serve' or Docker");
+            return;
+        }
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let backend = FilesystemBackend::new(temp_dir.path());
+
+        // Create test memories about caching decisions with embeddings
+        let memory1 = create_test_memory(
+            "ollama_mem_1",
+            "Decision: Use Redis for caching with LRU eviction policy for better memory management",
+            Some(vec![0.3, 0.4, 0.5]),
+        );
+        let memory2 = create_test_memory(
+            "ollama_mem_2",
+            "Decision: Configure Redis with maxmemory-policy allkeys-lru for automatic eviction",
+            Some(vec![0.3, 0.4, 0.55]),
+        );
+
+        backend
+            .store(&memory1)
+            .expect("Failed to store memory1");
+        backend
+            .store(&memory2)
+            .expect("Failed to store memory2");
+
+        // Create Ollama client
+        let llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(ollama_client);
+
+        let service = ConsolidationService::new(backend).with_llm(llm);
+
+        // Create test memories for summarization
+        let memories = vec![memory1, memory2];
+
+        // Test summarization with Ollama
+        let result = service.summarize_group(&memories);
+
+        match result {
+            Ok(summary) => {
+                assert!(!summary.is_empty(), "Summary should not be empty");
+                assert!(
+                    summary.len() > 20,
+                    "Summary should be reasonably detailed"
+                );
+                // Check that summary contains relevant terms
+                let summary_lower = summary.to_lowercase();
+                assert!(
+                    summary_lower.contains("redis")
+                        || summary_lower.contains("cache")
+                        || summary_lower.contains("lru")
+                        || summary_lower.contains("memory"),
+                    "Summary should contain relevant caching terms: {summary}"
+                );
+                println!("Ollama consolidation test passed. Summary: {summary}");
+            },
+            Err(e) => {
+                panic!("Ollama consolidation failed: {e}");
+            },
+        }
+    }
+
+    #[test]
+    fn test_consolidation_end_to_end_with_ollama() {
+        // Create Ollama client and check if available
+        let ollama_client = OllamaClient::new();
+        if !ollama_client.is_available() {
+            eprintln!("Skipping Ollama end-to-end consolidation test - Ollama server not running");
+            eprintln!("To run this test: start Ollama server with 'ollama serve' or Docker");
+            return;
+        }
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let backend = FilesystemBackend::new(temp_dir.path());
+
+        // Create SQLite index backend for edge storage
+        let index_path = temp_dir.path().join("index.db");
+        let index_backend = SqliteIndexBackend::new(&index_path).expect("Failed to create index backend");
+
+        // Create and store test memories with embeddings
+        let memory1 = create_test_memory(
+            "e2e_ollama_mem_1",
+            "Use in-memory caching to reduce API latency",
+            Some(vec![0.6, 0.7, 0.8]),
+        );
+        let memory2 = create_test_memory(
+            "e2e_ollama_mem_2",
+            "Configure cache TTL to 300 seconds for optimal performance",
+            Some(vec![0.6, 0.7, 0.85]),
+        );
+        let memory3 = create_test_memory(
+            "e2e_ollama_mem_3",
+            "Implement cache warming on service startup",
+            Some(vec![0.65, 0.7, 0.8]),
+        );
+
+        backend
+            .store(&memory1)
+            .expect("Failed to store memory1");
+        backend
+            .store(&memory2)
+            .expect("Failed to store memory2");
+        backend
+            .store(&memory3)
+            .expect("Failed to store memory3");
+
+        // Create consolidation service with Ollama and index backend
+        let llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(ollama_client);
+        let service = ConsolidationService::new(backend)
+            .with_llm(llm)
+            .with_index(Arc::new(index_backend));
+
+        // Create recall service
+        let recall = subcog::services::RecallService::new();
+
+        // Configure consolidation
+        let config = ConsolidationConfig::new()
+            .with_similarity_threshold(0.7)
+            .with_min_memories_to_consolidate(2)
+            .with_namespace_filter(vec![Namespace::Decisions]);
+
+        // Run end-to-end consolidation
+        let result = service.consolidate_memories(&recall, &config);
+
+        match result {
+            Ok(stats) => {
+                println!("Consolidation stats: {}", stats.summary());
+                assert!(
+                    stats.processed > 0,
+                    "Should have processed some memories"
+                );
+                // Note: summaries_created may be 0 if LLM fails or similarity threshold not met
+                println!("Ollama end-to-end consolidation test passed");
+            },
+            Err(e) => {
+                panic!("End-to-end consolidation with Ollama failed: {e}");
+            },
+        }
     }
 }
