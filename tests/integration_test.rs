@@ -933,4 +933,260 @@ mod consolidation_integration_tests {
             },
         }
     }
+
+    /// End-to-end integration test: capture -> consolidate -> verify
+    ///
+    /// This test simulates the complete user flow:
+    /// 1. Capture memories using `CaptureService`
+    /// 2. Consolidate them using `ConsolidationService` with mock LLM
+    /// 3. Verify summaries are created
+    /// 4. Verify edges are stored (SummarizedBy relationships)
+    /// 5. Verify original memories are preserved (not deleted/modified)
+    #[test]
+    fn test_end_to_end_capture_consolidate_verify() {
+        use subcog::config::Config;
+        use subcog::models::CaptureRequest;
+        use subcog::services::CaptureService;
+        use subcog::storage::traits::PersistenceBackend;
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        // Create SQLite index backend for storage
+        let index_path = temp_dir.path().join("index.db");
+        let index_backend = Arc::new(
+            SqliteIndexBackend::new(&index_path).expect("Failed to create index backend"),
+        );
+
+        // Create filesystem backend for persistence
+        let persistence_backend = FilesystemBackend::new(temp_dir.path());
+
+        // Create config for capture service
+        let config = Config::default();
+
+        // Create capture service with index backend
+        let capture_service = CaptureService::new(config)
+            .with_index(Arc::clone(&index_backend) as Arc<dyn subcog::storage::traits::IndexBackend + Send + Sync>);
+
+        // Step 1: Capture several related memories using CaptureService
+        let capture_requests = vec![
+            CaptureRequest {
+                namespace: Namespace::Decisions,
+                content: "Decision: Use Redis for session storage to improve performance and scalability".to_string(),
+                domain: Domain::new(),
+                tags: vec!["redis".to_string(), "caching".to_string()],
+                source: Some("architecture-decision.md".to_string()),
+                skip_security_check: true,
+            },
+            CaptureRequest {
+                namespace: Namespace::Decisions,
+                content: "Decision: Configure Redis with persistence enabled using AOF for durability".to_string(),
+                domain: Domain::new(),
+                tags: vec!["redis".to_string(), "persistence".to_string()],
+                source: Some("architecture-decision.md".to_string()),
+                skip_security_check: true,
+            },
+            CaptureRequest {
+                namespace: Namespace::Decisions,
+                content: "Decision: Set Redis maxmemory-policy to allkeys-lru for automatic eviction".to_string(),
+                domain: Domain::new(),
+                tags: vec!["redis".to_string(), "configuration".to_string()],
+                source: Some("architecture-decision.md".to_string()),
+                skip_security_check: true,
+            },
+        ];
+
+        let mut captured_ids = Vec::new();
+        for request in capture_requests {
+            let result = capture_service
+                .capture(request)
+                .expect("Failed to capture memory");
+            captured_ids.push(result.memory_id.clone());
+        }
+
+        assert_eq!(captured_ids.len(), 3, "Should have captured 3 memories");
+
+        // Retrieve captured memories and add embeddings for similarity matching
+        let mut memories = Vec::new();
+        for memory_id in &captured_ids {
+            let mut memory = persistence_backend
+                .get(memory_id)
+                .expect("Failed to retrieve memory");
+
+            // Add similar embeddings so they cluster together (threshold 0.7)
+            memory.embedding = Some(vec![0.8, 0.9, 1.0 + (memories.len() as f32) * 0.05]);
+            persistence_backend
+                .store(&memory)
+                .expect("Failed to update memory with embedding");
+
+            memories.push(memory);
+        }
+
+        // Step 2: Create consolidation service with mock LLM and index backend
+        let mock_llm: Arc<dyn LlmProvider + Send + Sync> = Arc::new(MockLlmProvider::new(
+            "Summary: Redis architecture decisions including session storage, AOF persistence, and LRU eviction policy.",
+        ));
+
+        let mut consolidation_service = ConsolidationService::new(persistence_backend.clone())
+            .with_llm(mock_llm)
+            .with_index(Arc::clone(&index_backend));
+
+        // Create recall service for finding related memories
+        let recall = subcog::services::RecallService::new();
+
+        // Configure consolidation with low threshold for testing
+        let consolidation_config = ConsolidationConfig::new()
+            .with_similarity_threshold(0.7)
+            .with_min_memories_to_consolidate(2)
+            .with_namespace_filter(vec![Namespace::Decisions]);
+
+        // Step 3: Run consolidation
+        let stats = consolidation_service
+            .consolidate_memories(&recall, &consolidation_config)
+            .expect("Failed to consolidate memories");
+
+        // Step 4: Verify consolidation results
+        assert!(
+            stats.processed > 0,
+            "Should have processed memories: {:?}",
+            stats
+        );
+        assert!(
+            stats.summaries_created > 0,
+            "Should have created at least one summary: {:?}",
+            stats
+        );
+
+        // Step 5: Verify original memories are preserved (not deleted or modified)
+        for (idx, original_id) in captured_ids.iter().enumerate() {
+            let memory = persistence_backend
+                .get(original_id)
+                .expect("Original memory should still exist");
+
+            assert_eq!(
+                memory.id, *original_id,
+                "Memory ID should match"
+            );
+            assert!(
+                !memory.is_summary,
+                "Original memory should not be marked as summary"
+            );
+            assert_eq!(
+                memory.status,
+                MemoryStatus::Active,
+                "Original memory should remain active"
+            );
+            assert!(
+                memory.tombstoned_at.is_none(),
+                "Original memory should not be tombstoned"
+            );
+            // Verify the memory still has content (not deleted)
+            assert!(
+                !memory.content.is_empty(),
+                "Original memory {idx} should still have content"
+            );
+        }
+
+        // Step 6: Find and verify summary node
+        let all_memories = persistence_backend
+            .list()
+            .expect("Failed to list all memories");
+
+        let summaries: Vec<_> = all_memories
+            .iter()
+            .filter(|m| m.is_summary)
+            .collect();
+
+        assert!(
+            !summaries.is_empty(),
+            "Should have at least one summary node"
+        );
+
+        let summary = summaries[0];
+        assert!(
+            summary.is_summary,
+            "Summary should be marked as summary"
+        );
+        assert!(
+            summary.consolidation_timestamp.is_some(),
+            "Summary should have consolidation timestamp"
+        );
+        assert!(
+            summary.source_memory_ids.is_some(),
+            "Summary should have source memory IDs"
+        );
+
+        let source_ids = summary
+            .source_memory_ids
+            .as_ref()
+            .expect("Should have source IDs");
+        assert_eq!(
+            source_ids.len(),
+            3,
+            "Summary should reference all 3 original memories"
+        );
+
+        // Verify source IDs match the captured memories
+        for captured_id in &captured_ids {
+            assert!(
+                source_ids.contains(captured_id),
+                "Summary should reference captured memory {captured_id}"
+            );
+        }
+
+        // Verify summary content contains relevant terms
+        let summary_lower = summary.content.to_lowercase();
+        assert!(
+            summary_lower.contains("redis") || summary_lower.contains("summary"),
+            "Summary should contain relevant terms: {}",
+            summary.content
+        );
+
+        // Step 7: Verify edges are stored (SummarizedBy relationships)
+        for original_id in &captured_ids {
+            let edges = index_backend
+                .query_edges(original_id, EdgeType::SummarizedBy)
+                .expect("Failed to query edges");
+
+            assert!(
+                !edges.is_empty(),
+                "Original memory {} should have SummarizedBy edge",
+                original_id
+            );
+
+            // Verify edge points to the summary
+            assert_eq!(
+                edges.len(),
+                1,
+                "Should have exactly one SummarizedBy edge"
+            );
+            assert_eq!(
+                edges[0], summary.id,
+                "Edge should point to the summary node"
+            );
+        }
+
+        // Step 8: Verify reverse edges (SourceOf from summary to originals)
+        let reverse_edges = index_backend
+            .query_edges(&summary.id, EdgeType::SourceOf)
+            .expect("Failed to query reverse edges");
+
+        assert_eq!(
+            reverse_edges.len(),
+            3,
+            "Summary should have SourceOf edges to all 3 originals"
+        );
+
+        for original_id in &captured_ids {
+            assert!(
+                reverse_edges.contains(original_id),
+                "Summary should have SourceOf edge to original memory {original_id}"
+            );
+        }
+
+        println!("✓ End-to-end integration test passed:");
+        println!("  - Captured 3 memories using CaptureService");
+        println!("  - Consolidated into {} summary node(s)", stats.summaries_created);
+        println!("  - Verified original memories preserved");
+        println!("  - Verified {} edges stored", captured_ids.len() * 2);
+    }
 }
