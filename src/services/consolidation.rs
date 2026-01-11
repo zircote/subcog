@@ -288,8 +288,24 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
                                 namespace = ?namespace,
                                 group_idx = group_idx,
                                 memory_count = memories.len(),
-                                "Failed to summarize group, skipping"
+                                "Failed to summarize group, creating relationships without summary"
                             );
+
+                            // Graceful degradation: Create RelatedTo edges without summary node
+                            if let Some(ref index) = self.index {
+                                self.create_related_edges(&memories, index)?;
+                                tracing::info!(
+                                    namespace = ?namespace,
+                                    memory_count = memories.len(),
+                                    "Created RelatedTo edges for group without LLM summary"
+                                );
+                            } else {
+                                tracing::debug!(
+                                    namespace = ?namespace,
+                                    memory_count = memories.len(),
+                                    "Index backend not available, skipping edge creation"
+                                );
+                            }
                             continue;
                         }
                     };
@@ -1087,6 +1103,94 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         );
 
         Ok(summary_node)
+    }
+
+    /// Creates RelatedTo edges between all memories in a group.
+    ///
+    /// This method is used when LLM summarization is unavailable but we still want
+    /// to preserve the relationships between semantically similar memories. Creates
+    /// a mesh topology where each memory is linked to every other memory in the group
+    /// with `RelatedTo` edges.
+    ///
+    /// # Arguments
+    ///
+    /// * `memories` - A slice of related memories to link together.
+    /// * `index` - The index backend to use for storing edges.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or an error if edge storage fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if edge storage operations fail.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use subcog::services::ConsolidationService;
+    /// use subcog::storage::persistence::FilesystemBackend;
+    /// use subcog::storage::index::SqliteBackend;
+    /// use std::sync::Arc;
+    ///
+    /// let backend = FilesystemBackend::new("/tmp/memories");
+    /// let index = SqliteBackend::new("/tmp/index.db")?;
+    /// let mut service = ConsolidationService::new(backend)
+    ///     .with_index(Arc::new(index));
+    ///
+    /// let memories = vec![/* related memories */];
+    /// service.create_related_edges(&memories, &index)?;
+    /// # Ok::<(), subcog::Error>(())
+    /// ```
+    #[instrument(skip(self, memories, index), fields(memory_count = memories.len()))]
+    fn create_related_edges(
+        &self,
+        memories: &[Memory],
+        index: &Arc<SqliteBackend>,
+    ) -> Result<()> {
+        if memories.len() < 2 {
+            tracing::debug!("Fewer than 2 memories, skipping edge creation");
+            return Ok(());
+        }
+
+        let mut edge_count = 0;
+
+        // Create a mesh topology: each memory is related to every other memory
+        for (i, memory_a) in memories.iter().enumerate() {
+            for memory_b in memories.iter().skip(i + 1) {
+                // Create bidirectional RelatedTo edges
+                if let Err(e) = index.store_edge(&memory_a.id, &memory_b.id, EdgeType::RelatedTo) {
+                    tracing::warn!(
+                        error = %e,
+                        from_id = %memory_a.id.as_str(),
+                        to_id = %memory_b.id.as_str(),
+                        "Failed to store RelatedTo edge, continuing"
+                    );
+                } else {
+                    edge_count += 1;
+                }
+
+                // Store the reverse edge (since RelatedTo is bidirectional)
+                if let Err(e) = index.store_edge(&memory_b.id, &memory_a.id, EdgeType::RelatedTo) {
+                    tracing::warn!(
+                        error = %e,
+                        from_id = %memory_b.id.as_str(),
+                        to_id = %memory_a.id.as_str(),
+                        "Failed to store RelatedTo edge (reverse), continuing"
+                    );
+                } else {
+                    edge_count += 1;
+                }
+            }
+        }
+
+        tracing::info!(
+            memory_count = memories.len(),
+            edge_count = edge_count,
+            "Created RelatedTo edges between memories"
+        );
+
+        Ok(())
     }
 }
 
@@ -2260,5 +2364,276 @@ mod tests {
         let summary = stats.summary();
         assert!(summary.contains("Processed: 10"));
         assert!(summary.contains("Summaries: 3"));
+    }
+
+    #[test]
+    fn test_create_related_edges() {
+        use crate::storage::index::SqliteBackend;
+        use crate::storage::traits::IndexBackend;
+        use std::sync::Arc;
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_create_related_edges"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+
+        // Create SQLite index backend
+        let index = SqliteBackend::in_memory().expect("Failed to create in-memory SQLite");
+        let index_arc = Arc::new(index);
+
+        let service = ConsolidationService::new(backend).with_index(index_arc.clone());
+
+        // Create test memories
+        let memory_a = create_test_memory("related_a", "First memory");
+        let memory_b = create_test_memory("related_b", "Second memory");
+        let memory_c = create_test_memory("related_c", "Third memory");
+
+        // Index memories first so foreign key constraints are satisfied
+        index_arc.index(&memory_a).expect("Failed to index memory_a");
+        index_arc.index(&memory_b).expect("Failed to index memory_b");
+        index_arc.index(&memory_c).expect("Failed to index memory_c");
+
+        let memories = vec![memory_a.clone(), memory_b.clone(), memory_c.clone()];
+
+        // Create RelatedTo edges
+        let result = service.create_related_edges(&memories, &index_arc);
+        assert!(result.is_ok());
+
+        // Verify edges were created
+        let edges_from_a = index_arc
+            .query_edges(&memory_a.id, EdgeType::RelatedTo)
+            .expect("Failed to query edges from memory_a");
+
+        // Memory A should be related to B and C
+        assert_eq!(edges_from_a.len(), 2, "memory_a should have 2 RelatedTo edges");
+        assert!(
+            edges_from_a.contains(&memory_b.id),
+            "memory_a should be related to memory_b"
+        );
+        assert!(
+            edges_from_a.contains(&memory_c.id),
+            "memory_a should be related to memory_c"
+        );
+
+        // Verify bidirectional edges
+        let edges_from_b = index_arc
+            .query_edges(&memory_b.id, EdgeType::RelatedTo)
+            .expect("Failed to query edges from memory_b");
+
+        assert_eq!(edges_from_b.len(), 2, "memory_b should have 2 RelatedTo edges");
+        assert!(
+            edges_from_b.contains(&memory_a.id),
+            "memory_b should be related to memory_a"
+        );
+        assert!(
+            edges_from_b.contains(&memory_c.id),
+            "memory_b should be related to memory_c"
+        );
+    }
+
+    #[test]
+    fn test_create_related_edges_single_memory() {
+        use crate::storage::index::SqliteBackend;
+        use std::sync::Arc;
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_related_edges_single"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+
+        let index = SqliteBackend::in_memory().expect("Failed to create in-memory SQLite");
+        let index_arc = Arc::new(index);
+
+        let service = ConsolidationService::new(backend).with_index(index_arc.clone());
+
+        // Create single memory
+        let memory_a = create_test_memory("single_mem", "Only memory");
+        let memories = vec![memory_a];
+
+        // Should succeed but create no edges
+        let result = service.create_related_edges(&memories, &index_arc);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_consolidate_memories_no_llm_creates_edges() {
+        use crate::embedding::Embedder as EmbedderTrait;
+        use crate::storage::index::SqliteBackend;
+        use crate::storage::traits::{IndexBackend, VectorBackend};
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_consolidate_no_llm_edges"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+
+        // Create index backend for edge storage
+        let index = SqliteBackend::in_memory().expect("Failed to create in-memory SQLite");
+        let index_arc = Arc::new(index);
+
+        // Create service WITHOUT LLM but WITH index backend
+        let mut service = ConsolidationService::new(backend).with_index(index_arc.clone());
+
+        // Create memories with embeddings
+        let embedding_a = vec![1.0, 0.0, 0.0];
+        let embedding_b = vec![0.95, 0.05, 0.0]; // Very similar to A
+
+        let mut memory_a = create_test_memory("no_llm_edge_a", "Decision about PostgreSQL");
+        memory_a.embedding = Some(embedding_a);
+        memory_a.namespace = crate::models::Namespace::Decisions;
+
+        let mut memory_b = create_test_memory("no_llm_edge_b", "Use PostgreSQL for storage");
+        memory_b.embedding = Some(embedding_b);
+        memory_b.namespace = crate::models::Namespace::Decisions;
+
+        // Index memories so foreign key constraints are satisfied
+        index_arc.index(&memory_a).expect("Failed to index memory_a");
+        index_arc.index(&memory_b).expect("Failed to index memory_b");
+
+        // Store memories
+        let _ = service.persistence.store(&memory_a);
+        let _ = service.persistence.store(&memory_b);
+
+        // Create mock embedder and vector backend
+        struct MockEmbedder;
+        impl EmbedderTrait for MockEmbedder {
+            fn embed(&self, _text: &str) -> Result<Vec<f32>> {
+                Ok(vec![1.0, 0.0, 0.0])
+            }
+            fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0]).collect())
+            }
+            fn model_name(&self) -> &str {
+                "mock"
+            }
+        }
+
+        struct MockVectorBackend;
+        impl VectorBackend for MockVectorBackend {
+            fn index(&self, _memory: &Memory) -> Result<()> {
+                Ok(())
+            }
+            fn search(&self, _embedding: &[f32], _limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+                Ok(vec![])
+            }
+            fn delete(&self, _memory_id: &MemoryId) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        let recall = crate::services::RecallService::new()
+            .with_embedder(Arc::new(MockEmbedder))
+            .with_vector(Arc::new(MockVectorBackend));
+
+        // Configure consolidation
+        let mut config = crate::config::ConsolidationConfig::new();
+        config.enabled = true;
+        config.similarity_threshold = 0.7;
+        config.min_memories_to_consolidate = 2;
+
+        // Run consolidation (should fail LLM summarization but create edges)
+        let result = service.consolidate_memories(&recall, &config);
+        assert!(result.is_ok());
+
+        let stats = result.unwrap();
+        // Should process 2 memories but create 0 summaries (no LLM)
+        assert_eq!(stats.processed, 2);
+        assert_eq!(stats.summaries_created, 0);
+
+        // Verify RelatedTo edges were created
+        let edges_from_a = index_arc
+            .query_edges(&memory_a.id, EdgeType::RelatedTo)
+            .expect("Failed to query edges from memory_a");
+
+        assert!(
+            !edges_from_a.is_empty(),
+            "memory_a should have RelatedTo edges even without LLM"
+        );
+        assert!(
+            edges_from_a.contains(&memory_b.id),
+            "memory_a should be related to memory_b"
+        );
+    }
+
+    #[test]
+    fn test_consolidate_memories_no_llm_no_index() {
+        use crate::embedding::Embedder as EmbedderTrait;
+        use crate::storage::traits::VectorBackend;
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_consolidate_no_llm_no_index"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+
+        // Create service WITHOUT LLM and WITHOUT index backend
+        let mut service = ConsolidationService::new(backend);
+
+        // Create memories with embeddings
+        let embedding_a = vec![1.0, 0.0, 0.0];
+        let embedding_b = vec![0.95, 0.05, 0.0];
+
+        let mut memory_a = create_test_memory("no_backends_a", "Decision A");
+        memory_a.embedding = Some(embedding_a);
+        memory_a.namespace = crate::models::Namespace::Decisions;
+
+        let mut memory_b = create_test_memory("no_backends_b", "Decision B");
+        memory_b.embedding = Some(embedding_b);
+        memory_b.namespace = crate::models::Namespace::Decisions;
+
+        // Store memories
+        let _ = service.persistence.store(&memory_a);
+        let _ = service.persistence.store(&memory_b);
+
+        // Create mock embedder and vector backend
+        struct MockEmbedder;
+        impl EmbedderTrait for MockEmbedder {
+            fn embed(&self, _text: &str) -> Result<Vec<f32>> {
+                Ok(vec![1.0, 0.0, 0.0])
+            }
+            fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0]).collect())
+            }
+            fn model_name(&self) -> &str {
+                "mock"
+            }
+        }
+
+        struct MockVectorBackend;
+        impl VectorBackend for MockVectorBackend {
+            fn index(&self, _memory: &Memory) -> Result<()> {
+                Ok(())
+            }
+            fn search(&self, _embedding: &[f32], _limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+                Ok(vec![])
+            }
+            fn delete(&self, _memory_id: &MemoryId) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        let recall = crate::services::RecallService::new()
+            .with_embedder(Arc::new(MockEmbedder))
+            .with_vector(Arc::new(MockVectorBackend));
+
+        let mut config = crate::config::ConsolidationConfig::new();
+        config.enabled = true;
+        config.similarity_threshold = 0.7;
+        config.min_memories_to_consolidate = 2;
+
+        // Should succeed gracefully even without LLM or index
+        let result = service.consolidate_memories(&recall, &config);
+        assert!(result.is_ok());
+
+        let stats = result.unwrap();
+        // Should process memories but create nothing
+        assert_eq!(stats.processed, 2);
+        assert_eq!(stats.summaries_created, 0);
     }
 }
