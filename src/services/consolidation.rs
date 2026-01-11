@@ -10,6 +10,7 @@ use crate::models::{
 };
 use crate::observability::current_request_id;
 use crate::security::record_event;
+use crate::storage::index::SqliteBackend;
 use crate::storage::traits::PersistenceBackend;
 use lru::LruCache;
 use std::collections::HashMap;
@@ -49,6 +50,8 @@ pub struct ConsolidationService<P: PersistenceBackend> {
     last_access: LruCache<String, u64>,
     /// Optional LLM provider for intelligent consolidation.
     llm: Option<Arc<dyn LlmProvider + Send + Sync>>,
+    /// Optional index backend for storing memory edges.
+    index: Option<Arc<SqliteBackend>>,
 }
 
 impl<P: PersistenceBackend> ConsolidationService<P> {
@@ -60,6 +63,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             access_counts: LruCache::new(ACCESS_CACHE_CAPACITY),
             last_access: LruCache::new(ACCESS_CACHE_CAPACITY),
             llm: None,
+            index: None,
         }
     }
 
@@ -84,6 +88,35 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     #[must_use]
     pub fn with_llm(mut self, llm: Arc<dyn LlmProvider + Send + Sync>) -> Self {
         self.llm = Some(llm);
+        self
+    }
+
+    /// Sets the index backend for storing memory edges.
+    ///
+    /// The index backend is used to store relationships between memories and their summaries.
+    /// If not set, edge relationships will not be persisted.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - The SQLite index backend to use for edge storage.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use subcog::services::ConsolidationService;
+    /// use subcog::storage::persistence::FilesystemBackend;
+    /// use subcog::storage::index::SqliteBackend;
+    /// use std::sync::Arc;
+    ///
+    /// let persistence = FilesystemBackend::new("/tmp/memories");
+    /// let index = SqliteBackend::new("/tmp/index.db")?;
+    /// let service = ConsolidationService::new(persistence)
+    ///     .with_index(Arc::new(index));
+    /// # Ok::<(), subcog::Error>(())
+    /// ```
+    #[must_use]
+    pub fn with_index(mut self, index: Arc<SqliteBackend>) -> Self {
+        self.index = Some(index);
         self
     }
 
@@ -787,6 +820,39 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
 
         // Store summary node
         self.persistence.store(&summary_node)?;
+
+        // Store edge relationships if index backend is available
+        if let Some(ref index) = self.index {
+            tracing::debug!(
+                summary_id = %summary_node.id.as_str(),
+                source_count = source_memory_ids.len(),
+                "Storing edge relationships for summary node"
+            );
+
+            for source_id in &source_memory_ids {
+                // Create SummarizedBy edge from source to summary
+                if let Err(e) = index.store_edge(source_id, &summary_node.id, EdgeType::SummarizedBy) {
+                    tracing::warn!(
+                        error = %e,
+                        source_id = %source_id.as_str(),
+                        summary_id = %summary_node.id.as_str(),
+                        "Failed to store edge relationship, continuing"
+                    );
+                    // Continue even if one edge fails - we still have the summary
+                }
+            }
+
+            tracing::info!(
+                summary_id = %summary_node.id.as_str(),
+                edges_stored = source_memory_ids.len(),
+                "Stored edge relationships for summary node"
+            );
+        } else {
+            tracing::debug!(
+                summary_id = %summary_node.id.as_str(),
+                "Index backend not available, skipping edge storage"
+            );
+        }
 
         tracing::info!(
             summary_id = %summary_node.id.as_str(),
@@ -1560,5 +1626,90 @@ mod tests {
         // Verify project info inherited from first source
         assert_eq!(summary_node.project_id, Some("project123".to_string()));
         assert_eq!(summary_node.branch, Some("main".to_string()));
+    }
+
+    #[test]
+    fn test_create_summary_node_stores_edges_with_index() {
+        use crate::storage::index::SqliteBackend;
+        use crate::storage::traits::IndexBackend;
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_create_summary_edges"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+
+        // Create SQLite index backend
+        let index = SqliteBackend::in_memory().expect("Failed to create in-memory SQLite");
+        let index_arc = Arc::new(index);
+
+        let mut service = ConsolidationService::new(backend)
+            .with_index(index_arc.clone());
+
+        // Create test source memories
+        let memory_a = create_test_memory("edge_source_1", "First memory");
+        let memory_b = create_test_memory("edge_source_2", "Second memory");
+
+        // Index the source memories first so foreign key constraints are satisfied
+        index_arc.index(&memory_a).expect("Failed to index memory_a");
+        index_arc.index(&memory_b).expect("Failed to index memory_b");
+
+        let source_memories = vec![memory_a.clone(), memory_b.clone()];
+        let summary_content = "Summary of two memories";
+
+        // Create summary node (should also store edges)
+        let result = service.create_summary_node(summary_content, &source_memories);
+        assert!(result.is_ok());
+
+        let summary_node = result.unwrap();
+
+        // Index the summary node so we can verify edges
+        index_arc.index(&summary_node).expect("Failed to index summary node");
+
+        // Verify edges were stored using the query_edges method
+        let edges_from_a = index_arc
+            .query_edges(&memory_a.id, EdgeType::SummarizedBy)
+            .expect("Failed to query edges from memory_a");
+        let edges_from_b = index_arc
+            .query_edges(&memory_b.id, EdgeType::SummarizedBy)
+            .expect("Failed to query edges from memory_b");
+
+        // Both source memories should have edges pointing to the summary
+        assert_eq!(edges_from_a.len(), 1, "memory_a should have 1 edge");
+        assert_eq!(edges_from_b.len(), 1, "memory_b should have 1 edge");
+        assert_eq!(
+            edges_from_a[0],
+            summary_node.id,
+            "memory_a edge should point to summary"
+        );
+        assert_eq!(
+            edges_from_b[0],
+            summary_node.id,
+            "memory_b edge should point to summary"
+        );
+    }
+
+    #[test]
+    fn test_create_summary_node_without_index_backend() {
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_create_summary_no_index"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
+        let mut service = ConsolidationService::new(backend); // No index backend
+
+        let memory_a = create_test_memory("mem_a", "Content A");
+        let source_memories = vec![memory_a];
+        let summary_content = "Summary without index";
+
+        // Should succeed even without index backend
+        let result = service.create_summary_node(summary_content, &source_memories);
+        assert!(result.is_ok());
+
+        let summary_node = result.unwrap();
+        assert!(summary_node.is_summary);
+        // Edges won't be stored, but summary creation should still work
     }
 }
