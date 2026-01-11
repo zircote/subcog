@@ -206,6 +206,9 @@ subcog status
 # Sync with git remote
 subcog sync
 
+# Consolidate related memories
+subcog consolidate --namespace decisions --days 30 --dry-run
+
 # Run as MCP server
 subcog serve
 
@@ -534,6 +537,292 @@ The service degrades gracefully when components fail:
 | `deduplication_check_duration_ms` | Check latency histogram |
 | `deduplication_recent_cache_size` | Current cache size |
 | `hook_deduplication_skipped_total` | Skipped by hook (labels: namespace, reason) |
+
+## Memory Consolidation Service
+
+The consolidation service intelligently summarizes related memories using LLM-powered analysis while preserving original memories and creating bidirectional edge relationships. This prevents memory accumulation without losing historical context.
+
+### How It Works
+
+Consolidation creates **summary nodes** that aggregate related memories while preserving originals:
+
+1. **Semantic Clustering**: Groups memories by namespace using configurable similarity threshold (default: 0.7)
+2. **LLM Summarization**: Generates coherent summaries preserving key details from each memory
+3. **Summary Node Creation**: Creates new memories marked with `is_summary=true` and `source_memory_ids` linking to originals
+4. **Edge Relationships**: Stores bidirectional edges (`SummarizedBy` / `SourceOf`) for traversal
+5. **Graceful Degradation**: Creates `RelatedTo` edges when LLM unavailable
+
+### CLI Usage
+
+```bash
+# Basic consolidation (uses config file settings)
+subcog consolidate
+
+# Filter by specific namespaces
+subcog consolidate --namespace decisions --namespace patterns
+
+# Set time window to last 7 days
+subcog consolidate --days 7
+
+# Preview what would be consolidated (dry-run mode)
+subcog consolidate --dry-run
+
+# Override similarity threshold (0.0-1.0)
+subcog consolidate --similarity 0.85
+
+# Set minimum memories per group
+subcog consolidate --min-memories 5
+
+# Combine multiple options
+subcog consolidate --namespace learnings --days 14 --similarity 0.9 --dry-run
+```
+
+**Dry-Run Output Example**:
+```
+Finding related memory groups...
+
+Found 3 group(s) across 2 namespace(s)
+  Total memories to consolidate: 12
+
+  Decisions: 2 group(s), 8 memories
+  Patterns: 1 group(s), 4 memories
+
+Would create 3 summary node(s)
+Would consolidate 12 memory/memories
+
+Run without --dry-run to apply changes
+```
+
+**Normal Run Output Example**:
+```
+Finding related memory groups...
+
+Found 3 group(s) across 2 namespace(s)
+  Total memories to consolidate: 12
+
+Creating summaries...
+
+Consolidation completed:
+  Processed 12 memories
+  ✓ Created 3 summary node(s)
+  ✓ Linked 12 source memories via edges
+```
+
+### Configuration
+
+#### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SUBCOG_CONSOLIDATION_ENABLED` | Enable consolidation service | `false` |
+| `SUBCOG_CONSOLIDATION_TIME_WINDOW_DAYS` | Time window in days for memories | `30` |
+| `SUBCOG_CONSOLIDATION_MIN_MEMORIES` | Minimum memories to form a group | `3` |
+| `SUBCOG_CONSOLIDATION_SIMILARITY_THRESHOLD` | Similarity threshold (0.0-1.0) | `0.7` |
+| `SUBCOG_CONSOLIDATION_NAMESPACE_FILTER` | Comma-separated namespaces | None (all) |
+
+#### Config File
+
+```toml
+[consolidation]
+enabled = true
+time_window_days = 30
+min_memories_to_consolidate = 3
+similarity_threshold = 0.7
+namespace_filter = ["decisions", "patterns", "learnings"]
+```
+
+### MCP Tools
+
+#### `subcog_consolidate`
+
+Triggers consolidation with optional filters. Returns consolidation statistics.
+
+**Arguments**:
+- `namespaces` (optional, array): Filter to specific namespaces (e.g., `["decisions", "patterns"]`)
+- `days` (optional, number): Time window in days for memories to consolidate
+- `min_memories` (optional, number): Minimum memories per group (≥2)
+- `similarity` (optional, number): Similarity threshold 0.0-1.0
+- `dry_run` (optional, boolean): Preview mode without making changes
+
+**Example**:
+```json
+{
+  "name": "subcog_consolidate",
+  "arguments": {
+    "namespaces": ["decisions"],
+    "days": 7,
+    "similarity": 0.85,
+    "dry_run": true
+  }
+}
+```
+
+**Dry-Run Response**:
+```markdown
+**Memory Consolidation (Dry Run)**
+
+Found 2 group(s) across 1 namespace(s):
+- Decisions: 2 group(s), 8 memories
+
+Would create 2 summary node(s)
+Would consolidate 8 memory/memories
+
+Run without dry_run to apply changes
+```
+
+**Normal Run Response**:
+```markdown
+**Memory Consolidation Completed**
+
+Processed 8 memories
+✓ Created 2 summary node(s)
+✓ Linked 8 source memories via edges
+```
+
+#### `subcog_get_summary`
+
+Retrieves a summary node and its linked source memories via edge relationships.
+
+**Arguments**:
+- `memory_id` (required, string): The ID of the summary memory to retrieve
+
+**Example**:
+```json
+{
+  "name": "subcog_get_summary",
+  "arguments": {
+    "memory_id": "summary_abc123"
+  }
+}
+```
+
+**Response**:
+```markdown
+**Summary: summary_abc123**
+
+Namespace: decisions
+Tags: redis, session-storage, architecture
+Consolidated: 2026-01-11T15:00:00Z
+
+Content:
+The team decided to use Redis for session storage with AOF persistence...
+
+**Source Memories (3):**
+
+1. decisions | [redis, storage] | Use Redis for session storage because... (150 chars)
+   subcog://user/project1/main/decisions/mem_001
+
+2. decisions | [redis, persistence] | Configure Redis with AOF persistence... (150 chars)
+   subcog://user/project1/main/decisions/mem_002
+
+3. decisions | [redis, eviction] | Set Redis eviction policy to allkeys-lru... (150 chars)
+   subcog://user/project1/main/decisions/mem_003
+```
+
+### MCP Resources
+
+#### `subcog://summaries`
+
+Lists all summary nodes across all namespaces.
+
+**Response Format**:
+```json
+{
+  "uri": "subcog://summaries",
+  "mimeType": "application/json",
+  "contents": [
+    {
+      "id": "summary_abc123",
+      "namespace": "decisions",
+      "tags": ["redis", "session-storage"],
+      "content_preview": "The team decided to use Redis...",
+      "source_count": 3,
+      "consolidation_timestamp": 1704988800,
+      "uri": "subcog://summaries/summary_abc123"
+    }
+  ]
+}
+```
+
+#### `subcog://summaries/{id}`
+
+Retrieves a specific summary node with full source memory details.
+
+**Example**: `subcog://summaries/summary_abc123`
+
+**Response Format**:
+```json
+{
+  "uri": "subcog://summaries/summary_abc123",
+  "mimeType": "application/json",
+  "summary": {
+    "id": "summary_abc123",
+    "namespace": "decisions",
+    "domain": "user",
+    "content": "Full summary content...",
+    "tags": ["redis", "session-storage"],
+    "consolidation_timestamp": 1704988800,
+    "source_count": 3,
+    "source_memories": [
+      {
+        "id": "mem_001",
+        "namespace": "decisions",
+        "tags": ["redis"],
+        "content_preview": "Use Redis for session storage...",
+        "uri": "subcog://user/project1/main/decisions/mem_001"
+      }
+    ]
+  }
+}
+```
+
+### Edge Relationships
+
+Consolidation creates bidirectional edge relationships stored in the `memory_edges` table:
+
+| Edge Type | Direction | Description |
+|-----------|-----------|-------------|
+| `SummarizedBy` | Original → Summary | Links source memory to its summary node |
+| `SourceOf` | Summary → Original | Links summary node to its source memories |
+| `RelatedTo` | Memory ↔ Memory | Links semantically similar memories (LLM fallback) |
+
+**Query edges via index backend**:
+```rust
+use subcog::models::EdgeType;
+
+// Get all summaries containing this memory
+let edges = index.query_edges(memory_id, EdgeType::SummarizedBy)?;
+
+// Get all source memories of a summary
+let sources = index.query_edges(summary_id, EdgeType::SourceOf)?;
+```
+
+### Graceful Degradation
+
+The consolidation service degrades gracefully when components are unavailable:
+
+| Component | Behavior |
+|-----------|----------|
+| **LLM unavailable** | Creates `RelatedTo` edges between similar memories without summarization |
+| **Index backend unavailable** | Skips edge storage, continues with summary creation |
+| **Embeddings unavailable** | Cannot group by similarity, returns empty groups |
+| **LLM fails mid-run** | Logs warning, skips failed group, continues with remaining groups |
+
+**Circuit Breaker Pattern**: When using `ResilientLlmProvider`:
+- **Automatic retries**: 3 attempts with exponential backoff (100ms, 200ms, 400ms)
+- **Circuit breaker**: Opens after 5 consecutive failures
+- **Transient error detection**: Retries on timeouts, 5xx errors, rate limiting
+- **Error budget tracking**: Monitors SLO violations
+
+### Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `consolidation_operations_total` | Total consolidation operations (labels: status) |
+| `consolidation_summaries_created` | Total summary nodes created |
+| `consolidation_edges_created` | Total edges created (labels: edge_type) |
+| `consolidation_duration_ms` | Operation duration histogram |
+| `consolidation_llm_failures` | LLM failures by namespace (labels: namespace) |
 
 ## Code Style Requirements
 
