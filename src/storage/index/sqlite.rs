@@ -717,6 +717,7 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
         "pending" => MemoryStatus::Pending,
         "deleted" => MemoryStatus::Deleted,
         "tombstoned" => MemoryStatus::Tombstoned,
+        "consolidated" => MemoryStatus::Consolidated,
         _ => MemoryStatus::Active,
     };
 
@@ -751,6 +752,9 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
         embedding: None,
         tags,
         source: row.source,
+        is_summary: false,
+        source_memory_ids: None,
+        consolidation_timestamp: None,
     }
 }
 
@@ -1389,6 +1393,9 @@ mod tests {
             embedding: None,
             tags: vec!["test".to_string()],
             source: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
         }
     }
 

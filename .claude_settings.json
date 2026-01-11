@@ -1,0 +1,29 @@
+{
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true
+  },
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Read(./**)",
+      "Write(./**)",
+      "Edit(./**)",
+      "Glob(./**)",
+      "Grep(./**)",
+      "Read(/Users/AllenR1_1/Projects/zircote/subcog/.worktrees/001-memory-consolidation-service/**)",
+      "Write(/Users/AllenR1_1/Projects/zircote/subcog/.worktrees/001-memory-consolidation-service/**)",
+      "Edit(/Users/AllenR1_1/Projects/zircote/subcog/.worktrees/001-memory-consolidation-service/**)",
+      "Glob(/Users/AllenR1_1/Projects/zircote/subcog/.worktrees/001-memory-consolidation-service/**)",
+      "Grep(/Users/AllenR1_1/Projects/zircote/subcog/.worktrees/001-memory-consolidation-service/**)",
+      "Read(/Users/AllenR1_1/Projects/zircote/subcog/.worktrees/001-memory-consolidation-service/.auto-claude/specs/001-memory-consolidation-service/**)",
+      "Write(/Users/AllenR1_1/Projects/zircote/subcog/.worktrees/001-memory-consolidation-service/.auto-claude/specs/001-memory-consolidation-service/**)",
+      "Edit(/Users/AllenR1_1/Projects/zircote/subcog/.worktrees/001-memory-consolidation-service/.auto-claude/specs/001-memory-consolidation-service/**)",
+      "Bash(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "mcp__context7__resolve-library-id(*)",
+      "mcp__context7__get-library-docs(*)"
+    ]
+  }
+}

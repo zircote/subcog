@@ -290,6 +290,9 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             embedding: None, // Will need re-embedding
             tags: merged_tags,
             source: target.source.or(source_source),
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
         };
 
         // Store merged memory
@@ -384,6 +387,9 @@ mod tests {
             embedding: None,
             tags: vec!["test".to_string()],
             source: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
         }
     }
 

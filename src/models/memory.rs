@@ -75,6 +75,22 @@ pub struct Memory {
     pub tags: Vec<String>,
     /// Optional source reference (file path, URL, etc.).
     pub source: Option<String>,
+    /// Whether this memory is a consolidation summary.
+    ///
+    /// When `true`, this memory represents a consolidated summary of multiple
+    /// related memories. The original memories are preserved and linked via
+    /// `source_memory_ids`.
+    pub is_summary: bool,
+    /// IDs of memories that were consolidated into this summary.
+    ///
+    /// Only populated when `is_summary` is `true`. These represent the original
+    /// memories that were analyzed and combined to create this summary.
+    pub source_memory_ids: Option<Vec<MemoryId>>,
+    /// Timestamp when this memory was consolidated (Unix epoch seconds).
+    ///
+    /// Only populated for consolidated memories (both summaries and source memories
+    /// that have been included in a consolidation).
+    pub consolidation_timestamp: Option<u64>,
 }
 
 /// Result of a memory operation with optional metadata.

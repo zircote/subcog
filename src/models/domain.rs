@@ -273,6 +273,12 @@ pub enum MemoryStatus {
     Deleted,
     /// Soft-deleted, hidden by default.
     Tombstoned,
+    /// Consolidated into a summary memory.
+    ///
+    /// This status indicates that the memory has been included in a consolidation
+    /// operation and is now referenced by a summary memory. The original memory
+    /// remains searchable and is linked to its summary via edge relationships.
+    Consolidated,
 }
 
 impl MemoryStatus {
@@ -286,6 +292,7 @@ impl MemoryStatus {
             Self::Pending => "pending",
             Self::Deleted => "deleted",
             Self::Tombstoned => "tombstoned",
+            Self::Consolidated => "consolidated",
         }
     }
 }

@@ -352,6 +352,9 @@ impl CaptureService {
                 embedding: embedding.clone(),
                 tags,
                 source: request.source,
+                is_summary: false,
+                source_memory_ids: None,
+                consolidation_timestamp: None,
             };
 
             // Generate URN (always use subcog:// format)
@@ -722,6 +725,9 @@ mod tests {
             embedding: None,
             tags: vec![],
             source: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
         };
 
         let urn = service.generate_urn(&memory);

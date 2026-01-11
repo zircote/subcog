@@ -135,6 +135,9 @@ impl StoredMemory {
             embedding: self.embedding.clone(),
             tags: self.tags.clone(),
             source: self.source.clone(),
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
         }
     }
 }
@@ -477,6 +480,9 @@ mod tests {
             embedding: None,
             tags: vec!["test".to_string()],
             source: Some("test.rs".to_string()),
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
         }
     }
 

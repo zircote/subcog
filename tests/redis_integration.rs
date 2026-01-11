@@ -84,6 +84,9 @@ mod index {
             project_id: None,
             branch: None,
             file_path: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
         }
     }
 
@@ -139,6 +142,9 @@ mod index {
             project_id: Some("test-project".to_string()),
             branch: Some("main".to_string()),
             file_path: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
         };
 
         let index_result = backend.index(&memory);

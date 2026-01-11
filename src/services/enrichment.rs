@@ -242,6 +242,9 @@ impl<P: LlmProvider> EnrichmentService<P> {
             embedding: memory.embedding.clone(),
             tags: new_tags.to_vec(),
             source: memory.source.clone(),
+            is_summary: memory.is_summary,
+            source_memory_ids: memory.source_memory_ids.clone(),
+            consolidation_timestamp: memory.consolidation_timestamp,
         };
 
         // Re-index the updated memory

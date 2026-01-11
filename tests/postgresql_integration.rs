@@ -80,6 +80,9 @@ mod persistence {
             project_id: None,
             branch: None,
             file_path: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
         }
     }
 
@@ -123,6 +126,9 @@ mod persistence {
             project_id: Some("test-project".to_string()),
             branch: Some("main".to_string()),
             file_path: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
         };
 
         // Store
@@ -225,6 +231,9 @@ mod persistence {
             project_id: None,
             branch: None,
             file_path: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
         };
 
         backend.store(&memory).expect("Store memory");
@@ -365,6 +374,9 @@ mod index {
             project_id: None,
             branch: None,
             file_path: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
         };
 
         backend.index(&memory).expect("Index should succeed");
