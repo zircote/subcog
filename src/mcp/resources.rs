@@ -14,7 +14,7 @@
 //! | Component | Format | Description |
 //! |-----------|--------|-------------|
 //! | `domain` | `_` \| `project` \| `user` \| `org/{name}` | Scope for resolution |
-//! | `resource-type` | `help` \| `memory` \| `search` \| `topics` \| `namespaces` | Type of resource |
+//! | `resource-type` | `help` \| `memory` \| `search` \| `topics` \| `namespaces` \| `summaries` | Type of resource |
 //! | `resource-id` | alphanumeric with `-`, `_` | Optional identifier |
 //!
 //! ## Domain Scopes
@@ -44,6 +44,10 @@
 //! - `subcog://topics/{topic}` - Get memories for a specific topic
 //! - `subcog://namespaces` - List all namespaces with descriptions and signal words
 //!
+//! ## Summary Resources
+//! - `subcog://summaries` - List all consolidated memory summaries
+//! - `subcog://summaries/{id}` - Get a specific summary with its source memories
+//!
 //! ## Domain-Scoped Resources
 //! - `subcog://project/_` - Project-scoped memories only
 //! - `subcog://org/{org}/_` - Organization-scoped memories
@@ -58,6 +62,8 @@
 //! subcog://memory/abc123         # Specific memory by ID
 //! subcog://search/postgres       # Search for "postgres"
 //! subcog://topics/authentication # Memories about authentication
+//! subcog://summaries             # List all consolidated summaries
+//! subcog://summaries/summary_123 # Get specific summary with sources
 //! ```
 //!
 //! For advanced filtering and discovery, use `subcog_recall` with the `filter`
@@ -236,6 +242,7 @@ impl ResourceHandler {
         resources.extend(self.memory_resource_definitions());
         resources.extend(Self::domain_resource_definitions());
         resources.extend(Self::search_topic_resource_definitions());
+        resources.extend(Self::summary_resource_definitions());
         resources.extend(Self::prompt_resource_definitions());
         resources
     }
@@ -398,6 +405,23 @@ impl ResourceHandler {
         resources
     }
 
+    fn summary_resource_definitions() -> Vec<ResourceDefinition> {
+        vec![
+            Self::build_resource(
+                "subcog://summaries",
+                "All Summaries",
+                "List all consolidated memory summaries",
+                "application/json",
+            ),
+            Self::build_resource(
+                "subcog://summaries/{id}",
+                "Summary by ID",
+                "Get a specific summary node with its source memories (replace {id})",
+                "application/json",
+            ),
+        ]
+    }
+
     fn prompt_resource_definitions() -> Vec<ResourceDefinition> {
         let items = [
             (
@@ -455,6 +479,8 @@ impl ResourceHandler {
     /// - `subcog://search/{query}` - Search memories with a query
     /// - `subcog://topics` - List all indexed topics
     /// - `subcog://topics/{topic}` - Get memories for a specific topic
+    /// - `subcog://summaries` - List all consolidated summaries
+    /// - `subcog://summaries/{id}` - Get a specific summary with source memories
     ///
     /// For advanced filtering, use `subcog_recall` with the `filter` argument.
     ///
@@ -485,9 +511,10 @@ impl ResourceHandler {
             "search" => self.get_search_resource(uri, &parts),
             "topics" => self.get_topics_resource(uri, &parts),
             "namespaces" => self.get_namespaces_resource(uri),
+            "summaries" => self.get_summaries_resource(uri, &parts),
             "_prompts" => self.get_aggregate_prompts_resource(uri),
             _ => Err(Error::InvalidInput(format!(
-                "Unknown resource type: {}. Valid: _, help, memory, project, user, org, search, topics, namespaces, _prompts",
+                "Unknown resource type: {}. Valid: _, help, memory, project, user, org, search, topics, namespaces, summaries, _prompts",
                 parts[0]
             ))),
         }
@@ -833,6 +860,121 @@ impl ResourceHandler {
         let response = serde_json::json!({
             "count": namespaces_json.len(),
             "namespaces": namespaces_json,
+        });
+
+        Ok(ResourceContent {
+            uri: uri.to_string(),
+            mime_type: Some("application/json".to_string()),
+            text: Some(serde_json::to_string_pretty(&response).unwrap_or_default()),
+            blob: None,
+        })
+    }
+
+    /// Gets summaries resource (list or specific summary).
+    ///
+    /// URIs:
+    /// - `subcog://summaries` - List all summary nodes
+    /// - `subcog://summaries/{id}` - Get a specific summary with source memories
+    fn get_summaries_resource(&self, uri: &str, parts: &[&str]) -> Result<ResourceContent> {
+        let recall = self.recall_service.as_ref().ok_or_else(|| {
+            Error::InvalidInput("Summary browsing requires RecallService".to_string())
+        })?;
+
+        if parts.len() == 1 {
+            // List all summaries
+            let filter = SearchFilter::new();
+            let results = recall.list_all(&filter, 1000)?;
+
+            // Filter to only summary nodes
+            let summaries: Vec<serde_json::Value> = results
+                .memories
+                .iter()
+                .filter(|hit| hit.memory.is_summary)
+                .map(|hit| {
+                    serde_json::json!({
+                        "id": hit.memory.id.as_str(),
+                        "namespace": hit.memory.namespace.as_str(),
+                        "tags": hit.memory.tags,
+                        "content_preview": truncate_content(&hit.memory.content, 200),
+                        "source_count": hit.memory.source_memory_ids.as_ref().map_or(0, Vec::len),
+                        "consolidation_timestamp": hit.memory.consolidation_timestamp,
+                        "uri": format!("subcog://summaries/{}", hit.memory.id.as_str()),
+                    })
+                })
+                .collect();
+
+            let response = serde_json::json!({
+                "count": summaries.len(),
+                "summaries": summaries,
+            });
+
+            Ok(ResourceContent {
+                uri: uri.to_string(),
+                mime_type: Some("application/json".to_string()),
+                text: Some(serde_json::to_string_pretty(&response).unwrap_or_default()),
+                blob: None,
+            })
+        } else {
+            // Get specific summary by ID
+            let summary_id = parts[1..].join("/");
+            let summary_id = decode_uri_component(&summary_id);
+
+            self.get_specific_summary_resource(uri, recall, &summary_id)
+        }
+    }
+
+    /// Gets a specific summary node with its source memories.
+    ///
+    /// Returns the summary content and linked source memories.
+    fn get_specific_summary_resource(
+        &self,
+        uri: &str,
+        recall: &RecallService,
+        summary_id: &str,
+    ) -> Result<ResourceContent> {
+        use crate::models::MemoryId;
+
+        // Get the summary memory
+        let summary = recall
+            .get_by_id(&MemoryId::new(summary_id))?
+            .ok_or_else(|| Error::InvalidInput(format!("Summary not found: {summary_id}")))?;
+
+        // Verify it's actually a summary
+        if !summary.is_summary {
+            return Err(Error::InvalidInput(format!(
+                "Memory {summary_id} is not a summary node"
+            )));
+        }
+
+        // Get source memory IDs
+        let source_ids = summary.source_memory_ids.as_ref().map_or_else(Vec::new, Clone::clone);
+
+        // Fetch source memories
+        let source_memories: Vec<serde_json::Value> = source_ids
+            .iter()
+            .filter_map(|id| recall.get_by_id(id).ok().flatten())
+            .map(|m| {
+                serde_json::json!({
+                    "id": m.id.as_str(),
+                    "namespace": m.namespace.as_str(),
+                    "tags": m.tags,
+                    "content_preview": truncate_content(&m.content, 150),
+                    "uri": format!("subcog://memory/{}", m.id.as_str()),
+                })
+            })
+            .collect();
+
+        let response = serde_json::json!({
+            "id": summary.id.as_str(),
+            "namespace": summary.namespace.as_str(),
+            "domain": summary.domain.to_string(),
+            "content": summary.content,
+            "tags": summary.tags,
+            "consolidation_timestamp": summary.consolidation_timestamp,
+            "source_count": source_ids.len(),
+            "source_memories": source_memories,
+            "created_at": summary.created_at,
+            "updated_at": summary.updated_at,
         });
 
         Ok(ResourceContent {
@@ -1466,5 +1608,237 @@ mod tests {
         let result = handler.get_resource("subcog://_prompts");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("PromptService"));
+    }
+
+    #[test]
+    fn test_list_resources_includes_summaries() {
+        let handler = ResourceHandler::new();
+        let resources = handler.list_resources();
+
+        assert!(resources.iter().any(|r| r.uri == "subcog://summaries"));
+        assert!(
+            resources
+                .iter()
+                .any(|r| r.uri == "subcog://summaries/{id}")
+        );
+    }
+
+    #[test]
+    fn test_summaries_resource_requires_recall_service() {
+        let mut handler = ResourceHandler::new();
+        let result = handler.get_resource("subcog://summaries");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("RecallService"));
+    }
+
+    #[test]
+    fn test_summaries_list_filters_only_summary_nodes() {
+        let index = SqliteBackend::in_memory().expect("in-memory index");
+        let now = 1_700_000_000;
+
+        // Create a regular memory
+        let regular = Memory {
+            id: MemoryId::new("regular-1"),
+            content: "Regular memory content".to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
+            status: MemoryStatus::Active,
+            created_at: now,
+            updated_at: now,
+            tombstoned_at: None,
+            embedding: None,
+            tags: vec!["tag1".to_string()],
+            source: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
+        };
+
+        // Create a summary memory
+        let summary = Memory {
+            id: MemoryId::new("summary-1"),
+            content: "Summary of related memories".to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
+            status: MemoryStatus::Active,
+            created_at: now,
+            updated_at: now,
+            tombstoned_at: None,
+            embedding: None,
+            tags: vec!["tag1".to_string()],
+            source: Some("consolidation".to_string()),
+            is_summary: true,
+            source_memory_ids: Some(vec![MemoryId::new("regular-1")]),
+            consolidation_timestamp: Some(now),
+        };
+
+        index.index(&regular).expect("index regular memory");
+        index.index(&summary).expect("index summary memory");
+
+        let recall = RecallService::with_index(index);
+        let mut handler = ResourceHandler::new().with_recall_service(recall);
+
+        let result = handler.get_resource("subcog://summaries").unwrap();
+        let body = result.text.unwrap();
+        let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+        // Should only include the summary, not the regular memory
+        assert_eq!(value["count"].as_u64(), Some(1));
+        assert_eq!(value["summaries"][0]["id"], "summary-1");
+        assert_eq!(value["summaries"][0]["source_count"], 1);
+        assert!(value["summaries"][0]["consolidation_timestamp"].is_u64());
+    }
+
+    #[test]
+    fn test_get_specific_summary_with_sources() {
+        let index = SqliteBackend::in_memory().expect("in-memory index");
+        let now = 1_700_000_000;
+
+        // Create source memories
+        let source1 = Memory {
+            id: MemoryId::new("source-1"),
+            content: "First source memory with detailed content".to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
+            status: MemoryStatus::Active,
+            created_at: now,
+            updated_at: now,
+            tombstoned_at: None,
+            embedding: None,
+            tags: vec!["db".to_string()],
+            source: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
+        };
+
+        let source2 = Memory {
+            id: MemoryId::new("source-2"),
+            content: "Second source memory with more details".to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
+            status: MemoryStatus::Active,
+            created_at: now,
+            updated_at: now,
+            tombstoned_at: None,
+            embedding: None,
+            tags: vec!["cache".to_string()],
+            source: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
+        };
+
+        // Create summary memory
+        let summary = Memory {
+            id: MemoryId::new("summary-1"),
+            content: "Consolidated summary of database and caching decisions".to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
+            status: MemoryStatus::Active,
+            created_at: now,
+            updated_at: now,
+            tombstoned_at: None,
+            embedding: None,
+            tags: vec!["db".to_string(), "cache".to_string()],
+            source: Some("consolidation".to_string()),
+            is_summary: true,
+            source_memory_ids: Some(vec![MemoryId::new("source-1"), MemoryId::new("source-2")]),
+            consolidation_timestamp: Some(now),
+        };
+
+        index.index(&source1).expect("index source1");
+        index.index(&source2).expect("index source2");
+        index.index(&summary).expect("index summary");
+
+        let recall = RecallService::with_index(index);
+        let mut handler = ResourceHandler::new().with_recall_service(recall);
+
+        let result = handler
+            .get_resource("subcog://summaries/summary-1")
+            .unwrap();
+        let body = result.text.unwrap();
+        let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+        assert_eq!(value["id"], "summary-1");
+        assert_eq!(value["namespace"], "decisions");
+        assert_eq!(value["source_count"], 2);
+        assert_eq!(
+            value["content"],
+            "Consolidated summary of database and caching decisions"
+        );
+
+        // Verify source memories are included
+        let sources = value["source_memories"].as_array().unwrap();
+        assert_eq!(sources.len(), 2);
+        assert!(sources.iter().any(|s| s["id"] == "source-1"));
+        assert!(sources.iter().any(|s| s["id"] == "source-2"));
+    }
+
+    #[test]
+    fn test_get_summary_rejects_non_summary() {
+        let index = SqliteBackend::in_memory().expect("in-memory index");
+        let now = 1_700_000_000;
+
+        // Create a regular memory (not a summary)
+        let regular = Memory {
+            id: MemoryId::new("regular-1"),
+            content: "Regular memory".to_string(),
+            namespace: Namespace::Decisions,
+            domain: Domain::new(),
+            project_id: None,
+            branch: None,
+            file_path: None,
+            status: MemoryStatus::Active,
+            created_at: now,
+            updated_at: now,
+            tombstoned_at: None,
+            embedding: None,
+            tags: vec![],
+            source: None,
+            is_summary: false,
+            source_memory_ids: None,
+            consolidation_timestamp: None,
+        };
+
+        index.index(&regular).expect("index memory");
+
+        let recall = RecallService::with_index(index);
+        let mut handler = ResourceHandler::new().with_recall_service(recall);
+
+        let result = handler.get_resource("subcog://summaries/regular-1");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("not a summary node")
+        );
+    }
+
+    #[test]
+    fn test_get_summary_not_found() {
+        let index = SqliteBackend::in_memory().expect("in-memory index");
+        let recall = RecallService::with_index(index);
+        let mut handler = ResourceHandler::new().with_recall_service(recall);
+
+        let result = handler.get_resource("subcog://summaries/nonexistent");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
     }
 }
