@@ -4,6 +4,7 @@
 
 use crate::Result;
 use crate::current_timestamp;
+use crate::llm::LlmProvider;
 use crate::models::{
     EdgeType, EventMeta, Memory, MemoryEvent, MemoryStatus, MemoryTier, Namespace, RetentionScore,
 };
@@ -13,6 +14,7 @@ use crate::storage::traits::PersistenceBackend;
 use lru::LruCache;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::time::Instant;
 use tracing::{info_span, instrument};
 
@@ -45,6 +47,8 @@ pub struct ConsolidationService<P: PersistenceBackend> {
     access_counts: LruCache<String, u32>,
     /// Last access times (`memory_id` -> timestamp), bounded LRU (HIGH-PERF-001).
     last_access: LruCache<String, u64>,
+    /// Optional LLM provider for intelligent consolidation.
+    llm: Option<Arc<dyn LlmProvider + Send + Sync>>,
 }
 
 impl<P: PersistenceBackend> ConsolidationService<P> {
@@ -55,7 +59,32 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             persistence,
             access_counts: LruCache::new(ACCESS_CACHE_CAPACITY),
             last_access: LruCache::new(ACCESS_CACHE_CAPACITY),
+            llm: None,
         }
+    }
+
+    /// Sets the LLM provider for intelligent consolidation.
+    ///
+    /// # Arguments
+    ///
+    /// * `llm` - The LLM provider to use for summarization and analysis.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use subcog::services::ConsolidationService;
+    /// use subcog::llm::AnthropicClient;
+    /// use subcog::storage::persistence::FilesystemBackend;
+    /// use std::sync::Arc;
+    ///
+    /// let backend = FilesystemBackend::new("/tmp/memories");
+    /// let llm = Arc::new(AnthropicClient::new());
+    /// let service = ConsolidationService::new(backend).with_llm(llm);
+    /// ```
+    #[must_use]
+    pub fn with_llm(mut self, llm: Arc<dyn LlmProvider + Send + Sync>) -> Self {
+        self.llm = Some(llm);
+        self
     }
 
     /// Records an access to a memory.
