@@ -1907,6 +1907,7 @@ impl From<SubcogConfig> for Config {
 }
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
 
@@ -2157,11 +2158,12 @@ mod tests {
         assert_eq!(config.similarity_threshold, 0.8);
 
         // Check namespace filter was parsed
-        if let Some(ref namespaces) = config.namespace_filter {
-            assert_eq!(namespaces.len(), 2);
-        } else {
-            panic!("Expected namespace_filter to be Some");
-        }
+        assert!(
+            config.namespace_filter.is_some(),
+            "Expected namespace_filter to be Some"
+        );
+        let namespaces = config.namespace_filter.as_ref().unwrap();
+        assert_eq!(namespaces.len(), 2);
     }
 
     #[test]
