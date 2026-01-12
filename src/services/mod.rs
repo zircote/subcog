@@ -96,7 +96,7 @@ mod topic_index;
 pub use auth::{AuthContext, AuthContextBuilder, Permission};
 pub use backend_factory::{BackendFactory, BackendSet};
 pub use capture::CaptureService;
-pub use consolidation::ConsolidationService;
+pub use consolidation::{ConsolidationService, ConsolidationStats};
 pub use context::{ContextBuilderService, MemoryStatistics};
 pub use data_subject::{
     ConsentPurpose, ConsentRecord, ConsentStatus, DataSubjectService, DeletionResult,

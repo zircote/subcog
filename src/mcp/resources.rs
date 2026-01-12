@@ -947,7 +947,10 @@ impl ResourceHandler {
         }
 
         // Get source memory IDs
-        let source_ids = summary.source_memory_ids.as_ref().map_or_else(Vec::new, Clone::clone);
+        let source_ids = summary
+            .source_memory_ids
+            .as_ref()
+            .map_or_else(Vec::new, Clone::clone);
 
         // Fetch source memories
         let source_memories: Vec<serde_json::Value> = source_ids
@@ -1616,11 +1619,7 @@ mod tests {
         let resources = handler.list_resources();
 
         assert!(resources.iter().any(|r| r.uri == "subcog://summaries"));
-        assert!(
-            resources
-                .iter()
-                .any(|r| r.uri == "subcog://summaries/{id}")
-        );
+        assert!(resources.iter().any(|r| r.uri == "subcog://summaries/{id}"));
     }
 
     #[test]
@@ -1784,10 +1783,10 @@ mod tests {
         );
 
         // Verify source memories are included
-        let sources = value["source_memories"].as_array().unwrap();
-        assert_eq!(sources.len(), 2);
-        assert!(sources.iter().any(|s| s["id"] == "source-1"));
-        assert!(sources.iter().any(|s| s["id"] == "source-2"));
+        let source_arr = value["source_memories"].as_array().unwrap();
+        assert_eq!(source_arr.len(), 2);
+        assert!(source_arr.iter().any(|s| s["id"] == "source-1"));
+        assert!(source_arr.iter().any(|s| s["id"] == "source-2"));
     }
 
     #[test]

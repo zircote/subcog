@@ -169,6 +169,9 @@ struct MemoryRow {
     tags: Option<String>,
     source: Option<String>,
     content: String,
+    is_summary: bool,
+    source_memory_ids: Option<String>,
+    consolidation_timestamp: Option<i64>,
 }
 
 impl SqliteBackend {
@@ -264,8 +267,16 @@ impl SqliteBackend {
         // Add tombstoned_at column if it doesn't exist (ADR-0053)
         let _ = conn.execute("ALTER TABLE memories ADD COLUMN tombstoned_at INTEGER", []);
 
-        // Create indexes for common query patterns (DB-H1)
-        Self::create_indexes(&conn);
+        // Add consolidation-related columns (summary nodes)
+        let _ = conn.execute(
+            "ALTER TABLE memories ADD COLUMN is_summary INTEGER DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute("ALTER TABLE memories ADD COLUMN source_memory_ids TEXT", []);
+        let _ = conn.execute(
+            "ALTER TABLE memories ADD COLUMN consolidation_timestamp INTEGER",
+            [],
+        );
 
         // Create FTS5 virtual table for full-text search (standalone, not synced with memories)
         // Note: FTS5 virtual tables use inverted indexes for MATCH queries and don't support
@@ -302,6 +313,10 @@ impl SqliteBackend {
             operation: "create_edges_table".to_string(),
             cause: e.to_string(),
         })?;
+
+        // Create indexes for common query patterns (DB-H1)
+        // NOTE: This must be called AFTER all tables are created (including memory_edges)
+        Self::create_indexes(&conn);
 
         Ok(())
     }
@@ -764,7 +779,7 @@ impl SqliteBackend {
             );
             Error::OperationFailed {
                 operation: "store_edge".to_string(),
-                cause: format!("Failed to insert edge: {}", e),
+                cause: format!("Failed to insert edge: {e}"),
             }
         })?;
 
@@ -840,7 +855,7 @@ fn fetch_memory_row(conn: &Connection, id: &MemoryId) -> Result<Option<MemoryRow
     let mut stmt = conn
         .prepare(
             "SELECT m.id, m.namespace, m.domain, m.project_id, m.branch, m.file_path, m.status, m.created_at,
-                    m.tombstoned_at, m.tags, m.source, f.content
+                    m.tombstoned_at, m.tags, m.source, f.content, m.is_summary, m.source_memory_ids, m.consolidation_timestamp
              FROM memories m
              JOIN memories_fts f ON m.id = f.id
              WHERE m.id = ?1",
@@ -865,6 +880,9 @@ fn fetch_memory_row(conn: &Connection, id: &MemoryId) -> Result<Option<MemoryRow
                 tags: row.get(9)?,
                 source: row.get(10)?,
                 content: row.get(11)?,
+                is_summary: row.get::<_, Option<bool>>(12)?.unwrap_or(false),
+                source_memory_ids: row.get(13)?,
+                consolidation_timestamp: row.get(14)?,
             })
         })
         .optional();
@@ -942,9 +960,16 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
         embedding: None,
         tags,
         source: row.source,
-        is_summary: false,
-        source_memory_ids: None,
-        consolidation_timestamp: None,
+        is_summary: row.is_summary,
+        source_memory_ids: row.source_memory_ids.as_ref().map(|json| {
+            serde_json::from_str::<Vec<String>>(json)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| MemoryId::new(&s))
+                .collect()
+        }),
+        #[allow(clippy::cast_sign_loss)]
+        consolidation_timestamp: row.consolidation_timestamp.map(|t| t as u64),
     }
 }
 
@@ -980,9 +1005,15 @@ impl IndexBackend for SqliteBackend {
                 #[allow(clippy::cast_possible_wrap)]
                 let created_at_i64 = memory.created_at as i64;
                 let tombstoned_at_i64 = memory.tombstoned_at.map(|t| t.timestamp());
+                #[allow(clippy::cast_possible_wrap)]
+                let consolidation_ts_i64 = memory.consolidation_timestamp.map(|t| t as i64);
+                let source_ids_json = memory
+                    .source_memory_ids
+                    .as_ref()
+                    .map(|ids| serde_json::to_string(ids).unwrap_or_default());
                 conn.execute(
-                    "INSERT OR REPLACE INTO memories (id, namespace, domain, project_id, branch, file_path, status, created_at, tags, source, tombstoned_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                    "INSERT OR REPLACE INTO memories (id, namespace, domain, project_id, branch, file_path, status, created_at, tags, source, tombstoned_at, is_summary, source_memory_ids, consolidation_timestamp)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                     params![
                         memory.id.as_str(),
                         memory.namespace.as_str(),
@@ -994,7 +1025,10 @@ impl IndexBackend for SqliteBackend {
                         created_at_i64,
                         tags_str,
                         memory.source.as_deref(),
-                        tombstoned_at_i64
+                        tombstoned_at_i64,
+                        memory.is_summary,
+                        source_ids_json,
+                        consolidation_ts_i64
                     ],
                 )
                 .map_err(|e| Error::OperationFailed {
@@ -1360,7 +1394,7 @@ impl IndexBackend for SqliteBackend {
 
             let sql = format!(
                 "SELECT m.id, m.namespace, m.domain, m.project_id, m.branch, m.file_path, m.status, m.created_at,
-                        m.tombstoned_at, m.tags, m.source, f.content
+                        m.tombstoned_at, m.tags, m.source, f.content, m.is_summary, m.source_memory_ids, m.consolidation_timestamp
                  FROM memories m
                  JOIN memories_fts f ON m.id = f.id
                  WHERE m.id IN ({})",
@@ -1392,6 +1426,9 @@ impl IndexBackend for SqliteBackend {
                         tags: row.get(9)?,
                         source: row.get(10)?,
                         content: row.get(11)?,
+                        is_summary: row.get::<_, Option<bool>>(12)?.unwrap_or(false),
+                        source_memory_ids: row.get(13)?,
+                        consolidation_timestamp: row.get(14)?,
                     })
                 })
                 .map_err(|e| Error::OperationFailed {
@@ -1451,17 +1488,31 @@ impl IndexBackend for SqliteBackend {
                     // Note: Cast u64 to i64 for SQLite compatibility (rusqlite doesn't impl ToSql for u64)
                     #[allow(clippy::cast_possible_wrap)]
                     let created_at_i64 = memory.created_at as i64;
+                    let tombstoned_at_i64 = memory.tombstoned_at.map(|t| t.timestamp());
+                    #[allow(clippy::cast_possible_wrap)]
+                    let consolidation_ts_i64 = memory.consolidation_timestamp.map(|t| t as i64);
+                    let source_ids_json = memory
+                        .source_memory_ids
+                        .as_ref()
+                        .map(|ids| serde_json::to_string(ids).unwrap_or_default());
                     conn.execute(
-                        "INSERT OR REPLACE INTO memories (id, namespace, domain, status, created_at, tags, source)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        "INSERT OR REPLACE INTO memories (id, namespace, domain, project_id, branch, file_path, status, created_at, tags, source, tombstoned_at, is_summary, source_memory_ids, consolidation_timestamp)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                         params![
                             memory.id.as_str(),
                             memory.namespace.as_str(),
                             domain_str,
+                            memory.project_id.as_deref(),
+                            memory.branch.as_deref(),
+                            memory.file_path.as_deref(),
                             memory.status.as_str(),
                             created_at_i64,
                             tags_str,
-                            memory.source.as_deref()
+                            memory.source.as_deref(),
+                            tombstoned_at_i64,
+                            memory.is_summary,
+                            source_ids_json,
+                            consolidation_ts_i64
                         ],
                     )
                     .map_err(|e| Error::OperationFailed {
@@ -2158,7 +2209,7 @@ mod tests {
         let conn = acquire_lock(&backend.conn);
 
         // Verify memory_edges table exists
-        let result: Result<i64, _> = conn.query_row(
+        let result: std::result::Result<i64, _> = conn.query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memory_edges'",
             [],
             |row| row.get(0),
@@ -2174,12 +2225,12 @@ mod tests {
         let conn = acquire_lock(&backend.conn);
 
         // Verify table has correct columns
-        let result: Result<Vec<String>, _> = conn
+        let result: std::result::Result<Vec<String>, _> = conn
             .prepare("PRAGMA table_info(memory_edges)")
             .and_then(|mut stmt| {
                 let columns = stmt
                     .query_map([], |row| row.get::<_, String>(1))?
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
                 Ok(columns)
             });
 
@@ -2189,7 +2240,11 @@ mod tests {
         assert!(columns.contains(&"to_id".to_string()));
         assert!(columns.contains(&"edge_type".to_string()));
         assert!(columns.contains(&"created_at".to_string()));
-        assert_eq!(columns.len(), 4, "memory_edges should have exactly 4 columns");
+        assert_eq!(
+            columns.len(),
+            4,
+            "memory_edges should have exactly 4 columns"
+        );
     }
 
     #[test]
@@ -2198,12 +2253,14 @@ mod tests {
         let conn = acquire_lock(&backend.conn);
 
         // Verify indexes were created
-        let indexes: Result<Vec<String>, _> = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='memory_edges'")
+        let indexes: std::result::Result<Vec<String>, _> = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='memory_edges'",
+            )
             .and_then(|mut stmt| {
                 let names = stmt
                     .query_map([], |row| row.get::<_, String>(0))?
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
                 Ok(names)
             });
 
@@ -2240,14 +2297,14 @@ mod tests {
         // Insert an edge
         let result = conn.execute(
             "INSERT INTO memory_edges (from_id, to_id, edge_type, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params!["edge_from", "edge_to", "summarized_by", 1234567890_i64],
+            params!["edge_from", "edge_to", "summarized_by", 1_234_567_890_i64],
         );
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 1, "Should insert one edge");
 
         // Query the edge back
-        let query_result: Result<(String, String, String, i64), _> = conn.query_row(
+        let query_result: std::result::Result<(String, String, String, i64), _> = conn.query_row(
             "SELECT from_id, to_id, edge_type, created_at FROM memory_edges WHERE from_id = ?1",
             params!["edge_from"],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
@@ -2258,7 +2315,7 @@ mod tests {
         assert_eq!(from_id, "edge_from");
         assert_eq!(to_id, "edge_to");
         assert_eq!(edge_type, "summarized_by");
-        assert_eq!(created_at, 1234567890);
+        assert_eq!(created_at, 1_234_567_890);
     }
 
     #[test]
@@ -2273,7 +2330,7 @@ mod tests {
         // This should fail due to foreign key constraint
         let result = conn.execute(
             "INSERT INTO memory_edges (from_id, to_id, edge_type, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params!["nonexistent_from", "nonexistent_to", "summarized_by", 1234567890_i64],
+            params!["nonexistent_from", "nonexistent_to", "summarized_by", 1_234_567_890_i64],
         );
 
         // Foreign keys might not be enforced in all SQLite configurations,
@@ -2299,7 +2356,7 @@ mod tests {
         // Insert edge
         conn.execute(
             "INSERT INTO memory_edges (from_id, to_id, edge_type, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params!["cascade_from", "cascade_to", "summarized_by", 1234567890_i64],
+            params!["cascade_from", "cascade_to", "summarized_by", 1_234_567_890_i64],
         )
         .unwrap();
 
@@ -2313,8 +2370,15 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1);
 
+        // Drop the connection guard BEFORE calling backend.remove() to avoid deadlock.
+        // The remove() method needs to acquire the same mutex lock.
+        drop(conn);
+
         // Delete the source memory
         backend.remove(&MemoryId::new("cascade_from")).unwrap();
+
+        // Re-acquire the connection to verify cascade delete worked
+        let conn = acquire_lock(&backend.conn);
 
         // Edge should be deleted due to CASCADE
         let count_after: i64 = conn
@@ -2324,7 +2388,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(count_after, 0, "Edge should be deleted when source memory is deleted");
+        assert_eq!(
+            count_after, 0,
+            "Edge should be deleted when source memory is deleted"
+        );
     }
 
     #[test]
@@ -2355,7 +2422,11 @@ mod tests {
         let no_edges = backend
             .query_edges(&memory1.id, EdgeType::Contradicts)
             .expect("query_edges for non-existent edge should succeed");
-        assert_eq!(no_edges.len(), 0, "Should have no edges for different edge type");
+        assert_eq!(
+            no_edges.len(),
+            0,
+            "Should have no edges for different edge type"
+        );
     }
 
     #[test]
@@ -2415,7 +2486,9 @@ mod tests {
             .unwrap();
 
         // Query should return all three
-        let edges = backend.query_edges(&source.id, EdgeType::RelatedTo).unwrap();
+        let edges = backend
+            .query_edges(&source.id, EdgeType::RelatedTo)
+            .unwrap();
         assert_eq!(edges.len(), 3, "Should have 3 edges");
 
         // Verify all targets are present

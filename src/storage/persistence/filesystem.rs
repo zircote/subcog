@@ -58,6 +58,15 @@ struct StoredMemory {
     embedding: Option<Vec<f32>>,
     tags: Vec<String>,
     source: Option<String>,
+    /// Whether this memory is a consolidation summary node.
+    #[serde(default)]
+    is_summary: bool,
+    /// IDs of memories that were consolidated into this summary.
+    #[serde(default)]
+    source_memory_ids: Option<Vec<String>>,
+    /// Timestamp when this memory was consolidated.
+    #[serde(default)]
+    consolidation_timestamp: Option<u64>,
 }
 
 impl From<&Memory> for StoredMemory {
@@ -81,6 +90,12 @@ impl From<&Memory> for StoredMemory {
             embedding: m.embedding.clone(),
             tags: m.tags.clone(),
             source: m.source.clone(),
+            is_summary: m.is_summary,
+            source_memory_ids: m
+                .source_memory_ids
+                .as_ref()
+                .map(|ids| ids.iter().map(|id| id.as_str().to_string()).collect()),
+            consolidation_timestamp: m.consolidation_timestamp,
         }
     }
 }
@@ -135,9 +150,12 @@ impl StoredMemory {
             embedding: self.embedding.clone(),
             tags: self.tags.clone(),
             source: self.source.clone(),
-            is_summary: false,
-            source_memory_ids: None,
-            consolidation_timestamp: None,
+            is_summary: self.is_summary,
+            source_memory_ids: self
+                .source_memory_ids
+                .as_ref()
+                .map(|ids| ids.iter().map(MemoryId::new).collect()),
+            consolidation_timestamp: self.consolidation_timestamp,
         }
     }
 }

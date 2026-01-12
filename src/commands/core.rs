@@ -198,7 +198,7 @@ pub fn cmd_status(config: &SubcogConfig) -> Result<(), Box<dyn std::error::Error
 }
 
 /// Consolidate command.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub fn cmd_consolidate(
     config: &SubcogConfig,
     namespace: Vec<String>,
@@ -207,15 +207,18 @@ pub fn cmd_consolidate(
     min_memories: Option<usize>,
     similarity: Option<f32>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::cli::{build_anthropic_client, build_lmstudio_client, build_ollama_client, build_openai_client, build_resilience_config};
-    use subcog::config::{ConsolidationConfig, LlmProvider, StorageBackendType};
+    use std::str::FromStr;
+    use std::sync::Arc;
+    use subcog::cli::{
+        build_anthropic_client, build_lmstudio_client, build_ollama_client, build_openai_client,
+        build_resilience_config,
+    };
+    use subcog::config::{LlmProvider, StorageBackendType};
     use subcog::llm::ResilientLlmProvider;
     use subcog::models::Namespace;
     use subcog::services::{ConsolidationService, ServiceContainer};
     use subcog::storage::index::SqliteBackend;
     use subcog::storage::persistence::FilesystemBackend;
-    use std::str::FromStr;
-    use std::sync::Arc;
 
     println!("Running memory consolidation...");
     println!();
@@ -232,10 +235,8 @@ pub fn cmd_consolidate(
 
     // Override namespace filter if provided
     if !namespace.is_empty() {
-        let parsed_namespaces: Result<Vec<Namespace>, _> = namespace
-            .iter()
-            .map(|ns| Namespace::from_str(ns))
-            .collect();
+        let parsed_namespaces: Result<Vec<Namespace>, _> =
+            namespace.iter().map(|ns| Namespace::from_str(ns)).collect();
 
         match parsed_namespaces {
             Ok(namespaces) => {
@@ -296,19 +297,31 @@ pub fn cmd_consolidate(
         match llm_config.provider {
             LlmProvider::OpenAi => {
                 let client = build_openai_client(llm_config);
-                Some(Arc::new(ResilientLlmProvider::new(client, resilience_config)))
+                Some(Arc::new(ResilientLlmProvider::new(
+                    client,
+                    resilience_config,
+                )))
             },
             LlmProvider::Anthropic => {
                 let client = build_anthropic_client(llm_config);
-                Some(Arc::new(ResilientLlmProvider::new(client, resilience_config)))
+                Some(Arc::new(ResilientLlmProvider::new(
+                    client,
+                    resilience_config,
+                )))
             },
             LlmProvider::Ollama => {
                 let client = build_ollama_client(llm_config);
-                Some(Arc::new(ResilientLlmProvider::new(client, resilience_config)))
+                Some(Arc::new(ResilientLlmProvider::new(
+                    client,
+                    resilience_config,
+                )))
             },
             LlmProvider::LmStudio => {
                 let client = build_lmstudio_client(llm_config);
-                Some(Arc::new(ResilientLlmProvider::new(client, resilience_config)))
+                Some(Arc::new(ResilientLlmProvider::new(
+                    client,
+                    resilience_config,
+                )))
             },
             LlmProvider::None => None,
         }
@@ -317,23 +330,29 @@ pub fn cmd_consolidate(
     // Display configuration
     println!("Configuration:");
     println!("  Storage backend: {:?}", storage_config.backend);
-    if let Some(llm) = &llm_provider {
+    if llm_provider.is_some() {
         println!("  LLM provider: {:?}", config.llm.provider);
     } else {
         println!("  LLM provider: None (will skip summarization)");
     }
     if let Some(ref namespaces) = consolidation_config.namespace_filter {
-        println!("  Namespaces: {:?}", namespaces);
+        println!("  Namespaces: {namespaces:?}");
     } else {
         println!("  Namespaces: all");
     }
     if let Some(d) = consolidation_config.time_window_days {
-        println!("  Time window: {} days", d);
+        println!("  Time window: {d} days");
     } else {
         println!("  Time window: all time");
     }
-    println!("  Similarity threshold: {}", consolidation_config.similarity_threshold);
-    println!("  Minimum memories: {}", consolidation_config.min_memories_to_consolidate);
+    println!(
+        "  Similarity threshold: {}",
+        consolidation_config.similarity_threshold
+    );
+    println!(
+        "  Minimum memories: {}",
+        consolidation_config.min_memories_to_consolidate
+    );
     println!();
 
     // Create consolidation service based on configured backend
@@ -347,25 +366,33 @@ pub fn cmd_consolidate(
                 .map_or_else(|| data_dir.join("memories.db"), std::path::PathBuf::from);
 
             let backend = SqliteBackend::new(&db_path)?;
-            let mut service = ConsolidationService::new(backend)
-                .with_index(index.clone());
+            let mut service = ConsolidationService::new(backend).with_index(Arc::clone(&index));
 
             if let Some(llm) = llm_provider {
                 service = service.with_llm(llm);
             }
 
-            run_consolidation(&mut service, &recall_service, &consolidation_config, dry_run)?;
+            run_consolidation(
+                &mut service,
+                &recall_service,
+                &consolidation_config,
+                dry_run,
+            )?;
         },
         StorageBackendType::Filesystem => {
             let backend = FilesystemBackend::new(data_dir);
-            let mut service = ConsolidationService::new(backend)
-                .with_index(index.clone());
+            let mut service = ConsolidationService::new(backend).with_index(Arc::clone(&index));
 
             if let Some(llm) = llm_provider {
                 service = service.with_llm(llm);
             }
 
-            run_consolidation(&mut service, &recall_service, &consolidation_config, dry_run)?;
+            run_consolidation(
+                &mut service,
+                &recall_service,
+                &consolidation_config,
+                dry_run,
+            )?;
         },
         StorageBackendType::PostgreSQL => {
             eprintln!("PostgreSQL consolidation not yet implemented");
@@ -381,6 +408,7 @@ pub fn cmd_consolidate(
 }
 
 /// Runs consolidation with the new API and prints results.
+#[allow(clippy::excessive_nesting, clippy::too_many_lines)]
 fn run_consolidation<P: PersistenceBackend>(
     service: &mut subcog::services::ConsolidationService<P>,
     recall_service: &subcog::services::RecallService,
@@ -403,7 +431,7 @@ fn run_consolidation<P: PersistenceBackend>(
                         continue;
                     }
 
-                    println!("Namespace: {:?}", namespace);
+                    println!("Namespace: {namespace:?}");
                     for (idx, group) in namespace_groups.iter().enumerate() {
                         println!("  Group {}: {} memories", idx + 1, group.len());
                         total_groups += 1;
@@ -413,8 +441,8 @@ fn run_consolidation<P: PersistenceBackend>(
                 }
 
                 println!("Summary:");
-                println!("  Would create {} summary node(s)", total_groups);
-                println!("  Would consolidate {} memory/memories", total_memories);
+                println!("  Would create {total_groups} summary node(s)");
+                println!("  Would consolidate {total_memories} memory/memories");
                 println!();
                 println!("Run without --dry-run to apply changes");
 
@@ -437,7 +465,7 @@ fn run_consolidation<P: PersistenceBackend>(
                 let mut total_memories = 0;
                 let mut namespaces_with_groups = 0;
 
-                for (_, namespace_groups) in &groups {
+                for namespace_groups in groups.values() {
                     if !namespace_groups.is_empty() {
                         namespaces_with_groups += 1;
                         for group in namespace_groups {
@@ -456,8 +484,10 @@ fn run_consolidation<P: PersistenceBackend>(
                     return Ok(());
                 }
 
-                println!("Found {} group(s) across {} namespace(s)", total_groups, namespaces_with_groups);
-                println!("  Total memories to consolidate: {}", total_memories);
+                println!(
+                    "Found {total_groups} group(s) across {namespaces_with_groups} namespace(s)"
+                );
+                println!("  Total memories to consolidate: {total_memories}");
                 println!();
 
                 // Show breakdown by namespace
@@ -466,7 +496,12 @@ fn run_consolidation<P: PersistenceBackend>(
                         continue;
                     }
                     let ns_memories: usize = namespace_groups.iter().map(Vec::len).sum();
-                    println!("  {:?}: {} group(s), {} memories", namespace, namespace_groups.len(), ns_memories);
+                    println!(
+                        "  {:?}: {} group(s), {} memories",
+                        namespace,
+                        namespace_groups.len(),
+                        ns_memories
+                    );
                 }
                 println!();
 
@@ -480,8 +515,9 @@ fn run_consolidation<P: PersistenceBackend>(
                         println!("  {}", stats.summary());
 
                         if stats.summaries_created > 0 {
-                            println!("  ✓ Created {} summary node(s)", stats.summaries_created);
-                            println!("  ✓ Linked {} source memories via edges", total_memories);
+                            let created = stats.summaries_created;
+                            println!("  ✓ Created {created} summary node(s)");
+                            println!("  ✓ Linked {total_memories} source memories via edges");
                         }
 
                         if stats.contradictions > 0 {

@@ -312,6 +312,7 @@ async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::
     .await
 }
 
+#[allow(clippy::too_many_lines)]
 async fn dispatch_command(
     cli: Cli,
     config: SubcogConfig,
@@ -362,8 +363,15 @@ async fn dispatch_command(
             let config = config.clone();
             let namespace = namespace.clone();
             run_blocking_cmd!(move || {
-                commands::cmd_consolidate(&config, namespace, days, dry_run, min_memories, similarity)
-                    .map_err(|e| e.to_string())
+                commands::cmd_consolidate(
+                    &config,
+                    namespace,
+                    days,
+                    dry_run,
+                    min_memories,
+                    similarity,
+                )
+                .map_err(|e| e.to_string())
             })
         },
         Commands::Reindex { repo } => {

@@ -66,6 +66,13 @@ pub fn cmd_enrich(
             id,
             dry_run,
         ),
+        LlmProvider::None => {
+            eprintln!("Error: LLM provider is set to 'none'. Enrichment requires an LLM provider.");
+            eprintln!(
+                "Configure a provider in subcog.toml or set SUBCOG_LLM_PROVIDER environment variable."
+            );
+            Err("LLM provider not configured".into())
+        },
     }
 }
 

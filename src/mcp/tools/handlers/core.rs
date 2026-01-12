@@ -3,15 +3,23 @@
 //! Contains handlers for subcog's core memory operations:
 //! capture, recall, status, namespaces, prompt understanding, consolidate, enrich, reindex.
 
+use crate::config::{ConsolidationConfig, LlmProvider, StorageBackendType, SubcogConfig};
+use crate::llm::ResilientLlmProvider;
 use crate::mcp::prompt_understanding::PROMPT_UNDERSTANDING;
 use crate::mcp::tool_types::{
     CaptureArgs, ConsolidateArgs, EnrichArgs, RecallArgs, ReindexArgs, build_filter_description,
     format_content_for_detail, parse_namespace, parse_search_mode,
 };
-use crate::models::{CaptureRequest, DetailLevel, Domain, SearchFilter, SearchMode, SearchResult};
-use crate::services::{ServiceContainer, parse_filter_query};
+#[cfg(test)]
+use crate::models::SearchResult;
+use crate::models::{CaptureRequest, DetailLevel, Domain, Namespace, SearchFilter, SearchMode};
+use crate::services::{ConsolidationService, ServiceContainer, parse_filter_query};
+use crate::storage::index::SqliteBackend;
+use crate::storage::persistence::FilesystemBackend;
 use crate::{Error, Result};
 use serde_json::Value;
+use std::str::FromStr;
+use std::sync::Arc;
 
 use super::super::{ToolContent, ToolResult};
 
@@ -42,6 +50,7 @@ fn validate_input_length(input: &str, field_name: &str, max_length: usize) -> Re
     Ok(())
 }
 
+#[cfg(test)]
 fn fetch_consolidation_candidates(
     recall: &crate::services::RecallService,
     filter: &SearchFilter,
@@ -447,21 +456,15 @@ pub fn execute_namespaces(_arguments: Value) -> Result<ToolResult> {
 
 /// Executes the consolidate tool.
 /// Triggers memory consolidation and returns statistics.
+#[allow(clippy::too_many_lines)]
 pub fn execute_consolidate(arguments: Value) -> Result<ToolResult> {
-    use crate::config::{ConsolidationConfig, StorageBackendType};
-    use crate::services::ConsolidationService;
-    use crate::storage::index::SqliteBackend;
-    use crate::storage::persistence::FilesystemBackend;
-    use std::str::FromStr;
-    use std::sync::Arc;
-
     let args: ConsolidateArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
     let dry_run = args.dry_run.unwrap_or(false);
 
     // Load config to check if consolidation is enabled
-    let config = crate::config::SubcogConfig::load()?;
+    let config = SubcogConfig::load_default();
 
     if !config.consolidation.enabled {
         return Ok(ToolResult {
@@ -477,7 +480,7 @@ pub fn execute_consolidate(arguments: Value) -> Result<ToolResult> {
 
     // Override namespace filter if provided
     if let Some(ref namespaces) = args.namespaces {
-        let parsed_namespaces: Result<Vec<Namespace>, _> = namespaces
+        let parsed_namespaces: std::result::Result<Vec<Namespace>, _> = namespaces
             .iter()
             .map(|ns| Namespace::from_str(ns))
             .collect();
@@ -529,7 +532,8 @@ pub fn execute_consolidate(arguments: Value) -> Result<ToolResult> {
     let index = Arc::new(services.index()?);
 
     // Build LLM provider (optional, for summarization)
-    let llm_provider = services.llm_provider();
+    let llm_provider: Option<Arc<dyn crate::llm::LlmProvider + Send + Sync>> =
+        build_llm_provider_from_config(&config.llm);
 
     // Run consolidation based on configured backend
     let result_text = match storage_config.backend {
@@ -540,30 +544,41 @@ pub fn execute_consolidate(arguments: Value) -> Result<ToolResult> {
                 .map_or_else(|| data_dir.join("memories.db"), std::path::PathBuf::from);
 
             let backend = SqliteBackend::new(&db_path)?;
-            let mut service = ConsolidationService::new(backend)
-                .with_index(index);
+            let mut service = ConsolidationService::new(backend).with_index(index);
 
             if let Some(llm) = llm_provider {
                 service = service.with_llm(llm);
             }
 
-            run_mcp_consolidation(&mut service, &recall_service, &consolidation_config, dry_run)?
+            run_mcp_consolidation(
+                &mut service,
+                &recall_service,
+                &consolidation_config,
+                dry_run,
+            )?
         },
         StorageBackendType::Filesystem => {
             let backend = FilesystemBackend::new(data_dir);
-            let mut service = ConsolidationService::new(backend)
-                .with_index(index);
+            let mut service = ConsolidationService::new(backend).with_index(index);
 
             if let Some(llm) = llm_provider {
                 service = service.with_llm(llm);
             }
 
-            run_mcp_consolidation(&mut service, &recall_service, &consolidation_config, dry_run)?
+            run_mcp_consolidation(
+                &mut service,
+                &recall_service,
+                &consolidation_config,
+                dry_run,
+            )?
         },
         StorageBackendType::PostgreSQL | StorageBackendType::Redis => {
             return Ok(ToolResult {
                 content: vec![ToolContent::Text {
-                    text: format!("{:?} consolidation not yet implemented", storage_config.backend),
+                    text: format!(
+                        "{:?} consolidation not yet implemented",
+                        storage_config.backend
+                    ),
                 }],
                 is_error: true,
             });
@@ -574,6 +589,61 @@ pub fn execute_consolidate(arguments: Value) -> Result<ToolResult> {
         content: vec![ToolContent::Text { text: result_text }],
         is_error: false,
     })
+}
+
+/// Builds an LLM provider from configuration.
+///
+/// Returns `None` if the provider is set to `None` or if client creation fails.
+fn build_llm_provider_from_config(
+    llm_config: &crate::config::LlmConfig,
+) -> Option<Arc<dyn crate::llm::LlmProvider + Send + Sync>> {
+    use crate::llm::{
+        AnthropicClient, LlmResilienceConfig, LmStudioClient, OllamaClient, OpenAiClient,
+    };
+
+    // Build resilience config from LLM settings
+    let resilience_config = LlmResilienceConfig {
+        max_retries: llm_config.max_retries.unwrap_or(3),
+        retry_backoff_ms: llm_config.retry_backoff_ms.unwrap_or(1000),
+        breaker_failure_threshold: llm_config.breaker_failure_threshold.unwrap_or(5),
+        breaker_reset_timeout_ms: llm_config.breaker_reset_ms.unwrap_or(30_000),
+        breaker_half_open_max_calls: llm_config.breaker_half_open_max_calls.unwrap_or(3),
+        latency_slo_ms: llm_config.latency_slo_ms.unwrap_or(5000),
+        error_budget_ratio: llm_config.error_budget_ratio.unwrap_or(0.01),
+        error_budget_window_secs: llm_config.error_budget_window_secs.unwrap_or(3600),
+    };
+
+    match llm_config.provider {
+        LlmProvider::OpenAi => {
+            let client = OpenAiClient::new();
+            Some(Arc::new(ResilientLlmProvider::new(
+                client,
+                resilience_config,
+            )))
+        },
+        LlmProvider::Anthropic => {
+            let client = AnthropicClient::new();
+            Some(Arc::new(ResilientLlmProvider::new(
+                client,
+                resilience_config,
+            )))
+        },
+        LlmProvider::Ollama => {
+            let client = OllamaClient::new();
+            Some(Arc::new(ResilientLlmProvider::new(
+                client,
+                resilience_config,
+            )))
+        },
+        LlmProvider::LmStudio => {
+            let client = LmStudioClient::new();
+            Some(Arc::new(ResilientLlmProvider::new(
+                client,
+                resilience_config,
+            )))
+        },
+        LlmProvider::None => None,
+    }
 }
 
 /// Helper function to run consolidation and format results for MCP tool response.
@@ -597,9 +667,17 @@ fn run_mcp_consolidation<P: crate::storage::PersistenceBackend>(
                 continue;
             }
 
-            output.push_str(&format!("**{:?}**: {} group(s)\n", namespace, namespace_groups.len()));
+            output.push_str(&format!(
+                "**{:?}**: {} group(s)\n",
+                namespace,
+                namespace_groups.len()
+            ));
             for (idx, group) in namespace_groups.iter().enumerate() {
-                output.push_str(&format!("  - Group {}: {} memories\n", idx + 1, group.len()));
+                output.push_str(&format!(
+                    "  - Group {}: {} memories\n",
+                    idx + 1,
+                    group.len()
+                ));
                 total_groups += 1;
                 total_memories += group.len();
             }
@@ -609,9 +687,13 @@ fn run_mcp_consolidation<P: crate::storage::PersistenceBackend>(
         if total_groups == 0 {
             output.push_str("No related memory groups found.\n");
         } else {
-            output.push_str(&format!("**Summary:**\n"));
-            output.push_str(&format!("  - Would create {} summary node(s)\n", total_groups));
-            output.push_str(&format!("  - Would consolidate {} memory/memories\n", total_memories));
+            output.push_str("**Summary:**\n");
+            output.push_str(&format!(
+                "  - Would create {total_groups} summary node(s)\n"
+            ));
+            output.push_str(&format!(
+                "  - Would consolidate {total_memories} memory/memories\n"
+            ));
         }
 
         Ok(output)
@@ -624,13 +706,19 @@ fn run_mcp_consolidation<P: crate::storage::PersistenceBackend>(
         if stats.processed == 0 {
             output.push_str("No memories found to consolidate.\n");
         } else {
-            output.push_str(&format!("**Statistics:**\n"));
+            output.push_str("**Statistics:**\n");
             output.push_str(&format!("  - Processed: {} memories\n", stats.processed));
-            output.push_str(&format!("  - Summary nodes created: {}\n", stats.summaries_created));
+            output.push_str(&format!(
+                "  - Summary nodes created: {}\n",
+                stats.summaries_created
+            ));
             output.push_str(&format!("  - Merged: {}\n", stats.merged));
             output.push_str(&format!("  - Archived: {}\n", stats.archived));
             if stats.contradictions > 0 {
-                output.push_str(&format!("  - Contradictions detected: {}\n", stats.contradictions));
+                output.push_str(&format!(
+                    "  - Contradictions detected: {}\n",
+                    stats.contradictions
+                ));
             }
         }
 
@@ -638,24 +726,64 @@ fn run_mcp_consolidation<P: crate::storage::PersistenceBackend>(
     }
 }
 
+/// Formats a single source memory entry for display.
+fn format_source_memory_entry<I: crate::storage::traits::IndexBackend>(
+    index: &I,
+    source_id: &crate::models::MemoryId,
+    position: usize,
+) -> Result<String> {
+    let mut entry = String::new();
+
+    match index.get_memory(source_id)? {
+        Some(source_memory) => {
+            entry.push_str(&format!("{}. **{}**\n", position, source_id.as_str()));
+            entry.push_str(&format!("   - Namespace: {:?}\n", source_memory.namespace));
+            if !source_memory.tags.is_empty() {
+                entry.push_str(&format!("   - Tags: {}\n", source_memory.tags.join(", ")));
+            }
+            // Show truncated content (first 150 chars)
+            let preview: &str = if source_memory.content.len() > 150 {
+                &source_memory.content[..150]
+            } else {
+                &source_memory.content
+            };
+            if source_memory.content.len() > 150 {
+                entry.push_str(&format!("   - Content: {preview}...\n"));
+            } else {
+                entry.push_str(&format!("   - Content: {preview}\n"));
+            }
+            entry.push('\n');
+        },
+        None => {
+            entry.push_str(&format!(
+                "{}. {} (not found)\n\n",
+                position,
+                source_id.as_str()
+            ));
+        },
+    }
+
+    Ok(entry)
+}
+
 /// Executes the get summary tool.
 /// Retrieves a summary memory and its linked source memories.
 pub fn execute_get_summary(arguments: Value) -> Result<ToolResult> {
     use crate::mcp::tool_types::GetSummaryArgs;
     use crate::models::{EdgeType, MemoryId};
+    use crate::storage::traits::IndexBackend;
 
     let args: GetSummaryArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
     let services = ServiceContainer::from_current_dir_or_user()?;
-    let persistence = services.persistence()?;
     let index = services.index()?;
 
-    // Get the summary memory
+    // Get the summary memory using IndexBackend::get_memory
     let memory_id = MemoryId::new(args.memory_id.clone());
-    let memory = persistence.get(&memory_id)?.ok_or_else(|| {
-        Error::InvalidInput(format!("Memory not found: {}", args.memory_id))
-    })?;
+    let memory = index
+        .get_memory(&memory_id)?
+        .ok_or_else(|| Error::InvalidInput(format!("Memory not found: {}", args.memory_id)))?;
 
     // Check if this is actually a summary
     if !memory.is_summary {
@@ -679,7 +807,7 @@ pub fn execute_get_summary(arguments: Value) -> Result<ToolResult> {
         output.push_str(&format!("**Tags:** {}\n", memory.tags.join(", ")));
     }
     if let Some(ts) = memory.consolidation_timestamp {
-        output.push_str(&format!("**Consolidated at:** {}\n", ts));
+        output.push_str(&format!("**Consolidated at:** {ts}\n"));
     }
     output.push_str(&format!("\n**Summary:**\n{}\n\n", memory.content));
 
@@ -687,32 +815,16 @@ pub fn execute_get_summary(arguments: Value) -> Result<ToolResult> {
     let source_ids = index.query_edges(&memory_id, EdgeType::SourceOf)?;
 
     if source_ids.is_empty() {
-        output.push_str("**Source Memories:** None (edges not stored or summary created without service)\n");
+        output.push_str(
+            "**Source Memories:** None (edges not stored or summary created without service)\n",
+        );
     } else {
         output.push_str(&format!("**Source Memories ({}):**\n\n", source_ids.len()));
 
-        // Retrieve each source memory
+        // Retrieve each source memory using IndexBackend::get_memory
         for (idx, source_id) in source_ids.iter().enumerate() {
-            match persistence.get(source_id)? {
-                Some(source_memory) => {
-                    output.push_str(&format!("{}. **{}**\n", idx + 1, source_id.as_str()));
-                    output.push_str(&format!("   - Namespace: {:?}\n", source_memory.namespace));
-                    if !source_memory.tags.is_empty() {
-                        output.push_str(&format!("   - Tags: {}\n", source_memory.tags.join(", ")));
-                    }
-                    // Show truncated content (first 150 chars)
-                    let preview = if source_memory.content.len() > 150 {
-                        format!("{}...", &source_memory.content[..150])
-                    } else {
-                        source_memory.content.clone()
-                    };
-                    output.push_str(&format!("   - Content: {}\n", preview));
-                    output.push('\n');
-                }
-                None => {
-                    output.push_str(&format!("{}. {} (not found)\n\n", idx + 1, source_id.as_str()));
-                }
-            }
+            let entry = format_source_memory_entry(&index, source_id, idx + 1)?;
+            output.push_str(&entry);
         }
     }
 

@@ -123,6 +123,7 @@ pub fn build_hook_llm_provider(
                 resilience_config,
             ))
         },
+        Provider::None => return None,
     };
 
     Some(provider)

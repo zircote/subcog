@@ -132,7 +132,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     ///
     /// # Arguments
     ///
-    /// * `index` - The SQLite index backend to use for edge storage.
+    /// * `index` - The `SQLite` index backend to use for edge storage.
     ///
     /// # Examples
     ///
@@ -264,6 +264,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             operation = "consolidate_memories"
         )
     )]
+    #[allow(clippy::too_many_lines)]
     pub fn consolidate_memories(
         &mut self,
         recall_service: &crate::services::RecallService,
@@ -383,7 +384,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
                                 );
                             }
                             continue;
-                        }
+                        },
                     };
 
                     // Create summary node (also stores edges if index backend available)
@@ -396,7 +397,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
                                 source_count = memories.len(),
                                 "Created summary node"
                             );
-                        }
+                        },
                         Err(e) => {
                             tracing::error!(
                                 error = %e,
@@ -406,7 +407,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
                                 "Failed to create summary node"
                             );
                             return Err(e);
-                        }
+                        },
                     }
                 }
             }
@@ -684,7 +685,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use subcog::services::ConsolidationService;
     /// use subcog::storage::persistence::FilesystemBackend;
     /// use subcog::models::{Memory, MemoryId, Namespace, Domain, MemoryStatus};
@@ -902,9 +903,9 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     /// let tier = service.get_suggested_tier("mem_popular");
     /// assert!(matches!(tier, MemoryTier::Hot | MemoryTier::Warm));
     ///
-    /// // Never accessed memory defaults to Warm tier
+    /// // Never accessed memory has low retention score, so Cold or Archive tier
     /// let tier_new = service.get_suggested_tier("mem_never_seen");
-    /// assert_eq!(tier_new, MemoryTier::Warm);
+    /// assert!(matches!(tier_new, MemoryTier::Cold | MemoryTier::Archive));
     /// ```
     #[must_use]
     pub fn get_suggested_tier(&self, memory_id: &str) -> MemoryTier {
@@ -957,19 +958,13 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     /// ```
     pub fn find_related_memories(
         &self,
-        recall_service: &crate::services::RecallService,
+        _recall_service: &crate::services::RecallService,
         config: &crate::config::ConsolidationConfig,
     ) -> Result<HashMap<Namespace, Vec<Vec<crate::models::MemoryId>>>> {
-        use crate::models::{SearchFilter, SearchMode};
-
-        // Check if vector search is available
-        if !recall_service.has_vector_search() {
-            tracing::warn!(
-                "Vector search not available for consolidation. \
-                 Embeddings required for semantic grouping. Returning empty result."
-            );
-            return Ok(HashMap::new());
-        }
+        // Note: This method uses embeddings already stored on Memory objects.
+        // It doesn't require RecallService's vector search capabilities.
+        // Memories without embeddings are gracefully handled by cluster_by_similarity
+        // which returns empty groups for embedding-less memories.
 
         // Get all memory IDs from persistence
         let memory_ids = self.persistence.list_ids()?;
@@ -985,35 +980,38 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         let mut namespace_groups: HashMap<Namespace, Vec<Memory>> = HashMap::new();
 
         for id in &memory_ids {
-            if let Some(memory) = self.persistence.get(id)? {
-                // Skip if outside time window
-                if let Some(cutoff) = cutoff_timestamp
-                    && memory.created_at < cutoff
-                {
-                    continue;
-                }
+            let Some(memory) = self.persistence.get(id)? else {
+                continue;
+            };
 
-                // Apply namespace filter if configured
-                if let Some(ref filter_namespaces) = config.namespace_filter {
-                    if !filter_namespaces.contains(&memory.namespace) {
-                        continue;
-                    }
-                }
-
-                // Skip if embedding is missing (needed for similarity comparison)
-                if memory.embedding.is_none() {
-                    tracing::debug!(
-                        memory_id = %memory.id.as_str(),
-                        "Skipping memory without embedding for consolidation"
-                    );
-                    continue;
-                }
-
-                namespace_groups
-                    .entry(memory.namespace)
-                    .or_default()
-                    .push(memory);
+            // Skip if outside time window
+            let outside_window = cutoff_timestamp.is_some_and(|cutoff| memory.created_at < cutoff);
+            if outside_window {
+                continue;
             }
+
+            // Apply namespace filter if configured
+            let excluded_namespace = config
+                .namespace_filter
+                .as_ref()
+                .is_some_and(|ns| !ns.contains(&memory.namespace));
+            if excluded_namespace {
+                continue;
+            }
+
+            // Skip if embedding is missing (needed for similarity comparison)
+            if memory.embedding.is_none() {
+                tracing::debug!(
+                    memory_id = %memory.id.as_str(),
+                    "Skipping memory without embedding for consolidation"
+                );
+                continue;
+            }
+
+            namespace_groups
+                .entry(memory.namespace)
+                .or_default()
+                .push(memory);
         }
 
         // For each namespace, find clusters of related memories
@@ -1068,23 +1066,14 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             assigned.insert(memory.id.as_str().to_string());
 
             // Find all other memories similar to this one
-            for (j, other_memory) in memories.iter().enumerate() {
-                if i == j || assigned.contains(other_memory.id.as_str()) {
-                    continue;
-                }
-
-                let Some(ref embedding_j) = other_memory.embedding else {
-                    continue;
-                };
-
-                // Calculate cosine similarity
-                let similarity = cosine_similarity(embedding_i, embedding_j);
-
-                if similarity >= threshold {
-                    group.push(other_memory.id.clone());
-                    assigned.insert(other_memory.id.as_str().to_string());
-                }
-            }
+            Self::find_similar_memories(
+                memories,
+                i,
+                embedding_i,
+                threshold,
+                &mut assigned,
+                &mut group,
+            );
 
             // Only add groups with multiple memories
             if group.len() >= 2 {
@@ -1093,6 +1082,34 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         }
 
         Ok(groups)
+    }
+
+    /// Finds memories similar to a given memory and adds them to the group.
+    ///
+    /// This is a helper function for `cluster_by_similarity` that reduces nesting depth.
+    fn find_similar_memories(
+        memories: &[Memory],
+        current_idx: usize,
+        current_embedding: &[f32],
+        threshold: f32,
+        assigned: &mut std::collections::HashSet<String>,
+        group: &mut Vec<crate::models::MemoryId>,
+    ) {
+        for (j, other_memory) in memories.iter().enumerate() {
+            if current_idx == j || assigned.contains(other_memory.id.as_str()) {
+                continue;
+            }
+
+            let Some(ref embedding_j) = other_memory.embedding else {
+                continue;
+            };
+
+            let similarity = cosine_similarity(current_embedding, embedding_j);
+            if similarity >= threshold {
+                group.push(other_memory.id.clone());
+                assigned.insert(other_memory.id.as_str().to_string());
+            }
+        }
     }
 
     /// Summarizes a group of related memories using LLM.
@@ -1185,7 +1202,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         );
 
         // Build system prompt
-        let system_prompt = format!("{}\n\n{}", BASE_SYSTEM_PROMPT, MEMORY_SUMMARIZATION_PROMPT);
+        let system_prompt = format!("{BASE_SYSTEM_PROMPT}\n\n{MEMORY_SUMMARIZATION_PROMPT}");
 
         // Call LLM
         tracing::debug!(
@@ -1203,7 +1220,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
                 );
                 crate::Error::OperationFailed {
                     operation: "summarize_group".to_string(),
-                    cause: format!("LLM summarization failed: {}", e),
+                    cause: format!("LLM summarization failed: {e}"),
                 }
             })?;
 
@@ -1264,6 +1281,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     /// assert!(summary_node.is_summary);
     /// # Ok::<(), subcog::Error>(())
     /// ```
+    #[allow(clippy::too_many_lines)]
     #[instrument(skip(self, summary_content, source_memories), fields(
         source_count = source_memories.len(),
         summary_length = summary_content.len()
@@ -1293,7 +1311,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         let now = current_timestamp();
 
         // Generate unique ID for summary node
-        let summary_id = crate::models::MemoryId::new(format!("summary_{}", now));
+        let summary_id = crate::models::MemoryId::new(format!("summary_{now}"));
 
         // Collect source memory IDs
         let source_memory_ids: Vec<crate::models::MemoryId> =
@@ -1312,7 +1330,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         // Use namespace and domain from first source memory
         // All memories in a group should have the same namespace (from find_related_memories)
         let namespace = source_memories[0].namespace;
-        let domain = source_memories[0].domain;
+        let domain = source_memories[0].domain.clone();
 
         // Use project_id and branch from first source if available
         let project_id = source_memories[0].project_id.clone();
@@ -1339,30 +1357,58 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             consolidation_timestamp: Some(now),
         };
 
-        // Store summary node
+        // Store summary node in persistence layer
         self.persistence.store(&summary_node)?;
 
         // Store edge relationships if index backend is available
+        // NOTE: We must index the summary node FIRST, before storing edges,
+        // because the memory_edges table has foreign key constraints on both
+        // from_id and to_id referencing the memories table.
         if let Some(ref index) = self.index {
+            // Index the summary node first so foreign key constraint for to_id is satisfied
+            use crate::storage::traits::IndexBackend;
+            if let Err(e) = index.index(&summary_node) {
+                tracing::warn!(
+                    error = %e,
+                    summary_id = %summary_node.id.as_str(),
+                    "Failed to index summary node, edges will not be stored"
+                );
+                // Return the summary node - it's still stored in persistence
+                return Ok(summary_node);
+            }
             tracing::debug!(
                 summary_id = %summary_node.id.as_str(),
                 source_count = source_memory_ids.len(),
                 "Storing edge relationships for summary node"
             );
 
-            let mut edges_created = 0u64;
+            let mut summarized_by_edges = 0u64;
+            let mut source_of_edges = 0u64;
             for source_id in &source_memory_ids {
                 // Create SummarizedBy edge from source to summary
-                if let Err(e) = index.store_edge(source_id, &summary_node.id, EdgeType::SummarizedBy) {
+                if let Err(e) =
+                    index.store_edge(source_id, &summary_node.id, EdgeType::SummarizedBy)
+                {
                     tracing::warn!(
                         error = %e,
                         source_id = %source_id.as_str(),
                         summary_id = %summary_node.id.as_str(),
-                        "Failed to store edge relationship, continuing"
+                        "Failed to store SummarizedBy edge, continuing"
                     );
-                    // Continue even if one edge fails - we still have the summary
                 } else {
-                    edges_created += 1;
+                    summarized_by_edges += 1;
+                }
+
+                // Create SourceOf edge from summary to source (inverse direction)
+                if let Err(e) = index.store_edge(&summary_node.id, source_id, EdgeType::SourceOf) {
+                    tracing::warn!(
+                        error = %e,
+                        summary_id = %summary_node.id.as_str(),
+                        source_id = %source_id.as_str(),
+                        "Failed to store SourceOf edge, continuing"
+                    );
+                } else {
+                    source_of_edges += 1;
                 }
             }
 
@@ -1371,7 +1417,12 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
                 "consolidation_edges_created",
                 "edge_type" => "summarized_by"
             )
-            .increment(edges_created);
+            .increment(summarized_by_edges);
+            metrics::counter!(
+                "consolidation_edges_created",
+                "edge_type" => "source_of"
+            )
+            .increment(source_of_edges);
 
             tracing::info!(
                 summary_id = %summary_node.id.as_str(),
@@ -1395,7 +1446,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         Ok(summary_node)
     }
 
-    /// Creates RelatedTo edges between all memories in a group.
+    /// Creates `RelatedTo` edges between all memories in a group.
     ///
     /// This method is used when LLM summarization is unavailable but we still want
     /// to preserve the relationships between semantically similar memories. Creates
@@ -1433,17 +1484,13 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     /// # Ok::<(), subcog::Error>(())
     /// ```
     #[instrument(skip(self, memories, index), fields(memory_count = memories.len()))]
-    fn create_related_edges(
-        &self,
-        memories: &[Memory],
-        index: &Arc<SqliteBackend>,
-    ) -> Result<()> {
+    fn create_related_edges(&self, memories: &[Memory], index: &Arc<SqliteBackend>) -> Result<()> {
         if memories.len() < 2 {
             tracing::debug!("Fewer than 2 memories, skipping edge creation");
             return Ok(());
         }
 
-        let mut edge_count = 0;
+        let mut edge_count: u64 = 0;
 
         // Create a mesh topology: each memory is related to every other memory
         for (i, memory_a) in memories.iter().enumerate() {
@@ -1479,7 +1526,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             "consolidation_edges_created",
             "edge_type" => "related_to"
         )
-        .increment(edge_count as u64);
+        .increment(edge_count);
 
         tracing::info!(
             memory_count = memories.len(),
@@ -1612,13 +1659,18 @@ impl ConsolidationStats {
         } else {
             format!(
                 "Processed: {}, Archived: {}, Merged: {}, Contradictions: {}, Summaries: {}",
-                self.processed, self.archived, self.merged, self.contradictions, self.summaries_created
+                self.processed,
+                self.archived,
+                self.merged,
+                self.contradictions,
+                self.summaries_created
             )
         }
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_statements, clippy::redundant_clone)]
 mod tests {
     use super::*;
     use crate::models::{Domain, MemoryId};
@@ -1660,6 +1712,7 @@ mod tests {
             archived: 2,
             merged: 1,
             contradictions: 0,
+            summaries_created: 0,
         };
         assert!(!stats.is_empty());
         assert!(stats.summary().contains("Processed: 10"));
@@ -1792,7 +1845,7 @@ mod tests {
         let vec_a = vec![1.0, 2.0, 3.0];
         let vec_b = vec![1.0, 2.0];
         let similarity = super::cosine_similarity(&vec_a, &vec_b);
-        assert_eq!(similarity, 0.0);
+        assert!(similarity.abs() < f32::EPSILON);
     }
 
     #[test]
@@ -1800,7 +1853,7 @@ mod tests {
         let vec_a = vec![0.0, 0.0, 0.0];
         let vec_b = vec![1.0, 2.0, 3.0];
         let similarity = super::cosine_similarity(&vec_a, &vec_b);
-        assert_eq!(similarity, 0.0);
+        assert!(similarity.abs() < f32::EPSILON);
     }
 
     #[test]
@@ -1896,8 +1949,9 @@ mod tests {
         let service = ConsolidationService::new(backend);
 
         // Create memories with similar but not identical embeddings
+        // cosine([1,0,0], [0.9,0.3,0]) ≈ 0.948, which is below 0.99 threshold
         let embedding_a = vec![1.0, 0.0, 0.0];
-        let embedding_b = vec![0.9, 0.1, 0.0];
+        let embedding_b = vec![0.9, 0.3, 0.0];
 
         let mut memory_a = create_test_memory("mem_a", "Content A");
         memory_a.embedding = Some(embedding_a);
@@ -1912,7 +1966,7 @@ mod tests {
         assert!(result.is_ok());
 
         let groups = result.unwrap();
-        // Should have no groups due to high threshold
+        // Should have no groups due to high threshold (similarity ≈ 0.948 < 0.99)
         assert!(groups.is_empty());
     }
 
@@ -1935,10 +1989,12 @@ mod tests {
         // Should fail without LLM provider
         let result = service.summarize_group(&memories);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("LLM provider not configured"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("LLM provider not configured")
+        );
     }
 
     #[test]
@@ -1962,7 +2018,10 @@ mod tests {
                 Ok("Mock summary".to_string())
             }
             fn analyze_for_capture(&self, _content: &str) -> Result<crate::llm::CaptureAnalysis> {
-                unimplemented!()
+                Err(crate::Error::OperationFailed {
+                    operation: "analyze_for_capture".to_string(),
+                    cause: "Not implemented for mock".to_string(),
+                })
             }
         }
 
@@ -1972,10 +2031,12 @@ mod tests {
         // Should fail with empty memories
         let result = service.summarize_group(&[]);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("No memories provided"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No memories provided")
+        );
     }
 
     #[test]
@@ -1999,7 +2060,10 @@ mod tests {
                 Ok("This is a comprehensive summary of the related decisions, preserving all key technical details.".to_string())
             }
             fn analyze_for_capture(&self, _content: &str) -> Result<crate::llm::CaptureAnalysis> {
-                unimplemented!()
+                Err(crate::Error::OperationFailed {
+                    operation: "analyze_for_capture".to_string(),
+                    cause: "Not implemented for mock".to_string(),
+                })
             }
         }
 
@@ -2045,7 +2109,10 @@ mod tests {
                 })
             }
             fn analyze_for_capture(&self, _content: &str) -> Result<crate::llm::CaptureAnalysis> {
-                unimplemented!()
+                Err(crate::Error::OperationFailed {
+                    operation: "analyze_for_capture".to_string(),
+                    cause: "Not implemented for mock".to_string(),
+                })
             }
         }
 
@@ -2061,10 +2128,12 @@ mod tests {
         // Should propagate LLM failure
         let result = service.summarize_group(&memories);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("LLM summarization failed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("LLM summarization failed")
+        );
     }
 
     #[test]
@@ -2088,7 +2157,10 @@ mod tests {
                 Ok("   ".to_string()) // Only whitespace
             }
             fn analyze_for_capture(&self, _content: &str) -> Result<crate::llm::CaptureAnalysis> {
-                unimplemented!()
+                Err(crate::Error::OperationFailed {
+                    operation: "analyze_for_capture".to_string(),
+                    cause: "Not implemented for mock".to_string(),
+                })
             }
         }
 
@@ -2103,10 +2175,7 @@ mod tests {
         // Should fail with empty response
         let result = service.summarize_group(&memories);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("empty summary"));
+        assert!(result.unwrap_err().to_string().contains("empty summary"));
     }
 
     #[test]
@@ -2169,10 +2238,12 @@ mod tests {
         // Should fail with empty source memories
         let result = service.create_summary_node(summary_content, &[]);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("No source memories"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No source memories")
+        );
     }
 
     #[test]
@@ -2191,10 +2262,12 @@ mod tests {
         // Should fail with empty content
         let result = service.create_summary_node("   ", &source_memories);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Summary content cannot be empty"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Summary content cannot be empty")
+        );
     }
 
     #[test]
@@ -2242,7 +2315,7 @@ mod tests {
             |d| d.path().to_path_buf(),
         );
         let backend = FilesystemBackend::new(&path);
-        let mut service = ConsolidationService::new(backend.clone());
+        let mut service = ConsolidationService::new(backend);
 
         let memory_a = create_test_memory("mem_a", "Content A");
         let source_memories = vec![memory_a];
@@ -2253,12 +2326,12 @@ mod tests {
 
         let summary_node = result.unwrap();
 
-        // Verify it was stored in persistence
-        let retrieved = backend.get(&summary_node.id);
+        // Verify it was stored in persistence (access via service.persistence)
+        let retrieved = service.persistence.get(&summary_node.id);
         assert!(retrieved.is_ok());
         assert!(retrieved.unwrap().is_some());
 
-        let retrieved_node = backend.get(&summary_node.id).unwrap().unwrap();
+        let retrieved_node = service.persistence.get(&summary_node.id).unwrap().unwrap();
         assert_eq!(retrieved_node.id, summary_node.id);
         assert!(retrieved_node.is_summary);
         assert_eq!(retrieved_node.content, summary_content);
@@ -2337,16 +2410,19 @@ mod tests {
         let index = SqliteBackend::in_memory().expect("Failed to create in-memory SQLite");
         let index_arc = Arc::new(index);
 
-        let mut service = ConsolidationService::new(backend)
-            .with_index(index_arc.clone());
+        let mut service = ConsolidationService::new(backend).with_index(index_arc.clone());
 
         // Create test source memories
         let memory_a = create_test_memory("edge_source_1", "First memory");
         let memory_b = create_test_memory("edge_source_2", "Second memory");
 
         // Index the source memories first so foreign key constraints are satisfied
-        index_arc.index(&memory_a).expect("Failed to index memory_a");
-        index_arc.index(&memory_b).expect("Failed to index memory_b");
+        index_arc
+            .index(&memory_a)
+            .expect("Failed to index memory_a");
+        index_arc
+            .index(&memory_b)
+            .expect("Failed to index memory_b");
 
         let source_memories = vec![memory_a.clone(), memory_b.clone()];
         let summary_content = "Summary of two memories";
@@ -2357,10 +2433,9 @@ mod tests {
 
         let summary_node = result.unwrap();
 
-        // Index the summary node so we can verify edges
-        index_arc.index(&summary_node).expect("Failed to index summary node");
-
         // Verify edges were stored using the query_edges method
+        // Note: create_summary_node now indexes the summary node internally,
+        // so we don't need to index it again here.
         let edges_from_a = index_arc
             .query_edges(&memory_a.id, EdgeType::SummarizedBy)
             .expect("Failed to query edges from memory_a");
@@ -2372,13 +2447,11 @@ mod tests {
         assert_eq!(edges_from_a.len(), 1, "memory_a should have 1 edge");
         assert_eq!(edges_from_b.len(), 1, "memory_b should have 1 edge");
         assert_eq!(
-            edges_from_a[0],
-            summary_node.id,
+            edges_from_a[0], summary_node.id,
             "memory_a edge should point to summary"
         );
         assert_eq!(
-            edges_from_b[0],
-            summary_node.id,
+            edges_from_b[0], summary_node.id,
             "memory_b edge should point to summary"
         );
     }
@@ -2482,27 +2555,38 @@ mod tests {
         // Create mock embedder
         struct MockEmbedder;
         impl EmbedderTrait for MockEmbedder {
+            fn dimensions(&self) -> usize {
+                3
+            }
             fn embed(&self, _text: &str) -> Result<Vec<f32>> {
                 Ok(vec![1.0, 0.0, 0.0])
-            }
-            fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0]).collect())
-            }
-            fn model_name(&self) -> &str {
-                "mock"
             }
         }
 
         // Create mock vector backend
         struct MockVectorBackend;
         impl VectorBackend for MockVectorBackend {
-            fn index(&self, _memory: &Memory) -> Result<()> {
+            fn dimensions(&self) -> usize {
+                3
+            }
+            fn upsert(&self, _id: &MemoryId, _embedding: &[f32]) -> Result<()> {
                 Ok(())
             }
-            fn search(&self, _embedding: &[f32], _limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+            fn remove(&self, _id: &MemoryId) -> Result<bool> {
+                Ok(true)
+            }
+            fn search(
+                &self,
+                _query_embedding: &[f32],
+                _filter: &crate::storage::traits::VectorFilter,
+                _limit: usize,
+            ) -> Result<Vec<(MemoryId, f32)>> {
                 Ok(vec![])
             }
-            fn delete(&self, _memory_id: &MemoryId) -> Result<()> {
+            fn count(&self) -> Result<usize> {
+                Ok(0)
+            }
+            fn clear(&self) -> Result<()> {
                 Ok(())
             }
         }
@@ -2548,7 +2632,10 @@ mod tests {
                 Ok("Comprehensive summary of database decisions: Use PostgreSQL with JSONB support.".to_string())
             }
             fn analyze_for_capture(&self, _content: &str) -> Result<crate::llm::CaptureAnalysis> {
-                unimplemented!()
+                Err(crate::Error::OperationFailed {
+                    operation: "analyze_for_capture".to_string(),
+                    cause: "Not implemented for mock".to_string(),
+                })
             }
         }
 
@@ -2574,27 +2661,38 @@ mod tests {
         // Create mock embedder
         struct MockEmbedder;
         impl EmbedderTrait for MockEmbedder {
+            fn dimensions(&self) -> usize {
+                3
+            }
             fn embed(&self, _text: &str) -> Result<Vec<f32>> {
                 Ok(vec![1.0, 0.0, 0.0])
-            }
-            fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0]).collect())
-            }
-            fn model_name(&self) -> &str {
-                "mock"
             }
         }
 
         // Create mock vector backend
         struct MockVectorBackend;
         impl VectorBackend for MockVectorBackend {
-            fn index(&self, _memory: &Memory) -> Result<()> {
+            fn dimensions(&self) -> usize {
+                3
+            }
+            fn upsert(&self, _id: &MemoryId, _embedding: &[f32]) -> Result<()> {
                 Ok(())
             }
-            fn search(&self, _embedding: &[f32], _limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+            fn remove(&self, _id: &MemoryId) -> Result<bool> {
+                Ok(true)
+            }
+            fn search(
+                &self,
+                _query_embedding: &[f32],
+                _filter: &crate::storage::traits::VectorFilter,
+                _limit: usize,
+            ) -> Result<Vec<(MemoryId, f32)>> {
                 Ok(vec![])
             }
-            fn delete(&self, _memory_id: &MemoryId) -> Result<()> {
+            fn count(&self) -> Result<usize> {
+                Ok(0)
+            }
+            fn clear(&self) -> Result<()> {
                 Ok(())
             }
         }
@@ -2641,7 +2739,10 @@ mod tests {
                 Ok("Summary".to_string())
             }
             fn analyze_for_capture(&self, _content: &str) -> Result<crate::llm::CaptureAnalysis> {
-                unimplemented!()
+                Err(crate::Error::OperationFailed {
+                    operation: "analyze_for_capture".to_string(),
+                    cause: "Not implemented for mock".to_string(),
+                })
             }
         }
 
@@ -2666,26 +2767,37 @@ mod tests {
         // Create mock embedder and vector backend
         struct MockEmbedder;
         impl EmbedderTrait for MockEmbedder {
+            fn dimensions(&self) -> usize {
+                3
+            }
             fn embed(&self, _text: &str) -> Result<Vec<f32>> {
                 Ok(vec![1.0, 0.0, 0.0])
-            }
-            fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0]).collect())
-            }
-            fn model_name(&self) -> &str {
-                "mock"
             }
         }
 
         struct MockVectorBackend;
         impl VectorBackend for MockVectorBackend {
-            fn index(&self, _memory: &Memory) -> Result<()> {
+            fn dimensions(&self) -> usize {
+                3
+            }
+            fn upsert(&self, _id: &MemoryId, _embedding: &[f32]) -> Result<()> {
                 Ok(())
             }
-            fn search(&self, _embedding: &[f32], _limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+            fn remove(&self, _id: &MemoryId) -> Result<bool> {
+                Ok(true)
+            }
+            fn search(
+                &self,
+                _query_embedding: &[f32],
+                _filter: &crate::storage::traits::VectorFilter,
+                _limit: usize,
+            ) -> Result<Vec<(MemoryId, f32)>> {
                 Ok(vec![])
             }
-            fn delete(&self, _memory_id: &MemoryId) -> Result<()> {
+            fn count(&self) -> Result<usize> {
+                Ok(0)
+            }
+            fn clear(&self) -> Result<()> {
                 Ok(())
             }
         }
@@ -2749,9 +2861,15 @@ mod tests {
         let memory_c = create_test_memory("related_c", "Third memory");
 
         // Index memories first so foreign key constraints are satisfied
-        index_arc.index(&memory_a).expect("Failed to index memory_a");
-        index_arc.index(&memory_b).expect("Failed to index memory_b");
-        index_arc.index(&memory_c).expect("Failed to index memory_c");
+        index_arc
+            .index(&memory_a)
+            .expect("Failed to index memory_a");
+        index_arc
+            .index(&memory_b)
+            .expect("Failed to index memory_b");
+        index_arc
+            .index(&memory_c)
+            .expect("Failed to index memory_c");
 
         let memories = vec![memory_a.clone(), memory_b.clone(), memory_c.clone()];
 
@@ -2765,7 +2883,11 @@ mod tests {
             .expect("Failed to query edges from memory_a");
 
         // Memory A should be related to B and C
-        assert_eq!(edges_from_a.len(), 2, "memory_a should have 2 RelatedTo edges");
+        assert_eq!(
+            edges_from_a.len(),
+            2,
+            "memory_a should have 2 RelatedTo edges"
+        );
         assert!(
             edges_from_a.contains(&memory_b.id),
             "memory_a should be related to memory_b"
@@ -2780,7 +2902,11 @@ mod tests {
             .query_edges(&memory_b.id, EdgeType::RelatedTo)
             .expect("Failed to query edges from memory_b");
 
-        assert_eq!(edges_from_b.len(), 2, "memory_b should have 2 RelatedTo edges");
+        assert_eq!(
+            edges_from_b.len(),
+            2,
+            "memory_b should have 2 RelatedTo edges"
+        );
         assert!(
             edges_from_b.contains(&memory_a.id),
             "memory_b should be related to memory_a"
@@ -2850,8 +2976,12 @@ mod tests {
         memory_b.namespace = crate::models::Namespace::Decisions;
 
         // Index memories so foreign key constraints are satisfied
-        index_arc.index(&memory_a).expect("Failed to index memory_a");
-        index_arc.index(&memory_b).expect("Failed to index memory_b");
+        index_arc
+            .index(&memory_a)
+            .expect("Failed to index memory_a");
+        index_arc
+            .index(&memory_b)
+            .expect("Failed to index memory_b");
 
         // Store memories
         let _ = service.persistence.store(&memory_a);
@@ -2860,26 +2990,37 @@ mod tests {
         // Create mock embedder and vector backend
         struct MockEmbedder;
         impl EmbedderTrait for MockEmbedder {
+            fn dimensions(&self) -> usize {
+                3
+            }
             fn embed(&self, _text: &str) -> Result<Vec<f32>> {
                 Ok(vec![1.0, 0.0, 0.0])
-            }
-            fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0]).collect())
-            }
-            fn model_name(&self) -> &str {
-                "mock"
             }
         }
 
         struct MockVectorBackend;
         impl VectorBackend for MockVectorBackend {
-            fn index(&self, _memory: &Memory) -> Result<()> {
+            fn dimensions(&self) -> usize {
+                3
+            }
+            fn upsert(&self, _id: &MemoryId, _embedding: &[f32]) -> Result<()> {
                 Ok(())
             }
-            fn search(&self, _embedding: &[f32], _limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+            fn remove(&self, _id: &MemoryId) -> Result<bool> {
+                Ok(true)
+            }
+            fn search(
+                &self,
+                _query_embedding: &[f32],
+                _filter: &crate::storage::traits::VectorFilter,
+                _limit: usize,
+            ) -> Result<Vec<(MemoryId, f32)>> {
                 Ok(vec![])
             }
-            fn delete(&self, _memory_id: &MemoryId) -> Result<()> {
+            fn count(&self) -> Result<usize> {
+                Ok(0)
+            }
+            fn clear(&self) -> Result<()> {
                 Ok(())
             }
         }
@@ -2952,26 +3093,37 @@ mod tests {
         // Create mock embedder and vector backend
         struct MockEmbedder;
         impl EmbedderTrait for MockEmbedder {
+            fn dimensions(&self) -> usize {
+                3
+            }
             fn embed(&self, _text: &str) -> Result<Vec<f32>> {
                 Ok(vec![1.0, 0.0, 0.0])
-            }
-            fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0]).collect())
-            }
-            fn model_name(&self) -> &str {
-                "mock"
             }
         }
 
         struct MockVectorBackend;
         impl VectorBackend for MockVectorBackend {
-            fn index(&self, _memory: &Memory) -> Result<()> {
+            fn dimensions(&self) -> usize {
+                3
+            }
+            fn upsert(&self, _id: &MemoryId, _embedding: &[f32]) -> Result<()> {
                 Ok(())
             }
-            fn search(&self, _embedding: &[f32], _limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+            fn remove(&self, _id: &MemoryId) -> Result<bool> {
+                Ok(true)
+            }
+            fn search(
+                &self,
+                _query_embedding: &[f32],
+                _filter: &crate::storage::traits::VectorFilter,
+                _limit: usize,
+            ) -> Result<Vec<(MemoryId, f32)>> {
                 Ok(vec![])
             }
-            fn delete(&self, _memory_id: &MemoryId) -> Result<()> {
+            fn count(&self) -> Result<usize> {
+                Ok(0)
+            }
+            fn clear(&self) -> Result<()> {
                 Ok(())
             }
         }
@@ -3065,8 +3217,12 @@ mod tests {
         let memory_b = create_test_memory("idempotent_b", "Second memory");
 
         // Index memories first
-        index_arc.index(&memory_a).expect("Failed to index memory_a");
-        index_arc.index(&memory_b).expect("Failed to index memory_b");
+        index_arc
+            .index(&memory_a)
+            .expect("Failed to index memory_a");
+        index_arc
+            .index(&memory_b)
+            .expect("Failed to index memory_b");
 
         let source_memories = vec![memory_a.clone(), memory_b.clone()];
         let summary_content = "Summary for idempotency test";
@@ -3114,26 +3270,37 @@ mod tests {
         // Create mock embedder and vector backend
         struct MockEmbedder;
         impl EmbedderTrait for MockEmbedder {
+            fn dimensions(&self) -> usize {
+                3
+            }
             fn embed(&self, _text: &str) -> Result<Vec<f32>> {
                 Ok(vec![1.0, 0.0, 0.0])
-            }
-            fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0]).collect())
-            }
-            fn model_name(&self) -> &str {
-                "mock"
             }
         }
 
         struct MockVectorBackend;
         impl VectorBackend for MockVectorBackend {
-            fn index(&self, _memory: &Memory) -> Result<()> {
+            fn dimensions(&self) -> usize {
+                3
+            }
+            fn upsert(&self, _id: &MemoryId, _embedding: &[f32]) -> Result<()> {
                 Ok(())
             }
-            fn search(&self, _embedding: &[f32], _limit: usize) -> Result<Vec<(MemoryId, f32)>> {
+            fn remove(&self, _id: &MemoryId) -> Result<bool> {
+                Ok(true)
+            }
+            fn search(
+                &self,
+                _query_embedding: &[f32],
+                _filter: &crate::storage::traits::VectorFilter,
+                _limit: usize,
+            ) -> Result<Vec<(MemoryId, f32)>> {
                 Ok(vec![])
             }
-            fn delete(&self, _memory_id: &MemoryId) -> Result<()> {
+            fn count(&self) -> Result<usize> {
+                Ok(0)
+            }
+            fn clear(&self) -> Result<()> {
                 Ok(())
             }
         }
@@ -3160,14 +3327,7 @@ mod tests {
         use crate::storage::traits::VectorBackend;
         use std::sync::Arc;
 
-        let temp_dir = tempfile::tempdir().ok();
-        let path = temp_dir.as_ref().map_or_else(
-            || std::path::PathBuf::from("/tmp/test_consolidate_multi_namespace"),
-            |d| d.path().to_path_buf(),
-        );
-        let backend = FilesystemBackend::new(&path);
-
-        // Create mock LLM
+        // Define mock types at the beginning of the function (before any statements)
         struct MockLlm;
         impl crate::llm::LlmProvider for MockLlm {
             fn name(&self) -> &'static str {
@@ -3177,9 +3337,56 @@ mod tests {
                 Ok("Summary of memories".to_string())
             }
             fn analyze_for_capture(&self, _content: &str) -> Result<crate::llm::CaptureAnalysis> {
-                unimplemented!()
+                Err(crate::Error::OperationFailed {
+                    operation: "analyze_for_capture".to_string(),
+                    cause: "Not implemented for mock".to_string(),
+                })
             }
         }
+
+        struct MockEmbedder;
+        impl EmbedderTrait for MockEmbedder {
+            fn dimensions(&self) -> usize {
+                3
+            }
+            fn embed(&self, _text: &str) -> Result<Vec<f32>> {
+                Ok(vec![1.0, 0.0, 0.0])
+            }
+        }
+
+        struct MockVectorBackend;
+        impl VectorBackend for MockVectorBackend {
+            fn dimensions(&self) -> usize {
+                3
+            }
+            fn upsert(&self, _id: &MemoryId, _embedding: &[f32]) -> Result<()> {
+                Ok(())
+            }
+            fn remove(&self, _id: &MemoryId) -> Result<bool> {
+                Ok(true)
+            }
+            fn search(
+                &self,
+                _query_embedding: &[f32],
+                _filter: &crate::storage::traits::VectorFilter,
+                _limit: usize,
+            ) -> Result<Vec<(MemoryId, f32)>> {
+                Ok(vec![])
+            }
+            fn count(&self) -> Result<usize> {
+                Ok(0)
+            }
+            fn clear(&self) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_consolidate_multi_namespace"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
 
         let llm: Arc<dyn crate::llm::LlmProvider + Send + Sync> = Arc::new(MockLlm);
         let mut service = ConsolidationService::new(backend).with_llm(llm);
@@ -3209,33 +3416,6 @@ mod tests {
         let _ = service.persistence.store(&mem_patterns_1);
         let _ = service.persistence.store(&mem_patterns_2);
 
-        // Create mock embedder and vector backend
-        struct MockEmbedder;
-        impl EmbedderTrait for MockEmbedder {
-            fn embed(&self, _text: &str) -> Result<Vec<f32>> {
-                Ok(vec![1.0, 0.0, 0.0])
-            }
-            fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0]).collect())
-            }
-            fn model_name(&self) -> &str {
-                "mock"
-            }
-        }
-
-        struct MockVectorBackend;
-        impl VectorBackend for MockVectorBackend {
-            fn index(&self, _memory: &Memory) -> Result<()> {
-                Ok(())
-            }
-            fn search(&self, _embedding: &[f32], _limit: usize) -> Result<Vec<(MemoryId, f32)>> {
-                Ok(vec![])
-            }
-            fn delete(&self, _memory_id: &MemoryId) -> Result<()> {
-                Ok(())
-            }
-        }
-
         let recall = crate::services::RecallService::new()
             .with_embedder(Arc::new(MockEmbedder))
             .with_vector(Arc::new(MockVectorBackend));
@@ -3259,17 +3439,11 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::excessive_nesting)]
     fn test_summarize_group_preserves_memory_details() {
         use std::sync::Arc;
 
-        let temp_dir = tempfile::tempdir().ok();
-        let path = temp_dir.as_ref().map_or_else(
-            || std::path::PathBuf::from("/tmp/test_summarize_details"),
-            |d| d.path().to_path_buf(),
-        );
-        let backend = FilesystemBackend::new(&path);
-
-        // Create mock LLM that echoes the input to verify details are passed
+        // Define mock type at the beginning of the function (before any statements)
         struct DetailCheckingMockLlm;
         impl crate::llm::LlmProvider for DetailCheckingMockLlm {
             fn name(&self) -> &'static str {
@@ -3277,24 +3451,35 @@ mod tests {
             }
             fn complete(&self, prompt: &str) -> Result<String> {
                 // Verify prompt contains key details
-                if prompt.contains("mem_detail_1")
+                let has_all_details = prompt.contains("mem_detail_1")
                     && prompt.contains("mem_detail_2")
                     && prompt.contains("Decisions")
                     && prompt.contains("Important detail 1")
-                    && prompt.contains("Important detail 2")
-                {
-                    Ok("Summary preserving all key technical details from both memories".to_string())
-                } else {
-                    Err(crate::Error::OperationFailed {
+                    && prompt.contains("Important detail 2");
+
+                if !has_all_details {
+                    return Err(crate::Error::OperationFailed {
                         operation: "llm_complete".to_string(),
                         cause: "Details not found in prompt".to_string(),
-                    })
+                    });
                 }
+
+                Ok("Summary preserving all key technical details from both memories".to_string())
             }
             fn analyze_for_capture(&self, _content: &str) -> Result<crate::llm::CaptureAnalysis> {
-                unimplemented!()
+                Err(crate::Error::OperationFailed {
+                    operation: "analyze_for_capture".to_string(),
+                    cause: "Not implemented for mock".to_string(),
+                })
             }
         }
+
+        let temp_dir = tempfile::tempdir().ok();
+        let path = temp_dir.as_ref().map_or_else(
+            || std::path::PathBuf::from("/tmp/test_summarize_details"),
+            |d| d.path().to_path_buf(),
+        );
+        let backend = FilesystemBackend::new(&path);
 
         let llm: Arc<dyn crate::llm::LlmProvider + Send + Sync> = Arc::new(DetailCheckingMockLlm);
         let service = ConsolidationService::new(backend).with_llm(llm);

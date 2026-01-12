@@ -359,7 +359,7 @@ Analyze the provided memories for potential consolidation actions:
 /// Operation mode for memory summarization.
 ///
 /// Used when creating a summary from a group of related memories.
-pub const MEMORY_SUMMARIZATION_PROMPT: &str = r#"<operation_mode>memory_summarization</operation_mode>
+pub const MEMORY_SUMMARIZATION_PROMPT: &str = r"<operation_mode>memory_summarization</operation_mode>
 
 <task>
 Create a concise summary from a group of related memories while preserving all key details.
@@ -384,7 +384,7 @@ The summary should:
 Respond with ONLY the summary text, no JSON formatting.
 The summary should be a well-structured paragraph or set of paragraphs that preserves
 all important information from the source memories.
-</output_format>"#;
+</output_format>";
 
 /// Builds the complete system prompt for a specific operation.
 ///
