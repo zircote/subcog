@@ -1,14 +1,14 @@
 # Subcog Competitive Analysis: Feature Parity with Industry AI Memory Tools
 
-**Date:** 2026-01-12
-**Version:** 1.0
-**Status:** Draft
+**Date:** 2026-01-13
+**Version:** 1.1
+**Status:** Updated
 
 ---
 
 ## Executive Summary
 
-Subcog is a **mature, feature-rich memory system** that already exceeds many competitors in certain areas (observability, security, CLI tooling). However, there are **critical gaps** in graph-based memory, multimodal support, and real-time collaboration features that industry leaders like Mem0 and Zep have prioritized.
+Subcog is a **mature, feature-rich memory system** that exceeds many competitors in key areas (observability, security, CLI tooling, graph memory). Recent development has closed critical gaps in knowledge graphs, entity extraction, memory expiration, and context templates. Remaining gaps are primarily in multimodal support and webhooks.
 
 ### Key Findings
 
@@ -16,9 +16,11 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 |----------|--------|
 | Core CRUD Operations | ✅ Full parity |
 | Search & Retrieval | ✅ Exceeds (hybrid search) |
-| Graph Memory | ❌ Critical gap |
+| Graph Memory | ✅ Full implementation |
+| Entity Extraction | ✅ Auto-extraction enabled |
+| Context Templates | ✅ Full implementation |
+| Memory Expiration | ✅ TTL support |
 | Multimodal Support | ❌ Critical gap |
-| Memory Expiration | ❌ Missing |
 | Webhooks | ❌ Missing |
 | Security & Compliance | ✅ Industry-leading |
 | Observability | ✅ Industry-leading |
@@ -44,12 +46,13 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 |-----------------|--------|------|-----|---------|
 | **Core CRUD** | ✅ Full | ✅ Full | ✅ Full | ✅ Full |
 | **Semantic Search** | ✅ Hybrid | ✅ Advanced | ✅ Graph RAG | ✅ Basic |
-| **Graph Memory** | ❌ Missing | ✅ Native | ✅ Temporal KG | ❌ None |
+| **Graph Memory** | ✅ Temporal KG | ✅ Native | ✅ Temporal KG | ❌ None |
 | **Multimodal** | ❌ Missing | ✅ Images/Docs | ❌ None | ❌ None |
-| **Memory Expiration** | ❌ Missing | ✅ TTL | ❌ None | ❌ None |
+| **Memory Expiration** | ✅ TTL | ✅ TTL | ❌ None | ❌ None |
 | **Webhooks** | ❌ Missing | ✅ Native | ✅ Native | ❌ None |
 | **Custom Categories** | ⚠️ Namespaces | ✅ Dynamic | ✅ Ontologies | ❌ None |
-| **Entity Extraction** | ❌ Missing | ✅ Auto | ✅ Auto | ✅ Auto |
+| **Entity Extraction** | ✅ Auto | ✅ Auto | ✅ Auto | ✅ Auto |
+| **Context Templates** | ✅ Full | ⚠️ Partial | ✅ Full | ❌ None |
 | **Batch Operations** | ✅ Full | ✅ Full | ✅ Full | ❌ None |
 | **MCP Integration** | ✅ Native | ✅ Native | ✅ Native | ❌ None |
 | **GDPR Compliance** | ✅ Full | ✅ Full | ⚠️ Partial | ❌ None |
@@ -90,7 +93,7 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 
 ---
 
-#### 2. Multimodal Memory Support
+#### 1. Multimodal Memory Support
 
 **Industry Standard (Mem0):**
 - Store images and documents alongside text
@@ -141,7 +144,7 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 
 ---
 
-#### 4. Webhooks / Event Notifications
+#### 2. Webhooks / Event Notifications
 
 **Industry Standard (Mem0, Zep):**
 - Real-time notifications for memory events
@@ -195,7 +198,7 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 
 ---
 
-#### 6. Custom Memory Categories / Ontologies
+<!-- #### 6. Custom Memory Categories / Ontologies
 
 **Industry Standard (Mem0, Zep):**
 - User-defined memory types
@@ -217,11 +220,11 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 2. Add namespace metadata (description, icon, color)
 3. New CLI: `subcog namespace create/delete/describe`
 4. Update schema to support user-defined namespaces
-5. Add namespace validation rules
+5. Add namespace validation rules -->
 
 ---
 
-#### 7. Group/Shared Memory Graphs
+#### 3. Group/Shared Memory Graphs
 
 **Industry Standard (Zep):**
 - Shared graphs across users
@@ -273,7 +276,7 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 
 ---
 
-#### 9. Memory Import / Direct Injection
+#### 4. Memory Import / Direct Injection
 
 **Industry Standard (Mem0):**
 - Bypass deduction phases for pre-defined memories
@@ -299,7 +302,7 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 
 ---
 
-#### 10. Structured Memory Export
+#### 5. Structured Memory Export
 
 **Industry Standard (Mem0):**
 - Export with customizable Pydantic schemas
@@ -327,7 +330,7 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 
 ### 🟢 Nice-to-Have Features (Lower Priority)
 
-#### 11. Framework Integrations
+#### 6. Framework Integrations
 
 **Industry Standard (Mem0, Zep):**
 - Native LangChain, CrewAI, LlamaIndex integrations
@@ -353,7 +356,7 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 
 ---
 
-#### 12. Voice/LiveKit Integration
+#### 7. Voice/LiveKit Integration
 
 **Industry Standard (Zep):**
 - Memory persistence for voice agents
@@ -378,7 +381,7 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 
 ---
 
-#### 13. Bring Your Own LLM (BYOM) Configuration
+#### 8. Bring Your Own LLM (BYOM) Configuration
 
 **Industry Standard (Zep):**
 - Customer-managed LLM configuration
@@ -411,7 +414,7 @@ Areas where Subcog **already leads** or **equals** industry standards:
 |---------|------------------|-----------------|
 | **Local-First** | Full offline support | Only major tool with this capability |
 | **Observability** | Full OTLP, tracing, metrics | Exceeds all competitors |
-| **CLI Tooling** | 15+ commands | Richest CLI available |
+| **CLI Tooling** | 20+ commands | Richest CLI available |
 | **Security** | Secrets, PII, encryption, RBAC, audit | Most comprehensive |
 | **Deduplication** | 3-tier (exact/semantic/recent) | Exceeds industry standard |
 | **Memory Consolidation** | LLM-powered summarization | Unique feature |
@@ -419,39 +422,50 @@ Areas where Subcog **already leads** or **equals** industry standards:
 | **Code Assistant Integration** | Deep Claude Code hooks | Unique integration |
 | **Prompt Management** | Full template system with enrichment | Advanced capability |
 | **GDPR Compliance** | Full Article 17/20 support | Production-ready |
+| **Graph Memory** | Temporal KG with bitemporal tracking | Matches Zep, exceeds Mem0 |
+| **Entity Extraction** | Auto-extraction with LLM + pattern fallback | Full parity |
+| **Context Templates** | Versioned templates with variable substitution | Exceeds Mem0 |
+| **Memory TTL** | Configurable expiration with auto-cleanup | Matches Mem0, exceeds Zep |
 
 ---
 
 ## Implementation Roadmap
 
-### Phase 1: Critical Gaps (Q1 2026)
+### ✅ Completed (Q1 2026)
+
+| Feature | Status | Completed |
+|---------|--------|-----------|
+| Memory Expiration/TTL | ✅ Done | Jan 2026 |
+| Entity Extraction | ✅ Done | Jan 2026 |
+| Knowledge Graphs | ✅ Done | Jan 2026 |
+| Context Templates | ✅ Done | Jan 2026 |
+
+**Outcome:** Major competitive gaps closed. Subcog now has feature parity with Mem0/Zep on core graph and entity capabilities.
+
+### Phase 1: Remaining Critical Gaps (Q1-Q2 2026)
 
 | Feature | Effort | Priority | Target |
 |---------|--------|----------|--------|
-| Memory Expiration/TTL | 1 week | 🔴 Critical | Jan 2026 |
-| Webhooks | 2 weeks | 🔴 Critical | Jan 2026 |
-| Multimodal Support | 2-3 weeks | 🔴 Critical | Feb 2026 |
-| Entity Extraction | 2 weeks | 🟡 Important | Feb 2026 |
+| Webhooks | 2 weeks | 🔴 Critical | Feb 2026 |
+| Multimodal Support | 2-3 weeks | 🔴 Critical | Mar 2026 |
 
-**Phase 1 Outcome:** Address critical feature gaps for production deployments.
+**Phase 1 Outcome:** Address remaining critical gaps for enterprise integrations and modern AI agents.
 
-### Phase 2: Competitive Parity (Q2 2026)
+### Phase 2: Feature Expansion (Q2 2026)
 
 | Feature | Effort | Priority | Target |
 |---------|--------|----------|--------|
-| Knowledge Graphs | 4-6 weeks | 🔴 Critical | Apr 2026 |
 | Custom Namespaces | 1 week | 🟡 Important | Mar 2026 |
 | Group Memory | 2-3 weeks | 🟡 Important | Apr 2026 |
-| Bulk Import/Export | 2 weeks | 🟡 Important | Mar 2026 |
+| Bulk Import/Export | 2 weeks | 🟡 Important | Apr 2026 |
 
-**Phase 2 Outcome:** Achieve feature parity with Mem0/Zep core offerings.
+**Phase 2 Outcome:** Enhance flexibility and team collaboration capabilities.
 
 ### Phase 3: Ecosystem Growth (Q3 2026)
 
 | Feature | Effort | Priority | Target |
 |---------|--------|----------|--------|
 | Framework SDKs | 3 weeks | 🟢 Nice-to-Have | Jul 2026 |
-| Context Templates | 1 week | 🟡 Important | Jun 2026 |
 | Voice Integration | 2 weeks | 🟢 Nice-to-Have | Aug 2026 |
 
 **Phase 3 Outcome:** Expand ecosystem reach and developer adoption.
@@ -462,21 +476,22 @@ Areas where Subcog **already leads** or **equals** industry standards:
 
 ### Immediate Actions (Next 30 Days)
 
-1. **Add Memory TTL** - Simplest critical gap to close
-2. **Design Webhook System** - Spec architecture for event notifications
-3. **Prototype Entity Extraction** - Test LLM-based entity detection
+1. **Design Webhook System** - Spec architecture for event notifications
+2. **Prototype Multimodal Support** - Test image/document capture workflows
+3. **Enhance Bulk Import/Export** - Migration tooling for enterprise adoption
 
 ### Strategic Priorities
 
-1. **Graph Memory** is the single most impactful differentiator to build
+1. **Webhooks** unlock enterprise integration scenarios
 2. **Multimodal** support is essential for modern AI agent use cases
-3. **Webhooks** unlock enterprise integration scenarios
+3. **Group Memory** enables team collaboration and knowledge sharing
 
 ### Positioning
 
 Subcog should position as:
 - **"The developer's AI memory system"** - Local-first, CLI-rich, deeply integrated
 - **"Production-ready from day one"** - Security, observability, compliance built-in
+- **"Full knowledge graph capabilities"** - Temporal KG, entity extraction, graph traversal
 - **"Hybrid search that just works"** - Best-in-class retrieval without configuration
 
 ---
@@ -500,4 +515,5 @@ Subcog should position as:
 ---
 
 *Report generated: 2026-01-12*
-*Next review: 2026-02-01*
+*Last updated: 2026-01-13*
+*Next review: 2026-02-15*
