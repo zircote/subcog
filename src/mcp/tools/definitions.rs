@@ -34,6 +34,12 @@ pub fn capture_tool() -> ToolDefinition {
                 "ttl": {
                     "type": "string",
                     "description": "Optional TTL for automatic expiration. Supports: '7d' (days), '24h' (hours), '60m' (minutes), '3600s' or '3600' (seconds), '0' (never expire)"
+                },
+                "domain": {
+                    "type": "string",
+                    "description": "Storage scope: 'project' (default, stored with project context), 'user' (global across all projects), 'org' (organization-shared)",
+                    "enum": ["project", "user", "org"],
+                    "default": "project"
                 }
             },
             "required": ["content", "namespace"]

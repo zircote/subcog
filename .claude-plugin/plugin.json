@@ -1,6 +1,6 @@
 {
   "name": "subcog",
-  "version": "0.1.0",
+  "version": "0.6.1",
   "description": "Persistent memory system for AI coding assistants. Captures decisions, learnings, and context from coding sessions and surfaces them when relevant.",
   "author": {
     "name": "Robert Allen",

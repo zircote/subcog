@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-01-13
+
+### Fixed
+
+- **User-Scope Memory Capture**: Fixed `subcog_capture` MCP tool to correctly route memories to user-scoped storage when `domain: "user"` is specified. Previously, user-scoped memories were incorrectly stored in project scope (`subcog://project/...` instead of `subcog://user/...`).
+
+### Added
+
+- **Domain Parameter for Capture**: Added `domain` parameter to `subcog_capture` MCP tool schema, allowing explicit storage scope selection:
+  - `"project"` (default): Stored with project context
+  - `"user"`: Global across all projects
+  - `"org"`: Organization-shared storage
+
 ## [0.6.0] - 2026-01-13
 
 ### Added

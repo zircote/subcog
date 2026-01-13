@@ -29,6 +29,11 @@ pub struct CaptureArgs {
     /// Supports duration strings like "7d", "30d", "24h", "60m", or seconds.
     /// Use "0" for no expiration (default behavior).
     pub ttl: Option<String>,
+    /// Storage scope: "project" (default), "user", or "org".
+    /// - "project": Stored with project context (requires git repo)
+    /// - "user": Stored globally for user across all projects
+    /// - "org": Stored in organization-shared index
+    pub domain: Option<String>,
 }
 
 /// Arguments for the recall tool.

@@ -10,8 +10,8 @@ use crate::llm::ResilientLlmProvider;
 use crate::mcp::prompt_understanding::PROMPT_UNDERSTANDING;
 use crate::mcp::tool_types::{
     CaptureArgs, ConsolidateArgs, DeleteArgs, EnrichArgs, GetArgs, InitArgs, RecallArgs,
-    ReindexArgs, UpdateArgs, build_filter_description, format_content_for_detail, parse_namespace,
-    parse_search_mode,
+    ReindexArgs, UpdateArgs, build_filter_description, format_content_for_detail,
+    parse_domain_scope, parse_namespace, parse_search_mode,
 };
 #[cfg(test)]
 use crate::models::SearchResult;
@@ -86,16 +86,25 @@ pub fn execute_capture(arguments: Value) -> Result<ToolResult> {
     // Parse TTL from duration string if provided
     let ttl_seconds = args.ttl.as_ref().and_then(|s| parse_duration_to_seconds(s));
 
-    // Use context-aware domain: project if in git repo, user if not
+    // Parse domain scope from argument, defaulting to context-aware detection
+    let scope = parse_domain_scope(args.domain.as_deref());
+
+    // Determine domain based on scope
+    let domain = match scope {
+        crate::storage::index::DomainScope::User => Domain::for_user(),
+        crate::storage::index::DomainScope::Org => Domain::for_org(),
+        crate::storage::index::DomainScope::Project => Domain::default_for_context(),
+    };
+
     let request = CaptureRequest {
         content: args.content,
         namespace,
-        domain: Domain::default_for_context(),
+        domain,
         tags: args.tags.unwrap_or_default(),
         source: args.source,
         skip_security_check: false,
         ttl_seconds,
-        scope: None, // Use default scope based on context
+        scope: Some(scope),
     };
 
     let services = ServiceContainer::from_current_dir_or_user()?;

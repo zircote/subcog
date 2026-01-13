@@ -202,6 +202,19 @@ impl Domain {
         }
     }
 
+    /// Creates an organization-scoped domain.
+    ///
+    /// Org-scoped memories are stored in a shared organization database
+    /// and are accessible to all team members.
+    #[must_use]
+    pub fn for_org() -> Self {
+        Self {
+            organization: Some("org".to_string()),
+            project: None,
+            repository: None,
+        }
+    }
+
     /// Creates a domain for a specific repository.
     #[must_use]
     pub fn for_repository(org: impl Into<String>, repo: impl Into<String>) -> Self {
