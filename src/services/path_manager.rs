@@ -35,6 +35,9 @@ pub const INDEX_DB_NAME: &str = "index.db";
 /// Name of the vector index file.
 pub const VECTOR_INDEX_NAME: &str = "vectors.idx";
 
+/// Name of the graph `SQLite` database file.
+pub const GRAPH_DB_NAME: &str = "graph.db";
+
 /// Manages storage paths for subcog backends.
 ///
 /// `PathManager` provides a centralized way to construct paths for:
@@ -141,6 +144,16 @@ impl PathManager {
     #[must_use]
     pub fn vector_path(&self) -> PathBuf {
         self.subcog_dir.join(VECTOR_INDEX_NAME)
+    }
+
+    /// Returns the path to the graph `SQLite` database.
+    ///
+    /// # Returns
+    ///
+    /// `{subcog_dir}/graph.db`
+    #[must_use]
+    pub fn graph_path(&self) -> PathBuf {
+        self.subcog_dir.join(GRAPH_DB_NAME)
     }
 
     /// Ensures the subcog directory exists.

@@ -439,3 +439,536 @@ pub fn prompt_delete_tool() -> ToolDefinition {
         }),
     }
 }
+
+// ============================================================================
+// Core CRUD Tools (Industry Parity: Mem0, Zep, LangMem)
+// ============================================================================
+
+/// Defines the get tool for direct memory retrieval by ID.
+///
+/// This is a fundamental CRUD operation present in all major memory systems:
+/// - Mem0: `get(memory_id)`
+/// - Zep: `get_memory(session_id, memory_id)`
+/// - `LangMem`: `get_memories()`
+pub fn get_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_get".to_string(),
+        description: "Get a memory by its ID. Returns the full memory content, metadata, and URN."
+            .to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "memory_id": {
+                    "type": "string",
+                    "description": "The ID of the memory to retrieve"
+                }
+            },
+            "required": ["memory_id"]
+        }),
+    }
+}
+
+/// Defines the delete tool for removing memories.
+///
+/// Supports both soft delete (tombstone) and hard delete (permanent).
+/// Defaults to soft delete for safety, matching the CLI behavior.
+pub fn delete_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_delete".to_string(),
+        description: "Delete a memory by its ID. Defaults to soft delete (tombstone) which can be restored. Use hard=true for permanent deletion.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "memory_id": {
+                    "type": "string",
+                    "description": "The ID of the memory to delete"
+                },
+                "hard": {
+                    "type": "boolean",
+                    "description": "If true, permanently delete the memory. If false (default), soft delete (tombstone) - can be restored later.",
+                    "default": false
+                }
+            },
+            "required": ["memory_id"]
+        }),
+    }
+}
+
+/// Defines the update tool for modifying existing memories.
+///
+/// Allows partial updates to content and/or tags. Follows the industry
+/// pattern of partial updates (Mem0 `update`, `LangMem` `update`).
+pub fn update_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_update".to_string(),
+        description: "Update an existing memory's content and/or tags. Provide only the fields you want to change.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "memory_id": {
+                    "type": "string",
+                    "description": "The ID of the memory to update"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "New content for the memory (optional - omit to keep existing)"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "New tags for the memory (optional - omit to keep existing). Replaces all existing tags when provided."
+                }
+            },
+            "required": ["memory_id"]
+        }),
+    }
+}
+
+/// Defines the list tool for listing all memories.
+///
+/// Lists memories with optional filtering and pagination.
+/// Matches Mem0's `get_all()` and Zep's `list_memories()` patterns.
+pub fn list_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_list".to_string(),
+        description: "List all memories with optional filtering and pagination. Unlike recall, this doesn't require a search query.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "filter": {
+                    "type": "string",
+                    "description": "GitHub-style filter query: ns:decisions tag:rust -tag:test status:active"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of results (default: 50, max: 1000)",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "default": 50
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Offset for pagination (default: 0)",
+                    "minimum": 0,
+                    "default": 0
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": "Filter by user ID (for multi-tenant scoping)"
+                },
+                "agent_id": {
+                    "type": "string",
+                    "description": "Filter by agent ID (for multi-agent scoping)"
+                }
+            },
+            "required": []
+        }),
+    }
+}
+
+/// Defines the `delete_all` tool for bulk deletion.
+///
+/// Bulk deletes memories matching filter criteria with dry-run safety.
+/// Implements Mem0's `delete_all()` pattern.
+pub fn delete_all_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_delete_all".to_string(),
+        description: "Bulk delete memories matching filter criteria. Defaults to dry-run mode for safety - set dry_run=false to execute.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "filter": {
+                    "type": "string",
+                    "description": "GitHub-style filter query: ns:decisions tag:deprecated -tag:important"
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "If true (default), show what would be deleted without making changes",
+                    "default": true
+                },
+                "hard": {
+                    "type": "boolean",
+                    "description": "If true, permanently delete. If false (default), soft delete (tombstone).",
+                    "default": false
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": "Filter by user ID for scoped deletion"
+                }
+            },
+            "required": []
+        }),
+    }
+}
+
+/// Defines the restore tool for recovering soft-deleted memories.
+///
+/// Restores a tombstoned memory back to active status.
+/// Implements the inverse of soft delete for data recovery.
+pub fn restore_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_restore".to_string(),
+        description:
+            "Restore a soft-deleted (tombstoned) memory. Returns the memory to active status."
+                .to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "memory_id": {
+                    "type": "string",
+                    "description": "The ID of the tombstoned memory to restore"
+                }
+            },
+            "required": ["memory_id"]
+        }),
+    }
+}
+
+/// Defines the history tool for memory change audit trail.
+///
+/// Retrieves change history for a memory by querying the event log.
+/// Provides audit trail visibility for compliance and debugging.
+pub fn history_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_history".to_string(),
+        description: "Get the change history for a memory. Shows creation, updates, and deletions from the audit log.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "memory_id": {
+                    "type": "string",
+                    "description": "The ID of the memory to get history for"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of events to return (default: 20)",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 20
+                }
+            },
+            "required": ["memory_id"]
+        }),
+    }
+}
+
+// ============================================================================
+// Graph / Knowledge Graph Tools
+// ============================================================================
+
+/// Defines the entities tool for entity CRUD operations.
+///
+/// Provides operations to create, read, update, and delete entities
+/// in the knowledge graph.
+pub fn entities_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_entities".to_string(),
+        description: "Manage entities in the knowledge graph. Supports CRUD operations for people, organizations, technologies, concepts, and files.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "Operation to perform",
+                    "enum": ["create", "get", "list", "delete"]
+                },
+                "entity_id": {
+                    "type": "string",
+                    "description": "Entity ID (required for get/delete)"
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Entity name (required for create)"
+                },
+                "entity_type": {
+                    "type": "string",
+                    "description": "Type of entity",
+                    "enum": ["Person", "Organization", "Technology", "Concept", "File"]
+                },
+                "aliases": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Alternative names for the entity"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum results for list operation (default: 20)",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 20
+                }
+            },
+            "required": ["action"]
+        }),
+    }
+}
+
+/// Defines the relationships tool for relationship CRUD operations.
+///
+/// Provides operations to create, read, and delete relationships
+/// between entities in the knowledge graph.
+pub fn relationships_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_relationships".to_string(),
+        description: "Manage relationships between entities in the knowledge graph. Supports creating, querying, and deleting relationships like WorksAt, Uses, Created, etc.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "Operation to perform",
+                    "enum": ["create", "get", "list", "delete"]
+                },
+                "from_entity": {
+                    "type": "string",
+                    "description": "Source entity ID (required for create)"
+                },
+                "to_entity": {
+                    "type": "string",
+                    "description": "Target entity ID (required for create)"
+                },
+                "relationship_type": {
+                    "type": "string",
+                    "description": "Type of relationship",
+                    "enum": ["WorksAt", "Created", "Uses", "Implements", "PartOf", "RelatesTo", "MentionedIn", "Supersedes", "ConflictsWith"]
+                },
+                "entity_id": {
+                    "type": "string",
+                    "description": "Entity ID to get relationships for (for get/list)"
+                },
+                "direction": {
+                    "type": "string",
+                    "description": "Relationship direction for get/list",
+                    "enum": ["outgoing", "incoming", "both"],
+                    "default": "both"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum results (default: 20)",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 20
+                }
+            },
+            "required": ["action"]
+        }),
+    }
+}
+
+/// Defines the graph query tool for traversing the knowledge graph.
+///
+/// Enables graph traversal operations like finding neighbors,
+/// paths between entities, and subgraph extraction.
+pub fn graph_query_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_graph_query".to_string(),
+        description: "Query and traverse the knowledge graph. Find paths between entities, get neighbors at various depths, and explore connections.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "description": "Query operation to perform",
+                    "enum": ["neighbors", "path", "stats"]
+                },
+                "entity_id": {
+                    "type": "string",
+                    "description": "Starting entity ID (required for neighbors)"
+                },
+                "from_entity": {
+                    "type": "string",
+                    "description": "Source entity ID (required for path)"
+                },
+                "to_entity": {
+                    "type": "string",
+                    "description": "Target entity ID (required for path)"
+                },
+                "depth": {
+                    "type": "integer",
+                    "description": "Traversal depth for neighbors/path (default: 2, max: 5)",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "default": 2
+                }
+            },
+            "required": ["operation"]
+        }),
+    }
+}
+
+/// Defines the extract entities tool for LLM-powered entity extraction.
+///
+/// Extracts entities and relationships from text content using
+/// LLM analysis with pattern-based fallback.
+pub fn extract_entities_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_extract_entities".to_string(),
+        description: "Extract entities and relationships from text using LLM. Identifies people, organizations, technologies, concepts, and their relationships. Falls back to pattern-based extraction if LLM unavailable.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "Text content to extract entities from"
+                },
+                "store": {
+                    "type": "boolean",
+                    "description": "Whether to store extracted entities in the graph (default: false)",
+                    "default": false
+                },
+                "memory_id": {
+                    "type": "string",
+                    "description": "Optional memory ID to link extracted entities to"
+                },
+                "min_confidence": {
+                    "type": "number",
+                    "description": "Minimum confidence threshold (0.0-1.0, default: 0.5)",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "default": 0.5
+                }
+            },
+            "required": ["content"]
+        }),
+    }
+}
+
+/// Defines the entity merge tool for deduplicating entities.
+///
+/// Merges duplicate or similar entities into a single canonical entity,
+/// preserving relationships and mentions.
+pub fn entity_merge_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_entity_merge".to_string(),
+        description: "Merge duplicate entities into a single canonical entity. Transfers all relationships and mentions to the merged entity. Use 'find_duplicates' to identify candidates first.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "Operation to perform",
+                    "enum": ["find_duplicates", "merge"]
+                },
+                "entity_id": {
+                    "type": "string",
+                    "description": "Entity ID to find duplicates for (for find_duplicates)"
+                },
+                "entity_ids": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Entity IDs to merge (for merge, minimum 2)"
+                },
+                "canonical_name": {
+                    "type": "string",
+                    "description": "Name for the merged entity (required for merge)"
+                },
+                "threshold": {
+                    "type": "number",
+                    "description": "Similarity threshold for finding duplicates (0.0-1.0, default: 0.7)",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "default": 0.7
+                }
+            },
+            "required": ["action"]
+        }),
+    }
+}
+
+/// Defines the relationship inference tool for discovering implicit relationships.
+///
+/// Uses LLM analysis to infer relationships between existing entities
+/// based on context and patterns.
+pub fn relationship_infer_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_relationship_infer".to_string(),
+        description: "Infer implicit relationships between entities using LLM analysis. Discovers connections based on entity types, names, and context. Falls back to heuristic-based inference if LLM unavailable.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "entity_ids": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Entity IDs to analyze for relationships (optional, analyzes all recent if not provided)"
+                },
+                "store": {
+                    "type": "boolean",
+                    "description": "Whether to store inferred relationships in the graph (default: false)",
+                    "default": false
+                },
+                "min_confidence": {
+                    "type": "number",
+                    "description": "Minimum confidence threshold for inferred relationships (0.0-1.0, default: 0.6)",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "default": 0.6
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum entities to analyze if entity_ids not provided (default: 50)",
+                    "minimum": 1,
+                    "maximum": 200,
+                    "default": 50
+                }
+            },
+            "required": []
+        }),
+    }
+}
+
+/// Defines the graph visualize tool for generating graph visualizations.
+///
+/// Produces ASCII art, Mermaid diagrams, or DOT format representations
+/// of the knowledge graph.
+pub fn graph_visualize_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_graph_visualize".to_string(),
+        description: "Visualize the knowledge graph or a subgraph. Generates Mermaid diagrams, DOT format, or ASCII art representation of entities and their relationships.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "format": {
+                    "type": "string",
+                    "description": "Output format for visualization",
+                    "enum": ["mermaid", "dot", "ascii"],
+                    "default": "mermaid"
+                },
+                "entity_id": {
+                    "type": "string",
+                    "description": "Center visualization on this entity (optional)"
+                },
+                "depth": {
+                    "type": "integer",
+                    "description": "Depth of relationships to include from center entity (default: 2)",
+                    "minimum": 1,
+                    "maximum": 4,
+                    "default": 2
+                },
+                "entity_types": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["Person", "Organization", "Technology", "Concept", "File"]
+                    },
+                    "description": "Filter to specific entity types"
+                },
+                "relationship_types": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["WorksAt", "Created", "Uses", "Implements", "PartOf", "RelatesTo", "MentionedIn", "Supersedes", "ConflictsWith"]
+                    },
+                    "description": "Filter to specific relationship types"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum entities to include (default: 50)",
+                    "minimum": 1,
+                    "maximum": 200,
+                    "default": 50
+                }
+            },
+            "required": []
+        }),
+    }
+}

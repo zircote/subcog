@@ -147,7 +147,7 @@ impl std::str::FromStr for Namespace {
 }
 
 /// Domain separation for memories.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct Domain {
     /// Organization or team identifier.
     pub organization: Option<String>,

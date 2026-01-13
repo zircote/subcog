@@ -82,6 +82,9 @@ mod context;
 mod data_subject;
 pub mod deduplication;
 mod enrichment;
+mod entity_extraction;
+mod graph;
+mod graph_rag;
 pub mod migration;
 mod path_manager;
 mod prompt;
@@ -95,7 +98,7 @@ mod topic_index;
 
 pub use auth::{AuthContext, AuthContextBuilder, Permission};
 pub use backend_factory::{BackendFactory, BackendSet};
-pub use capture::CaptureService;
+pub use capture::{CaptureService, EntityExtractionCallback, EntityExtractionStats};
 pub use consolidation::{ConsolidationService, ConsolidationStats};
 pub use context::{ContextBuilderService, MemoryStatistics};
 pub use data_subject::{
@@ -106,7 +109,18 @@ pub use deduplication::{
     DeduplicationConfig, DeduplicationService, Deduplicator, DuplicateCheckResult, DuplicateReason,
 };
 pub use enrichment::{EnrichmentResult, EnrichmentService, EnrichmentStats};
-pub use path_manager::{INDEX_DB_NAME, PathManager, SUBCOG_DIR_NAME, VECTOR_INDEX_NAME};
+pub use entity_extraction::{
+    EntityExtractorService, ExtractedEntity, ExtractedRelationship, ExtractionResult,
+    InferenceResult, InferredRelationship,
+};
+pub use graph::GraphService;
+pub use graph_rag::{
+    ExpansionConfig, GraphRAGConfig, GraphRAGService, GraphSearchHit, GraphSearchResults,
+    SearchProvenance,
+};
+pub use path_manager::{
+    GRAPH_DB_NAME, INDEX_DB_NAME, PathManager, SUBCOG_DIR_NAME, VECTOR_INDEX_NAME,
+};
 pub use prompt::{PromptFilter, PromptService, SaveOptions, SaveResult};
 pub use prompt_enrichment::{
     ENRICHMENT_TIMEOUT, EnrichmentRequest, EnrichmentStatus, PROMPT_ENRICHMENT_SYSTEM_PROMPT,
@@ -314,8 +328,12 @@ impl ServiceContainer {
         // Create backends using factory (centralizes initialization logic)
         let backends = BackendFactory::create_all(&paths.index_path(), &paths.vector_path());
 
+        // Create entity extraction callback if auto-extraction is enabled
+        let entity_extraction =
+            Self::create_entity_extraction_callback(&capture_config, &paths, None);
+
         // Build CaptureService based on available backends
-        let capture = Self::build_capture_service(capture_config, &backends);
+        let capture = Self::build_capture_service(capture_config, &backends, entity_extraction);
 
         Ok(Self {
             capture,
@@ -388,8 +406,12 @@ impl ServiceContainer {
         // Create backends using factory (centralizes initialization logic)
         let backends = BackendFactory::create_all(&paths.index_path(), &paths.vector_path());
 
+        // Create entity extraction callback if auto-extraction is enabled
+        let entity_extraction =
+            Self::create_entity_extraction_callback(&capture_config, &paths, None);
+
         // Build CaptureService based on available backends
-        let capture = Self::build_capture_service(capture_config, &backends);
+        let capture = Self::build_capture_service(capture_config, &backends, entity_extraction);
 
         tracing::info!(
             user_data_dir = %user_data_dir.display(),
@@ -565,9 +587,16 @@ impl ServiceContainer {
     /// Builds a `CaptureService` from available backends.
     ///
     /// Applies graceful degradation: uses whatever backends are available.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The capture configuration
+    /// * `backends` - Available storage backends
+    /// * `entity_extraction` - Optional callback for entity extraction (Graph RAG)
     fn build_capture_service(
         config: crate::config::Config,
         backends: &BackendSet,
+        entity_extraction: Option<capture::EntityExtractionCallback>,
     ) -> CaptureService {
         let mut service = CaptureService::new(config);
 
@@ -586,7 +615,160 @@ impl ServiceContainer {
             service = service.with_vector(Arc::clone(vector));
         }
 
+        // Add entity extraction callback if provided
+        if let Some(callback) = entity_extraction {
+            service = service.with_entity_extraction(callback);
+        }
+
         service
+    }
+
+    /// Creates an entity extraction callback if auto-extraction is enabled.
+    ///
+    /// The callback:
+    /// 1. Extracts entities from the memory content using [`EntityExtractorService`]
+    /// 2. Stores entities and relationships in the [`GraphService`]
+    /// 3. Records mentions linking memories to entities
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The capture configuration (checked for `auto_extract_entities` flag)
+    /// * `paths` - Path manager for locating the graph database
+    /// * `llm` - Optional LLM provider for intelligent extraction
+    ///
+    /// # Returns
+    ///
+    /// `Some(callback)` if auto-extraction is enabled and graph backend initializes,
+    /// `None` otherwise (graceful degradation).
+    #[allow(clippy::excessive_nesting)] // Callback closures require nested scopes
+    fn create_entity_extraction_callback(
+        config: &crate::config::Config,
+        paths: &PathManager,
+        llm: Option<Arc<dyn crate::llm::LlmProvider>>,
+    ) -> Option<capture::EntityExtractionCallback> {
+        // Check if auto-extraction is enabled
+        if !config.features.auto_extract_entities {
+            return None;
+        }
+
+        // Create graph backend (gracefully degrade if it fails)
+        let graph_path = paths.graph_path();
+        let graph_backend = match crate::storage::graph::SqliteGraphBackend::new(&graph_path) {
+            Ok(backend) => backend,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "Failed to create graph backend for entity extraction, disabling"
+                );
+                return None;
+            },
+        };
+
+        // Create services wrapped in Arc for sharing
+        let graph_service = Arc::new(GraphService::new(graph_backend));
+        let domain = crate::models::Domain::new(); // Default domain for extraction
+
+        let entity_extractor = if let Some(llm) = llm {
+            Arc::new(EntityExtractorService::with_shared_llm(llm, domain))
+        } else {
+            Arc::new(EntityExtractorService::without_llm(domain))
+        };
+
+        // Create the callback that captures the services
+        let callback: capture::EntityExtractionCallback = Arc::new(move |content, memory_id| {
+            use crate::models::graph::{Entity, EntityType, Relationship, RelationshipType};
+            use std::collections::HashMap;
+
+            let mut stats = capture::EntityExtractionStats::default();
+
+            // Extract entities from content
+            let extraction = entity_extractor.extract(content)?;
+            stats.used_fallback = extraction.used_fallback;
+
+            // Map entity names to IDs for relationship resolution
+            let mut name_to_id: HashMap<String, crate::models::graph::EntityId> = HashMap::new();
+
+            // Store entities in graph
+            for extracted in &extraction.entities {
+                // Parse entity type, defaulting to Concept if unknown
+                let entity_type =
+                    EntityType::parse(&extracted.entity_type).unwrap_or(EntityType::Concept);
+
+                // Create the Entity from ExtractedEntity
+                let entity =
+                    Entity::new(entity_type, &extracted.name, crate::models::Domain::new())
+                        .with_confidence(extracted.confidence)
+                        .with_aliases(extracted.aliases.iter().cloned());
+
+                // Store entity
+                match graph_service.store_entity(&entity) {
+                    Ok(()) => {
+                        stats.entities_stored += 1;
+
+                        // Track name to ID mapping for relationship resolution
+                        name_to_id.insert(extracted.name.clone(), entity.id.clone());
+                        for alias in &extracted.aliases {
+                            name_to_id.insert(alias.clone(), entity.id.clone());
+                        }
+
+                        // Record mention linking memory to entity
+                        if let Err(e) = graph_service.record_mention(&entity.id, memory_id) {
+                            tracing::debug!(
+                                memory_id = %memory_id,
+                                entity_id = %entity.id.as_ref(),
+                                error = %e,
+                                "Failed to record entity mention"
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        tracing::debug!(
+                            entity_name = %extracted.name,
+                            error = %e,
+                            "Failed to store entity"
+                        );
+                    },
+                }
+            }
+
+            // Store relationships in graph
+            for extracted_rel in &extraction.relationships {
+                // Look up entity IDs by name - skip if either entity not found
+                let (Some(from), Some(to)) = (
+                    name_to_id.get(&extracted_rel.from),
+                    name_to_id.get(&extracted_rel.to),
+                ) else {
+                    tracing::debug!(
+                        from = %extracted_rel.from,
+                        to = %extracted_rel.to,
+                        "Skipping relationship: one or both entities not found"
+                    );
+                    continue;
+                };
+
+                // Parse relationship type, defaulting to RelatesTo if unknown
+                let rel_type = RelationshipType::parse(&extracted_rel.relationship_type)
+                    .unwrap_or(RelationshipType::RelatesTo);
+
+                let relationship = Relationship::new(from.clone(), to.clone(), rel_type)
+                    .with_confidence(extracted_rel.confidence);
+
+                if let Err(e) = graph_service.store_relationship(&relationship) {
+                    tracing::debug!(
+                        from = %extracted_rel.from,
+                        to = %extracted_rel.to,
+                        error = %e,
+                        "Failed to store relationship"
+                    );
+                } else {
+                    stats.relationships_stored += 1;
+                }
+            }
+
+            Ok(stats)
+        });
+
+        Some(callback)
     }
 
     /// Creates a deduplication service without embedding support.
@@ -766,5 +948,85 @@ impl ServiceContainer {
         }
 
         Ok(results)
+    }
+
+    /// Creates a graph service for knowledge graph operations.
+    ///
+    /// The graph service stores entities and relationships in a dedicated
+    /// `SQLite` database (`graph.db`) in the user data directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the graph backend cannot be initialized.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let container = ServiceContainer::from_current_dir_or_user()?;
+    /// let graph = container.graph()?;
+    ///
+    /// let entity = graph.store_entity(Entity::new(EntityType::Technology, "Rust", domain))?;
+    /// ```
+    pub fn graph(&self) -> Result<GraphService<crate::storage::graph::SqliteGraphBackend>> {
+        use crate::storage::graph::SqliteGraphBackend;
+
+        let user_data_dir = get_user_data_dir()?;
+        let paths = PathManager::for_user(&user_data_dir);
+        let graph_path = paths.graph_path();
+
+        let backend = SqliteGraphBackend::new(&graph_path).map_err(|e| Error::OperationFailed {
+            operation: "create_graph_backend".to_string(),
+            cause: e.to_string(),
+        })?;
+
+        Ok(GraphService::new(backend))
+    }
+
+    /// Creates an entity extractor service for extracting entities from text.
+    ///
+    /// The extractor uses pattern-based fallback when no LLM is provided.
+    /// For LLM-powered extraction, use [`Self::entity_extractor_with_llm`].
+    ///
+    /// # Returns
+    ///
+    /// An [`EntityExtractorService`] configured for the appropriate domain.
+    #[must_use]
+    pub fn entity_extractor(&self) -> EntityExtractorService {
+        let domain = self.current_domain();
+        EntityExtractorService::without_llm(domain)
+    }
+
+    /// Creates an entity extractor service with LLM support.
+    ///
+    /// The extractor uses the provided LLM for intelligent entity extraction.
+    /// Falls back to pattern-based extraction if LLM calls fail.
+    ///
+    /// # Arguments
+    ///
+    /// * `llm` - The LLM provider to use for extraction.
+    ///
+    /// # Returns
+    ///
+    /// An [`EntityExtractorService`] configured with LLM support.
+    pub fn entity_extractor_with_llm(
+        &self,
+        llm: Arc<dyn crate::llm::LlmProvider>,
+    ) -> EntityExtractorService {
+        let domain = self.current_domain();
+        EntityExtractorService::with_shared_llm(llm, domain)
+    }
+
+    /// Returns the current domain based on scope.
+    ///
+    /// - If in a git repository: returns project-scoped domain (`Domain::new()`)
+    /// - If NOT in a git repository: returns user-scoped domain (`Domain::for_user()`)
+    fn current_domain(&self) -> crate::models::Domain {
+        if self.repo_path.is_some() {
+            // Project scope: uses user-level storage with project facets
+            crate::models::Domain::new()
+        } else {
+            // User scope: uses user-level storage without project facets
+            crate::models::Domain::for_user()
+        }
     }
 }

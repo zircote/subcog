@@ -92,6 +92,287 @@ pub struct ReindexArgs {
 }
 
 // ============================================================================
+// Core CRUD Tool Arguments (Industry Parity: Mem0, Zep, LangMem)
+// ============================================================================
+
+/// Arguments for the get tool.
+///
+/// Direct memory retrieval by ID - a fundamental CRUD operation
+/// present in all major memory systems (Mem0 `get`, Zep `get_memory`).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GetArgs {
+    /// Memory ID to retrieve.
+    pub memory_id: String,
+}
+
+/// Arguments for the delete tool.
+///
+/// Soft/hard delete capability matching industry patterns.
+/// Defaults to soft delete (tombstone) for safety, with explicit
+/// hard delete option for permanent removal.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteArgs {
+    /// Memory ID to delete.
+    pub memory_id: String,
+    /// If true, permanently delete. If false (default), soft delete (tombstone).
+    #[serde(default)]
+    pub hard: bool,
+}
+
+/// Arguments for the update tool.
+///
+/// Allows updating content and/or tags of an existing memory.
+/// Follows the industry pattern of partial updates (Mem0 `update`,
+/// `LangMem` `update`).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateArgs {
+    /// Memory ID to update.
+    pub memory_id: String,
+    /// New content (optional - if not provided, content unchanged).
+    pub content: Option<String>,
+    /// New tags (optional - if not provided, tags unchanged).
+    /// Replaces existing tags entirely when provided.
+    pub tags: Option<Vec<String>>,
+}
+
+/// Arguments for the list tool.
+///
+/// Lists all memories with optional filtering and pagination.
+/// Matches Mem0's `get_all()` and Zep's `list_memories()` patterns.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListArgs {
+    /// GitHub-style filter query (e.g., "ns:decisions tag:rust -tag:test").
+    pub filter: Option<String>,
+    /// Maximum number of results to return (default: 50).
+    pub limit: Option<usize>,
+    /// Offset for pagination (default: 0).
+    pub offset: Option<usize>,
+    /// Filter by user ID (flexible scoping via metadata).
+    pub user_id: Option<String>,
+    /// Filter by agent ID (flexible scoping via metadata).
+    pub agent_id: Option<String>,
+}
+
+/// Arguments for the `delete_all` tool.
+///
+/// Bulk delete memories matching filter criteria.
+/// Implements Mem0's `delete_all()` pattern with dry-run safety.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteAllArgs {
+    /// GitHub-style filter query (e.g., "ns:decisions tag:deprecated").
+    /// At least one filter criterion is required for safety.
+    pub filter: Option<String>,
+    /// If true, show what would be deleted without making changes (default: true).
+    #[serde(default = "default_true")]
+    pub dry_run: bool,
+    /// If true, permanently delete. If false (default), soft delete (tombstone).
+    #[serde(default)]
+    pub hard: bool,
+    /// Filter by user ID for scoped deletion.
+    pub user_id: Option<String>,
+}
+
+/// Arguments for the restore tool.
+///
+/// Restores a tombstoned (soft-deleted) memory.
+/// Implements the inverse of soft delete for data recovery.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RestoreArgs {
+    /// Memory ID to restore.
+    pub memory_id: String,
+}
+
+/// Arguments for the history tool.
+///
+/// Retrieves change history for a memory by querying the event log.
+/// Provides audit trail visibility without storing full version snapshots.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HistoryArgs {
+    /// Memory ID to get history for.
+    pub memory_id: String,
+    /// Maximum number of events to return (default: 20).
+    pub limit: Option<usize>,
+}
+
+/// Default value helper for `dry_run` (defaults to true for safety).
+const fn default_true() -> bool {
+    true
+}
+
+// ============================================================================
+// Graph / Knowledge Graph Tool Arguments
+// ============================================================================
+
+/// Arguments for the entities tool.
+///
+/// Provides CRUD operations for entities in the knowledge graph.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EntitiesArgs {
+    /// Operation to perform: create, get, list, delete.
+    pub action: String,
+    /// Entity ID (required for get/delete).
+    pub entity_id: Option<String>,
+    /// Entity name (required for create).
+    pub name: Option<String>,
+    /// Type of entity: Person, Organization, Technology, Concept, File.
+    pub entity_type: Option<String>,
+    /// Alternative names for the entity.
+    pub aliases: Option<Vec<String>>,
+    /// Maximum results for list operation (default: 20).
+    pub limit: Option<usize>,
+}
+
+/// Arguments for the relationships tool.
+///
+/// Provides CRUD operations for relationships between entities.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelationshipsArgs {
+    /// Operation to perform: create, get, list, delete.
+    pub action: String,
+    /// Source entity ID (required for create).
+    pub from_entity: Option<String>,
+    /// Target entity ID (required for create).
+    pub to_entity: Option<String>,
+    /// Type of relationship.
+    pub relationship_type: Option<String>,
+    /// Entity ID to get relationships for (for get/list).
+    pub entity_id: Option<String>,
+    /// Relationship direction: outgoing, incoming, both.
+    pub direction: Option<String>,
+    /// Maximum results (default: 20).
+    pub limit: Option<usize>,
+}
+
+/// Arguments for the graph query tool.
+///
+/// Enables graph traversal operations.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GraphQueryArgs {
+    /// Query operation: neighbors, path, stats.
+    pub operation: String,
+    /// Starting entity ID (required for neighbors).
+    pub entity_id: Option<String>,
+    /// Source entity ID (required for path).
+    pub from_entity: Option<String>,
+    /// Target entity ID (required for path).
+    pub to_entity: Option<String>,
+    /// Traversal depth (default: 2, max: 5).
+    pub depth: Option<usize>,
+}
+
+/// Arguments for the extract entities tool.
+///
+/// Extracts entities and relationships from text using LLM.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtractEntitiesArgs {
+    /// Text content to extract entities from.
+    pub content: String,
+    /// Whether to store extracted entities in the graph (default: false).
+    #[serde(default)]
+    pub store: bool,
+    /// Optional memory ID to link extracted entities to.
+    pub memory_id: Option<String>,
+    /// Minimum confidence threshold (0.0-1.0, default: 0.5).
+    pub min_confidence: Option<f32>,
+}
+
+/// Arguments for the entity merge tool.
+///
+/// Merges duplicate entities into a single canonical entity.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EntityMergeArgs {
+    /// Operation: `find_duplicates`, `merge`.
+    pub action: String,
+    /// Entity ID to find duplicates for (for `find_duplicates`).
+    pub entity_id: Option<String>,
+    /// Entity IDs to merge (for merge, minimum 2).
+    pub entity_ids: Option<Vec<String>>,
+    /// Name for the merged entity (required for merge).
+    pub canonical_name: Option<String>,
+    /// Similarity threshold for finding duplicates (0.0-1.0, default: 0.7).
+    pub threshold: Option<f32>,
+}
+
+/// Arguments for the relationship inference tool.
+///
+/// Infers implicit relationships between entities using LLM.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelationshipInferArgs {
+    /// Entity IDs to analyze for relationships.
+    pub entity_ids: Option<Vec<String>>,
+    /// Whether to store inferred relationships (default: false).
+    #[serde(default)]
+    pub store: bool,
+    /// Minimum confidence threshold (0.0-1.0, default: 0.6).
+    pub min_confidence: Option<f32>,
+    /// Maximum entities to analyze if `entity_ids` not provided (default: 50).
+    pub limit: Option<usize>,
+}
+
+/// Arguments for the graph visualize tool.
+///
+/// Generates visual representations of the knowledge graph.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GraphVisualizeArgs {
+    /// Output format: mermaid, dot, ascii.
+    pub format: Option<String>,
+    /// Center visualization on this entity.
+    pub entity_id: Option<String>,
+    /// Depth of relationships to include (default: 2).
+    pub depth: Option<usize>,
+    /// Filter to specific entity types.
+    pub entity_types: Option<Vec<String>>,
+    /// Filter to specific relationship types.
+    pub relationship_types: Option<Vec<String>>,
+    /// Maximum entities to include (default: 50).
+    pub limit: Option<usize>,
+}
+
+/// Parses an entity type string to `EntityType` enum.
+pub fn parse_entity_type(s: &str) -> Option<crate::models::graph::EntityType> {
+    use crate::models::graph::EntityType;
+    match s.to_lowercase().as_str() {
+        "person" => Some(EntityType::Person),
+        "organization" => Some(EntityType::Organization),
+        "technology" => Some(EntityType::Technology),
+        "concept" => Some(EntityType::Concept),
+        "file" => Some(EntityType::File),
+        _ => None,
+    }
+}
+
+/// Parses a relationship type string to `RelationshipType` enum.
+pub fn parse_relationship_type(s: &str) -> Option<crate::models::graph::RelationshipType> {
+    use crate::models::graph::RelationshipType;
+    match s {
+        "WorksAt" | "works_at" => Some(RelationshipType::WorksAt),
+        "Created" | "created" => Some(RelationshipType::Created),
+        "Uses" | "uses" => Some(RelationshipType::Uses),
+        "Implements" | "implements" => Some(RelationshipType::Implements),
+        "PartOf" | "part_of" => Some(RelationshipType::PartOf),
+        "RelatesTo" | "relates_to" => Some(RelationshipType::RelatesTo),
+        "MentionedIn" | "mentioned_in" => Some(RelationshipType::MentionedIn),
+        "Supersedes" | "supersedes" => Some(RelationshipType::Supersedes),
+        "ConflictsWith" | "conflicts_with" => Some(RelationshipType::ConflictsWith),
+        _ => None,
+    }
+}
+
+// ============================================================================
 // Prompt Tool Arguments
 // ============================================================================
 
@@ -488,6 +769,91 @@ mod tests {
         let json = r#"{"name": "test", "domain": "user", "recursive": true}"#;
         let result: Result<PromptDeleteArgs, _> = serde_json::from_str(json);
         assert!(result.is_err());
+    }
+
+    // ==========================================================================
+    // Core CRUD tools (industry parity: Mem0, Zep, LangMem)
+    // ==========================================================================
+
+    #[test]
+    fn test_get_args_rejects_unknown_fields() {
+        let json = r#"{"memory_id": "123", "include_deleted": true}"#;
+        let result: Result<GetArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn test_get_args_accepts_valid_fields() {
+        let json = r#"{"memory_id": "abc123"}"#;
+        let result: Result<GetArgs, _> = serde_json::from_str(json);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().memory_id, "abc123");
+    }
+
+    #[test]
+    fn test_delete_args_rejects_unknown_fields() {
+        let json = r#"{"memory_id": "123", "force": true}"#;
+        let result: Result<DeleteArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn test_delete_args_accepts_valid_fields() {
+        let json = r#"{"memory_id": "abc123", "hard": true}"#;
+        let result: Result<DeleteArgs, _> = serde_json::from_str(json);
+        assert!(result.is_ok());
+        let args = result.unwrap();
+        assert_eq!(args.memory_id, "abc123");
+        assert!(args.hard);
+    }
+
+    #[test]
+    fn test_delete_args_defaults_hard_to_false() {
+        let json = r#"{"memory_id": "abc123"}"#;
+        let result: Result<DeleteArgs, _> = serde_json::from_str(json);
+        assert!(result.is_ok());
+        let args = result.unwrap();
+        assert!(!args.hard);
+    }
+
+    #[test]
+    fn test_update_args_rejects_unknown_fields() {
+        let json = r#"{"memory_id": "123", "namespace": "decisions"}"#;
+        let result: Result<UpdateArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn test_update_args_accepts_valid_fields() {
+        let json = r#"{"memory_id": "abc123", "content": "new content", "tags": ["a", "b"]}"#;
+        let result: Result<UpdateArgs, _> = serde_json::from_str(json);
+        assert!(result.is_ok());
+        let args = result.unwrap();
+        assert_eq!(args.memory_id, "abc123");
+        assert_eq!(args.content, Some("new content".to_string()));
+        assert_eq!(args.tags, Some(vec!["a".to_string(), "b".to_string()]));
+    }
+
+    #[test]
+    fn test_update_args_allows_partial_updates() {
+        // Only content
+        let json = r#"{"memory_id": "abc123", "content": "updated"}"#;
+        let result: Result<UpdateArgs, _> = serde_json::from_str(json);
+        assert!(result.is_ok());
+        let args = result.unwrap();
+        assert!(args.content.is_some());
+        assert!(args.tags.is_none());
+
+        // Only tags
+        let json = r#"{"memory_id": "abc123", "tags": ["x"]}"#;
+        let result: Result<UpdateArgs, _> = serde_json::from_str(json);
+        assert!(result.is_ok());
+        let args = result.unwrap();
+        assert!(args.content.is_none());
+        assert!(args.tags.is_some());
     }
 
     // ==========================================================================

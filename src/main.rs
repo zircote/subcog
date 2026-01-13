@@ -32,7 +32,7 @@ use subcog::observability::{
 use subcog::security::AuditConfig;
 use tracing::info_span;
 
-use commands::{HookEvent, MigrateAction, PromptAction};
+use commands::{GraphAction, HookEvent, MigrateAction, PromptAction};
 
 /// Subcog - A persistent memory system for AI coding assistants.
 #[derive(Parser)]
@@ -225,6 +225,32 @@ enum Commands {
         #[arg(long, default_value = "30")]
         older_than: u64,
     },
+
+    /// Delete one or more memories.
+    Delete {
+        /// Memory IDs to delete.
+        #[arg(required = true)]
+        ids: Vec<String>,
+
+        /// Permanently delete (hard delete). Default is soft delete (tombstone).
+        #[arg(long)]
+        hard: bool,
+
+        /// Skip confirmation prompt.
+        #[arg(short, long)]
+        force: bool,
+
+        /// Show what would be deleted without making changes.
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Manage the knowledge graph.
+    Graph {
+        /// Graph subcommand.
+        #[command(subcommand)]
+        action: GraphAction,
+    },
 }
 
 /// Main entry point.
@@ -292,6 +318,8 @@ async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::
         Commands::Migrate { .. } => "migrate",
         Commands::Completions { .. } => "completions",
         Commands::Gc { .. } => "gc",
+        Commands::Delete { .. } => "delete",
+        Commands::Graph { .. } => "graph",
     };
 
     let request_context = RequestContext::new();
@@ -431,6 +459,20 @@ async fn dispatch_command(
         } => run_blocking_cmd!(move || {
             subcog::cli::gc::execute(dry_run, purge, older_than).map_err(|e| e.to_string())
         }),
+        Commands::Delete {
+            ids,
+            hard,
+            force,
+            dry_run,
+        } => run_blocking_cmd!(move || {
+            subcog::cli::delete::execute(ids, hard, force, dry_run).map_err(|e| e.to_string())
+        }),
+        Commands::Graph { action } => {
+            let config = config.clone();
+            run_blocking_cmd!(move || {
+                commands::cmd_graph(&config, action).map_err(|e| e.to_string())
+            })
+        },
     }
 }
 

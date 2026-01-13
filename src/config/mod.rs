@@ -825,6 +825,8 @@ pub struct ConfigFileFeatures {
     pub consolidation: Option<bool>,
     /// Enable org-scope storage.
     pub org_scope_enabled: Option<bool>,
+    /// Enable automatic entity extraction during memory capture.
+    pub auto_extract_entities: Option<bool>,
 }
 
 /// LLM section in config file.
@@ -1740,6 +1742,22 @@ impl SubcogConfig {
             }
         }
 
+        // Auto-extract entities during capture (for graph-augmented retrieval)
+        if let Ok(value) = std::env::var("SUBCOG_AUTO_EXTRACT_ENTITIES") {
+            if let Some(enabled) = parse_bool_env(&value) {
+                self.features.auto_extract_entities = enabled;
+                tracing::info!(
+                    enabled = enabled,
+                    "Auto entity extraction configured via SUBCOG_AUTO_EXTRACT_ENTITIES"
+                );
+            } else {
+                tracing::warn!(
+                    value = %value,
+                    "Invalid SUBCOG_AUTO_EXTRACT_ENTITIES value, keeping default (false)"
+                );
+            }
+        }
+
         self.search_intent = self.search_intent.clone().with_env_overrides();
         self.prompt = self.prompt.clone().with_env_overrides();
         self.consolidation = self.consolidation.clone().with_env_overrides();
@@ -1851,6 +1869,7 @@ pub struct Config {
 
 /// Feature configuration for services.
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ServiceFeatures {
     /// Whether to block content with secrets.
     pub block_secrets: bool,
@@ -1858,6 +1877,8 @@ pub struct ServiceFeatures {
     pub redact_secrets: bool,
     /// Whether to enable auto-sync.
     pub auto_sync: bool,
+    /// Whether to auto-extract entities during capture.
+    pub auto_extract_entities: bool,
 }
 
 impl Default for ServiceFeatures {
@@ -1866,6 +1887,7 @@ impl Default for ServiceFeatures {
             block_secrets: false,
             redact_secrets: true,
             auto_sync: false,
+            auto_extract_entities: false,
         }
     }
 }
@@ -1901,6 +1923,7 @@ impl From<SubcogConfig> for Config {
                 block_secrets: false,
                 redact_secrets: subcog.features.secrets_filter,
                 auto_sync: false,
+                auto_extract_entities: subcog.features.auto_extract_entities,
             },
         }
     }

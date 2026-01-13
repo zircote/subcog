@@ -20,6 +20,7 @@
 #![allow(clippy::unused_self)]
 
 pub mod bulkhead;
+pub mod graph;
 pub mod index;
 pub mod migrations;
 pub mod persistence;

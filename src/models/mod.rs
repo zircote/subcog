@@ -6,9 +6,11 @@ mod capture;
 mod consolidation;
 mod domain;
 mod events;
+pub mod graph;
 mod memory;
 mod prompt;
 mod search;
+pub mod temporal;
 
 pub use capture::{CaptureRequest, CaptureResult};
 pub use consolidation::{EdgeType, MemoryTier, RetentionScore};

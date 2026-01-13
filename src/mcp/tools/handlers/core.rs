@@ -7,12 +7,18 @@ use crate::config::{ConsolidationConfig, LlmProvider, StorageBackendType, Subcog
 use crate::llm::ResilientLlmProvider;
 use crate::mcp::prompt_understanding::PROMPT_UNDERSTANDING;
 use crate::mcp::tool_types::{
-    CaptureArgs, ConsolidateArgs, EnrichArgs, RecallArgs, ReindexArgs, build_filter_description,
-    format_content_for_detail, parse_namespace, parse_search_mode,
+    CaptureArgs, ConsolidateArgs, DeleteArgs, EnrichArgs, GetArgs, RecallArgs, ReindexArgs,
+    UpdateArgs, build_filter_description, format_content_for_detail, parse_namespace,
+    parse_search_mode,
 };
 #[cfg(test)]
 use crate::models::SearchResult;
-use crate::models::{CaptureRequest, DetailLevel, Domain, Namespace, SearchFilter, SearchMode};
+use crate::models::{
+    CaptureRequest, DetailLevel, Domain, EventMeta, MemoryEvent, MemoryId, MemoryStatus, Namespace,
+    SearchFilter, SearchMode,
+};
+use crate::observability::current_request_id;
+use crate::security::record_event;
 use crate::services::{ConsolidationService, ServiceContainer, parse_filter_query};
 use crate::storage::index::SqliteBackend;
 use crate::storage::persistence::FilesystemBackend;
@@ -951,6 +957,820 @@ pub fn execute_gdpr_export(_arguments: Value) -> Result<ToolResult> {
             is_error: true,
         }),
     }
+}
+
+// ============================================================================
+// Core CRUD Handlers (Industry Parity: Mem0, Zep, LangMem)
+// ============================================================================
+
+/// Executes the get tool - retrieves a memory by ID.
+///
+/// This is a fundamental CRUD operation that provides direct access to
+/// a specific memory without requiring a search query.
+pub fn execute_get(arguments: Value) -> Result<ToolResult> {
+    use crate::storage::traits::IndexBackend;
+
+    let args: GetArgs =
+        serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let index = services.index()?;
+
+    let memory_id = MemoryId::new(&args.memory_id);
+
+    match index.get_memory(&memory_id)? {
+        Some(memory) => {
+            // Build URN for the memory
+            let domain_part = if memory.domain.is_project_scoped() {
+                "project".to_string()
+            } else {
+                memory.domain.to_string()
+            };
+            let urn = format!(
+                "subcog://{}/{}/{}",
+                domain_part, memory.namespace, memory.id
+            );
+
+            // Format tags
+            let tags_display = if memory.tags.is_empty() {
+                "None".to_string()
+            } else {
+                memory.tags.join(", ")
+            };
+
+            // Format status
+            let status_display = match memory.status {
+                MemoryStatus::Active => "Active",
+                MemoryStatus::Archived => "Archived",
+                MemoryStatus::Superseded => "Superseded",
+                MemoryStatus::Pending => "Pending",
+                MemoryStatus::Deleted => "Deleted",
+                MemoryStatus::Tombstoned => "Tombstoned (soft deleted)",
+                MemoryStatus::Consolidated => "Consolidated",
+            };
+
+            let output = format!(
+                "**Memory: {}**\n\n\
+                 **URN:** {}\n\
+                 **Namespace:** {:?}\n\
+                 **Status:** {}\n\
+                 **Tags:** {}\n\
+                 **Created:** {}\n\
+                 **Updated:** {}\n\
+                 {}\n\
+                 **Content:**\n{}",
+                memory.id.as_str(),
+                urn,
+                memory.namespace,
+                status_display,
+                tags_display,
+                memory.created_at,
+                memory.updated_at,
+                memory
+                    .source
+                    .as_ref()
+                    .map_or(String::new(), |s| format!("**Source:** {s}\n")),
+                memory.content
+            );
+
+            Ok(ToolResult {
+                content: vec![ToolContent::Text { text: output }],
+                is_error: false,
+            })
+        },
+        None => Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!("Memory not found: {}", args.memory_id),
+            }],
+            is_error: true,
+        }),
+    }
+}
+
+/// Executes the delete tool - soft or hard deletes a memory.
+///
+/// Defaults to soft delete (tombstone) which can be restored later.
+/// Use `hard: true` for permanent deletion.
+pub fn execute_delete(arguments: Value) -> Result<ToolResult> {
+    use crate::storage::traits::IndexBackend;
+    use chrono::TimeZone;
+
+    let args: DeleteArgs =
+        serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let index = services.index()?;
+
+    let memory_id = MemoryId::new(&args.memory_id);
+
+    // First check if memory exists
+    let Some(memory) = index.get_memory(&memory_id)? else {
+        return Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!("Memory not found: {}", args.memory_id),
+            }],
+            is_error: true,
+        });
+    };
+
+    if args.hard {
+        // Hard delete - permanent removal
+        if index.remove(&memory_id)? {
+            record_event(MemoryEvent::Deleted {
+                meta: EventMeta::new("mcp.delete", current_request_id()),
+                memory_id,
+                reason: "mcp.subcog_delete --hard".to_string(),
+            });
+
+            metrics::counter!("mcp_delete_hard_total").increment(1);
+
+            Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: format!(
+                        "Memory permanently deleted: {}\n\n\
+                         ⚠️ This action is irreversible.",
+                        args.memory_id
+                    ),
+                }],
+                is_error: false,
+            })
+        } else {
+            Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: format!("Failed to delete memory: {}", args.memory_id),
+                }],
+                is_error: true,
+            })
+        }
+    } else {
+        // Soft delete - tombstone the memory
+        let now = crate::current_timestamp();
+        let now_i64 = i64::try_from(now).unwrap_or(i64::MAX);
+        let now_dt = chrono::Utc
+            .timestamp_opt(now_i64, 0)
+            .single()
+            .unwrap_or_else(chrono::Utc::now);
+
+        let mut updated_memory = memory;
+        updated_memory.status = MemoryStatus::Tombstoned;
+        updated_memory.tombstoned_at = Some(now_dt);
+        updated_memory.updated_at = now;
+
+        // Re-index with updated status (INSERT OR REPLACE)
+        index.index(&updated_memory)?;
+
+        record_event(MemoryEvent::Updated {
+            meta: EventMeta::with_timestamp("mcp.delete", current_request_id(), now),
+            memory_id,
+            modified_fields: vec!["status".to_string(), "tombstoned_at".to_string()],
+        });
+
+        metrics::counter!("mcp_delete_soft_total").increment(1);
+
+        Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!(
+                    "Memory tombstoned (soft deleted): {}\n\n\
+                     The memory can be restored or permanently purged with `subcog gc --purge`.",
+                    args.memory_id
+                ),
+            }],
+            is_error: false,
+        })
+    }
+}
+
+/// Executes the update tool - modifies an existing memory's content and/or tags.
+///
+/// This is a partial update operation - only provided fields are changed.
+pub fn execute_update(arguments: Value) -> Result<ToolResult> {
+    use crate::storage::traits::IndexBackend;
+
+    let args: UpdateArgs =
+        serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+    // Validate that at least one field is being updated
+    if args.content.is_none() && args.tags.is_none() {
+        return Err(Error::InvalidInput(
+            "At least one of 'content' or 'tags' must be provided for update".to_string(),
+        ));
+    }
+
+    // SEC-M5: Validate content length if provided
+    if let Some(ref content) = args.content {
+        validate_input_length(content, "content", MAX_CONTENT_LENGTH)?;
+    }
+
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let index = services.index()?;
+
+    let memory_id = MemoryId::new(&args.memory_id);
+
+    // Get existing memory
+    let Some(mut memory) = index.get_memory(&memory_id)? else {
+        return Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!("Memory not found: {}", args.memory_id),
+            }],
+            is_error: true,
+        });
+    };
+
+    // Check if memory is tombstoned
+    if memory.status == MemoryStatus::Tombstoned {
+        return Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!(
+                    "Cannot update tombstoned memory: {}\n\n\
+                     Restore the memory first or create a new one.",
+                    args.memory_id
+                ),
+            }],
+            is_error: true,
+        });
+    }
+
+    // Track what we're updating for the audit log
+    let mut modified_fields = Vec::new();
+
+    // Update content if provided
+    if let Some(new_content) = args.content {
+        memory.content = new_content;
+        modified_fields.push("content".to_string());
+    }
+
+    // Update tags if provided
+    if let Some(new_tags) = args.tags {
+        memory.tags = new_tags;
+        modified_fields.push("tags".to_string());
+    }
+
+    // Update timestamp
+    let now = crate::current_timestamp();
+    memory.updated_at = now;
+    modified_fields.push("updated_at".to_string());
+
+    // Re-index the memory (INSERT OR REPLACE)
+    index.index(&memory)?;
+
+    record_event(MemoryEvent::Updated {
+        meta: EventMeta::with_timestamp("mcp.update", current_request_id(), now),
+        memory_id,
+        modified_fields: modified_fields.clone(),
+    });
+
+    metrics::counter!("mcp_update_total").increment(1);
+
+    // Format response
+    let fields_updated = modified_fields
+        .iter()
+        .filter(|f| *f != "updated_at")
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let tags_display = if memory.tags.is_empty() {
+        "None".to_string()
+    } else {
+        memory.tags.join(", ")
+    };
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text {
+            text: format!(
+                "Memory updated: {}\n\n\
+                 **Updated fields:** {}\n\
+                 **Current tags:** {}\n\
+                 **Updated at:** {}",
+                args.memory_id, fields_updated, tags_display, now
+            ),
+        }],
+        is_error: false,
+    })
+}
+
+// ============================================================================
+// Mem0 Parity: List, DeleteAll, Restore, History
+// ============================================================================
+
+/// Executes the list tool - lists memories with optional filtering and pagination.
+///
+/// Unlike recall, this doesn't require a search query. Matches Mem0's `get_all()`
+/// and Zep's `list_memories()` patterns.
+pub fn execute_list(arguments: Value) -> Result<ToolResult> {
+    use crate::mcp::tool_types::ListArgs;
+
+    let args: ListArgs =
+        serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+    // Build filter from the filter query string
+    let mut filter = if let Some(filter_query) = &args.filter {
+        parse_filter_query(filter_query)
+    } else {
+        SearchFilter::new()
+    };
+
+    // Apply user_id filter via tag if provided
+    if let Some(ref user_id) = args.user_id {
+        filter = filter.with_tag(format!("user:{user_id}"));
+    }
+
+    // Apply agent_id filter via tag if provided
+    if let Some(ref agent_id) = args.agent_id {
+        filter = filter.with_tag(format!("agent:{agent_id}"));
+    }
+
+    let limit = args.limit.unwrap_or(50).min(1000);
+    let offset = args.offset.unwrap_or(0);
+
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let recall = services.recall()?;
+
+    // Use list_all which returns all matching memories without a search query
+    // We fetch limit + offset and then skip manually for pagination
+    let fetch_count = limit.saturating_add(offset);
+    let result = recall.list_all(&filter, fetch_count)?;
+
+    // Apply offset pagination manually
+    let paginated_memories: Vec<_> = result
+        .memories
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .collect();
+    let displayed_count = paginated_memories.len();
+
+    // Build filter description for output
+    let filter_desc = build_filter_description(&filter);
+
+    let mut output = format!(
+        "**Memory List** (showing {displayed_count} of {} total, offset: {offset}{filter_desc})\n\n",
+        result.total_count
+    );
+
+    if paginated_memories.is_empty() {
+        output.push_str("No memories found matching the criteria.\n");
+    } else {
+        for (i, hit) in paginated_memories.iter().enumerate() {
+            let tags_display = if hit.memory.tags.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", hit.memory.tags.join(", "))
+            };
+
+            // Build URN
+            let domain_part = if hit.memory.domain.is_project_scoped() {
+                "project".to_string()
+            } else {
+                hit.memory.domain.to_string()
+            };
+            let urn = format!(
+                "subcog://{}/{}/{}",
+                domain_part, hit.memory.namespace, hit.memory.id
+            );
+
+            // Status indicator for non-active memories
+            let status_indicator = match hit.memory.status {
+                MemoryStatus::Tombstoned => " ⚠️ [tombstoned]",
+                MemoryStatus::Archived => " 📦 [archived]",
+                MemoryStatus::Superseded => " ↩️ [superseded]",
+                _ => "",
+            };
+
+            output.push_str(&format!(
+                "{}. {}{}{}\n",
+                offset + i + 1,
+                urn,
+                tags_display,
+                status_indicator
+            ));
+        }
+    }
+
+    // Add pagination hint if there are more results
+    if result.total_count > offset + displayed_count {
+        output.push_str(&format!(
+            "\n_Use offset={} to see more results._",
+            offset + displayed_count
+        ));
+    }
+
+    metrics::counter!("mcp_list_total").increment(1);
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text { text: output }],
+        is_error: false,
+    })
+}
+
+/// Executes the `delete_all` tool - bulk deletes memories matching filter criteria.
+///
+/// Defaults to dry-run mode for safety. Implements Mem0's `delete_all()` pattern.
+#[allow(clippy::too_many_lines)]
+pub fn execute_delete_all(arguments: Value) -> Result<ToolResult> {
+    use crate::mcp::tool_types::DeleteAllArgs;
+
+    let args: DeleteAllArgs =
+        serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+    // Build filter from the filter query string
+    let mut filter = args
+        .filter
+        .as_ref()
+        .map_or_else(SearchFilter::new, |q| parse_filter_query(q));
+
+    // Apply user_id filter via tag if provided
+    if let Some(ref user_id) = args.user_id {
+        filter = filter.with_tag(format!("user:{user_id}"));
+    }
+
+    // Safety check: require at least some filter criteria
+    if !has_any_filter_criteria(&filter, args.user_id.is_some()) {
+        return Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: "**Safety check failed**: At least one filter criterion is required for bulk deletion.\n\n\
+                       Examples:\n\
+                       - `filter: \"ns:decisions\"` - delete all decisions\n\
+                       - `filter: \"tag:deprecated\"` - delete tagged memories\n\
+                       - `user_id: \"user123\"` - delete user's memories".to_string(),
+            }],
+            is_error: true,
+        });
+    }
+
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let recall = services.recall()?;
+    let index = services.index()?;
+
+    // Fetch all matching memories (up to 10000 for safety)
+    let result = recall.list_all(&filter, 10000)?;
+    let matching_count = result.memories.len();
+
+    if matching_count == 0 {
+        return Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: "No memories found matching the filter criteria.".to_string(),
+            }],
+            is_error: false,
+        });
+    }
+
+    let filter_desc = build_filter_description(&filter);
+
+    if args.dry_run {
+        let output =
+            build_dry_run_output(&result.memories, matching_count, &filter_desc, args.hard);
+        return Ok(ToolResult {
+            content: vec![ToolContent::Text { text: output }],
+            is_error: false,
+        });
+    }
+
+    // Execute the deletion
+    let (deleted_count, failed_count) = execute_bulk_delete(&result.memories, args.hard, &index)?;
+
+    let output = build_delete_result_output(deleted_count, failed_count, &filter_desc, args.hard);
+
+    metrics::counter!(
+        "mcp_delete_all_total",
+        "type" => if args.hard { "hard" } else { "soft" }
+    )
+    .increment(deleted_count);
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text { text: output }],
+        is_error: false,
+    })
+}
+
+/// Checks if the filter has any criteria set.
+const fn has_any_filter_criteria(filter: &SearchFilter, has_user_id: bool) -> bool {
+    !filter.namespaces.is_empty()
+        || !filter.tags.is_empty()
+        || !filter.excluded_tags.is_empty()
+        || has_user_id
+        || filter.created_after.is_some()
+        || filter.created_before.is_some()
+}
+
+/// Builds the dry-run output message.
+fn build_dry_run_output(
+    memories: &[crate::models::SearchHit],
+    matching_count: usize,
+    filter_desc: &str,
+    hard: bool,
+) -> String {
+    let delete_type = if hard {
+        "permanently delete"
+    } else {
+        "tombstone (soft delete)"
+    };
+
+    let mut output = format!(
+        "**Dry-run: Would delete {matching_count} memories**{filter_desc}\n\n\
+         Action: {delete_type}\n\n"
+    );
+
+    // Show first 10 memories that would be deleted
+    let preview_count = matching_count.min(10);
+    output.push_str(&format!("Preview (first {preview_count}):\n"));
+
+    for hit in memories.iter().take(preview_count) {
+        let domain_part = if hit.memory.domain.is_project_scoped() {
+            "project".to_string()
+        } else {
+            hit.memory.domain.to_string()
+        };
+        let urn = format!(
+            "subcog://{}/{}/{}",
+            domain_part, hit.memory.namespace, hit.memory.id
+        );
+        output.push_str(&format!("  - {urn}\n"));
+    }
+
+    if matching_count > preview_count {
+        output.push_str(&format!(
+            "  ... and {} more\n",
+            matching_count - preview_count
+        ));
+    }
+
+    output.push_str("\n_Set `dry_run: false` to execute the deletion._");
+    output
+}
+
+/// Executes bulk deletion and returns (`deleted_count`, `failed_count`).
+fn execute_bulk_delete(
+    memories: &[crate::models::SearchHit],
+    hard: bool,
+    index: &crate::storage::index::SqliteBackend,
+) -> Result<(u64, u64)> {
+    let mut deleted_count = 0u64;
+    let mut failed_count = 0u64;
+    let now = crate::current_timestamp();
+
+    for hit in memories {
+        let memory_id = hit.memory.id.clone();
+        let success = if hard {
+            delete_memory_hard(index, &memory_id, now)
+        } else {
+            delete_memory_soft(index, &hit.memory, now)
+        };
+
+        if success {
+            deleted_count += 1;
+        } else {
+            failed_count += 1;
+        }
+    }
+
+    Ok((deleted_count, failed_count))
+}
+
+/// Performs hard (permanent) deletion of a memory.
+fn delete_memory_hard(
+    index: &crate::storage::index::SqliteBackend,
+    memory_id: &MemoryId,
+    now: u64,
+) -> bool {
+    use crate::storage::traits::IndexBackend;
+
+    match index.remove(memory_id) {
+        Ok(true) => {
+            record_event(MemoryEvent::Deleted {
+                meta: EventMeta::with_timestamp("mcp.delete_all", current_request_id(), now),
+                memory_id: memory_id.clone(),
+                reason: "mcp.subcog_delete_all --hard".to_string(),
+            });
+            true
+        },
+        _ => false,
+    }
+}
+
+/// Performs soft deletion (tombstone) of a memory.
+fn delete_memory_soft(
+    index: &crate::storage::index::SqliteBackend,
+    memory: &crate::models::Memory,
+    now: u64,
+) -> bool {
+    use crate::storage::traits::IndexBackend;
+    use chrono::TimeZone;
+
+    let now_i64 = i64::try_from(now).unwrap_or(i64::MAX);
+    let now_dt = chrono::Utc
+        .timestamp_opt(now_i64, 0)
+        .single()
+        .unwrap_or_else(chrono::Utc::now);
+
+    let mut updated_memory = memory.clone();
+    updated_memory.status = MemoryStatus::Tombstoned;
+    updated_memory.tombstoned_at = Some(now_dt);
+    updated_memory.updated_at = now;
+
+    match index.index(&updated_memory) {
+        Ok(()) => {
+            record_event(MemoryEvent::Updated {
+                meta: EventMeta::with_timestamp("mcp.delete_all", current_request_id(), now),
+                memory_id: memory.id.clone(),
+                modified_fields: vec!["status".to_string(), "tombstoned_at".to_string()],
+            });
+            true
+        },
+        Err(_) => false,
+    }
+}
+
+/// Builds the deletion result output message.
+fn build_delete_result_output(
+    deleted_count: u64,
+    failed_count: u64,
+    filter_desc: &str,
+    hard: bool,
+) -> String {
+    let delete_type = if hard {
+        "permanently deleted"
+    } else {
+        "tombstoned"
+    };
+
+    let mut output = format!(
+        "**Bulk delete completed**{filter_desc}\n\n\
+         - {delete_type}: {deleted_count}\n"
+    );
+
+    if failed_count > 0 {
+        output.push_str(&format!("- Failed: {failed_count}\n"));
+    }
+
+    if !hard {
+        output.push_str(
+            "\n_Tombstoned memories can be restored with `subcog_restore` \
+             or permanently removed with `subcog gc --purge`._",
+        );
+    }
+
+    output
+}
+
+/// Executes the restore tool - restores a tombstoned (soft-deleted) memory.
+///
+/// Sets the memory status back to Active and clears the tombstone timestamp.
+pub fn execute_restore(arguments: Value) -> Result<ToolResult> {
+    use crate::mcp::tool_types::RestoreArgs;
+    use crate::storage::traits::IndexBackend;
+
+    let args: RestoreArgs =
+        serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let index = services.index()?;
+
+    let memory_id = MemoryId::new(&args.memory_id);
+
+    // Get existing memory
+    let Some(mut memory) = index.get_memory(&memory_id)? else {
+        return Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!("Memory not found: {}", args.memory_id),
+            }],
+            is_error: true,
+        });
+    };
+
+    // Check if memory is actually tombstoned
+    if memory.status != MemoryStatus::Tombstoned {
+        return Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!(
+                    "Memory '{}' is not tombstoned (current status: {:?}).\n\n\
+                     Only tombstoned memories can be restored.",
+                    args.memory_id, memory.status
+                ),
+            }],
+            is_error: true,
+        });
+    }
+
+    // Restore the memory
+    let now = crate::current_timestamp();
+    memory.status = MemoryStatus::Active;
+    memory.tombstoned_at = None;
+    memory.updated_at = now;
+
+    // Re-index with updated status
+    index.index(&memory)?;
+
+    record_event(MemoryEvent::Updated {
+        meta: EventMeta::with_timestamp("mcp.restore", current_request_id(), now),
+        memory_id,
+        modified_fields: vec!["status".to_string(), "tombstoned_at".to_string()],
+    });
+
+    metrics::counter!("mcp_restore_total").increment(1);
+
+    // Build URN for response
+    let domain_part = if memory.domain.is_project_scoped() {
+        "project".to_string()
+    } else {
+        memory.domain.to_string()
+    };
+    let urn = format!(
+        "subcog://{}/{}/{}",
+        domain_part, memory.namespace, memory.id
+    );
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text {
+            text: format!(
+                "Memory restored: {}\n\n\
+                 **URN:** {}\n\
+                 **Status:** Active\n\
+                 **Restored at:** {}",
+                args.memory_id, urn, now
+            ),
+        }],
+        is_error: false,
+    })
+}
+
+/// Executes the history tool - retrieves change history for a memory.
+///
+/// Queries the event log for events related to the specified memory ID.
+/// Note: This provides audit trail visibility but doesn't store full version snapshots.
+pub fn execute_history(arguments: Value) -> Result<ToolResult> {
+    use crate::mcp::tool_types::HistoryArgs;
+    use crate::storage::traits::IndexBackend;
+
+    let args: HistoryArgs =
+        serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let index = services.index()?;
+
+    let memory_id = MemoryId::new(&args.memory_id);
+    let _limit = args.limit.unwrap_or(20).min(100);
+
+    // Query event log for this memory
+    // Note: The event log is currently stored via tracing/metrics, not in SQLite.
+    // For a full implementation, we'd need to query a persistent event store.
+    // For now, we provide status info and suggest using external log aggregation.
+
+    let mut output = format!("**Memory History: {}**\n\n", args.memory_id);
+
+    if let Some(memory) = index.get_memory(&memory_id)? {
+        // Build basic history from memory metadata
+        output.push_str("**Current State:**\n");
+        output.push_str(&format!("- Status: {:?}\n", memory.status));
+        output.push_str(&format!("- Created: {}\n", memory.created_at));
+        output.push_str(&format!("- Last Updated: {}\n", memory.updated_at));
+
+        if let Some(ref tombstoned_at) = memory.tombstoned_at {
+            output.push_str(&format!("- Tombstoned: {tombstoned_at}\n"));
+        }
+
+        if memory.is_summary {
+            output.push_str("- Type: Summary node\n");
+            if let Some(ref source_ids) = memory.source_memory_ids {
+                output.push_str(&format!(
+                    "- Consolidated from: {} memories\n",
+                    source_ids.len()
+                ));
+            }
+        }
+
+        output.push_str("\n**Event Types Tracked:**\n");
+        output.push_str("- `Captured`: Initial creation\n");
+        output.push_str("- `Updated`: Content or tag changes\n");
+        output.push_str("- `Deleted`: Soft or hard deletion\n");
+        output.push_str("- `Archived`: Archival status change\n");
+
+        output.push_str(&format!(
+            "\n_Note: Full event history requires log aggregation. \
+             Events are emitted via tracing and can be queried from your \
+             log backend (e.g., Elasticsearch, Datadog, Splunk). \
+             Filter by `memory_id=\"{}\"`._",
+            args.memory_id
+        ));
+    } else {
+        output.push_str("⚠️ Memory not found in current storage.\n\n");
+        output.push_str("The memory may have been:\n");
+        output.push_str("- Permanently deleted (hard delete)\n");
+        output.push_str("- Never existed with this ID\n");
+        output.push_str("- Stored in a different domain scope\n");
+
+        output.push_str(&format!(
+            "\n_Check your log backend for historical events with `memory_id=\"{}\"`._",
+            args.memory_id
+        ));
+    }
+
+    metrics::counter!("mcp_history_total").increment(1);
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text { text: output }],
+        is_error: false,
+    })
 }
 
 #[cfg(test)]

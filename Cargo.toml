@@ -146,6 +146,10 @@ harness = false
 name = "query_parser"
 harness = false
 
+[[bench]]
+name = "graph_rag"
+harness = false
+
 # TEMPORARILY DISABLED: consolidation benchmark needs API updates
 # [[bench]]
 # name = "consolidation"

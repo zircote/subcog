@@ -363,12 +363,6 @@ pub const MEMORY_SUMMARIZATION_PROMPT: &str = r"<operation_mode>memory_summariza
 
 <task>
 Create a concise summary from a group of related memories while preserving all key details.
-The summary should:
-- Capture the essence of all memories in the group
-- Preserve critical information, decisions, and context
-- Maintain technical accuracy
-- Be coherent and well-structured
-- Avoid losing important details through over-compression
 </task>
 
 <guidelines>
@@ -385,6 +379,128 @@ Respond with ONLY the summary text, no JSON formatting.
 The summary should be a well-structured paragraph or set of paragraphs that preserves
 all important information from the source memories.
 </output_format>";
+
+/// Entity extraction prompt for identifying named entities in text.
+///
+/// Used by the `EntityExtractorService` to extract entities and their relationships.
+pub const ENTITY_EXTRACTION_PROMPT: &str = r#"<operation_mode>entity_extraction</operation_mode>
+
+<task>
+Extract named entities and their relationships from the provided text.
+Identify all significant entities including people, organizations, technologies,
+concepts, and files mentioned in the content.
+</task>
+
+<entity_types>
+- Person: Individual people (e.g., "Alice", "John Smith", "the architect")
+- Organization: Companies, teams, departments (e.g., "Acme Corp", "DevOps team")
+- Technology: Programming languages, frameworks, tools (e.g., "Rust", "PostgreSQL", "Docker")
+- Concept: Abstract ideas, patterns, principles (e.g., "microservices", "SOLID principles")
+- File: Source files, configurations (e.g., "main.rs", "docker-compose.yml")
+</entity_types>
+
+<relationship_types>
+- WorksAt: Person → Organization
+- Created: Entity → Entity (authorship)
+- Uses: Entity → Technology
+- Implements: Entity → Concept
+- PartOf: Entity → Entity (composition)
+- RelatesTo: Entity → Entity (general association)
+- MentionedIn: Entity → File
+- Supersedes: Entity → Entity (replacement)
+- ConflictsWith: Entity → Entity (contradiction)
+</relationship_types>
+
+<guidelines>
+- Extract only clearly identifiable entities, not vague references
+- Assign confidence scores (0.0-1.0) based on clarity of identification
+- Include aliases when the same entity is referred to differently
+- Infer relationships only when clearly stated or strongly implied
+- For each relationship, note the evidence from the text
+</guidelines>
+
+<output_format>
+Respond with a JSON object:
+{
+  "entities": [
+    {
+      "name": "entity name",
+      "type": "Person|Organization|Technology|Concept|File",
+      "confidence": 0.95,
+      "aliases": ["optional", "alternative", "names"],
+      "description": "brief description if available"
+    }
+  ],
+  "relationships": [
+    {
+      "from": "source entity name",
+      "to": "target entity name",
+      "type": "RelationshipType",
+      "confidence": 0.85,
+      "evidence": "text snippet supporting this relationship"
+    }
+  ]
+}
+</output_format>"#;
+
+/// Relationship inference prompt for discovering implicit relationships.
+///
+/// Used by the `EntityExtractorService` to infer relationships between existing entities
+/// that weren't explicitly stated in text.
+pub const RELATIONSHIP_INFERENCE_PROMPT: &str = r#"<operation_mode>relationship_inference</operation_mode>
+
+<task>
+Analyze the provided entities and infer likely relationships between them.
+These entities already exist in the knowledge graph. Your task is to discover
+implicit connections based on their types, names, and any available properties.
+</task>
+
+<entity_types>
+- Person: Individual people
+- Organization: Companies, teams, departments
+- Technology: Programming languages, frameworks, tools
+- Concept: Abstract ideas, patterns, principles
+- File: Source files, configurations
+</entity_types>
+
+<relationship_types>
+- WorksAt: Person → Organization (employment)
+- Created: Entity → Entity (authorship/creation)
+- Uses: Entity → Technology (dependency/usage)
+- Implements: Entity → Concept (realization of concept)
+- PartOf: Entity → Entity (composition/membership)
+- RelatesTo: Entity → Entity (general association)
+- DependsOn: Technology → Technology (technical dependency)
+- Supersedes: Entity → Entity (replacement)
+- ConflictsWith: Entity → Entity (contradiction)
+</relationship_types>
+
+<guidelines>
+- Infer relationships based on common patterns (e.g., Rust → Uses → cargo)
+- Consider entity types when inferring relationships
+- Assign confidence scores (0.0-1.0) based on inference strength:
+  - 0.9+: Near-certain (e.g., PostgreSQL Uses SQL)
+  - 0.7-0.9: Likely (e.g., Python project likely Uses pip)
+  - 0.5-0.7: Possible but uncertain
+- Include reasoning for each inferred relationship
+- Do NOT infer relationships that are obvious duplicates of existing ones
+- Focus on meaningful, non-trivial connections
+</guidelines>
+
+<output_format>
+Respond with a JSON object:
+{
+  "relationships": [
+    {
+      "from": "source entity name",
+      "to": "target entity name",
+      "type": "RelationshipType",
+      "confidence": 0.85,
+      "reasoning": "brief explanation of why this relationship was inferred"
+    }
+  ]
+}
+</output_format>"#;
 
 /// Builds the complete system prompt for a specific operation.
 ///
@@ -423,6 +539,8 @@ pub fn build_system_prompt_with_config(
         OperationMode::SearchIntent => SEARCH_INTENT_PROMPT,
         OperationMode::Enrichment => ENRICHMENT_PROMPT,
         OperationMode::Consolidation => CONSOLIDATION_PROMPT,
+        OperationMode::EntityExtraction => ENTITY_EXTRACTION_PROMPT,
+        OperationMode::RelationshipInference => RELATIONSHIP_INFERENCE_PROMPT,
     };
 
     // Start with the base prompt
@@ -482,6 +600,10 @@ pub enum OperationMode {
     Enrichment,
     /// Analyzing memories for consolidation.
     Consolidation,
+    /// Extracting entities and relationships from text.
+    EntityExtraction,
+    /// Inferring relationships between existing entities.
+    RelationshipInference,
 }
 
 impl OperationMode {
@@ -493,6 +615,8 @@ impl OperationMode {
             Self::SearchIntent => "search_intent",
             Self::Enrichment => "enrichment",
             Self::Consolidation => "consolidation",
+            Self::EntityExtraction => "entity_extraction",
+            Self::RelationshipInference => "relationship_inference",
         }
     }
 }

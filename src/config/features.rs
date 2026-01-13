@@ -22,6 +22,12 @@ pub struct FeatureFlags {
     pub consolidation: bool,
     /// Enable org-scope storage (PostgreSQL shared storage).
     pub org_scope_enabled: bool,
+    /// Enable automatic entity extraction during memory capture.
+    ///
+    /// When enabled, entities (people, organizations, technologies, concepts)
+    /// are automatically extracted from captured memories and stored in the
+    /// knowledge graph for graph-augmented retrieval.
+    pub auto_extract_entities: bool,
 }
 
 impl FeatureFlags {
@@ -37,6 +43,7 @@ impl FeatureFlags {
             auto_capture: false,
             consolidation: false,
             org_scope_enabled: false,
+            auto_extract_entities: false,
         }
     }
 
@@ -52,6 +59,7 @@ impl FeatureFlags {
             auto_capture: false,
             consolidation: false,
             org_scope_enabled: false,
+            auto_extract_entities: false,
         }
     }
 
@@ -67,6 +75,7 @@ impl FeatureFlags {
             auto_capture: true,
             consolidation: true,
             org_scope_enabled: true,
+            auto_extract_entities: true,
         }
     }
 
@@ -100,6 +109,9 @@ impl FeatureFlags {
         if let Some(v) = file.org_scope_enabled {
             flags.org_scope_enabled = v;
         }
+        if let Some(v) = file.auto_extract_entities {
+            flags.auto_extract_entities = v;
+        }
         flags
     }
 
@@ -130,6 +142,9 @@ impl FeatureFlags {
         }
         if let Some(v) = file.org_scope_enabled {
             self.org_scope_enabled = v;
+        }
+        if let Some(v) = file.auto_extract_entities {
+            self.auto_extract_entities = v;
         }
     }
 }

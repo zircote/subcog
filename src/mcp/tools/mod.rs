@@ -70,6 +70,47 @@ impl ToolRegistry {
             definitions::prompt_delete_tool(),
         );
 
+        // Core CRUD tools (industry parity: Mem0, Zep, LangMem)
+        tools.insert("subcog_get".to_string(), definitions::get_tool());
+        tools.insert("subcog_delete".to_string(), definitions::delete_tool());
+        tools.insert("subcog_update".to_string(), definitions::update_tool());
+
+        // Mem0 parity tools: list, delete_all, restore, history
+        tools.insert("subcog_list".to_string(), definitions::list_tool());
+        tools.insert(
+            "subcog_delete_all".to_string(),
+            definitions::delete_all_tool(),
+        );
+        tools.insert("subcog_restore".to_string(), definitions::restore_tool());
+        tools.insert("subcog_history".to_string(), definitions::history_tool());
+
+        // Knowledge graph tools
+        tools.insert("subcog_entities".to_string(), definitions::entities_tool());
+        tools.insert(
+            "subcog_relationships".to_string(),
+            definitions::relationships_tool(),
+        );
+        tools.insert(
+            "subcog_graph_query".to_string(),
+            definitions::graph_query_tool(),
+        );
+        tools.insert(
+            "subcog_extract_entities".to_string(),
+            definitions::extract_entities_tool(),
+        );
+        tools.insert(
+            "subcog_entity_merge".to_string(),
+            definitions::entity_merge_tool(),
+        );
+        tools.insert(
+            "subcog_relationship_infer".to_string(),
+            definitions::relationship_infer_tool(),
+        );
+        tools.insert(
+            "subcog_graph_visualize".to_string(),
+            definitions::graph_visualize_tool(),
+        );
+
         Self { tools }
     }
 
@@ -108,6 +149,23 @@ impl ToolRegistry {
             "prompt_get" => handlers::execute_prompt_get(arguments),
             "prompt_run" => handlers::execute_prompt_run(arguments),
             "prompt_delete" => handlers::execute_prompt_delete(arguments),
+            // Core CRUD tools (industry parity: Mem0, Zep, LangMem)
+            "subcog_get" => handlers::execute_get(arguments),
+            "subcog_delete" => handlers::execute_delete(arguments),
+            "subcog_update" => handlers::execute_update(arguments),
+            // Mem0 parity tools: list, delete_all, restore, history
+            "subcog_list" => handlers::execute_list(arguments),
+            "subcog_delete_all" => handlers::execute_delete_all(arguments),
+            "subcog_restore" => handlers::execute_restore(arguments),
+            "subcog_history" => handlers::execute_history(arguments),
+            // Knowledge graph tools
+            "subcog_entities" => handlers::execute_entities(arguments),
+            "subcog_relationships" => handlers::execute_relationships(arguments),
+            "subcog_graph_query" => handlers::execute_graph_query(arguments),
+            "subcog_extract_entities" => handlers::execute_extract_entities(arguments),
+            "subcog_entity_merge" => handlers::execute_entity_merge(arguments),
+            "subcog_relationship_infer" => handlers::execute_relationship_infer(arguments),
+            "subcog_graph_visualize" => handlers::execute_graph_visualize(arguments),
             _ => Err(Error::InvalidInput(format!("Unknown tool: {name}"))),
         }
     }
@@ -634,5 +692,376 @@ mod tests {
             // Should be human readable
             assert!(text.len() > 10);
         }
+    }
+
+    // ============================================================================
+    // Core CRUD Tool Tests (Industry Parity: Mem0, Zep, LangMem)
+    // ============================================================================
+
+    #[test]
+    fn test_crud_tools_registered() {
+        let registry = ToolRegistry::new();
+
+        assert!(registry.get_tool("subcog_get").is_some());
+        assert!(registry.get_tool("subcog_delete").is_some());
+        assert!(registry.get_tool("subcog_update").is_some());
+    }
+
+    #[test]
+    fn test_get_tool_schema() {
+        let registry = ToolRegistry::new();
+        let tool = registry.get_tool("subcog_get").unwrap();
+
+        assert!(tool.description.contains("Get"));
+        assert!(tool.input_schema["properties"]["memory_id"].is_object());
+        let required = tool.input_schema["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("memory_id")));
+    }
+
+    #[test]
+    fn test_delete_tool_schema() {
+        let registry = ToolRegistry::new();
+        let tool = registry.get_tool("subcog_delete").unwrap();
+
+        assert!(tool.description.contains("Delete"));
+        assert!(tool.input_schema["properties"]["memory_id"].is_object());
+        assert!(tool.input_schema["properties"]["hard"].is_object());
+        let required = tool.input_schema["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("memory_id")));
+    }
+
+    #[test]
+    fn test_update_tool_schema() {
+        let registry = ToolRegistry::new();
+        let tool = registry.get_tool("subcog_update").unwrap();
+
+        assert!(tool.description.contains("Update"));
+        assert!(tool.input_schema["properties"]["memory_id"].is_object());
+        assert!(tool.input_schema["properties"]["content"].is_object());
+        assert!(tool.input_schema["properties"]["tags"].is_object());
+        let required = tool.input_schema["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("memory_id")));
+    }
+
+    #[test]
+    fn test_get_nonexistent_memory() {
+        let registry = ToolRegistry::new();
+        let result = registry.execute(
+            "subcog_get",
+            serde_json::json!({
+                "memory_id": "nonexistent-memory-12345"
+            }),
+        );
+
+        // Should succeed but return is_error=true for not found
+        let Ok(tool_result) = result else {
+            // Also acceptable if it returns Err
+            return;
+        };
+
+        assert!(tool_result.is_error);
+        if let ToolContent::Text { text } = &tool_result.content[0] {
+            assert!(text.to_lowercase().contains("not found"));
+        }
+    }
+
+    #[test]
+    fn test_delete_nonexistent_memory() {
+        let registry = ToolRegistry::new();
+        let result = registry.execute(
+            "subcog_delete",
+            serde_json::json!({
+                "memory_id": "nonexistent-memory-12345"
+            }),
+        );
+
+        // Should succeed but return is_error=true for not found
+        let Ok(tool_result) = result else {
+            return;
+        };
+
+        assert!(tool_result.is_error);
+        if let ToolContent::Text { text } = &tool_result.content[0] {
+            assert!(text.to_lowercase().contains("not found"));
+        }
+    }
+
+    #[test]
+    fn test_update_nonexistent_memory() {
+        let registry = ToolRegistry::new();
+        let result = registry.execute(
+            "subcog_update",
+            serde_json::json!({
+                "memory_id": "nonexistent-memory-12345",
+                "content": "new content"
+            }),
+        );
+
+        // Should succeed but return is_error=true for not found
+        let Ok(tool_result) = result else {
+            return;
+        };
+
+        assert!(tool_result.is_error);
+        if let ToolContent::Text { text } = &tool_result.content[0] {
+            assert!(text.to_lowercase().contains("not found"));
+        }
+    }
+
+    #[test]
+    fn test_update_requires_at_least_one_field() {
+        let registry = ToolRegistry::new();
+        let result = registry.execute(
+            "subcog_update",
+            serde_json::json!({
+                "memory_id": "some-memory-id"
+                // No content or tags provided
+            }),
+        );
+
+        // Should fail - at least one of content or tags is required
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("content") || msg.contains("tags"),
+            "Error should mention missing fields: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_delete_hard_flag_defaults_to_false() {
+        // Verify schema shows default is false
+        let registry = ToolRegistry::new();
+        let tool = registry.get_tool("subcog_delete").unwrap();
+
+        let hard_schema = &tool.input_schema["properties"]["hard"];
+        assert_eq!(hard_schema["default"], serde_json::json!(false));
+    }
+
+    // ============================================================================
+    // Mem0 Parity Tool Tests (list, delete_all, restore, history)
+    // ============================================================================
+
+    #[test]
+    fn test_mem0_parity_tools_registered() {
+        let registry = ToolRegistry::new();
+
+        assert!(registry.get_tool("subcog_list").is_some());
+        assert!(registry.get_tool("subcog_delete_all").is_some());
+        assert!(registry.get_tool("subcog_restore").is_some());
+        assert!(registry.get_tool("subcog_history").is_some());
+    }
+
+    #[test]
+    fn test_list_tool_schema() {
+        let registry = ToolRegistry::new();
+        let tool = registry.get_tool("subcog_list").unwrap();
+
+        assert!(tool.description.contains("List"));
+        assert!(tool.input_schema["properties"]["filter"].is_object());
+        assert!(tool.input_schema["properties"]["limit"].is_object());
+        assert!(tool.input_schema["properties"]["offset"].is_object());
+        assert!(tool.input_schema["properties"]["user_id"].is_object());
+        assert!(tool.input_schema["properties"]["agent_id"].is_object());
+        // No required fields - all optional
+        let required = tool.input_schema.get("required");
+        assert!(required.is_none() || required.unwrap().as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_delete_all_tool_schema() {
+        let registry = ToolRegistry::new();
+        let tool = registry.get_tool("subcog_delete_all").unwrap();
+
+        assert!(tool.description.to_lowercase().contains("delete"));
+        assert!(tool.input_schema["properties"]["filter"].is_object());
+        assert!(tool.input_schema["properties"]["dry_run"].is_object());
+        assert!(tool.input_schema["properties"]["hard"].is_object());
+        assert!(tool.input_schema["properties"]["user_id"].is_object());
+        // dry_run defaults to true for safety
+        assert_eq!(
+            tool.input_schema["properties"]["dry_run"]["default"],
+            serde_json::json!(true)
+        );
+    }
+
+    #[test]
+    fn test_restore_tool_schema() {
+        let registry = ToolRegistry::new();
+        let tool = registry.get_tool("subcog_restore").unwrap();
+
+        assert!(tool.description.contains("Restore"));
+        assert!(tool.input_schema["properties"]["memory_id"].is_object());
+        let required = tool.input_schema["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("memory_id")));
+    }
+
+    #[test]
+    fn test_history_tool_schema() {
+        let registry = ToolRegistry::new();
+        let tool = registry.get_tool("subcog_history").unwrap();
+
+        assert!(tool.description.contains("history") || tool.description.contains("History"));
+        assert!(tool.input_schema["properties"]["memory_id"].is_object());
+        assert!(tool.input_schema["properties"]["limit"].is_object());
+        let required = tool.input_schema["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("memory_id")));
+    }
+
+    #[test]
+    fn test_list_with_empty_args() {
+        let registry = ToolRegistry::new();
+        let result = registry.execute("subcog_list", serde_json::json!({}));
+
+        // Should succeed with empty args (returns all memories or empty list)
+        assert!(result.is_ok());
+        let tool_result = result.unwrap();
+        assert!(!tool_result.content.is_empty());
+    }
+
+    #[test]
+    fn test_list_with_pagination() {
+        let registry = ToolRegistry::new();
+        let result = registry.execute(
+            "subcog_list",
+            serde_json::json!({
+                "limit": 10,
+                "offset": 0
+            }),
+        );
+
+        assert!(result.is_ok());
+        let tool_result = result.unwrap();
+        assert!(!tool_result.content.is_empty());
+    }
+
+    #[test]
+    fn test_list_with_user_scoping() {
+        let registry = ToolRegistry::new();
+        let result = registry.execute(
+            "subcog_list",
+            serde_json::json!({
+                "user_id": "test-user-123",
+                "limit": 5
+            }),
+        );
+
+        assert!(result.is_ok());
+        let tool_result = result.unwrap();
+        assert!(!tool_result.content.is_empty());
+    }
+
+    #[test]
+    fn test_delete_all_dry_run_default() {
+        let registry = ToolRegistry::new();
+        // Empty filter with dry_run (default true) should return preview
+        let result = registry.execute(
+            "subcog_delete_all",
+            serde_json::json!({
+                "filter": "ns:decisions"
+            }),
+        );
+
+        assert!(result.is_ok());
+        let tool_result = result.unwrap();
+        assert!(!tool_result.content.is_empty());
+
+        // Should indicate dry-run mode
+        if let ToolContent::Text { text } = &tool_result.content[0] {
+            assert!(
+                text.contains("dry") || text.contains("preview") || text.contains("would"),
+                "Dry-run response should indicate preview mode: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_delete_all_explicit_dry_run_false() {
+        let registry = ToolRegistry::new();
+        // With dry_run=false but no matching memories
+        let result = registry.execute(
+            "subcog_delete_all",
+            serde_json::json!({
+                "filter": "ns:nonexistent-namespace-12345",
+                "dry_run": false
+            }),
+        );
+
+        // Should succeed (even if no memories deleted)
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_restore_nonexistent_memory() {
+        let registry = ToolRegistry::new();
+        let result = registry.execute(
+            "subcog_restore",
+            serde_json::json!({
+                "memory_id": "nonexistent-tombstoned-memory-12345"
+            }),
+        );
+
+        // Should return error (memory not found or not tombstoned)
+        let Ok(tool_result) = result else {
+            return; // Error is acceptable
+        };
+
+        assert!(tool_result.is_error);
+        if let ToolContent::Text { text } = &tool_result.content[0] {
+            assert!(
+                text.to_lowercase().contains("not found")
+                    || text.to_lowercase().contains("error")
+                    || text.to_lowercase().contains("failed"),
+                "Should indicate restore failure: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_history_nonexistent_memory() {
+        let registry = ToolRegistry::new();
+        let result = registry.execute(
+            "subcog_history",
+            serde_json::json!({
+                "memory_id": "nonexistent-memory-12345"
+            }),
+        );
+
+        // History provides helpful guidance even for non-existent memories
+        let Ok(tool_result) = result else {
+            return; // Error is also acceptable
+        };
+
+        // Not an error - provides useful info about how to find history
+        assert!(!tool_result.is_error);
+        if let ToolContent::Text { text } = &tool_result.content[0] {
+            // Should mention the memory wasn't found and provide guidance
+            assert!(
+                text.contains("not found") || text.contains("Memory History"),
+                "Should provide history info or not found message: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_history_with_limit() {
+        let registry = ToolRegistry::new();
+        let result = registry.execute(
+            "subcog_history",
+            serde_json::json!({
+                "memory_id": "some-memory-id",
+                "limit": 5
+            }),
+        );
+
+        // Schema parsing should work, and function provides guidance
+        let Ok(tool_result) = result else {
+            return;
+        };
+
+        // History provides helpful info even when memory doesn't exist
+        assert!(!tool_result.is_error);
+        assert!(!tool_result.content.is_empty());
     }
 }

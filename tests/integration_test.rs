@@ -1171,3 +1171,353 @@ mod consolidation_integration_tests {
         println!("  - Verified {} edges stored", captured_ids.len() * 2);
     }
 }
+
+/// Graph RAG integration tests.
+///
+/// Tests the hybrid search functionality that combines semantic search
+/// with knowledge graph expansion for enhanced memory recall.
+mod graph_rag_tests {
+    use subcog::models::graph::EntityId;
+    use subcog::services::{ExpansionConfig, GraphRAGConfig, GraphSearchResults, SearchProvenance};
+
+    // ========================================================================
+    // Configuration Tests
+    // ========================================================================
+
+    #[test]
+    fn test_graph_rag_config_default() {
+        let config = GraphRAGConfig::default();
+
+        assert_eq!(config.max_depth, 2);
+        assert!((config.expansion_boost - 1.2).abs() < f32::EPSILON);
+        assert_eq!(config.max_query_entities, 5);
+        assert_eq!(config.max_expansion_results, 10);
+        assert!((config.min_entity_confidence - 0.5).abs() < f32::EPSILON);
+        assert!(config.include_relationship_context);
+    }
+
+    #[test]
+    fn test_graph_rag_config_builder() {
+        let config = GraphRAGConfig::new()
+            .with_max_depth(4)
+            .with_expansion_boost(1.8)
+            .with_max_query_entities(15)
+            .with_max_expansion_results(25);
+
+        assert_eq!(config.max_depth, 4);
+        assert!((config.expansion_boost - 1.8).abs() < f32::EPSILON);
+        assert_eq!(config.max_query_entities, 15);
+        assert_eq!(config.max_expansion_results, 25);
+    }
+
+    #[test]
+    fn test_graph_rag_config_from_env() {
+        // Test with no env vars set (should use defaults)
+        let config = GraphRAGConfig::from_env();
+
+        // Defaults should be used
+        assert_eq!(config.max_depth, 2);
+        assert!((config.expansion_boost - 1.2).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_expansion_config_default() {
+        let config = ExpansionConfig::default();
+
+        assert!(config.depth.is_none());
+        assert!(config.entity_type_filter.is_none());
+        assert!(config.use_relationship_weight);
+    }
+
+    // ========================================================================
+    // Search Provenance Tests
+    // ========================================================================
+
+    #[test]
+    fn test_provenance_semantic_variant() {
+        let provenance = SearchProvenance::Semantic;
+
+        assert!(matches!(provenance, SearchProvenance::Semantic));
+    }
+
+    #[test]
+    fn test_provenance_graph_expansion_variant() {
+        let entity_id = EntityId::new("entity_abc123");
+        let provenance = SearchProvenance::GraphExpansion {
+            source_entity: entity_id,
+            hop_count: 3,
+        };
+
+        let SearchProvenance::GraphExpansion {
+            source_entity,
+            hop_count,
+        } = provenance
+        else {
+            unreachable!("Expected GraphExpansion");
+        };
+
+        assert_eq!(source_entity.as_ref(), "entity_abc123");
+        assert_eq!(hop_count, 3);
+    }
+
+    #[test]
+    fn test_provenance_both_variant() {
+        let entity_id = EntityId::new("entity_def456");
+        let provenance = SearchProvenance::Both {
+            semantic_score: 925,
+            source_entity: entity_id,
+        };
+
+        let SearchProvenance::Both {
+            semantic_score,
+            source_entity,
+        } = provenance
+        else {
+            unreachable!("Expected Both");
+        };
+
+        assert_eq!(semantic_score, 925);
+        assert_eq!(source_entity.as_ref(), "entity_def456");
+    }
+
+    #[test]
+    fn test_provenance_equality() {
+        let prov1 = SearchProvenance::Semantic;
+        let prov2 = SearchProvenance::Semantic;
+
+        assert_eq!(prov1, prov2);
+
+        let entity_id = EntityId::new("e1");
+        let prov3 = SearchProvenance::GraphExpansion {
+            source_entity: entity_id.clone(),
+            hop_count: 1,
+        };
+        let prov4 = SearchProvenance::GraphExpansion {
+            source_entity: entity_id,
+            hop_count: 1,
+        };
+
+        assert_eq!(prov3, prov4);
+    }
+
+    #[test]
+    fn test_provenance_pattern_matching() {
+        let provenances = [
+            SearchProvenance::Semantic,
+            SearchProvenance::GraphExpansion {
+                source_entity: EntityId::new("e1"),
+                hop_count: 1,
+            },
+            SearchProvenance::Both {
+                semantic_score: 800,
+                source_entity: EntityId::new("e2"),
+            },
+        ];
+
+        let semantic_count = provenances
+            .iter()
+            .filter(|p| matches!(p, SearchProvenance::Semantic))
+            .count();
+        let graph_count = provenances
+            .iter()
+            .filter(|p| matches!(p, SearchProvenance::GraphExpansion { .. }))
+            .count();
+        let both_count = provenances
+            .iter()
+            .filter(|p| matches!(p, SearchProvenance::Both { .. }))
+            .count();
+
+        assert_eq!(semantic_count, 1);
+        assert_eq!(graph_count, 1);
+        assert_eq!(both_count, 1);
+    }
+
+    // ========================================================================
+    // GraphSearchResults Tests
+    // ========================================================================
+
+    #[test]
+    fn test_graph_search_results_empty() {
+        let results = GraphSearchResults {
+            query: "test query".to_string(),
+            hits: Vec::new(),
+            semantic_count: 0,
+            graph_count: 0,
+            query_entities: Vec::new(),
+        };
+
+        assert!(results.is_empty());
+        assert_eq!(results.len(), 0);
+        assert_eq!(results.query, "test query");
+        assert!(results.semantic_hits().is_empty());
+        assert!(results.graph_hits().is_empty());
+        assert!(results.hybrid_hits().is_empty());
+    }
+
+    #[test]
+    fn test_graph_search_results_counts() {
+        let results = GraphSearchResults {
+            query: "auth implementation".to_string(),
+            hits: Vec::new(),
+            semantic_count: 15,
+            graph_count: 8,
+            query_entities: vec![
+                "AuthService".to_string(),
+                "OAuth".to_string(),
+                "JWT".to_string(),
+            ],
+        };
+
+        assert_eq!(results.semantic_count, 15);
+        assert_eq!(results.graph_count, 8);
+        assert_eq!(results.query_entities.len(), 3);
+        assert!(results.query_entities.contains(&"OAuth".to_string()));
+    }
+
+    // ========================================================================
+    // Score Calculation Tests
+    // ========================================================================
+
+    #[test]
+    fn test_hop_count_scoring() {
+        // Score should decrease as hop count increases
+        let mut prev_score = f32::MAX;
+        for hop_count in 0..5usize {
+            #[allow(clippy::cast_precision_loss)]
+            let score = 1.0 / (1.0 + hop_count as f32);
+            assert!(score < prev_score, "Score should decrease with hop count");
+            assert!(score > 0.0, "Score should be positive");
+            assert!(score <= 1.0, "Score should be <= 1.0");
+            prev_score = score;
+        }
+    }
+
+    #[test]
+    fn test_score_with_boost() {
+        let boost = 1.2f32;
+        let hop_count = 2usize;
+
+        #[allow(clippy::cast_precision_loss)]
+        let base_score = 1.0 / (1.0 + hop_count as f32);
+        let boosted_score = base_score * boost;
+
+        assert!(boosted_score > base_score);
+        assert!((boosted_score - base_score * 1.2).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_midpoint_calculation() {
+        let semantic_score = 0.8f32;
+        let graph_score = 0.6f32;
+
+        let combined = f32::midpoint(semantic_score, graph_score);
+
+        // Midpoint should be between the two scores
+        assert!(combined >= graph_score);
+        assert!(combined <= semantic_score);
+        assert!((combined - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_semantic_score_to_int() {
+        let semantic_score = 0.875f32;
+
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let int_score = (semantic_score.abs() * 1000.0) as u32;
+
+        assert_eq!(int_score, 875);
+    }
+
+    // ========================================================================
+    // Entity ID Tests
+    // ========================================================================
+
+    #[test]
+    fn test_entity_id_creation() {
+        let id1 = EntityId::new("entity_001");
+        let id2 = EntityId::new(String::from("entity_002"));
+
+        assert_eq!(id1.as_ref(), "entity_001");
+        assert_eq!(id2.as_ref(), "entity_002");
+    }
+
+    #[test]
+    fn test_entity_id_clone() {
+        let original = EntityId::new("entity_xyz");
+        let cloned = original.clone();
+
+        assert_eq!(original, cloned);
+        assert_eq!(original.as_ref(), cloned.as_ref());
+    }
+
+    #[test]
+    fn test_entity_id_comparison() {
+        let id1 = EntityId::new("entity_a");
+        let id2 = EntityId::new("entity_a");
+        let id3 = EntityId::new("entity_b");
+
+        assert_eq!(id1, id2);
+        assert_ne!(id1, id3);
+    }
+
+    // ========================================================================
+    // Edge Cases and Boundary Tests
+    // ========================================================================
+
+    #[test]
+    fn test_zero_hop_count() {
+        // At hop count 0, score should be 1.0
+        let score = 1.0f32 / (1.0 + 0.0);
+        assert!((score - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_large_hop_count() {
+        // Large hop counts should still produce valid (small but positive) scores
+        let hop_count = 100usize;
+
+        #[allow(clippy::cast_precision_loss)]
+        let score = 1.0 / (1.0 + hop_count as f32);
+
+        assert!(score > 0.0);
+        assert!(score < 0.01); // Very small for large hop counts
+    }
+
+    #[test]
+    fn test_max_depth_boundary() {
+        let config = GraphRAGConfig::new().with_max_depth(10);
+        assert_eq!(config.max_depth, 10);
+
+        let config_zero = GraphRAGConfig::new().with_max_depth(0);
+        assert_eq!(config_zero.max_depth, 0);
+    }
+
+    #[test]
+    fn test_expansion_boost_boundaries() {
+        // No boost (1.0)
+        let config_no_boost = GraphRAGConfig::new().with_expansion_boost(1.0);
+        assert!((config_no_boost.expansion_boost - 1.0).abs() < f32::EPSILON);
+
+        // High boost (2.0)
+        let config_high_boost = GraphRAGConfig::new().with_expansion_boost(2.0);
+        assert!((config_high_boost.expansion_boost - 2.0).abs() < f32::EPSILON);
+
+        // Fractional boost
+        let config_half_boost = GraphRAGConfig::new().with_expansion_boost(0.5);
+        assert!((config_half_boost.expansion_boost - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_empty_query_entities() {
+        let results = GraphSearchResults {
+            query: String::new(),
+            hits: Vec::new(),
+            semantic_count: 0,
+            graph_count: 0,
+            query_entities: Vec::new(),
+        };
+
+        assert!(results.query.is_empty());
+        assert!(results.query_entities.is_empty());
+    }
+}

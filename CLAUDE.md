@@ -30,7 +30,8 @@ src/
 │   ├── consolidation.rs     # MemoryTier, EdgeType, RetentionScore
 │   ├── domain.rs            # Domain, Namespace (11 variants), MemoryStatus
 │   ├── events.rs            # MemoryEvent variants
-│   └── prompt.rs            # PromptTemplate, PromptVariable, validation
+│   ├── prompt.rs            # PromptTemplate, PromptVariable, validation
+│   └── graph.rs             # Entity, Relationship, EntityType, GraphStats
 │
 ├── storage/                  # Three-layer storage abstraction
 │   ├── mod.rs               # CompositeStorage, layer trait re-exports
@@ -46,10 +47,13 @@ src/
 │   │   ├── sqlite.rs        # SQLite + FTS5 implementation
 │   │   ├── postgresql.rs    # PostgreSQL full-text
 │   │   └── redis.rs         # RediSearch implementation
-│   └── vector/
-│       ├── usearch.rs       # usearch HNSW implementation
-│       ├── pgvector.rs      # pgvector implementation
-│       └── redis.rs         # Redis vector search
+│   ├── vector/
+│   │   ├── usearch.rs       # usearch HNSW implementation
+│   │   ├── pgvector.rs      # pgvector implementation
+│   │   └── redis.rs         # Redis vector search
+│   └── graph/               # Knowledge graph storage
+│       ├── mod.rs           # GraphBackend trait
+│       └── sqlite.rs        # SQLite graph implementation
 │
 ├── services/                 # Business logic
 │   ├── mod.rs               # ServiceContainer
@@ -62,6 +66,8 @@ src/
 │   ├── prompt.rs            # PromptService (CRUD for prompts)
 │   ├── prompt_parser.rs     # Multi-format parsing (MD, YAML, JSON)
 │   ├── prompt_enrichment.rs # LLM-assisted metadata enrichment
+│   ├── graph.rs             # GraphService (entity storage, traversal)
+│   ├── entity_extraction.rs # EntityExtractorService (LLM + fallback)
 │   └── deduplication/       # Deduplication service
 │       ├── mod.rs           # Module exports, Deduplicator trait
 │       ├── types.rs         # DuplicateCheckResult, DuplicateReason
@@ -124,6 +130,13 @@ src/
 │   ├── serve.rs             # serve subcommand (MCP)
 │   ├── hook.rs              # hook subcommand
 │   └── prompt.rs            # prompt subcommand (save, list, get, run, delete, export)
+│
+├── commands/                 # Command implementations
+│   ├── mod.rs               # Command re-exports
+│   ├── core.rs              # Core commands (capture, recall, status)
+│   ├── graph.rs             # Graph commands (entities, relationships, stats, get)
+│   ├── prompt.rs            # Prompt management
+│   └── hook.rs              # Hook event handlers
 │
 └── observability/            # Telemetry
     ├── metrics.rs           # Prometheus metrics
@@ -227,6 +240,15 @@ subcog prompt get my-prompt
 subcog prompt run code-review --var file=src/main.rs --var issue_type=security
 subcog prompt delete my-prompt --domain project
 subcog prompt export my-prompt --format yaml --output my-prompt.yaml
+
+# Knowledge graph commands
+subcog graph entities                    # List all entities
+subcog graph entities --query "Rust"     # Search entities by name
+subcog graph entities --type technology  # Filter by type
+subcog graph relationships Alice         # Show relationships for entity
+subcog graph relationships Alice --depth 2  # Traverse 2 levels deep
+subcog graph stats                       # Show graph statistics
+subcog graph get Alice                   # Get entity details
 ```
 
 ### Prompt Templates
@@ -823,6 +845,133 @@ The consolidation service degrades gracefully when components are unavailable:
 | `consolidation_edges_created` | Total edges created (labels: edge_type) |
 | `consolidation_duration_ms` | Operation duration histogram |
 | `consolidation_llm_failures` | LLM failures by namespace (labels: namespace) |
+
+## Knowledge Graph (Graph-Augmented Retrieval)
+
+The knowledge graph enables entity-centric memory retrieval by extracting named entities (people, organizations, technologies, concepts) from captured memories and storing their relationships.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      CaptureService                             │
+│                           │                                     │
+│                           ▼                                     │
+│              ┌────────────────────────┐                         │
+│              │   EntityExtractor      │ ◄── LLM or Fallback    │
+│              │   (extract entities)   │                         │
+│              └────────────────────────┘                         │
+│                           │                                     │
+│                           ▼                                     │
+│              ┌────────────────────────┐                         │
+│              │     GraphService       │                         │
+│              │  (store in SQLite)     │                         │
+│              └────────────────────────┘                         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Entity Types
+
+| Type | Description | Examples |
+|------|-------------|----------|
+| `Person` | Individual people | Alice, Bob, John Smith |
+| `Organization` | Companies, teams, groups | Anthropic, Rust Foundation |
+| `Technology` | Tools, languages, frameworks | Rust, PostgreSQL, React |
+| `Concept` | Abstract ideas, patterns | Microservices, CQRS |
+| `File` | Source files, documents | src/main.rs, README.md |
+
+### Relationship Types
+
+| Type | Description |
+|------|-------------|
+| `WorksAt` | Person → Organization |
+| `Uses` | Entity → Technology |
+| `Implements` | Entity → Concept |
+| `RelatesTo` | Generic relationship |
+| `DependsOn` | Dependency relationship |
+| `Contains` | Containment relationship |
+
+### Configuration
+
+Enable auto-extraction during capture:
+
+```bash
+# Environment variable
+export SUBCOG_AUTO_EXTRACT_ENTITIES=true
+
+# Or in subcog.toml
+[features]
+auto_extract_entities = true
+```
+
+### CLI Commands
+
+```bash
+# List entities
+subcog graph entities
+subcog graph entities --query "database" --type technology --limit 10
+
+# Show relationships
+subcog graph relationships "PostgreSQL"
+subcog graph relationships "Alice" --depth 2 --format json
+
+# View statistics
+subcog graph stats
+
+# Get entity details
+subcog graph get "PostgreSQL" --format json
+```
+
+### Data Model
+
+**Entity** (`src/models/graph.rs`):
+- `id: EntityId` - Unique identifier (UUID-based)
+- `entity_type: EntityType` - Person, Organization, Technology, Concept, File
+- `name: String` - Display name
+- `aliases: Vec<String>` - Alternative names
+- `domain: Domain` - Scope (user/org/project)
+- `confidence: f32` - Extraction confidence (0.0-1.0)
+- `properties: HashMap<String, Value>` - Custom metadata
+
+**Relationship**:
+- `from_entity: EntityId` - Source entity
+- `to_entity: EntityId` - Target entity
+- `relationship_type: RelationshipType` - Type of relationship
+- `confidence: f32` - Relationship confidence
+
+**Mention**:
+- `entity_id: EntityId` - Referenced entity
+- `memory_id: MemoryId` - Memory containing the mention
+- `context: Option<String>` - Surrounding text
+
+### Storage Backend
+
+The graph uses `SQLite` with the following tables:
+
+| Table | Purpose |
+|-------|---------|
+| `entities` | Entity records with properties |
+| `relationships` | Entity-to-entity relationships |
+| `mentions` | Entity mentions in memories |
+
+Database location: `{data_dir}/graph.db`
+
+### Graceful Degradation
+
+| Component | Fallback Behavior |
+|-----------|------------------|
+| LLM unavailable | Uses regex-based entity extraction |
+| Graph storage fails | Capture continues without graph storage |
+| Entity extraction fails | Warning logged, capture succeeds |
+
+### Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `entity_extraction_total` | Total extractions (labels: status, fallback) |
+| `graph_entities_stored` | Entities stored in graph |
+| `graph_relationships_stored` | Relationships stored |
+| `graph_query_duration_ms` | Query latency histogram |
 
 ## Code Style Requirements
 

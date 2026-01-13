@@ -63,6 +63,25 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::{info_span, instrument};
 
+/// Callback type for post-capture entity extraction.
+///
+/// Called after successful capture with the memory content and ID.
+/// Should extract entities and store them in the knowledge graph.
+/// Errors are logged but do not fail the capture operation.
+pub type EntityExtractionCallback =
+    Arc<dyn Fn(&str, &MemoryId) -> Result<EntityExtractionStats> + Send + Sync>;
+
+/// Statistics from entity extraction during capture.
+#[derive(Debug, Clone, Default)]
+pub struct EntityExtractionStats {
+    /// Number of entities extracted and stored.
+    pub entities_stored: usize,
+    /// Number of relationships extracted and stored.
+    pub relationships_stored: usize,
+    /// Whether the extraction used fallback (no LLM).
+    pub used_fallback: bool,
+}
+
 /// Service for capturing memories.
 ///
 /// # Storage Layers
@@ -71,12 +90,24 @@ use tracing::{info_span, instrument};
 /// 1. **Index** (`SQLite` FTS5) - Authoritative storage with full-text search via BM25
 /// 2. **Vector** (usearch) - Semantic similarity search
 ///
+/// # Entity Extraction
+///
+/// When configured with an entity extraction callback and the feature is enabled,
+/// entities (people, organizations, technologies, concepts) are automatically
+/// extracted from captured content and stored in the knowledge graph for
+/// graph-augmented retrieval (Graph RAG).
+///
 /// # Graceful Degradation
 ///
 /// If embedder or vector backend is unavailable:
 /// - Capture still succeeds (Index layer is authoritative)
 /// - A warning is logged for each failed secondary store
 /// - The memory may not be searchable via semantic similarity
+///
+/// If entity extraction fails:
+/// - Capture still succeeds
+/// - A warning is logged
+/// - The memory won't have graph relationships
 pub struct CaptureService {
     /// Configuration.
     config: Config,
@@ -90,6 +121,8 @@ pub struct CaptureService {
     index: Option<Arc<dyn IndexBackend + Send + Sync>>,
     /// Vector backend for similarity search (optional).
     vector: Option<Arc<dyn VectorBackend + Send + Sync>>,
+    /// Entity extraction callback for graph-augmented retrieval (optional).
+    entity_extraction: Option<EntityExtractionCallback>,
 }
 
 impl CaptureService {
@@ -118,6 +151,7 @@ impl CaptureService {
             embedder: None,
             index: None,
             vector: None,
+            entity_extraction: None,
         }
     }
 
@@ -141,6 +175,7 @@ impl CaptureService {
             embedder: Some(embedder),
             index: Some(index),
             vector: Some(vector),
+            entity_extraction: None,
         }
     }
 
@@ -163,6 +198,45 @@ impl CaptureService {
     pub fn with_vector(mut self, vector: Arc<dyn VectorBackend + Send + Sync>) -> Self {
         self.vector = Some(vector);
         self
+    }
+
+    /// Adds an entity extraction callback for graph-augmented retrieval.
+    ///
+    /// When configured, entities (people, organizations, technologies, concepts)
+    /// are automatically extracted from captured content and stored in the
+    /// knowledge graph. This enables Graph RAG (Retrieval-Augmented Generation)
+    /// by finding related memories through entity relationships.
+    ///
+    /// # Arguments
+    ///
+    /// * `callback` - A callback that extracts entities from content and stores them.
+    ///   The callback receives the content and memory ID, and should return stats.
+    ///   Errors are logged but don't fail the capture operation.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use std::sync::Arc;
+    /// use subcog::services::{CaptureService, EntityExtractionStats};
+    ///
+    /// let callback = Arc::new(|content: &str, memory_id: &MemoryId| {
+    ///     // Extract entities and store in graph...
+    ///     Ok(EntityExtractionStats::default())
+    /// });
+    ///
+    /// let service = CaptureService::default()
+    ///     .with_entity_extraction(callback);
+    /// ```
+    #[must_use]
+    pub fn with_entity_extraction(mut self, callback: EntityExtractionCallback) -> Self {
+        self.entity_extraction = Some(callback);
+        self
+    }
+
+    /// Returns whether entity extraction is configured.
+    #[must_use]
+    pub fn has_entity_extraction(&self) -> bool {
+        self.entity_extraction.is_some()
     }
 
     /// Returns whether embedding generation is available.
@@ -403,6 +477,43 @@ impl CaptureService {
                             "Failed to upsert embedding (continuing without)"
                         );
                         warnings.push("Embedding not stored in vector index".to_string());
+                    },
+                }
+            }
+
+            // Extract entities for graph-augmented retrieval (best-effort)
+            if self.config.features.auto_extract_entities
+                && let Some(ref callback) = self.entity_extraction
+            {
+                let _span = info_span!("subcog.memory.capture.entity_extraction").entered();
+                match callback(&memory.content, &memory_id) {
+                    Ok(stats) => {
+                        tracing::debug!(
+                            memory_id = %memory_id,
+                            entities = stats.entities_stored,
+                            relationships = stats.relationships_stored,
+                            fallback = stats.used_fallback,
+                            "Extracted entities for graph RAG"
+                        );
+                        metrics::counter!(
+                            "entity_extraction_total",
+                            "status" => "success",
+                            "fallback" => if stats.used_fallback { "true" } else { "false" }
+                        )
+                        .increment(1);
+                    },
+                    Err(e) => {
+                        tracing::warn!(
+                            memory_id = %memory_id,
+                            error = %e,
+                            "Failed to extract entities (continuing without graph relationships)"
+                        );
+                        warnings.push("Entity extraction failed".to_string());
+                        metrics::counter!(
+                            "entity_extraction_total",
+                            "status" => "error"
+                        )
+                        .increment(1);
                     },
                 }
             }

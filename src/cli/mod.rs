@@ -43,6 +43,7 @@
 mod capture;
 mod config;
 mod consolidate;
+pub mod delete;
 pub mod gc;
 mod hook;
 mod llm_factory;
