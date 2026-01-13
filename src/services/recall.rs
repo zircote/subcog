@@ -686,6 +686,105 @@ impl RecallService {
         result
     }
 
+    /// Lists all memories with full content.
+    ///
+    /// Unlike [`list_all`](Self::list_all), this variant preserves memory content
+    /// for use cases requiring topic extraction or full memory analysis (e.g., statistics).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::OperationFailed`] if:
+    /// - No index backend is configured
+    /// - The index backend list operation fails
+    /// - Batch memory retrieval fails
+    #[allow(clippy::cast_possible_truncation)]
+    #[instrument(
+        name = "subcog.memory.recall.list_all_with_content",
+        skip(self, filter),
+        fields(
+            request_id = tracing::field::Empty,
+            component = "memory",
+            operation = "list_all_with_content",
+            limit = limit
+        )
+    )]
+    pub fn list_all_with_content(
+        &self,
+        filter: &SearchFilter,
+        limit: usize,
+    ) -> Result<SearchResult> {
+        let start = Instant::now();
+        let effective_filter = self.effective_filter(filter);
+        let filter = effective_filter.as_ref();
+        let domain_label = domain_label(filter);
+        if let Some(request_id) = current_request_id() {
+            tracing::Span::current().record("request_id", request_id.as_str());
+        }
+
+        let result = (|| {
+            let index = self.index.as_ref().ok_or_else(|| Error::OperationFailed {
+                operation: "list_all_with_content".to_string(),
+                cause: "No index backend configured".to_string(),
+            })?;
+
+            let results = index.list_all(filter, limit)?;
+
+            // PERF-C1: Use batch query instead of N+1 individual get_memory calls
+            let ids: Vec<_> = results.iter().map(|(id, _)| id.clone()).collect();
+            let batch_memories = index.get_memories_batch(&ids)?;
+
+            // Zip results with fetched memories, preserving content for analysis
+            let memories: Vec<SearchHit> = results
+                .into_iter()
+                .zip(batch_memories)
+                .filter_map(|((_, score), memory_opt)| {
+                    memory_opt.map(|memory| SearchHit {
+                        memory, // Content preserved for topic extraction
+                        score,
+                        raw_score: score,
+                        vector_score: None,
+                        bm25_score: None,
+                    })
+                })
+                .collect();
+
+            let execution_time_ms = start.elapsed().as_millis() as u64;
+            let total_count = memories.len();
+            record_recall_events(&memories, "*");
+
+            Ok(SearchResult {
+                memories,
+                total_count,
+                mode: SearchMode::Text,
+                execution_time_ms,
+            })
+        })();
+
+        let status = if result.is_ok() { "success" } else { "error" };
+        metrics::counter!(
+            "memory_search_total",
+            "mode" => "list_all_with_content",
+            "domain" => domain_label,
+            "status" => status
+        )
+        .increment(1);
+        metrics::histogram!(
+            "memory_search_duration_ms",
+            "mode" => "list_all_with_content",
+            "backend" => "sqlite"
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
+        metrics::histogram!(
+            "memory_lifecycle_duration_ms",
+            "component" => "memory",
+            "operation" => "recall",
+            "mode" => "list_all_with_content"
+        )
+        .record(start.elapsed().as_secs_f64() * 1000.0);
+
+        result
+    }
+
     /// Performs BM25 text search.
     ///
     /// Note: Scores are NOT normalized here. Normalization is applied:

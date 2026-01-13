@@ -199,6 +199,10 @@ impl ContextBuilderService {
 
     /// Gets memory statistics for session context.
     ///
+    /// Uses [`RecallService::list_all_with_content`] to fetch memories with full content
+    /// for topic extraction. This is intentionally more expensive than the lightweight
+    /// [`RecallService::list_all`] used by MCP tools.
+    ///
     /// # Errors
     ///
     /// Returns an error if statistics gathering fails.
@@ -207,13 +211,8 @@ impl ContextBuilderService {
             return Ok(MemoryStatistics::default());
         };
 
-        // Search for all memories (broad query)
-        let result = recall.search(
-            "*",
-            SearchMode::Text,
-            &SearchFilter::new(),
-            RECENT_MEMORIES_LIMIT,
-        )?;
+        // Fetch all memories with content for topic extraction
+        let result = recall.list_all_with_content(&SearchFilter::new(), RECENT_MEMORIES_LIMIT)?;
 
         let mut namespace_counts: HashMap<String, usize> = HashMap::new();
         let mut tag_counts: HashMap<String, usize> = HashMap::new();
