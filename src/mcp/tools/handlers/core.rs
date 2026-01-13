@@ -1805,7 +1805,10 @@ fn format_init_status(services: &ServiceContainer) -> String {
         return output;
     };
 
-    output.push_str(&format!("- **Total memories**: {}\n", result.memories.len()));
+    output.push_str(&format!(
+        "- **Total memories**: {}\n",
+        result.memories.len()
+    ));
 
     // Count by namespace
     let mut ns_counts = std::collections::HashMap::new();
@@ -1859,9 +1862,7 @@ fn format_init_recall(services: &ServiceContainer, query: &str, limit: usize) ->
             }
         },
         Ok(_) => {
-            output.push_str(
-                "_No existing context memories found. This may be a new project._\n\n",
-            );
+            output.push_str("_No existing context memories found. This may be a new project._\n\n");
             output.push_str("**Tip**: Capture decisions, patterns, and learnings as you work!\n");
         },
         Err(e) => {

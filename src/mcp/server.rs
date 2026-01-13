@@ -86,9 +86,9 @@ use rmcp::model::{
     AnnotateAble, CallToolRequestParam, CallToolResult, Content, GetPromptRequestParam,
     GetPromptResult, Implementation, ListPromptsResult, ListResourceTemplatesResult,
     ListResourcesResult, ListToolsResult, PaginatedRequestParam, Prompt,
-    PromptArgument as RmcpPromptArgument, PromptMessage as RmcpPromptMessage,
-    PromptMessageContent, PromptMessageRole, RawResource, Resource, ResourceContents,
-    ServerCapabilities, ServerInfo, Tool,
+    PromptArgument as RmcpPromptArgument, PromptMessage as RmcpPromptMessage, PromptMessageContent,
+    PromptMessageRole, RawResource, Resource, ResourceContents, ServerCapabilities, ServerInfo,
+    Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::transport::stdio;
@@ -842,9 +842,10 @@ impl ServerHandler for McpHandler {
         let state = self.state.clone();
         let (request_context, request_id) = init_request_context();
         let prompt_name = request.name.clone();
-        let arguments = request
-            .arguments
-            .map_or_else(|| serde_json::Value::Object(serde_json::Map::new()), serde_json::Value::Object);
+        let arguments = request.arguments.map_or_else(
+            || serde_json::Value::Object(serde_json::Map::new()),
+            serde_json::Value::Object,
+        );
         async move {
             let span = info_span!(
                 parent: None,

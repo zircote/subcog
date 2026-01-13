@@ -1013,3 +1013,222 @@ pub fn init_tool() -> ToolDefinition {
         }),
     }
 }
+
+// ============================================================================
+// Context Template Tools
+// ============================================================================
+
+/// Defines the `context_template_save` tool.
+pub fn context_template_save_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "context_template_save".to_string(),
+        description: "Save or update a context template for formatting memories. Templates support variable substitution ({{var}}), iteration ({{#each memories}}...{{/each}}), and multiple output formats.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Template name (unique identifier)"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Template content with variable placeholders. Use {{var}} for variables, {{#each memories}}...{{/each}} for iteration over memories."
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Human-readable description of the template's purpose"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Tags for categorization and filtering"
+                },
+                "domain": {
+                    "type": "string",
+                    "description": "Storage scope: project (default), user, or org",
+                    "enum": ["project", "user", "org"],
+                    "default": "project"
+                },
+                "output_format": {
+                    "type": "string",
+                    "description": "Default output format: markdown (default), json, or xml",
+                    "enum": ["markdown", "json", "xml"],
+                    "default": "markdown"
+                },
+                "variables": {
+                    "type": "array",
+                    "description": "User-defined variable declarations",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Variable name (used as {{name}} in content)"
+                            },
+                            "description": {
+                                "type": "string",
+                                "description": "Description of what this variable represents"
+                            },
+                            "default": {
+                                "type": "string",
+                                "description": "Default value if not provided at render time"
+                            },
+                            "required": {
+                                "type": "boolean",
+                                "description": "Whether this variable must be provided (default: true)"
+                            }
+                        },
+                        "required": ["name"]
+                    }
+                }
+            },
+            "required": ["name", "content"]
+        }),
+    }
+}
+
+/// Defines the `context_template_list` tool.
+pub fn context_template_list_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "context_template_list".to_string(),
+        description: "List available context templates with optional filtering by domain, tags, or name pattern.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "description": "Filter by storage scope: project, user, or org",
+                    "enum": ["project", "user", "org"]
+                },
+                "tags": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Filter by tags (must have ALL specified tags)"
+                },
+                "name_pattern": {
+                    "type": "string",
+                    "description": "Filter by name pattern (substring match)"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of results (default: 20, max: 100)",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 20
+                }
+            },
+            "required": []
+        }),
+    }
+}
+
+/// Defines the `context_template_get` tool.
+pub fn context_template_get_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "context_template_get".to_string(),
+        description: "Get a context template by name, optionally specifying version and domain."
+            .to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Template name to retrieve"
+                },
+                "version": {
+                    "type": "integer",
+                    "description": "Specific version to retrieve (default: latest)",
+                    "minimum": 1
+                },
+                "domain": {
+                    "type": "string",
+                    "description": "Storage scope to search: project, user, or org",
+                    "enum": ["project", "user", "org"]
+                }
+            },
+            "required": ["name"]
+        }),
+    }
+}
+
+/// Defines the `context_template_render` tool.
+pub fn context_template_render_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "context_template_render".to_string(),
+        description: "Render a context template with memories from a search query. Combines template rendering with memory recall for formatted output.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Template name to render"
+                },
+                "version": {
+                    "type": "integer",
+                    "description": "Specific template version (default: latest)",
+                    "minimum": 1
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Search query to find memories for the template"
+                },
+                "namespaces": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["decisions", "patterns", "learnings", "context", "tech-debt", "apis", "config", "security", "performance", "testing"]
+                    },
+                    "description": "Filter memories by namespaces"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum memories to include (default: 10)",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "default": 10
+                },
+                "format": {
+                    "type": "string",
+                    "description": "Override output format: markdown, json, or xml",
+                    "enum": ["markdown", "json", "xml"]
+                },
+                "variables": {
+                    "type": "object",
+                    "description": "Custom variable values as key-value pairs",
+                    "additionalProperties": { "type": "string" }
+                }
+            },
+            "required": ["name"]
+        }),
+    }
+}
+
+/// Defines the `context_template_delete` tool.
+pub fn context_template_delete_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "context_template_delete".to_string(),
+        description: "Delete a context template. Can delete a specific version or all versions."
+            .to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Template name to delete"
+                },
+                "version": {
+                    "type": "integer",
+                    "description": "Specific version to delete (omit to delete all versions)",
+                    "minimum": 1
+                },
+                "domain": {
+                    "type": "string",
+                    "description": "Storage scope: project (default), user, or org",
+                    "enum": ["project", "user", "org"],
+                    "default": "project"
+                }
+            },
+            "required": ["name", "domain"]
+        }),
+    }
+}

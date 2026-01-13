@@ -4,6 +4,7 @@
 
 mod capture;
 mod consolidation;
+mod context_template;
 mod domain;
 mod events;
 pub mod graph;
@@ -14,6 +15,10 @@ pub mod temporal;
 
 pub use capture::{CaptureRequest, CaptureResult};
 pub use consolidation::{EdgeType, MemoryTier, RetentionScore};
+pub use context_template::{
+    AUTO_VARIABLE_PREFIXES, AUTO_VARIABLES, ContextTemplate, OutputFormat, TemplateVariable,
+    TemplateVersion, VariableType, is_auto_variable,
+};
 pub use domain::{Domain, MemoryStatus, Namespace};
 pub use events::{EventMeta, MemoryEvent};
 pub use memory::{Memory, MemoryId, MemoryResult};

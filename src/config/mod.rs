@@ -168,6 +168,8 @@ pub struct SubcogConfig {
     pub ttl: TtlConfig,
     /// Operation timeout configuration (CHAOS-HIGH-005).
     pub timeouts: OperationTimeoutConfig,
+    /// Context template configuration.
+    pub context_templates: ContextTemplatesConfig,
     /// Config files that were loaded (for debugging).
     pub config_sources: Vec<PathBuf>,
 }
@@ -808,6 +810,8 @@ pub struct ConfigFile {
     pub consolidation: Option<ConfigFileConsolidation>,
     /// TTL (Time-To-Live) configuration for memory expiration.
     pub ttl: Option<ConfigFileTtl>,
+    /// Context template configuration.
+    pub context_templates: Option<ConfigFileContextTemplates>,
 }
 
 /// Features section in config file.
@@ -1004,6 +1008,170 @@ pub struct ConfigFileTtlScope {
     pub user: Option<String>,
     /// TTL for org-scoped memories.
     pub org: Option<String>,
+}
+
+/// Context template configuration section in config file.
+///
+/// # Example TOML
+///
+/// ```toml
+/// [context_templates]
+/// enabled = true
+/// default_format = "markdown"  # markdown, json, xml
+///
+/// [context_templates.hooks.session_start]
+/// template = "session-context"
+/// version = 1
+/// format = "markdown"
+/// ```
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ConfigFileContextTemplates {
+    /// Whether context templates feature is enabled.
+    pub enabled: Option<bool>,
+    /// Default output format: "markdown", "json", or "xml".
+    pub default_format: Option<String>,
+    /// Per-hook template configuration.
+    pub hooks: Option<ConfigFileHookTemplates>,
+}
+
+/// Per-hook template configuration.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ConfigFileHookTemplates {
+    /// Template for `session_start` hook.
+    pub session_start: Option<ConfigFileHookTemplate>,
+    /// Template for `user_prompt_submit` hook.
+    pub user_prompt_submit: Option<ConfigFileHookTemplate>,
+    /// Template for `post_tool_use` hook.
+    pub post_tool_use: Option<ConfigFileHookTemplate>,
+    /// Template for `pre_compact` hook.
+    pub pre_compact: Option<ConfigFileHookTemplate>,
+}
+
+/// Configuration for a specific hook's template.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ConfigFileHookTemplate {
+    /// Name of the template to use.
+    pub template: Option<String>,
+    /// Specific version to use (None = latest).
+    pub version: Option<u32>,
+    /// Output format override: "markdown", "json", or "xml".
+    pub format: Option<String>,
+}
+
+/// Runtime context template configuration.
+///
+/// Controls the context templates feature for formatting memories and statistics
+/// in hooks and MCP tool responses.
+#[derive(Debug, Clone)]
+pub struct ContextTemplatesConfig {
+    /// Whether context templates feature is enabled.
+    pub enabled: bool,
+    /// Default output format for templates.
+    pub default_format: crate::models::OutputFormat,
+    /// Per-hook template configuration.
+    pub hooks: HookTemplatesConfig,
+}
+
+impl Default for ContextTemplatesConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            default_format: crate::models::OutputFormat::Markdown,
+            hooks: HookTemplatesConfig::default(),
+        }
+    }
+}
+
+impl ContextTemplatesConfig {
+    /// Creates config from a config file section.
+    pub fn from_config_file(file: &ConfigFileContextTemplates) -> Self {
+        let default_format = file
+            .default_format
+            .as_deref()
+            .and_then(parse_output_format)
+            .unwrap_or(crate::models::OutputFormat::Markdown);
+
+        let hooks = file
+            .hooks
+            .as_ref()
+            .map(HookTemplatesConfig::from_config_file)
+            .unwrap_or_default();
+
+        Self {
+            enabled: file.enabled.unwrap_or(true),
+            default_format,
+            hooks,
+        }
+    }
+}
+
+/// Runtime per-hook template configuration.
+#[derive(Debug, Clone, Default)]
+pub struct HookTemplatesConfig {
+    /// Template for `session_start` hook.
+    pub session_start: Option<HookTemplateConfig>,
+    /// Template for `user_prompt_submit` hook.
+    pub user_prompt_submit: Option<HookTemplateConfig>,
+    /// Template for `post_tool_use` hook.
+    pub post_tool_use: Option<HookTemplateConfig>,
+    /// Template for `pre_compact` hook.
+    pub pre_compact: Option<HookTemplateConfig>,
+}
+
+impl HookTemplatesConfig {
+    /// Creates config from a config file section.
+    pub fn from_config_file(file: &ConfigFileHookTemplates) -> Self {
+        Self {
+            session_start: file
+                .session_start
+                .as_ref()
+                .map(HookTemplateConfig::from_config_file),
+            user_prompt_submit: file
+                .user_prompt_submit
+                .as_ref()
+                .map(HookTemplateConfig::from_config_file),
+            post_tool_use: file
+                .post_tool_use
+                .as_ref()
+                .map(HookTemplateConfig::from_config_file),
+            pre_compact: file
+                .pre_compact
+                .as_ref()
+                .map(HookTemplateConfig::from_config_file),
+        }
+    }
+}
+
+/// Runtime configuration for a specific hook's template.
+#[derive(Debug, Clone)]
+pub struct HookTemplateConfig {
+    /// Name of the template to use.
+    pub template: String,
+    /// Specific version to use (None = latest).
+    pub version: Option<u32>,
+    /// Output format override.
+    pub format: Option<crate::models::OutputFormat>,
+}
+
+impl HookTemplateConfig {
+    /// Creates config from a config file section.
+    pub fn from_config_file(file: &ConfigFileHookTemplate) -> Self {
+        Self {
+            template: file.template.clone().unwrap_or_default(),
+            version: file.version,
+            format: file.format.as_deref().and_then(parse_output_format),
+        }
+    }
+}
+
+/// Parses output format from string.
+fn parse_output_format(s: &str) -> Option<crate::models::OutputFormat> {
+    match s.to_lowercase().as_str() {
+        "markdown" | "md" => Some(crate::models::OutputFormat::Markdown),
+        "json" => Some(crate::models::OutputFormat::Json),
+        "xml" => Some(crate::models::OutputFormat::Xml),
+        _ => None,
+    }
 }
 
 /// Runtime TTL (Time-To-Live) configuration.
@@ -1995,6 +2163,7 @@ impl Default for SubcogConfig {
             consolidation: ConsolidationConfig::default(),
             ttl: TtlConfig::default(),
             timeouts: OperationTimeoutConfig::from_env(),
+            context_templates: ContextTemplatesConfig::default(),
             config_sources: Vec::new(),
         }
     }
@@ -2168,6 +2337,9 @@ impl SubcogConfig {
         }
         if let Some(ref ttl) = file.ttl {
             self.ttl = TtlConfig::from_config_file(ttl);
+        }
+        if let Some(ref context_templates) = file.context_templates {
+            self.context_templates = ContextTemplatesConfig::from_config_file(context_templates);
         }
     }
 

@@ -247,7 +247,7 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 
 ---
 
-#### 8. Context Templates
+<!-- #### 8. Context Templates
 
 **Industry Standard (Zep):**
 - Reusable templates for context formatting
@@ -269,7 +269,7 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 2. Template variables for memory insertion
 3. Formatting options (markdown, JSON, structured)
 4. New tools: `subcog_context_template_save/run`
-5. Use in hooks for consistent context injection
+5. Use in hooks for consistent context injection -->
 
 ---
 

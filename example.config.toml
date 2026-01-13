@@ -162,3 +162,28 @@ use_http_post = true # POST accumulates metrics, PUT replaces all (default: true
 
 [prompt.consolidation]
 # additional_guidance = "Preserve all security-related memories during consolidation."
+
+# Context template configuration - customize how memories are formatted in hooks and tools.
+# Templates support variable substitution, iteration, and multiple output formats.
+[context_templates]
+enabled = true
+default_format = "markdown"  # markdown, json, xml
+
+# Per-hook template overrides (optional).
+# Configure which template to use for each hook's context injection.
+# If not set, hooks use their default formatting.
+#
+# [context_templates.hooks.session_start]
+# template = "session-context"     # Name of the template to use
+# version = 1                      # Optional: use specific version (default: latest)
+# format = "markdown"              # Optional: override default format
+#
+# [context_templates.hooks.user_prompt_submit]
+# template = "prompt-context"
+# format = "markdown"
+#
+# [context_templates.hooks.post_tool_use]
+# template = "tool-context"
+#
+# [context_templates.hooks.pre_compact]
+# template = "compact-context"

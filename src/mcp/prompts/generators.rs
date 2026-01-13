@@ -10,9 +10,8 @@ use super::templates::{
     DISCOVER_RESPONSE, GENERATE_TUTORIAL_RESPONSE, GENERATE_TUTORIAL_STRUCTURE,
     INTENT_SEARCH_INSTRUCTIONS, INTENT_SEARCH_RESPONSE, LIST_FORMAT_INSTRUCTIONS,
     QUERY_SUGGEST_INSTRUCTIONS, QUERY_SUGGEST_RESPONSE, SEARCH_HELP_SYSTEM,
-    SESSION_START_INSTRUCTIONS, SESSION_START_RESPONSE, TUTORIAL_BEST_PRACTICES,
-    TUTORIAL_CAPTURE, TUTORIAL_NAMESPACES, TUTORIAL_OVERVIEW, TUTORIAL_SEARCH,
-    TUTORIAL_WORKFLOWS,
+    SESSION_START_INSTRUCTIONS, SESSION_START_RESPONSE, TUTORIAL_BEST_PRACTICES, TUTORIAL_CAPTURE,
+    TUTORIAL_NAMESPACES, TUTORIAL_OVERVIEW, TUTORIAL_SEARCH, TUTORIAL_WORKFLOWS,
 };
 use super::types::{PromptContent, PromptMessage};
 
@@ -509,7 +508,9 @@ pub fn generate_session_start_prompt(arguments: &Value) -> Vec<PromptMessage> {
     let mut prompt = String::from("Initialize my Subcog session.\n\n");
 
     if include_recall {
-        prompt.push_str("**Include context recall**: Yes - search for project setup and architecture.\n");
+        prompt.push_str(
+            "**Include context recall**: Yes - search for project setup and architecture.\n",
+        );
     } else {
         prompt.push_str("**Include context recall**: No - skip initial recall.\n");
     }

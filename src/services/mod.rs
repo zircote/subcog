@@ -79,6 +79,7 @@ mod backend_factory;
 mod capture;
 mod consolidation;
 mod context;
+mod context_template;
 mod data_subject;
 pub mod deduplication;
 mod enrichment;
@@ -101,6 +102,10 @@ pub use backend_factory::{BackendFactory, BackendSet};
 pub use capture::{CaptureService, EntityExtractionCallback, EntityExtractionStats};
 pub use consolidation::{ConsolidationService, ConsolidationStats};
 pub use context::{ContextBuilderService, MemoryStatistics};
+pub use context_template::{
+    ContextTemplateFilter, ContextTemplateService, RenderResult, ValidationIssue, ValidationResult,
+    ValidationSeverity,
+};
 pub use data_subject::{
     ConsentPurpose, ConsentRecord, ConsentStatus, DataSubjectService, DeletionResult,
     ExportMetadata, ExportedMemory, UserDataExport,

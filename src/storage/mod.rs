@@ -20,6 +20,7 @@
 #![allow(clippy::unused_self)]
 
 pub mod bulkhead;
+pub mod context_template;
 pub mod graph;
 pub mod index;
 pub mod migrations;
@@ -31,6 +32,10 @@ pub mod vector;
 
 pub use bulkhead::{
     BulkheadIndexBackend, BulkheadPersistenceBackend, BulkheadVectorBackend, StorageBulkheadConfig,
+};
+pub use context_template::{
+    ContextTemplateBackendType, ContextTemplateDbStats, ContextTemplateStorage,
+    ContextTemplateStorageFactory, SqliteContextTemplateStorage,
 };
 pub use index::get_user_data_dir;
 pub use prompt::{

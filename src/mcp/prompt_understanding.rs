@@ -123,6 +123,30 @@ ns:decisions tag:rust -tag:deprecated since:7d source:src/*
 |------|-------------|
 | `subcog_gdpr_export` | Export all user data (GDPR Article 20) |
 
+### 3.7 Context Template Tools
+
+Context templates format memories and statistics for hooks and tool responses.
+
+| Tool | Description |
+|------|-------------|
+| `context_template_save` | Save a context template with variables and iteration |
+| `context_template_list` | List templates with filtering by domain/tags |
+| `context_template_get` | Fetch template by name (optionally specific version) |
+| `context_template_render` | Render template with memories and custom variables |
+| `context_template_delete` | Delete a template (specific version or all) |
+
+**Template syntax**:
+- **Variables**: `{{variable_name}}` - substituted at render time
+- **Iteration**: `{{#each memories}}...{{memory.field}}...{{/each}}`
+- **Output formats**: markdown (default), json, xml
+
+**Auto-variables** (populated automatically):
+- `{{memories}}` - List of memories for iteration
+- `{{memory.id}}`, `{{memory.content}}`, `{{memory.namespace}}`, `{{memory.tags}}`, `{{memory.score}}`
+- `{{total_count}}`, `{{namespace_counts}}`, `{{statistics}}`
+
+**Versioning**: Templates auto-increment version on save (v1, v2, v3...).
+
 ## 4. Key Features
 
 ### 4.1 Search Intent Detection
@@ -376,6 +400,46 @@ subcog_relationship_infer:
 
 ```yaml
 subcog_gdpr_export: {}
+```
+
+### 9.10 Create a Context Template
+
+```yaml
+context_template_save:
+  name: search-results
+  content: |
+    # {{title}}
+
+    Found {{total_count}} memories:
+
+    {{#each memories}}
+    - **{{memory.namespace}}**: {{memory.content}}
+      _Score: {{memory.score}}_
+    {{/each}}
+  description: Format search results for display
+  tags: [search, formatting]
+  domain: user
+```
+
+### 9.11 Render a Context Template with Query
+
+```yaml
+context_template_render:
+  name: search-results
+  query: "authentication patterns"
+  limit: 10
+  format: markdown
+  variables:
+    title: "Authentication Patterns"
+```
+
+### 9.12 List Context Templates
+
+```yaml
+context_template_list:
+  domain: user
+  tags: [formatting]
+  limit: 20
 ```
 
 ## 10. Safety and Integrity

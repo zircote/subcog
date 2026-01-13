@@ -465,6 +465,102 @@ pub struct PromptDeleteArgs {
     pub domain: String,
 }
 
+// =============================================================================
+// Context Template Arguments
+// =============================================================================
+
+/// Arguments for the `context_template_save` tool.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContextTemplateSaveArgs {
+    /// Unique template name (kebab-case, e.g., "search-results").
+    pub name: String,
+    /// Template content with `{{variable}}` placeholders and `{{#each}}` iteration.
+    pub content: String,
+    /// Human-readable description of the template.
+    pub description: Option<String>,
+    /// Tags for categorization and search.
+    pub tags: Option<Vec<String>>,
+    /// Storage scope: "project" (default), "user", or "org".
+    pub domain: Option<String>,
+    /// Default output format: "markdown" (default), "json", or "xml".
+    pub output_format: Option<String>,
+    /// Explicit variable definitions with metadata.
+    pub variables: Option<Vec<ContextTemplateVariableArg>>,
+}
+
+/// Variable definition argument for `context_template_save`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContextTemplateVariableArg {
+    /// Variable name (without `{{}}`).
+    pub name: String,
+    /// Variable description for documentation.
+    pub description: Option<String>,
+    /// Default value if not provided.
+    pub default: Option<String>,
+    /// Whether the variable is required (default: true).
+    pub required: Option<bool>,
+}
+
+/// Arguments for the `context_template_list` tool.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContextTemplateListArgs {
+    /// Filter by domain scope: "project", "user", or "org".
+    pub domain: Option<String>,
+    /// Filter by tags (AND logic - must have all).
+    pub tags: Option<Vec<String>>,
+    /// Filter by name pattern (glob-style, e.g., "search-*").
+    pub name_pattern: Option<String>,
+    /// Maximum number of results (default: 20, max: 100).
+    pub limit: Option<usize>,
+}
+
+/// Arguments for the `context_template_get` tool.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContextTemplateGetArgs {
+    /// Template name to retrieve.
+    pub name: String,
+    /// Specific version to retrieve (None = latest).
+    pub version: Option<u32>,
+    /// Domain to search (if not specified, searches User -> Project).
+    pub domain: Option<String>,
+}
+
+/// Arguments for the `context_template_render` tool.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContextTemplateRenderArgs {
+    /// Template name to render.
+    pub name: String,
+    /// Specific version to use (None = latest).
+    pub version: Option<u32>,
+    /// Query string for memory search to populate the template.
+    pub query: Option<String>,
+    /// Maximum memories to include (default: 10).
+    pub limit: Option<u32>,
+    /// Namespaces to filter memories (default: all).
+    pub namespaces: Option<Vec<String>>,
+    /// Custom variable values (key: value pairs).
+    pub variables: Option<std::collections::HashMap<String, String>>,
+    /// Output format override: "markdown", "json", or "xml".
+    pub format: Option<String>,
+}
+
+/// Arguments for the `context_template_delete` tool.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContextTemplateDeleteArgs {
+    /// Template name to delete.
+    pub name: String,
+    /// Specific version to delete (None = delete all versions).
+    pub version: Option<u32>,
+    /// Domain scope to delete from (required for safety).
+    pub domain: String,
+}
+
 /// Arguments for the `subcog_init` tool.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

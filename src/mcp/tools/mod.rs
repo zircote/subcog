@@ -114,6 +114,28 @@ impl ToolRegistry {
         // Session initialization tool
         tools.insert("subcog_init".to_string(), definitions::init_tool());
 
+        // Context template tools
+        tools.insert(
+            "context_template_save".to_string(),
+            definitions::context_template_save_tool(),
+        );
+        tools.insert(
+            "context_template_list".to_string(),
+            definitions::context_template_list_tool(),
+        );
+        tools.insert(
+            "context_template_get".to_string(),
+            definitions::context_template_get_tool(),
+        );
+        tools.insert(
+            "context_template_render".to_string(),
+            definitions::context_template_render_tool(),
+        );
+        tools.insert(
+            "context_template_delete".to_string(),
+            definitions::context_template_delete_tool(),
+        );
+
         Self { tools }
     }
 
@@ -171,6 +193,12 @@ impl ToolRegistry {
             "subcog_graph_visualize" => handlers::execute_graph_visualize(arguments),
             // Session initialization
             "subcog_init" => handlers::execute_init(arguments),
+            // Context template tools
+            "context_template_save" => handlers::execute_context_template_save(arguments),
+            "context_template_list" => handlers::execute_context_template_list(arguments),
+            "context_template_get" => handlers::execute_context_template_get(arguments),
+            "context_template_render" => handlers::execute_context_template_render(arguments),
+            "context_template_delete" => handlers::execute_context_template_delete(arguments),
             _ => Err(Error::InvalidInput(format!("Unknown tool: {name}"))),
         }?;
 

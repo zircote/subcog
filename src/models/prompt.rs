@@ -81,7 +81,8 @@ macro_rules! lazy_regex {
 }
 
 /// Regex pattern for extracting template variables: `{{variable_name}}`.
-static VARIABLE_PATTERN: LazyLock<Regex> = lazy_regex!(r"\{\{(\w+)\}\}");
+/// Supports dots for context template auto-variables like `{{memory.id}}`.
+static VARIABLE_PATTERN: LazyLock<Regex> = lazy_regex!(r"\{\{([\w.]+)\}\}");
 
 /// Regex pattern for detecting any content between `{{` and `}}`.
 static VALIDATION_PATTERN: LazyLock<Regex> = lazy_regex!(r"\{\{([^}]*)\}\}");

@@ -83,17 +83,11 @@ mod tests {
 
         // Should show hints for first MAX_HINTS calls
         for i in 0..MAX_HINTS {
-            assert!(
-                should_show_hint(),
-                "Should show hint for call {i}"
-            );
+            assert!(should_show_hint(), "Should show hint for call {i}");
         }
 
         // Should stop showing hints after MAX_HINTS
-        assert!(
-            !should_show_hint(),
-            "Should not show hint after MAX_HINTS"
-        );
+        assert!(!should_show_hint(), "Should not show hint after MAX_HINTS");
     }
 
     #[test]

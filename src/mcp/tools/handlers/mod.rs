@@ -3,10 +3,15 @@
 //! This module contains the execution logic for all MCP tools,
 //! organized into submodules by domain.
 
+mod context_templates;
 mod core;
 mod graph;
 mod prompts;
 
+pub use context_templates::{
+    execute_context_template_delete, execute_context_template_get, execute_context_template_list,
+    execute_context_template_render, execute_context_template_save,
+};
 pub use core::{
     execute_capture, execute_consolidate, execute_delete, execute_delete_all, execute_enrich,
     execute_gdpr_export, execute_get, execute_get_summary, execute_history, execute_init,
