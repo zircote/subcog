@@ -54,6 +54,7 @@ mod recall;
 mod serve;
 mod status;
 mod sync;
+pub mod webhook;
 
 pub use capture::CaptureCommand;
 pub use config::ConfigCommand;

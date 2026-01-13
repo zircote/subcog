@@ -55,6 +55,7 @@ pub mod rendering;
 pub mod security;
 pub mod services;
 pub mod storage;
+pub mod webhooks;
 
 // Re-exports for convenience
 pub use config::{FeatureFlags, OperationTimeoutConfig, OperationType, SubcogConfig};

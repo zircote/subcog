@@ -8,6 +8,7 @@
 //! - `hook.rs`: Claude Code hook event handlers
 //! - `migrate.rs`: Migration commands (embeddings)
 //! - `prompt.rs`: Prompt template management
+//! - `webhook.rs`: Webhook management commands
 
 mod config;
 mod core;
@@ -16,6 +17,7 @@ mod graph;
 mod hook;
 mod migrate;
 mod prompt;
+mod webhook;
 
 use std::path::PathBuf;
 
@@ -29,6 +31,66 @@ pub use graph::{GraphAction, cmd_graph};
 pub use hook::cmd_hook;
 pub use migrate::cmd_migrate_embeddings;
 pub use prompt::cmd_prompt;
+pub use webhook::cmd_webhook;
+
+/// Webhook subcommands.
+#[derive(Subcommand)]
+pub enum WebhookAction {
+    /// List configured webhooks.
+    List {
+        /// Output format: table, json, or yaml.
+        #[arg(short, long, default_value = "table")]
+        format: String,
+    },
+
+    /// Test a webhook by sending a test event.
+    Test {
+        /// Webhook name.
+        name: String,
+    },
+
+    /// Show webhook delivery history.
+    History {
+        /// Webhook name (optional, shows all if not specified).
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// Maximum number of records to show.
+        #[arg(short, long, default_value = "20")]
+        limit: usize,
+
+        /// Output format: table or json.
+        #[arg(short, long, default_value = "table")]
+        format: String,
+    },
+
+    /// Show webhook statistics.
+    Stats {
+        /// Webhook name (optional, shows all if not specified).
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+
+    /// Export audit logs for a domain (GDPR data portability).
+    Export {
+        /// Domain to export logs for.
+        domain: String,
+
+        /// Output file path (prints to stdout if not specified).
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+
+    /// Delete audit logs for a domain (GDPR right to erasure).
+    DeleteLogs {
+        /// Domain to delete logs for.
+        domain: String,
+
+        /// Skip confirmation prompt.
+        #[arg(short, long)]
+        force: bool,
+    },
+}
 
 /// Migrate subcommands.
 #[derive(Subcommand)]

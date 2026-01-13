@@ -174,6 +174,8 @@ pub struct SubcogConfig {
     pub context_templates: ContextTemplatesConfig,
     /// Organization configuration for shared memory graphs.
     pub org: OrgConfig,
+    /// Webhook configuration.
+    pub webhooks: WebhooksConfig,
     /// Config files that were loaded (for debugging).
     pub config_sources: Vec<PathBuf>,
 }
@@ -818,6 +820,9 @@ pub struct ConfigFile {
     pub context_templates: Option<ConfigFileContextTemplates>,
     /// Organization configuration for shared memory graphs.
     pub org: Option<ConfigFileOrg>,
+    /// Webhook configurations.
+    #[serde(default)]
+    pub webhooks: Vec<ConfigFileWebhook>,
 }
 
 /// Features section in config file.
@@ -2171,6 +2176,7 @@ impl Default for SubcogConfig {
             timeouts: OperationTimeoutConfig::from_env(),
             context_templates: ContextTemplatesConfig::default(),
             org: OrgConfig::default(),
+            webhooks: WebhooksConfig::default(),
             config_sources: Vec::new(),
         }
     }
@@ -2351,6 +2357,11 @@ impl SubcogConfig {
         if let Some(ref org) = file.org {
             self.org = OrgConfig::from_config_file(org, self.features.org_scope_enabled);
         }
+
+        // Webhooks from [[webhooks]] array
+        if !file.webhooks.is_empty() {
+            self.webhooks = WebhooksConfig::from_config_file(file.webhooks);
+        }
     }
 
     /// Sets the repository path.
@@ -2470,6 +2481,125 @@ impl From<SubcogConfig> for Config {
                 auto_extract_entities: subcog.features.auto_extract_entities,
             },
         }
+    }
+}
+
+// =============================================================================
+// WEBHOOK CONFIGURATION
+// =============================================================================
+
+/// Webhook configuration from config.toml.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ConfigFileWebhook {
+    /// Unique name for this webhook.
+    pub name: String,
+    /// Target URL for webhook delivery.
+    pub url: String,
+    /// Authentication configuration.
+    pub auth: Option<ConfigFileWebhookAuth>,
+    /// Event types to subscribe to (empty = all events).
+    #[serde(default)]
+    pub events: Vec<String>,
+    /// Domain scopes to filter (empty = all scopes).
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    /// Whether this webhook is enabled.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Retry configuration.
+    #[serde(default)]
+    pub retry: ConfigFileWebhookRetry,
+    /// Payload format (default, slack, discord).
+    pub format: Option<String>,
+}
+
+/// Webhook authentication from config.toml.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ConfigFileWebhookAuth {
+    /// Bearer token authentication.
+    Bearer {
+        /// The bearer token (supports `${ENV_VAR}` expansion).
+        token: String,
+    },
+    /// HMAC-SHA256 signature authentication.
+    Hmac {
+        /// The shared secret (supports `${ENV_VAR}` expansion).
+        secret: String,
+    },
+    /// Both Bearer token and HMAC signature.
+    Both {
+        /// The bearer token.
+        token: String,
+        /// The HMAC secret.
+        secret: String,
+    },
+}
+
+/// Webhook retry configuration from config.toml.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConfigFileWebhookRetry {
+    /// Maximum number of retry attempts (default: 3).
+    #[serde(default = "default_webhook_max_retries")]
+    pub max_retries: u32,
+    /// Base delay in milliseconds for exponential backoff (default: 1000).
+    #[serde(default = "default_webhook_base_delay_ms")]
+    pub base_delay_ms: u64,
+    /// Request timeout in seconds (default: 30).
+    #[serde(default = "default_webhook_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+impl Default for ConfigFileWebhookRetry {
+    fn default() -> Self {
+        Self {
+            max_retries: default_webhook_max_retries(),
+            base_delay_ms: default_webhook_base_delay_ms(),
+            timeout_secs: default_webhook_timeout_secs(),
+        }
+    }
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+const fn default_webhook_max_retries() -> u32 {
+    3
+}
+
+const fn default_webhook_base_delay_ms() -> u64 {
+    1000
+}
+
+const fn default_webhook_timeout_secs() -> u64 {
+    30
+}
+
+/// Runtime webhook configuration.
+#[derive(Debug, Clone, Default)]
+pub struct WebhooksConfig {
+    /// List of configured webhook endpoints.
+    pub webhooks: Vec<ConfigFileWebhook>,
+}
+
+impl WebhooksConfig {
+    /// Creates webhooks config from parsed config file entries.
+    #[must_use]
+    pub const fn from_config_file(webhooks: Vec<ConfigFileWebhook>) -> Self {
+        Self { webhooks }
+    }
+
+    /// Returns the number of configured webhooks.
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.webhooks.len()
+    }
+
+    /// Returns true if no webhooks are configured.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.webhooks.is_empty()
     }
 }
 

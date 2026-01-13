@@ -1034,4 +1034,37 @@ impl ServiceContainer {
             crate::models::Domain::for_user()
         }
     }
+
+    /// Creates a webhook service for event notifications.
+    ///
+    /// The webhook service subscribes to memory events and delivers them to
+    /// configured webhook endpoints. Configuration is loaded from
+    /// `~/.config/subcog/webhooks.yaml`.
+    ///
+    /// Returns `Ok(None)` if no webhooks are configured.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration is invalid or the audit database
+    /// cannot be created.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let container = ServiceContainer::from_current_dir_or_user()?;
+    /// if let Some(webhook_service) = container.webhook_service()? {
+    ///     // Start webhook dispatcher as background task
+    ///     let _handle = webhook_service.start();
+    /// }
+    /// ```
+    pub fn webhook_service(&self) -> Result<Option<crate::webhooks::WebhookService>> {
+        let scope = if self.is_user_scope() {
+            crate::storage::index::DomainScope::User
+        } else {
+            crate::storage::index::DomainScope::Project
+        };
+
+        let user_data_dir = get_user_data_dir()?;
+        crate::webhooks::WebhookService::from_config_file(scope, &user_data_dir)
+    }
 }

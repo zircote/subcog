@@ -37,6 +37,16 @@ pub fn parse_search_mode(s: &str) -> SearchMode {
     }
 }
 
+/// Parses domain string into a Domain.
+fn parse_domain(s: Option<&str>) -> Domain {
+    match s.map(str::to_lowercase).as_deref() {
+        Some("user") => Domain::for_user(),
+        Some("org") => Domain::for_org(),
+        Some("project") => Domain::new(),
+        _ => Domain::default_for_context(), // Auto-detect if not specified
+    }
+}
+
 /// Capture command.
 pub fn cmd_capture(
     _config: &SubcogConfig,
@@ -45,6 +55,7 @@ pub fn cmd_capture(
     tags: Option<String>,
     source: Option<String>,
     ttl: Option<String>,
+    domain: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let services = subcog::services::ServiceContainer::from_current_dir_or_user()?;
     let service = services.capture();
@@ -56,11 +67,13 @@ pub fn cmd_capture(
     // Parse TTL from duration string if provided
     let ttl_seconds = ttl.as_ref().and_then(|s| parse_duration_to_seconds(s));
 
-    // Use context-aware domain: project if in git repo, user if not
+    // Parse domain: user, org, project, or auto-detect from context
+    let domain = parse_domain(domain.as_deref());
+
     let request = CaptureRequest {
         content,
         namespace: parse_namespace(&namespace),
-        domain: Domain::default_for_context(),
+        domain,
         tags: tag_list,
         source,
         skip_security_check: false,

@@ -30,9 +30,11 @@ use subcog::observability::{
     self, InitOptions, RequestContext, enter_request_context, scope_request_context,
 };
 use subcog::security::AuditConfig;
+use subcog::storage::index::DomainScope;
+use subcog::webhooks::WebhookService;
 use tracing::info_span;
 
-use commands::{GraphAction, HookEvent, MigrateAction, PromptAction};
+use commands::{GraphAction, HookEvent, MigrateAction, PromptAction, WebhookAction};
 
 /// Subcog - A persistent memory system for AI coding assistants.
 #[derive(Parser)]
@@ -75,6 +77,10 @@ enum Commands {
         /// Supports: "7d" (days), "24h" (hours), "60m" (minutes), "3600s" or "3600" (seconds), "0" (never expire).
         #[arg(long)]
         ttl: Option<String>,
+
+        /// Storage domain: "project" (default if in git repo), "user" (global), or "org".
+        #[arg(short, long)]
+        domain: Option<String>,
     },
 
     /// Search for memories.
@@ -261,6 +267,13 @@ enum Commands {
         #[command(subcommand)]
         action: GraphAction,
     },
+
+    /// Manage webhook notifications.
+    Webhook {
+        /// Webhook subcommand.
+        #[command(subcommand)]
+        action: WebhookAction,
+    },
 }
 
 /// Main entry point.
@@ -330,6 +343,7 @@ async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::
         Commands::Gc { .. } => "gc",
         Commands::Delete { .. } => "delete",
         Commands::Graph { .. } => "graph",
+        Commands::Webhook { .. } => "webhook",
     };
 
     let request_context = RequestContext::new();
@@ -370,10 +384,11 @@ async fn dispatch_command(
             tags,
             source,
             ttl,
+            domain,
         } => {
             let config = config.clone();
             run_blocking_cmd!(move || {
-                commands::cmd_capture(&config, content, namespace, tags, source, ttl)
+                commands::cmd_capture(&config, content, namespace, tags, source, ttl, domain)
                     .map_err(|e| e.to_string())
             })
         },
@@ -493,6 +508,9 @@ async fn dispatch_command(
                 commands::cmd_graph(&config, action).map_err(|e| e.to_string())
             })
         },
+        Commands::Webhook { action } => {
+            run_blocking_cmd!(move || { commands::cmd_webhook(action).map_err(|e| e.to_string()) })
+        },
     }
 }
 
@@ -586,6 +604,9 @@ async fn cmd_serve(transport: String, port: u16) -> Result<(), Box<dyn std::erro
         _ => Transport::Stdio,
     };
 
+    // Start webhook service if configured
+    let _webhook_handle = start_webhook_service();
+
     let mut server = McpServer::new()
         .with_transport(transport_type)
         .with_port(port);
@@ -598,4 +619,43 @@ async fn cmd_serve(transport: String, port: u16) -> Result<(), Box<dyn std::erro
     server.start().await.map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+/// Starts the webhook service if webhooks are configured.
+///
+/// Returns a join handle for the background task, or None if no webhooks are configured.
+fn start_webhook_service() -> Option<tokio::task::JoinHandle<()>> {
+    // Get user data directory for audit database
+    let data_dir = match subcog::storage::get_user_data_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            tracing::debug!(error = %e, "Could not determine data directory for webhooks");
+            return None;
+        },
+    };
+
+    // Try to create webhook service from config file
+    let service = match WebhookService::from_config_file(DomainScope::Project, &data_dir) {
+        Ok(Some(service)) => service,
+        Ok(None) => {
+            tracing::debug!("No webhooks configured");
+            return None;
+        },
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to load webhook configuration");
+            return None;
+        },
+    };
+
+    let webhook_count = service.webhook_count();
+    let enabled_count = service.enabled_webhook_count();
+
+    tracing::info!(
+        total = webhook_count,
+        enabled = enabled_count,
+        "Starting webhook service"
+    );
+
+    // Start the webhook dispatcher as a background task
+    Some(service.start())
 }

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### Webhooks/Event Notifications
+- New webhook system for real-time notifications when memory events occur
+- Configuration via `[[webhooks]]` in `~/.config/subcog/config.toml` with:
+  - Multiple webhook endpoints
+  - Event type filtering (`captured`, `deleted`, `updated`, `consolidated`, `archived`, `retrieved`, `synced`)
+  - Domain scope filtering (`project`, `user`, `org`)
+  - Environment variable expansion (`${SECRET_NAME}`)
+  - Payload format selection: `default`, `slack` (Block Kit), `discord` (Embeds)
+- Authentication options:
+  - Bearer token (`Authorization: Bearer <token>`)
+  - HMAC-SHA256 signature (`X-Subcog-Signature: sha256=<sig>`)
+  - Combined Bearer + HMAC for maximum security
+- Exponential backoff retry with configurable delays
+- GDPR-compliant SQLite audit logging with export/delete by domain
+- New CLI commands:
+  - `subcog webhook list` - List configured webhooks
+  - `subcog webhook test <name>` - Send test event
+  - `subcog webhook history` - View delivery history
+  - `subcog webhook stats` - View statistics
+  - `subcog webhook export <domain>` - Export audit logs (GDPR Article 20)
+  - `subcog webhook delete-logs <domain>` - Delete audit logs (GDPR Article 17)
+- New `ServiceContainer::webhook_service()` method for programmatic access
+- Prometheus metrics: `webhook_deliveries_total`, `webhook_delivery_duration_ms`, success/failure counters
+
 ## [0.6.1] - 2026-01-13
 
 ### Fixed
@@ -19,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `"project"` (default): Stored with project context
   - `"user"`: Global across all projects
   - `"org"`: Organization-shared storage
+- **CLI Domain Flag**: Added `--domain` / `-d` flag to `subcog capture` CLI command with same options as MCP tool
 
 ## [0.6.0] - 2026-01-13
 
