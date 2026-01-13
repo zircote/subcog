@@ -578,7 +578,7 @@ For performance tuning, see [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ### Active Work
 
-- [TASK_PLAN.md](docs/spec/active/TASK_PLAN.md) - Current remediation tasks (Issue #45)
+See `docs/spec/active/` for current work in progress.
 
 ### Completed Specifications
 

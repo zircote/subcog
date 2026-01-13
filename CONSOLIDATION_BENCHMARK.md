@@ -259,4 +259,3 @@ Potential enhancements for the benchmark:
 - [Consolidation Service](./src/services/consolidation.rs)
 - [Integration Tests](./tests/integration_test.rs)
 - [Unit Tests Summary](./CONSOLIDATION_TESTS_SUMMARY.md)
-- [Spec](./docs/spec/active/001-memory-consolidation-service/spec.md)

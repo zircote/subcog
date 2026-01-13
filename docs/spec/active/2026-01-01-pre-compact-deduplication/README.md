@@ -53,7 +53,7 @@ The current implementation only performs within-batch prefix deduplication (firs
 
 ## Key Documents
 
-- [REQUIREMENTS.md](REQUIREMENTS.md) - Product requirements (26 functional requirements)
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Technical design with component diagrams
-- [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) - 7 phases, 26 tasks
-- [DECISIONS.md](DECISIONS.md) - 8 architecture decision records
+- [REQUIREMENTS.md](./REQUIREMENTS.md) - Product requirements (26 functional requirements)
+- [ARCHITECTURE.md](./ARCHITECTURE.md) - Technical design with component diagrams
+- [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) - 7 phases, 26 tasks
+- [DECISIONS.md](./DECISIONS.md) - 8 architecture decision records

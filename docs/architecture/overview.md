@@ -4,7 +4,7 @@ Detailed overview of Subcog's system architecture.
 
 > **Note**: This documentation describes the target architecture from the specification.
 > Current implementation uses simplified, synchronous patterns. Where significant differences
-> exist, they are noted inline. See [ARCHITECTURE.md](../../docs/spec/active/2025-12-28-subcog-rust-rewrite/ARCHITECTURE.md) for the full specification.
+> exist, they are noted inline. See [ARCHITECTURE.md](../spec/completed/2025-12-28-subcog-rust-rewrite/ARCHITECTURE.md) for the full specification.
 
 ## System Layers
 

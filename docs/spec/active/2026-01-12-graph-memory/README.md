@@ -30,11 +30,11 @@ This specification describes the implementation of a Graph Memory / Knowledge Gr
 
 | Document | Description |
 |----------|-------------|
-| [REQUIREMENTS.md](REQUIREMENTS.md) | Product requirements and user stories |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Technical architecture and design decisions |
-| [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | Phased implementation plan with tasks |
-| [DECISIONS.md](DECISIONS.md) | Architecture Decision Records (ADRs) |
-| [PROGRESS.md](PROGRESS.md) | Implementation progress tracking |
+| [REQUIREMENTS.md](./REQUIREMENTS.md) | Product requirements and user stories |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Technical architecture and design decisions |
+| [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) | Phased implementation plan with tasks |
+| [DECISIONS.md](./DECISIONS.md) | Architecture Decision Records (ADRs) |
+| [PROGRESS.md](./PROGRESS.md) | Implementation progress tracking |
 
 ## Timeline
 

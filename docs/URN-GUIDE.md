@@ -475,7 +475,7 @@ See: subcog://project/decisions/dc58d23a35876f5a59426e81aaa81d796efa7fc1
 
 ## See Also
 
-- [ARCHITECTURE.md](spec/active/2025-12-28-subcog-rust-rewrite/ARCHITECTURE.md) - System architecture
-- [REQUIREMENTS.md](spec/active/2025-12-28-subcog-rust-rewrite/REQUIREMENTS.md) - Product requirements
+- [ARCHITECTURE.md](spec/completed/2025-12-28-subcog-rust-rewrite/ARCHITECTURE.md) - System architecture
+- [REQUIREMENTS.md](spec/completed/2025-12-28-subcog-rust-rewrite/REQUIREMENTS.md) - Product requirements
 - [src/mcp/resources.rs](../src/mcp/resources.rs) - Resource handler implementation
 - [src/mcp/tools.rs](../src/mcp/tools.rs) - Tool implementations

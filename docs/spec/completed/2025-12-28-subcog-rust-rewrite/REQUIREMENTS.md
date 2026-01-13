@@ -557,8 +557,4 @@ View or update memory system configuration.
 
 ## References
 
-- [Source PRD](../../../research/2025-12-28-rust-rewrite/PRD.md)
-- [Storage Specification](../../../research/2025-12-28-rust-rewrite/STORAGE_AND_OBSERVABILITY.md)
-- [MCP Resources Specification](../../../research/2025-12-28-rust-rewrite/MCP_RESOURCES_AND_LLM.md)
-- [Access Interfaces Specification](../../../research/2025-12-28-rust-rewrite/ACCESS_INTERFACES.md)
-- [Integration Specification](../../../research/2025-12-28-rust-rewrite/SEAMLESS_INTEGRATION.md)
+See [RESEARCH_NOTES.md](./RESEARCH_NOTES.md) for background research that informed this specification.

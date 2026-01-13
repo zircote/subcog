@@ -179,6 +179,6 @@ Implement the documented deduplication logic that checks for existing similar me
 
 ### References
 
-- [docs/hooks/pre-compact.md](../../hooks/pre-compact.md) - Pre-compact hook documentation
+- [docs/hooks/pre-compact.md](../../../hooks/pre-compact.md) - Pre-compact hook documentation
 - [src/hooks/pre_compact.rs](../../../../src/hooks/pre_compact.rs) - Current implementation
 - [src/services/recall.rs](../../../../src/services/recall.rs) - RecallService implementation
