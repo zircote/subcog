@@ -7,30 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Security
+## [0.6.0] - 2026-01-13
 
-- Added request body size limits (1MB) to MCP server to prevent DoS attacks
-- Added deserialization size validation before JSON parsing
-- Path traversal protection already implemented in filesystem backend
-- OpenAI API key format validation (already fixed in previous session)
-- PostgreSQL connection string validation (already fixed in previous session)
+### Added
+
+#### Organization-Scoped Storage
+- New `org` scope for team collaboration with shared memories across projects
+- Org-scoped storage infrastructure with dedicated SQLite databases
+- Support for `SUBCOG_ORG_ID` environment variable
+
+#### Memory Consolidation Service
+- LLM-powered memory consolidation that groups related memories and creates summaries
+- New `subcog consolidate` CLI command with `--namespace`, `--days`, `--dry-run`, `--min-memories`, `--similarity` options
+- New `subcog_consolidate` MCP tool for triggering consolidation
+- `subcog://summaries` and `subcog://summaries/{id}` MCP resources for browsing summary nodes
+- Memory edges table for storing `SummarizedBy` relationships
+- Prometheus metrics: `consolidation_operations_total`, timing histograms
+- Graceful degradation when LLM unavailable (still detects related memories)
+- Support for OpenAI and Ollama LLM providers
+
+#### Knowledge Graph
+- Entity-centric memory retrieval via knowledge graph
+- Entity extraction from memory content
+- Graph-based relationship queries
+
+#### Context Templates
+- New Context Templates system for formatting memories in hooks
+- `context_template_save`, `context_template_get`, `context_template_list`, `context_template_delete` MCP tools
+- `context_template_render` for applying templates to memory sets
+
+#### GC Expiration Module
+- Garbage collection for expired memories
+- Configurable expiration policies per namespace
+
+#### Session Initialization Enforcement
+- Cross-client MCP support with session initialization requirements
+- Ensures consistent state across different MCP clients
+
+#### Security & Compliance
+- RBAC foundation for role-based access control
+- GDPR consent tracking and audit reports
+- Request body size limits (1MB) to prevent DoS attacks
+- Deserialization size validation before JSON parsing
+- XML content escaping in prompt enrichment
+- LLM response redaction in parse errors
 
 ### Changed
 
-- Centralized `DEFAULT_DIMENSIONS` constant in `embedding` module (was duplicated in 4 files)
+- Extracted generic `Bulkhead<T>` for shared concurrency limiting across storage backends
+- Centralized `DEFAULT_DIMENSIONS` constant in `embedding` module
 - Made MCP rate limits configurable via `SUBCOG_MCP_RATE_LIMIT_MAX_REQUESTS` and `SUBCOG_MCP_RATE_LIMIT_WINDOW_SECS`
 - Reduced deduplication search limit from 10 to 3 for performance
 - Added word limit (1000) to pseudo-embedding generation for performance
+- Start new trace per MCP request for better observability
+- Cache branch lookups during recall for performance
 
 ### Fixed
 
-- Fixed vector search integration test to share backends between CaptureService and RecallService
-- Fixed rustdoc warning for unclosed HTML tag in events.rs
-- Pre-allocated HashMap in RRF fusion for performance (PERF-M1)
+- SessionStart hook now reports correct memory count
+- Hook schema compliance for Stop and PreCompact events
+- Docker security: explicit USER directives in OTEL Collector and Grafana Dockerfiles
+- Database connection retry with exponential backoff
+- Preserve LLM HTTP timeouts in fallback provider
+- Avoid repo-local storage fallback (architecture fix)
+- CI failures in consolidation service and integration tests
+- Vector search integration test backend sharing
+- Rustdoc warning for unclosed HTML tag in events.rs
+- Pre-allocated HashMap in RRF fusion for performance
 
 ### Removed
 
 - Removed placeholder functions (`add`, `divide`, `Config`) from lib.rs
+- Removed sync tool from MCP and CLI (SQLite is now authoritative)
 
 ## [0.2.0] - 2026-01-02
 
