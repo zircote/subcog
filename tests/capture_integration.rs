@@ -94,6 +94,7 @@ fn test_capture_rejects_empty_content() {
         tags: vec![],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -122,6 +123,7 @@ fn test_capture_rejects_whitespace_only_content() {
         tags: vec![],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -149,6 +151,7 @@ fn test_capture_rejects_oversized_content() {
         tags: vec![],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -180,6 +183,7 @@ fn test_capture_accepts_content_at_size_limit() {
         tags: vec![],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -206,6 +210,7 @@ fn test_capture_blocks_secrets_when_configured() {
         tags: vec![],
         source: None,
         skip_security_check: false, // Don't skip security check
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -238,6 +243,7 @@ fn test_capture_allows_secrets_when_skip_security_check() {
         tags: vec![],
         source: None,
         skip_security_check: true, // Skip security check
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -262,6 +268,7 @@ fn test_capture_allows_content_without_secrets() {
         tags: vec!["database".to_string()],
         source: None,
         skip_security_check: false,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -425,6 +432,7 @@ fn test_capture_result_has_valid_urn() {
         tags: vec![],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -458,6 +466,7 @@ fn test_capture_result_has_valid_memory_id() {
         tags: vec![],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -498,6 +507,7 @@ fn test_capture_preserves_tags() {
         ],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -527,6 +537,7 @@ fn test_capture_adds_hash_tag() {
         tags: vec!["database".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -572,6 +583,7 @@ fn test_capture_accepts_all_namespaces() {
             tags: vec![],
             source: None,
             skip_security_check: true,
+            ttl_seconds: None,
         };
 
         let result = capture_service.capture(request);
@@ -603,6 +615,7 @@ fn test_capture_accepts_default_domain() {
         tags: vec![],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -624,6 +637,7 @@ fn test_capture_accepts_context_aware_domain() {
         tags: vec![],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -652,6 +666,7 @@ fn test_capture_accepts_source_path() {
         tags: vec![],
         source: Some("src/main.rs".to_string()),
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -673,6 +688,7 @@ fn test_capture_accepts_none_source_path() {
         tags: vec![],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);

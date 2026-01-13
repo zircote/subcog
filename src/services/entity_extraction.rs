@@ -25,6 +25,115 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Technology patterns for fallback entity extraction.
+///
+/// Organized by category for maintainability.
+static TECH_PATTERNS: &[&str] = &[
+    // Programming Languages (18)
+    "Rust",
+    "Python",
+    "Java",
+    "JavaScript",
+    "TypeScript",
+    "Go",
+    "C++",
+    "C#",
+    "Ruby",
+    "PHP",
+    "Swift",
+    "Kotlin",
+    "Scala",
+    "Elixir",
+    "Haskell",
+    "Clojure",
+    "F#",
+    "Zig",
+    // Databases (12)
+    "PostgreSQL",
+    "MySQL",
+    "SQLite",
+    "Redis",
+    "MongoDB",
+    "Cassandra",
+    "DynamoDB",
+    "CockroachDB",
+    "ClickHouse",
+    "Elasticsearch",
+    "Neo4j",
+    "Firestore",
+    // Web Frameworks (14)
+    "React",
+    "Vue",
+    "Angular",
+    "Svelte",
+    "Next.js",
+    "Nuxt",
+    "Express",
+    "Django",
+    "Rails",
+    "Laravel",
+    "Spring",
+    "Flask",
+    "FastAPI",
+    "Actix",
+    // Cloud Providers (9)
+    "AWS",
+    "Azure",
+    "GCP",
+    "Cloudflare",
+    "Vercel",
+    "Netlify",
+    "Heroku",
+    "DigitalOcean",
+    "Linode",
+    // Container/Orchestration (8)
+    "Docker",
+    "Kubernetes",
+    "k8s",
+    "Podman",
+    "Nomad",
+    "ECS",
+    "EKS",
+    "GKE",
+    // Infrastructure (6)
+    "Terraform",
+    "Ansible",
+    "Prometheus",
+    "Grafana",
+    "Datadog",
+    "Jaeger",
+    // Message Queues (6)
+    "Kafka",
+    "RabbitMQ",
+    "NATS",
+    "Pulsar",
+    "SQS",
+    "Pub/Sub",
+    // Build Tools (10)
+    "Webpack",
+    "Vite",
+    "esbuild",
+    "Rollup",
+    "Cargo",
+    "npm",
+    "yarn",
+    "pnpm",
+    "Maven",
+    "Gradle",
+    // Runtime Environments (4)
+    "Node.js",
+    "Deno",
+    "Bun",
+    "WASM",
+    // APIs/Protocols (6)
+    "REST",
+    "GraphQL",
+    "gRPC",
+    "WebSocket",
+    "MQTT",
+    "OpenAPI",
+];
+
 /// Result of entity extraction from text.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExtractionResult {
@@ -304,34 +413,7 @@ impl EntityExtractorService {
         let mut entities = Vec::new();
         let mut warnings = vec!["LLM unavailable, using pattern-based fallback".to_string()];
 
-        // Simple pattern matching for technologies (common patterns)
-        let tech_patterns = [
-            "Rust",
-            "Python",
-            "Java",
-            "JavaScript",
-            "TypeScript",
-            "Go",
-            "C++",
-            "PostgreSQL",
-            "MySQL",
-            "SQLite",
-            "Redis",
-            "MongoDB",
-            "Docker",
-            "Kubernetes",
-            "AWS",
-            "Azure",
-            "GCP",
-            "React",
-            "Vue",
-            "Angular",
-            "Node.js",
-            "Django",
-            "Rails",
-        ];
-
-        for pattern in &tech_patterns {
+        for pattern in TECH_PATTERNS {
             if text.contains(pattern) {
                 entities.push(ExtractedEntity {
                     name: (*pattern).to_string(),

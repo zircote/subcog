@@ -59,7 +59,7 @@ impl FeatureFlags {
             auto_capture: false,
             consolidation: false,
             org_scope_enabled: false,
-            auto_extract_entities: false,
+            auto_extract_entities: true,
         }
     }
 

@@ -70,6 +70,11 @@ enum Commands {
         /// Source file or context.
         #[arg(short, long)]
         source: Option<String>,
+
+        /// TTL (time-to-live) for automatic expiration.
+        /// Supports: "7d" (days), "24h" (hours), "60m" (minutes), "3600s" or "3600" (seconds), "0" (never expire).
+        #[arg(long)]
+        ttl: Option<String>,
     },
 
     /// Search for memories.
@@ -96,6 +101,11 @@ enum Commands {
         /// Include tombstoned memories in results.
         #[arg(long)]
         include_tombstoned: bool,
+
+        /// Filter by entity names (memories mentioning these entities).
+        /// Comma-separated for OR logic (e.g., "PostgreSQL,Redis").
+        #[arg(short, long)]
+        entity: Option<String>,
     },
 
     /// Show status.
@@ -359,10 +369,11 @@ async fn dispatch_command(
             namespace,
             tags,
             source,
+            ttl,
         } => {
             let config = config.clone();
             run_blocking_cmd!(move || {
-                commands::cmd_capture(&config, content, namespace, tags, source)
+                commands::cmd_capture(&config, content, namespace, tags, source, ttl)
                     .map_err(|e| e.to_string())
             })
         },
@@ -373,9 +384,18 @@ async fn dispatch_command(
             limit,
             raw,
             include_tombstoned,
+            entity,
         } => run_blocking_cmd!(move || {
-            commands::cmd_recall(query, mode, namespace, limit, raw, include_tombstoned)
-                .map_err(|e| e.to_string())
+            commands::cmd_recall(
+                query,
+                mode,
+                namespace,
+                limit,
+                raw,
+                include_tombstoned,
+                entity,
+            )
+            .map_err(|e| e.to_string())
         }),
         Commands::Status => {
             let config = config.clone();

@@ -600,6 +600,7 @@ mod tests {
             created_at: 1_234_567_890,
             updated_at: 1_234_567_890,
             tombstoned_at: None,
+            expires_at: None,
             embedding: None,
             tags: vec!["test".to_string()],
             source: None,

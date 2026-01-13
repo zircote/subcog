@@ -115,6 +115,7 @@ fn test_capture_recall_text_search_roundtrip() {
         tags: vec!["database".to_string(), "architecture".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -173,6 +174,7 @@ fn test_capture_recall_vector_search_roundtrip() {
         tags: vec!["caching".to_string(), "redis".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -268,6 +270,7 @@ fn test_capture_recall_hybrid_search_roundtrip() {
             tags: tags.iter().map(std::string::ToString::to_string).collect(),
             source: None,
             skip_security_check: true,
+            ttl_seconds: None,
         };
 
         let result = capture_service.capture(request);
@@ -322,6 +325,7 @@ fn test_capture_recall_namespace_filtering() {
         tags: vec!["architecture".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
     capture_service
         .capture(request1)
@@ -335,6 +339,7 @@ fn test_capture_recall_namespace_filtering() {
         tags: vec!["architecture".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
     capture_service
         .capture(request2)
@@ -389,6 +394,7 @@ fn test_captured_memory_has_embedding() {
         tags: vec!["rust".to_string(), "memory-safety".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -425,6 +431,7 @@ fn test_capture_graceful_degradation() {
         tags: vec!["refactoring".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     // Note: This may fail without a repo context, but the point is it doesn't crash
@@ -452,6 +459,7 @@ fn test_recall_limit_parameter_honored() {
             tags: vec!["database".to_string()],
             source: None,
             skip_security_check: true,
+            ttl_seconds: None,
         };
 
         let result = capture_service.capture(request);
@@ -500,6 +508,7 @@ fn test_multiple_captures_searchable() {
             tags: vec!["resilience".to_string()],
             source: None,
             skip_security_check: true,
+            ttl_seconds: None,
         };
 
         let result = capture_service.capture(request);
@@ -563,6 +572,7 @@ fn test_full_workflow_capture_recall_update() {
         tags: vec!["architecture".to_string(), "initial".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -584,6 +594,7 @@ fn test_full_workflow_capture_recall_update() {
         tags: vec!["architecture".to_string(), "updated".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let update_result = capture_service.capture(update_request);
@@ -633,6 +644,7 @@ fn test_cross_namespace_workflow() {
         tags: vec!["database".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
     capture_service
         .capture(decision)
@@ -646,6 +658,7 @@ fn test_cross_namespace_workflow() {
         tags: vec!["database".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
     capture_service
         .capture(pattern)
@@ -659,6 +672,7 @@ fn test_cross_namespace_workflow() {
         tags: vec!["database".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
     capture_service
         .capture(learning)
@@ -708,6 +722,7 @@ fn test_semantic_search_related_concepts() {
         tags: vec!["caching".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
     capture_service
         .capture(request)
@@ -747,6 +762,7 @@ fn test_score_normalization_in_results() {
             tags: vec!["design".to_string()],
             source: None,
             skip_security_check: true,
+            ttl_seconds: None,
         };
         capture_service
             .capture(request)
@@ -846,6 +862,7 @@ fn test_service_container_from_current_dir_or_user_always_succeeds() {
         tags: vec!["test".to_string(), "user-scope".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     // Capture should succeed regardless of scope
@@ -873,6 +890,7 @@ fn test_user_scope_capture_recall_roundtrip() {
         tags: vec!["user-scope".to_string(), "sqlite".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let capture_result = capture.capture(request);

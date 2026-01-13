@@ -401,6 +401,7 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             tombstoned_at: None,
+            expires_at: None,
             embedding: None,
             tags: vec![],
             source: None,

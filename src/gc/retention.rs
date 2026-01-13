@@ -500,6 +500,7 @@ mod tests {
             created_at,
             updated_at: created_at,
             tombstoned_at: None,
+            expires_at: None,
             embedding: None,
             tags: vec!["test".to_string()],
             source: None,

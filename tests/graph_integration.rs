@@ -162,6 +162,7 @@ fn test_entity_extraction_triggered_during_capture() {
         tags: vec!["architecture".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -193,6 +194,7 @@ fn test_entities_stored_in_graph_after_capture() {
         tags: vec!["database".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);
@@ -500,6 +502,7 @@ fn test_capture_without_extraction() {
         tags: vec!["test".to_string()],
         source: None,
         skip_security_check: true,
+        ttl_seconds: None,
     };
 
     let result = capture_service.capture(request);

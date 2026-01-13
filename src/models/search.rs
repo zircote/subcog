@@ -118,6 +118,9 @@ pub struct SearchFilter {
     pub min_score: Option<f32>,
     /// Include tombstoned memories (default: false).
     pub include_tombstoned: bool,
+    /// Filter by entity names (memories mentioning these entities).
+    /// Uses OR logic - matches memories mentioning ANY of the listed entities.
+    pub entity_names: Vec<String>,
 }
 
 impl SearchFilter {
@@ -139,6 +142,7 @@ impl SearchFilter {
             created_before: None,
             min_score: None,
             include_tombstoned: false,
+            entity_names: Vec::new(),
         }
     }
 
@@ -256,6 +260,23 @@ impl SearchFilter {
             && self.created_after.is_none()
             && self.created_before.is_none()
             && self.min_score.is_none()
+            && self.entity_names.is_empty()
+    }
+
+    /// Adds an entity name filter.
+    /// Filters to memories mentioning this entity (OR logic with other entities).
+    #[must_use]
+    pub fn with_entity(mut self, entity: impl Into<String>) -> Self {
+        self.entity_names.push(entity.into());
+        self
+    }
+
+    /// Adds multiple entity name filters.
+    #[must_use]
+    pub fn with_entities(mut self, entities: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.entity_names
+            .extend(entities.into_iter().map(Into::into));
+        self
     }
 }
 

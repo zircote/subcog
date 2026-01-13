@@ -796,6 +796,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             created_at: target.created_at.min(source_created_at),
             updated_at: now,
             tombstoned_at: None,
+            expires_at: None,
             embedding: None, // Will need re-embedding
             tags: merged_tags,
             source: target.source.or(source_source),
@@ -1349,6 +1350,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             created_at: now,
             updated_at: now,
             tombstoned_at: None,
+            expires_at: None,
             embedding: None, // Will need embedding in future for searchability
             tags: merged_tags,
             source: Some("consolidation".to_string()),
@@ -1689,6 +1691,7 @@ mod tests {
             created_at: current_timestamp(),
             updated_at: current_timestamp(),
             tombstoned_at: None,
+            expires_at: None,
             embedding: None,
             tags: vec!["test".to_string()],
             source: None,

@@ -17,6 +17,11 @@ pub struct CaptureRequest {
     pub source: Option<String>,
     /// Whether to skip security filtering.
     pub skip_security_check: bool,
+    /// Optional time-to-live in seconds.
+    ///
+    /// When set, `expires_at` is calculated as `created_at + ttl_seconds`.
+    /// `None` means no expiration (memory lives until manually deleted).
+    pub ttl_seconds: Option<u64>,
 }
 
 impl CaptureRequest {
@@ -54,6 +59,16 @@ impl CaptureRequest {
     #[must_use]
     pub fn with_source(mut self, source: impl Into<String>) -> Self {
         self.source = Some(source.into());
+        self
+    }
+
+    /// Sets the time-to-live in seconds.
+    ///
+    /// The memory will expire after this duration from creation time.
+    /// `None` means no expiration.
+    #[must_use]
+    pub const fn with_ttl(mut self, ttl_seconds: u64) -> Self {
+        self.ttl_seconds = Some(ttl_seconds);
         self
     }
 }

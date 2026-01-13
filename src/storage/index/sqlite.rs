@@ -166,6 +166,7 @@ struct MemoryRow {
     status: String,
     created_at: i64,
     tombstoned_at: Option<i64>,
+    expires_at: Option<i64>,
     tags: Option<String>,
     source: Option<String>,
     content: String,
@@ -267,6 +268,9 @@ impl SqliteBackend {
         // Add tombstoned_at column if it doesn't exist (ADR-0053)
         let _ = conn.execute("ALTER TABLE memories ADD COLUMN tombstoned_at INTEGER", []);
 
+        // Add expires_at column for TTL-based expiration (Memory Expiration feature)
+        let _ = conn.execute("ALTER TABLE memories ADD COLUMN expires_at INTEGER", []);
+
         // Add consolidation-related columns (summary nodes)
         let _ = conn.execute(
             "ALTER TABLE memories ADD COLUMN is_summary INTEGER DEFAULT 0",
@@ -350,6 +354,13 @@ impl SqliteBackend {
         // Partial index on tombstoned_at for cleanup queries
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_tombstoned_at ON memories(tombstoned_at) WHERE tombstoned_at IS NOT NULL",
+            [],
+        );
+
+        // Partial index on expires_at for expiration queries (TTL feature)
+        // Only indexes non-NULL values since we query for expired memories
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_expires_at ON memories(expires_at) WHERE expires_at IS NOT NULL",
             [],
         );
 
@@ -855,7 +866,7 @@ fn fetch_memory_row(conn: &Connection, id: &MemoryId) -> Result<Option<MemoryRow
     let mut stmt = conn
         .prepare(
             "SELECT m.id, m.namespace, m.domain, m.project_id, m.branch, m.file_path, m.status, m.created_at,
-                    m.tombstoned_at, m.tags, m.source, f.content, m.is_summary, m.source_memory_ids, m.consolidation_timestamp
+                    m.tombstoned_at, m.expires_at, m.tags, m.source, f.content, m.is_summary, m.source_memory_ids, m.consolidation_timestamp
              FROM memories m
              JOIN memories_fts f ON m.id = f.id
              WHERE m.id = ?1",
@@ -877,12 +888,13 @@ fn fetch_memory_row(conn: &Connection, id: &MemoryId) -> Result<Option<MemoryRow
                 status: row.get(6)?,
                 created_at: row.get(7)?,
                 tombstoned_at: row.get(8)?,
-                tags: row.get(9)?,
-                source: row.get(10)?,
-                content: row.get(11)?,
-                is_summary: row.get::<_, Option<bool>>(12)?.unwrap_or(false),
-                source_memory_ids: row.get(13)?,
-                consolidation_timestamp: row.get(14)?,
+                expires_at: row.get(9)?,
+                tags: row.get(10)?,
+                source: row.get(11)?,
+                content: row.get(12)?,
+                is_summary: row.get::<_, Option<bool>>(13)?.unwrap_or(false),
+                source_memory_ids: row.get(14)?,
+                consolidation_timestamp: row.get(15)?,
             })
         })
         .optional();
@@ -944,6 +956,8 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
     let tombstoned_at = row
         .tombstoned_at
         .and_then(|ts| Utc.timestamp_opt(ts, 0).single());
+    #[allow(clippy::cast_sign_loss)]
+    let expires_at = row.expires_at.map(|t| t as u64);
 
     Memory {
         id: MemoryId::new(row.id),
@@ -957,6 +971,7 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
         created_at: created_at_u64,
         updated_at: created_at_u64,
         tombstoned_at,
+        expires_at,
         embedding: None,
         tags,
         source: row.source,
@@ -1011,9 +1026,10 @@ impl IndexBackend for SqliteBackend {
                     .source_memory_ids
                     .as_ref()
                     .map(|ids| serde_json::to_string(ids).unwrap_or_default());
+                let expires_at_i64 = memory.expires_at.map(u64::cast_signed);
                 conn.execute(
-                    "INSERT OR REPLACE INTO memories (id, namespace, domain, project_id, branch, file_path, status, created_at, tags, source, tombstoned_at, is_summary, source_memory_ids, consolidation_timestamp)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                    "INSERT OR REPLACE INTO memories (id, namespace, domain, project_id, branch, file_path, status, created_at, tags, source, tombstoned_at, expires_at, is_summary, source_memory_ids, consolidation_timestamp)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                     params![
                         memory.id.as_str(),
                         memory.namespace.as_str(),
@@ -1026,6 +1042,7 @@ impl IndexBackend for SqliteBackend {
                         tags_str,
                         memory.source.as_deref(),
                         tombstoned_at_i64,
+                        expires_at_i64,
                         memory.is_summary,
                         source_ids_json,
                         consolidation_ts_i64
@@ -1394,7 +1411,7 @@ impl IndexBackend for SqliteBackend {
 
             let sql = format!(
                 "SELECT m.id, m.namespace, m.domain, m.project_id, m.branch, m.file_path, m.status, m.created_at,
-                        m.tombstoned_at, m.tags, m.source, f.content, m.is_summary, m.source_memory_ids, m.consolidation_timestamp
+                        m.tombstoned_at, m.expires_at, m.tags, m.source, f.content, m.is_summary, m.source_memory_ids, m.consolidation_timestamp
                  FROM memories m
                  JOIN memories_fts f ON m.id = f.id
                  WHERE m.id IN ({})",
@@ -1423,12 +1440,13 @@ impl IndexBackend for SqliteBackend {
                         status: row.get(6)?,
                         created_at: row.get(7)?,
                         tombstoned_at: row.get(8)?,
-                        tags: row.get(9)?,
-                        source: row.get(10)?,
-                        content: row.get(11)?,
-                        is_summary: row.get::<_, Option<bool>>(12)?.unwrap_or(false),
-                        source_memory_ids: row.get(13)?,
-                        consolidation_timestamp: row.get(14)?,
+                        expires_at: row.get(9)?,
+                        tags: row.get(10)?,
+                        source: row.get(11)?,
+                        content: row.get(12)?,
+                        is_summary: row.get::<_, Option<bool>>(13)?.unwrap_or(false),
+                        source_memory_ids: row.get(14)?,
+                        consolidation_timestamp: row.get(15)?,
                     })
                 })
                 .map_err(|e| Error::OperationFailed {
@@ -1495,9 +1513,10 @@ impl IndexBackend for SqliteBackend {
                         .source_memory_ids
                         .as_ref()
                         .map(|ids| serde_json::to_string(ids).unwrap_or_default());
+                    let expires_at_i64 = memory.expires_at.map(u64::cast_signed);
                     conn.execute(
-                        "INSERT OR REPLACE INTO memories (id, namespace, domain, project_id, branch, file_path, status, created_at, tags, source, tombstoned_at, is_summary, source_memory_ids, consolidation_timestamp)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                        "INSERT OR REPLACE INTO memories (id, namespace, domain, project_id, branch, file_path, status, created_at, tags, source, tombstoned_at, expires_at, is_summary, source_memory_ids, consolidation_timestamp)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                         params![
                             memory.id.as_str(),
                             memory.namespace.as_str(),
@@ -1510,6 +1529,7 @@ impl IndexBackend for SqliteBackend {
                             tags_str,
                             memory.source.as_deref(),
                             tombstoned_at_i64,
+                            expires_at_i64,
                             memory.is_summary,
                             source_ids_json,
                             consolidation_ts_i64
@@ -1631,6 +1651,7 @@ mod tests {
             created_at: 1_234_567_890,
             updated_at: 1_234_567_890,
             tombstoned_at: None,
+            expires_at: None,
             embedding: None,
             tags: vec!["test".to_string()],
             source: None,

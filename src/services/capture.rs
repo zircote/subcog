@@ -19,6 +19,7 @@
 //!     tags: vec!["database".to_string()],
 //!     source: Some("ARCHITECTURE.md".to_string()),
 //!     skip_security_check: false,
+//!     ttl_seconds: None,
 //! };
 //!
 //! let result = service.capture(request).expect("capture should succeed");
@@ -39,6 +40,7 @@
 //!     tags: vec![],
 //!     source: None,
 //!     skip_security_check: false,
+//!     ttl_seconds: None,
 //! };
 //!
 //! let validation = service.validate(&request).expect("validation should succeed");
@@ -50,6 +52,7 @@
 use crate::config::Config;
 use crate::context::GitContext;
 use crate::embedding::Embedder;
+use crate::gc::{ExpirationConfig, ExpirationService};
 use crate::models::{
     CaptureRequest, CaptureResult, EventMeta, Memory, MemoryEvent, MemoryId, MemoryStatus,
 };
@@ -80,6 +83,44 @@ pub struct EntityExtractionStats {
     pub relationships_stored: usize,
     /// Whether the extraction used fallback (no LLM).
     pub used_fallback: bool,
+}
+
+/// Runs entity extraction and logs results/metrics.
+///
+/// Extracted to a separate function to support both async (`tokio::spawn`) and
+/// sync (inline) execution paths.
+fn run_entity_extraction(callback: &EntityExtractionCallback, content: &str, memory_id: &MemoryId) {
+    let _span = info_span!(
+        "subcog.memory.capture.entity_extraction",
+        memory_id = %memory_id
+    )
+    .entered();
+
+    match callback(content, memory_id) {
+        Ok(stats) => {
+            tracing::debug!(
+                memory_id = %memory_id,
+                entities = stats.entities_stored,
+                relationships = stats.relationships_stored,
+                fallback = stats.used_fallback,
+                "Entity extraction completed"
+            );
+            metrics::counter!(
+                "entity_extraction_total",
+                "status" => "success",
+                "fallback" => if stats.used_fallback { "true" } else { "false" }
+            )
+            .increment(1);
+        },
+        Err(e) => {
+            tracing::warn!(
+                memory_id = %memory_id,
+                error = %e,
+                "Entity extraction failed"
+            );
+            metrics::counter!("entity_extraction_total", "status" => "error").increment(1);
+        },
+    }
 }
 
 /// Service for capturing memories.
@@ -123,6 +164,11 @@ pub struct CaptureService {
     vector: Option<Arc<dyn VectorBackend + Send + Sync>>,
     /// Entity extraction callback for graph-augmented retrieval (optional).
     entity_extraction: Option<EntityExtractionCallback>,
+    /// Expiration configuration for probabilistic TTL cleanup (optional).
+    ///
+    /// When set, a probabilistic cleanup of TTL-expired memories is triggered
+    /// after each successful capture (default 5% probability).
+    expiration_config: Option<ExpirationConfig>,
 }
 
 impl CaptureService {
@@ -152,6 +198,7 @@ impl CaptureService {
             index: None,
             vector: None,
             entity_extraction: None,
+            expiration_config: None,
         }
     }
 
@@ -176,6 +223,7 @@ impl CaptureService {
             index: Some(index),
             vector: Some(vector),
             entity_extraction: None,
+            expiration_config: None,
         }
     }
 
@@ -257,6 +305,39 @@ impl CaptureService {
         self.vector.is_some()
     }
 
+    /// Adds expiration configuration for probabilistic TTL cleanup.
+    ///
+    /// When configured, a probabilistic cleanup of TTL-expired memories is
+    /// triggered after each successful capture. By default, there is a 5%
+    /// chance of running cleanup after each capture.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use subcog::services::CaptureService;
+    /// use subcog::gc::ExpirationConfig;
+    ///
+    /// // Enable expiration cleanup with default 5% probability
+    /// let service = CaptureService::default()
+    ///     .with_expiration_config(ExpirationConfig::default());
+    ///
+    /// // Or with custom probability (10%)
+    /// let config = ExpirationConfig::new().with_cleanup_probability(0.10);
+    /// let service = CaptureService::default()
+    ///     .with_expiration_config(config);
+    /// ```
+    #[must_use]
+    pub const fn with_expiration_config(mut self, config: ExpirationConfig) -> Self {
+        self.expiration_config = Some(config);
+        self
+    }
+
+    /// Returns whether expiration cleanup is configured.
+    #[must_use]
+    pub const fn has_expiration(&self) -> bool {
+        self.expiration_config.is_some()
+    }
+
     /// Captures a memory.
     ///
     /// # Errors
@@ -280,6 +361,7 @@ impl CaptureService {
     ///     tags: vec!["database".to_string(), "architecture".to_string()],
     ///     source: Some("src/config.rs".to_string()),
     ///     skip_security_check: false,
+    ///     ttl_seconds: None,
     /// };
     ///
     /// let result = service.capture(request)?;
@@ -410,6 +492,17 @@ impl CaptureService {
                 tags.push(hash_tag);
             }
 
+            // Calculate expires_at from TTL if provided
+            // ttl_seconds = 0 means "never expire" (expires_at = None)
+            // ttl_seconds > 0 means expires at now + ttl_seconds
+            let expires_at = request.ttl_seconds.and_then(|ttl| {
+                if ttl == 0 {
+                    None // Explicit "never expire"
+                } else {
+                    Some(now.saturating_add(ttl))
+                }
+            });
+
             // Create memory
             let mut memory = Memory {
                 id: memory_id.clone(),
@@ -423,6 +516,7 @@ impl CaptureService {
                 created_at: now,
                 updated_at: now,
                 tombstoned_at: None,
+                expires_at,
                 embedding: embedding.clone(),
                 tags,
                 source: request.source,
@@ -481,40 +575,24 @@ impl CaptureService {
                 }
             }
 
-            // Extract entities for graph-augmented retrieval (best-effort)
+            // Extract entities for graph-augmented retrieval (async when possible, sync fallback)
+            // Entity extraction runs in the background to avoid blocking capture latency.
             if self.config.features.auto_extract_entities
                 && let Some(ref callback) = self.entity_extraction
             {
-                let _span = info_span!("subcog.memory.capture.entity_extraction").entered();
-                match callback(&memory.content, &memory_id) {
-                    Ok(stats) => {
-                        tracing::debug!(
-                            memory_id = %memory_id,
-                            entities = stats.entities_stored,
-                            relationships = stats.relationships_stored,
-                            fallback = stats.used_fallback,
-                            "Extracted entities for graph RAG"
-                        );
-                        metrics::counter!(
-                            "entity_extraction_total",
-                            "status" => "success",
-                            "fallback" => if stats.used_fallback { "true" } else { "false" }
-                        )
-                        .increment(1);
-                    },
-                    Err(e) => {
-                        tracing::warn!(
-                            memory_id = %memory_id,
-                            error = %e,
-                            "Failed to extract entities (continuing without graph relationships)"
-                        );
-                        warnings.push("Entity extraction failed".to_string());
-                        metrics::counter!(
-                            "entity_extraction_total",
-                            "status" => "error"
-                        )
-                        .increment(1);
-                    },
+                let callback = Arc::clone(callback);
+                let content = memory.content.clone();
+                let memory_id_for_task = memory_id.clone();
+
+                // Check if we're in a tokio runtime context
+                if tokio::runtime::Handle::try_current().is_ok() {
+                    // Async path: spawn background task
+                    tokio::spawn(async move {
+                        run_entity_extraction(&callback, &content, &memory_id_for_task);
+                    });
+                } else {
+                    // Sync path: run inline (for tests/CLI without async runtime)
+                    run_entity_extraction(&callback, &content, &memory_id_for_task);
                 }
             }
 
@@ -566,7 +644,57 @@ impl CaptureService {
         )
         .record(start.elapsed().as_secs_f64() * 1000.0);
 
+        // Probabilistic TTL cleanup (only on success, with configured index)
+        if result.is_ok() {
+            self.maybe_run_expiration_cleanup();
+        }
+
         result
+    }
+
+    /// Probabilistically runs expiration cleanup of TTL-expired memories.
+    ///
+    /// This is called after each successful capture to lazily clean up
+    /// expired memories without requiring a separate scheduled job.
+    fn maybe_run_expiration_cleanup(&self) {
+        // Need both expiration config and index backend
+        let (Some(config), Some(index)) = (&self.expiration_config, &self.index) else {
+            return;
+        };
+
+        // Create a temporary expiration service to check probability
+        let service = ExpirationService::new(Arc::clone(index), config.clone());
+
+        if !service.should_run_cleanup() {
+            return;
+        }
+
+        // Run cleanup (best-effort, don't fail capture)
+        let _span = info_span!("subcog.memory.capture.expiration_cleanup").entered();
+        match service.gc_expired_memories(false) {
+            Ok(result) => {
+                if result.memories_tombstoned > 0 {
+                    tracing::info!(
+                        tombstoned = result.memories_tombstoned,
+                        checked = result.memories_checked,
+                        duration_ms = result.duration_ms,
+                        "Probabilistic TTL cleanup completed"
+                    );
+                } else {
+                    tracing::debug!(
+                        checked = result.memories_checked,
+                        duration_ms = result.duration_ms,
+                        "Probabilistic TTL cleanup found no expired memories"
+                    );
+                }
+            },
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "Probabilistic TTL cleanup failed (capture still succeeded)"
+                );
+            },
+        }
     }
 
     /// Generates a URN for the memory.
@@ -608,6 +736,7 @@ impl CaptureService {
     ///     tags: vec![],
     ///     source: None,
     ///     skip_security_check: false,
+    ///     ttl_seconds: None,
     /// };
     /// let result = service.validate(&request)?;
     /// assert!(result.is_valid);
@@ -620,6 +749,7 @@ impl CaptureService {
     ///     tags: vec![],
     ///     source: None,
     ///     skip_security_check: false,
+    ///     ttl_seconds: None,
     /// };
     /// let result = service.validate(&empty_request)?;
     /// assert!(!result.is_valid);
@@ -735,6 +865,7 @@ mod tests {
             tags: vec!["test".to_string()],
             source: Some("test.rs".to_string()),
             skip_security_check: false,
+            ttl_seconds: None,
         }
     }
 
@@ -833,6 +964,7 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             tombstoned_at: None,
+            expires_at: None,
             embedding: None,
             tags: vec![],
             source: None,
@@ -925,6 +1057,7 @@ mod tests {
             tags: vec!["test".to_string()],
             source: Some(file_path.to_string_lossy().to_string()),
             skip_security_check: false,
+            ttl_seconds: None,
         };
 
         let result = service.capture(request).expect("capture");

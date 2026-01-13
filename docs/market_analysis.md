@@ -63,7 +63,7 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 
 ### 🔴 Critical Gaps (High Priority)
 
-#### 1. Graph Memory / Knowledge Graphs
+<!-- #### 1. Graph Memory / Knowledge Graphs
 
 **Industry Standard (Mem0, Zep):**
 - Temporal knowledge graphs with entity-relationship modeling
@@ -86,7 +86,7 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 2. Build knowledge graph layer with Neo4j/SQLite graph extensions
 3. Add temporal tracking (when relationships formed/changed)
 4. Implement Graph RAG retrieval alongside hybrid search
-5. New MCP tools: `subcog_entities`, `subcog_relationships`, `subcog_graph_query`
+5. New MCP tools: `subcog_entities`, `subcog_relationships`, `subcog_graph_query` -->
 
 ---
 
@@ -115,7 +115,7 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 
 ---
 
-#### 3. Memory Expiration / TTL
+<!-- #### 3. Memory Expiration / TTL
 
 **Industry Standard (Mem0):**
 - Set expiration dates on memories
@@ -137,7 +137,7 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 2. Add background job for expired memory cleanup
 3. Add `--ttl` flag to capture command
 4. New tool parameter: `subcog_capture --expires "7d"`
-5. Add expiration filters to recall
+5. Add expiration filters to recall -->
 
 ---
 
@@ -169,7 +169,7 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 
 ### 🟡 Important Gaps (Medium Priority)
 
-#### 5. Automatic Entity Extraction
+<!-- #### 5. Automatic Entity Extraction
 
 **Industry Standard (Mem0, Zep, LangMem):**
 - Auto-extract entities (people, organizations, concepts)
@@ -191,7 +191,7 @@ Subcog is a **mature, feature-rich memory system** that already exceeds many com
 2. Auto-tag memories with detected entities
 3. Build entity index for fast lookup
 4. Add entity filter to recall: `subcog recall --entity "John Doe"`
-5. New tool: `subcog_entities --memory_id` or `--query`
+5. New tool: `subcog_entities --memory_id` or `--query` -->
 
 ---
 

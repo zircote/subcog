@@ -69,6 +69,12 @@ pub struct Memory {
     /// Compatibility is handled in storage adapters, so explicit versioning
     /// of the Memory struct is not required at this time.
     pub tombstoned_at: Option<DateTime<Utc>>,
+    /// Expiration timestamp (Unix epoch seconds).
+    ///
+    /// Memory is eligible for automatic cleanup after this timestamp.
+    /// Set at capture time as `created_at + ttl_seconds`. Preserved on updates.
+    /// `None` means no expiration (memory lives until manually deleted).
+    pub expires_at: Option<u64>,
     /// Optional embedding vector.
     pub embedding: Option<Vec<f32>>,
     /// Optional tags for categorization.

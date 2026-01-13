@@ -768,6 +768,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             tombstoned_at: None,
+            expires_at: None,
             embedding: None,
             tags: vec![],
             source: None,

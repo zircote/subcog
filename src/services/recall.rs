@@ -49,7 +49,7 @@ use crate::models::{
 use crate::observability::current_request_id;
 use crate::security::record_event;
 use crate::storage::index::SqliteBackend;
-use crate::storage::traits::{IndexBackend, VectorBackend};
+use crate::storage::traits::{GraphBackend, IndexBackend, VectorBackend};
 use crate::{Error, Result};
 use chrono::{TimeZone, Utc};
 use git2::{BranchType, Repository};
@@ -90,6 +90,8 @@ pub struct RecallService {
     embedder: Option<Arc<dyn Embedder>>,
     /// Vector backend for similarity search (optional).
     vector: Option<Arc<dyn VectorBackend + Send + Sync>>,
+    /// Graph backend for entity-based filtering (optional).
+    graph: Option<Arc<dyn GraphBackend>>,
     /// Scope filter applied to every search (e.g., project facets).
     scope_filter: Option<SearchFilter>,
     /// Search timeout in milliseconds (RES-M5).
@@ -107,6 +109,7 @@ impl RecallService {
             index: None,
             embedder: None,
             vector: None,
+            graph: None,
             scope_filter: None,
             timeout_ms: DEFAULT_SEARCH_TIMEOUT_MS,
         }
@@ -121,6 +124,7 @@ impl RecallService {
             index: Some(index),
             embedder: None,
             vector: None,
+            graph: None,
             scope_filter: None,
             timeout_ms: DEFAULT_SEARCH_TIMEOUT_MS,
         }
@@ -143,6 +147,7 @@ impl RecallService {
             index: Some(index),
             embedder: Some(embedder),
             vector: Some(vector),
+            graph: None,
             scope_filter: None,
             timeout_ms: DEFAULT_SEARCH_TIMEOUT_MS,
         }
@@ -159,6 +164,16 @@ impl RecallService {
     #[must_use]
     pub fn with_vector(mut self, vector: Arc<dyn VectorBackend + Send + Sync>) -> Self {
         self.vector = Some(vector);
+        self
+    }
+
+    /// Adds a graph backend for entity-based filtering.
+    ///
+    /// When a graph backend is configured and [`SearchFilter::entity_names`] is non-empty,
+    /// search results are filtered to only include memories that mention the specified entities.
+    #[must_use]
+    pub fn with_graph(mut self, graph: Arc<dyn GraphBackend>) -> Self {
+        self.graph = Some(graph);
         self
     }
 
@@ -306,6 +321,12 @@ impl RecallService {
                     self.hybrid_search(query, filter, limit)?
                 },
             };
+
+            // Apply entity filter if specified (graph-augmented search)
+            if !filter.entity_names.is_empty() {
+                self.apply_entity_filter(&mut memories, &filter.entity_names);
+            }
+
             // Check timeout after search (RES-M5)
             if deadline_ms > 0 && start.elapsed().as_millis() as u64 >= deadline_ms {
                 tracing::warn!(
@@ -461,6 +482,79 @@ impl RecallService {
                 );
             }
         }
+    }
+
+    /// Filters search results to only include memories that mention specified entities.
+    ///
+    /// Uses the graph backend to look up entity mentions. If no graph backend is configured,
+    /// this is a no-op (graceful degradation).
+    fn apply_entity_filter(&self, hits: &mut Vec<SearchHit>, entity_names: &[String]) {
+        let Some(graph) = &self.graph else {
+            tracing::debug!("Entity filter requested but no graph backend configured");
+            return;
+        };
+
+        let _span = info_span!(
+            "subcog.memory.recall.entity_filter",
+            entity_count = entity_names.len()
+        )
+        .entered();
+
+        // Collect all memory IDs that mention any of the specified entities
+        let allowed_memory_ids: HashSet<MemoryId> = entity_names
+            .iter()
+            .flat_map(|name| self.collect_mentions_for_entity_name(graph.as_ref(), name))
+            .collect();
+
+        // If no entities found, filter results to empty (no matches)
+        if allowed_memory_ids.is_empty() {
+            tracing::debug!(
+                entity_names = ?entity_names,
+                "No entities found for filter, returning empty results"
+            );
+            hits.clear();
+            return;
+        }
+
+        // Filter results to only include allowed memory IDs
+        let before_count = hits.len();
+        hits.retain(|hit| allowed_memory_ids.contains(&hit.memory.id));
+
+        tracing::debug!(
+            before = before_count,
+            after = hits.len(),
+            allowed_memories = allowed_memory_ids.len(),
+            "Applied entity filter"
+        );
+    }
+
+    /// Collects memory IDs that mention entities matching the given name.
+    fn collect_mentions_for_entity_name(
+        &self,
+        graph: &dyn GraphBackend,
+        entity_name: &str,
+    ) -> Vec<MemoryId> {
+        let entities = match graph.find_entities_by_name(entity_name, None, None, 10) {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::warn!(error = %e, entity_name = %entity_name, "Failed to find entities");
+                return Vec::new();
+            },
+        };
+
+        entities
+            .into_iter()
+            .flat_map(|entity| {
+                graph
+                    .get_mentions_for_entity(&entity.id)
+                    .inspect_err(|e| {
+                        tracing::warn!(error = %e, entity_id = %entity.id, "Failed to get mentions");
+                    })
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|m| m.memory_id)
+            })
+            .collect()
     }
 
     fn load_branch_names() -> Option<HashSet<String>> {
@@ -1047,6 +1141,7 @@ const fn create_placeholder_memory(id: MemoryId) -> Memory {
         created_at: 0,
         updated_at: 0,
         tombstoned_at: None,
+        expires_at: None,
         embedding: None,
         tags: Vec::new(),
         source: None,
@@ -1076,6 +1171,7 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             tombstoned_at: None,
+            expires_at: None,
             embedding: None,
             tags: Vec::new(),
             source: None,
@@ -1643,6 +1739,7 @@ mod proptests {
             created_at: 0,
             updated_at: 0,
             tombstoned_at: None,
+            expires_at: None,
             embedding: None,
             tags: Vec::new(),
             source: None,

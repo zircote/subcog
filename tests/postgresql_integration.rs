@@ -83,6 +83,7 @@ mod persistence {
             is_summary: false,
             source_memory_ids: None,
             consolidation_timestamp: None,
+            expires_at: None,
         }
     }
 
@@ -129,6 +130,7 @@ mod persistence {
             is_summary: false,
             source_memory_ids: None,
             consolidation_timestamp: None,
+            expires_at: None,
         };
 
         // Store
@@ -234,6 +236,7 @@ mod persistence {
             is_summary: false,
             source_memory_ids: None,
             consolidation_timestamp: None,
+            expires_at: None,
         };
 
         backend.store(&memory).expect("Store memory");
@@ -377,6 +380,7 @@ mod index {
             is_summary: false,
             source_memory_ids: None,
             consolidation_timestamp: None,
+            expires_at: None,
         };
 
         backend.index(&memory).expect("Index should succeed");

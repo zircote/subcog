@@ -87,6 +87,7 @@ mod index {
             is_summary: false,
             source_memory_ids: None,
             consolidation_timestamp: None,
+            expires_at: None,
         }
     }
 
@@ -145,6 +146,7 @@ mod index {
             is_summary: false,
             source_memory_ids: None,
             consolidation_timestamp: None,
+            expires_at: None,
         };
 
         let index_result = backend.index(&memory);

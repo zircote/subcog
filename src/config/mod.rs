@@ -164,6 +164,8 @@ pub struct SubcogConfig {
     pub storage: StorageConfig,
     /// Consolidation configuration.
     pub consolidation: ConsolidationConfig,
+    /// TTL (Time-To-Live) configuration for memory expiration.
+    pub ttl: TtlConfig,
     /// Operation timeout configuration (CHAOS-HIGH-005).
     pub timeouts: OperationTimeoutConfig,
     /// Config files that were loaded (for debugging).
@@ -804,6 +806,8 @@ pub struct ConfigFile {
     pub storage: Option<ConfigFileStorage>,
     /// Consolidation configuration.
     pub consolidation: Option<ConfigFileConsolidation>,
+    /// TTL (Time-To-Live) configuration for memory expiration.
+    pub ttl: Option<ConfigFileTtl>,
 }
 
 /// Features section in config file.
@@ -932,6 +936,359 @@ pub struct ConfigFileIntentWeights {
     pub performance: Option<f32>,
     /// Weight for testing namespace.
     pub testing: Option<f32>,
+}
+
+/// TTL (Time-To-Live) configuration section in config file.
+///
+/// Supports duration strings: "7d" (days), "30d", "0" (no expiration).
+///
+/// # Example TOML
+///
+/// ```toml
+/// [memory.ttl]
+/// default = "30d"
+///
+/// [memory.ttl.namespace]
+/// decisions = "90d"
+/// context = "7d"
+/// tech-debt = "0"  # Never expires
+///
+/// [memory.ttl.scope]
+/// project = "30d"
+/// user = "90d"
+/// org = "365d"
+/// ```
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ConfigFileTtl {
+    /// Default TTL for all memories (e.g., "30d").
+    /// "0" means no expiration.
+    pub default: Option<String>,
+    /// Per-namespace TTL overrides.
+    pub namespace: Option<ConfigFileTtlNamespace>,
+    /// Per-scope TTL overrides.
+    pub scope: Option<ConfigFileTtlScope>,
+}
+
+/// Per-namespace TTL configuration in config file.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ConfigFileTtlNamespace {
+    /// TTL for decisions namespace.
+    pub decisions: Option<String>,
+    /// TTL for patterns namespace.
+    pub patterns: Option<String>,
+    /// TTL for learnings namespace.
+    pub learnings: Option<String>,
+    /// TTL for context namespace.
+    pub context: Option<String>,
+    /// TTL for tech-debt namespace.
+    #[serde(alias = "tech-debt")]
+    pub tech_debt: Option<String>,
+    /// TTL for apis namespace.
+    pub apis: Option<String>,
+    /// TTL for config namespace.
+    pub config: Option<String>,
+    /// TTL for security namespace.
+    pub security: Option<String>,
+    /// TTL for performance namespace.
+    pub performance: Option<String>,
+    /// TTL for testing namespace.
+    pub testing: Option<String>,
+}
+
+/// Per-scope TTL configuration in config file.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ConfigFileTtlScope {
+    /// TTL for project-scoped memories.
+    pub project: Option<String>,
+    /// TTL for user-scoped memories.
+    pub user: Option<String>,
+    /// TTL for org-scoped memories.
+    pub org: Option<String>,
+}
+
+/// Runtime TTL (Time-To-Live) configuration.
+///
+/// Controls memory expiration with domain-scoped and per-namespace defaults.
+/// TTL values are stored in seconds (0 means no expiration).
+///
+/// # Defaults
+///
+/// - `default_seconds`: None (no expiration)
+/// - All namespace/scope overrides: None (inherit from default)
+///
+/// # Environment Variables
+///
+/// | Variable | Description | Example |
+/// |----------|-------------|---------|
+/// | `SUBCOG_TTL_DEFAULT` | Default TTL | "30d", "0" |
+///
+/// # Priority Order (highest to lowest)
+///
+/// 1. Explicit `--ttl` flag on capture command
+/// 2. Per-namespace TTL (e.g., `ttl.namespace.context = "7d"`)
+/// 3. Per-scope TTL (e.g., `ttl.scope.project = "30d"`)
+/// 4. Global default TTL (e.g., `ttl.default = "30d"`)
+/// 5. No expiration (if nothing configured)
+#[derive(Debug, Clone, Default)]
+pub struct TtlConfig {
+    /// Default TTL in seconds for all memories (None = no expiration, 0 = no expiration).
+    pub default_seconds: Option<u64>,
+    /// Per-namespace TTL overrides in seconds.
+    pub namespace: TtlNamespaceConfig,
+    /// Per-scope TTL overrides in seconds.
+    pub scope: TtlScopeConfig,
+}
+
+/// Per-namespace TTL configuration (runtime).
+#[derive(Debug, Clone, Default)]
+pub struct TtlNamespaceConfig {
+    /// TTL for decisions namespace in seconds.
+    pub decisions: Option<u64>,
+    /// TTL for patterns namespace in seconds.
+    pub patterns: Option<u64>,
+    /// TTL for learnings namespace in seconds.
+    pub learnings: Option<u64>,
+    /// TTL for context namespace in seconds.
+    pub context: Option<u64>,
+    /// TTL for tech-debt namespace in seconds.
+    pub tech_debt: Option<u64>,
+    /// TTL for apis namespace in seconds.
+    pub apis: Option<u64>,
+    /// TTL for config namespace in seconds.
+    pub config: Option<u64>,
+    /// TTL for security namespace in seconds.
+    pub security: Option<u64>,
+    /// TTL for performance namespace in seconds.
+    pub performance: Option<u64>,
+    /// TTL for testing namespace in seconds.
+    pub testing: Option<u64>,
+}
+
+/// Per-scope TTL configuration (runtime).
+#[derive(Debug, Clone, Default)]
+pub struct TtlScopeConfig {
+    /// TTL for project-scoped memories in seconds.
+    pub project: Option<u64>,
+    /// TTL for user-scoped memories in seconds.
+    pub user: Option<u64>,
+    /// TTL for org-scoped memories in seconds.
+    pub org: Option<u64>,
+}
+
+impl TtlConfig {
+    /// Creates a new TTL configuration with defaults.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates configuration from config file settings.
+    #[must_use]
+    pub fn from_config_file(file: &ConfigFileTtl) -> Self {
+        let mut config = Self::default();
+
+        if let Some(ref default) = file.default {
+            config.default_seconds = parse_duration_to_seconds(default);
+        }
+
+        if let Some(ref ns) = file.namespace {
+            config.namespace = TtlNamespaceConfig::from_config_file(ns);
+        }
+
+        if let Some(ref scope) = file.scope {
+            config.scope = TtlScopeConfig::from_config_file(scope);
+        }
+
+        config
+    }
+
+    /// Loads configuration from environment variables.
+    #[must_use]
+    pub fn from_env() -> Self {
+        Self::default().with_env_overrides()
+    }
+
+    /// Applies environment variable overrides.
+    #[must_use]
+    pub fn with_env_overrides(mut self) -> Self {
+        if let Ok(v) = std::env::var("SUBCOG_TTL_DEFAULT") {
+            self.default_seconds = parse_duration_to_seconds(&v);
+        }
+        self
+    }
+
+    /// Gets the effective TTL in seconds for a given namespace and scope.
+    ///
+    /// Returns `None` if no TTL is configured (memory never expires).
+    /// Returns `Some(0)` if explicitly set to never expire.
+    ///
+    /// Priority order:
+    /// 1. Per-namespace TTL
+    /// 2. Per-scope TTL
+    /// 3. Global default TTL
+    #[must_use]
+    pub fn get_ttl_seconds(&self, namespace: &str, scope: &str) -> Option<u64> {
+        // Check namespace-specific TTL first
+        let ns_ttl = match namespace.to_lowercase().as_str() {
+            "decisions" => self.namespace.decisions,
+            "patterns" => self.namespace.patterns,
+            "learnings" => self.namespace.learnings,
+            "context" => self.namespace.context,
+            "tech-debt" | "tech_debt" => self.namespace.tech_debt,
+            "apis" => self.namespace.apis,
+            "config" => self.namespace.config,
+            "security" => self.namespace.security,
+            "performance" => self.namespace.performance,
+            "testing" => self.namespace.testing,
+            _ => None,
+        };
+
+        if ns_ttl.is_some() {
+            return ns_ttl;
+        }
+
+        // Check scope-specific TTL
+        let scope_ttl = match scope.to_lowercase().as_str() {
+            "project" => self.scope.project,
+            "user" => self.scope.user,
+            "org" => self.scope.org,
+            _ => None,
+        };
+
+        if scope_ttl.is_some() {
+            return scope_ttl;
+        }
+
+        // Fall back to global default
+        self.default_seconds
+    }
+
+    /// Sets the default TTL in seconds.
+    #[must_use]
+    pub const fn with_default_seconds(mut self, seconds: Option<u64>) -> Self {
+        self.default_seconds = seconds;
+        self
+    }
+}
+
+impl TtlNamespaceConfig {
+    /// Creates configuration from config file settings.
+    #[must_use]
+    pub fn from_config_file(file: &ConfigFileTtlNamespace) -> Self {
+        Self {
+            decisions: file
+                .decisions
+                .as_ref()
+                .and_then(|s| parse_duration_to_seconds(s)),
+            patterns: file
+                .patterns
+                .as_ref()
+                .and_then(|s| parse_duration_to_seconds(s)),
+            learnings: file
+                .learnings
+                .as_ref()
+                .and_then(|s| parse_duration_to_seconds(s)),
+            context: file
+                .context
+                .as_ref()
+                .and_then(|s| parse_duration_to_seconds(s)),
+            tech_debt: file
+                .tech_debt
+                .as_ref()
+                .and_then(|s| parse_duration_to_seconds(s)),
+            apis: file
+                .apis
+                .as_ref()
+                .and_then(|s| parse_duration_to_seconds(s)),
+            config: file
+                .config
+                .as_ref()
+                .and_then(|s| parse_duration_to_seconds(s)),
+            security: file
+                .security
+                .as_ref()
+                .and_then(|s| parse_duration_to_seconds(s)),
+            performance: file
+                .performance
+                .as_ref()
+                .and_then(|s| parse_duration_to_seconds(s)),
+            testing: file
+                .testing
+                .as_ref()
+                .and_then(|s| parse_duration_to_seconds(s)),
+        }
+    }
+}
+
+impl TtlScopeConfig {
+    /// Creates configuration from config file settings.
+    #[must_use]
+    pub fn from_config_file(file: &ConfigFileTtlScope) -> Self {
+        Self {
+            project: file
+                .project
+                .as_ref()
+                .and_then(|s| parse_duration_to_seconds(s)),
+            user: file
+                .user
+                .as_ref()
+                .and_then(|s| parse_duration_to_seconds(s)),
+            org: file.org.as_ref().and_then(|s| parse_duration_to_seconds(s)),
+        }
+    }
+}
+
+/// Parses a duration string to seconds.
+///
+/// Supported formats:
+/// - "0" or "" - No expiration (returns `Some(0)`)
+/// - "30d" - 30 days
+/// - "7d" - 7 days
+/// - "24h" - 24 hours
+/// - "60m" - 60 minutes
+/// - "3600s" or "3600" - 3600 seconds
+///
+/// # Returns
+///
+/// - `Some(0)` for "0" or empty string (explicitly no expiration)
+/// - `Some(seconds)` for valid duration strings
+/// - `None` for invalid formats (caller should use default)
+#[must_use]
+pub fn parse_duration_to_seconds(s: &str) -> Option<u64> {
+    let s = s.trim();
+
+    // Empty or "0" means no expiration
+    if s.is_empty() || s == "0" {
+        return Some(0);
+    }
+
+    // Try to parse as pure number (seconds)
+    if let Ok(secs) = s.parse::<u64>() {
+        return Some(secs);
+    }
+
+    // Parse duration with suffix
+    let (num_str, multiplier) = if let Some(num) = s.strip_suffix('d') {
+        (num, 86400u64) // days -> seconds
+    } else if let Some(num) = s.strip_suffix('h') {
+        (num, 3600u64) // hours -> seconds
+    } else if let Some(num) = s.strip_suffix('m') {
+        (num, 60u64) // minutes -> seconds
+    } else if let Some(num) = s.strip_suffix('s') {
+        (num, 1u64) // seconds
+    } else {
+        // Unknown format
+        tracing::warn!(duration = %s, "Invalid TTL duration format, expected Nd/Nh/Nm/Ns");
+        return None;
+    };
+
+    num_str.trim().parse::<u64>().map_or_else(
+        |_| {
+            tracing::warn!(duration = %s, "Invalid TTL duration number");
+            None
+        },
+        |num| Some(num.saturating_mul(multiplier)),
+    )
 }
 
 /// Consolidation configuration section in config file.
@@ -1636,6 +1993,7 @@ impl Default for SubcogConfig {
             prompt: PromptConfig::default(),
             storage: StorageConfig::default(),
             consolidation: ConsolidationConfig::default(),
+            ttl: TtlConfig::default(),
             timeouts: OperationTimeoutConfig::from_env(),
             config_sources: Vec::new(),
         }
@@ -1761,6 +2119,7 @@ impl SubcogConfig {
         self.search_intent = self.search_intent.clone().with_env_overrides();
         self.prompt = self.prompt.clone().with_env_overrides();
         self.consolidation = self.consolidation.clone().with_env_overrides();
+        self.ttl = self.ttl.clone().with_env_overrides();
     }
 
     /// Applies a `ConfigFile` to the current configuration.
@@ -1806,6 +2165,9 @@ impl SubcogConfig {
         }
         if let Some(ref consolidation) = file.consolidation {
             self.consolidation = ConsolidationConfig::from_config_file(consolidation);
+        }
+        if let Some(ref ttl) = file.ttl {
+            self.ttl = TtlConfig::from_config_file(ttl);
         }
     }
 
@@ -2218,5 +2580,149 @@ mod tests {
 
         let config = ConsolidationConfig::from_config_file(&file);
         assert_eq!(config.similarity_threshold, 0.0);
+    }
+
+    // TTL Configuration Tests
+
+    #[test]
+    fn test_parse_duration_to_seconds_days() {
+        assert_eq!(parse_duration_to_seconds("7d"), Some(7 * 86400));
+        assert_eq!(parse_duration_to_seconds("30d"), Some(30 * 86400));
+        assert_eq!(parse_duration_to_seconds("365d"), Some(365 * 86400));
+    }
+
+    #[test]
+    fn test_parse_duration_to_seconds_hours() {
+        assert_eq!(parse_duration_to_seconds("24h"), Some(24 * 3600));
+        assert_eq!(parse_duration_to_seconds("1h"), Some(3600));
+    }
+
+    #[test]
+    fn test_parse_duration_to_seconds_minutes() {
+        assert_eq!(parse_duration_to_seconds("60m"), Some(3600));
+        assert_eq!(parse_duration_to_seconds("5m"), Some(300));
+    }
+
+    #[test]
+    fn test_parse_duration_to_seconds_seconds() {
+        assert_eq!(parse_duration_to_seconds("3600s"), Some(3600));
+        assert_eq!(parse_duration_to_seconds("60s"), Some(60));
+    }
+
+    #[test]
+    fn test_parse_duration_to_seconds_raw_number() {
+        assert_eq!(parse_duration_to_seconds("3600"), Some(3600));
+        assert_eq!(parse_duration_to_seconds("86400"), Some(86400));
+    }
+
+    #[test]
+    fn test_parse_duration_to_seconds_zero_and_empty() {
+        assert_eq!(parse_duration_to_seconds("0"), Some(0));
+        assert_eq!(parse_duration_to_seconds(""), Some(0));
+        assert_eq!(parse_duration_to_seconds("  "), Some(0));
+    }
+
+    #[test]
+    fn test_parse_duration_to_seconds_invalid() {
+        assert_eq!(parse_duration_to_seconds("abc"), None);
+        assert_eq!(parse_duration_to_seconds("7x"), None);
+        assert_eq!(parse_duration_to_seconds("d7"), None);
+    }
+
+    #[test]
+    fn test_parse_duration_to_seconds_whitespace() {
+        assert_eq!(parse_duration_to_seconds(" 7d "), Some(7 * 86400));
+        assert_eq!(parse_duration_to_seconds("  30d"), Some(30 * 86400));
+    }
+
+    #[test]
+    fn test_ttl_config_defaults() {
+        let config = TtlConfig::default();
+        assert_eq!(config.default_seconds, None);
+        assert_eq!(config.namespace.decisions, None);
+        assert_eq!(config.scope.project, None);
+    }
+
+    #[test]
+    fn test_ttl_config_get_ttl_seconds_priority() {
+        let config = TtlConfig {
+            default_seconds: Some(30 * 86400), // 30 days
+            namespace: TtlNamespaceConfig {
+                context: Some(7 * 86400), // 7 days for context
+                ..Default::default()
+            },
+            scope: TtlScopeConfig {
+                project: Some(14 * 86400), // 14 days for project
+                ..Default::default()
+            },
+        };
+
+        // Namespace-specific TTL takes priority
+        assert_eq!(
+            config.get_ttl_seconds("context", "project"),
+            Some(7 * 86400)
+        );
+
+        // Scope-specific TTL used when no namespace TTL
+        assert_eq!(
+            config.get_ttl_seconds("decisions", "project"),
+            Some(14 * 86400)
+        );
+
+        // Default TTL used when no namespace or scope TTL
+        assert_eq!(
+            config.get_ttl_seconds("decisions", "user"),
+            Some(30 * 86400)
+        );
+    }
+
+    #[test]
+    fn test_ttl_config_from_config_file() {
+        let file = ConfigFileTtl {
+            default: Some("30d".to_string()),
+            namespace: Some(ConfigFileTtlNamespace {
+                decisions: Some("90d".to_string()),
+                context: Some("7d".to_string()),
+                tech_debt: Some("0".to_string()), // Never expires
+                ..Default::default()
+            }),
+            scope: Some(ConfigFileTtlScope {
+                project: Some("30d".to_string()),
+                user: Some("90d".to_string()),
+                org: Some("365d".to_string()),
+            }),
+        };
+
+        let config = TtlConfig::from_config_file(&file);
+
+        assert_eq!(config.default_seconds, Some(30 * 86400));
+        assert_eq!(config.namespace.decisions, Some(90 * 86400));
+        assert_eq!(config.namespace.context, Some(7 * 86400));
+        assert_eq!(config.namespace.tech_debt, Some(0)); // 0 = no expiration
+        assert_eq!(config.scope.project, Some(30 * 86400));
+        assert_eq!(config.scope.user, Some(90 * 86400));
+        assert_eq!(config.scope.org, Some(365 * 86400));
+    }
+
+    #[test]
+    fn test_ttl_config_no_expiration() {
+        let config = TtlConfig::default();
+
+        // No TTL configured means None (never expires)
+        assert_eq!(config.get_ttl_seconds("decisions", "project"), None);
+    }
+
+    #[test]
+    fn test_ttl_config_explicit_no_expiration() {
+        let config = TtlConfig {
+            namespace: TtlNamespaceConfig {
+                tech_debt: Some(0), // Explicitly set to never expire
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        // Some(0) means explicitly set to never expire
+        assert_eq!(config.get_ttl_seconds("tech-debt", "project"), Some(0));
     }
 }

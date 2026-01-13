@@ -1,8 +1,9 @@
 //! Garbage collection module.
 //!
 //! This module provides garbage collection utilities for cleaning up stale
-//! memories, particularly those associated with deleted git branches or
-//! memories that have exceeded their retention period.
+//! memories, particularly those associated with deleted git branches,
+//! memories that have exceeded their retention period, or memories that
+//! have exceeded their explicit TTL (`expires_at` timestamp).
 //!
 //! # Overview
 //!
@@ -56,9 +57,14 @@
 //! if any are from stale branches and mark them accordingly.
 
 mod branch;
+mod expiration;
 mod retention;
 
 pub use branch::{BranchGarbageCollector, GcResult, branch_exists};
+pub use expiration::{
+    DEFAULT_CLEANUP_PROBABILITY, EXPIRATION_CLEANUP_PROBABILITY_ENV, ExpirationConfig,
+    ExpirationGcResult, ExpirationService,
+};
 pub use retention::{
     DEFAULT_RETENTION_DAYS, RETENTION_DAYS_ENV, RetentionConfig, RetentionGarbageCollector,
     RetentionGcResult, retention_days,

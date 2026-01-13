@@ -397,6 +397,7 @@ mod implementation {
                 created_at: created_at as u64,
                 updated_at: updated_at as u64,
                 tombstoned_at,
+                expires_at: None,
                 is_summary: false,
                 source_memory_ids: None,
                 consolidation_timestamp: None,
@@ -610,6 +611,7 @@ mod tests {
             is_summary: false,
             source_memory_ids: None,
             consolidation_timestamp: None,
+            expires_at: None,
         }
     }
 
@@ -841,6 +843,7 @@ mod stub_tests {
             created_at: 1_700_000_000,
             updated_at: 1_700_000_000,
             tombstoned_at: None,
+            expires_at: None,
             embedding: None,
             tags: vec![],
             source: None,

@@ -55,6 +55,9 @@ struct StoredMemory {
     updated_at: u64,
     #[serde(default)]
     tombstoned_at: Option<u64>,
+    /// Expiration timestamp (Unix epoch seconds).
+    #[serde(default)]
+    expires_at: Option<u64>,
     embedding: Option<Vec<f32>>,
     tags: Vec<String>,
     source: Option<String>,
@@ -87,6 +90,7 @@ impl From<&Memory> for StoredMemory {
             tombstoned_at: m
                 .tombstoned_at
                 .and_then(|ts| u64::try_from(ts.timestamp()).ok()),
+            expires_at: m.expires_at,
             embedding: m.embedding.clone(),
             tags: m.tags.clone(),
             source: m.source.clone(),
@@ -147,6 +151,7 @@ impl StoredMemory {
                 let ts_i64 = i64::try_from(ts).unwrap_or(i64::MAX);
                 Utc.timestamp_opt(ts_i64, 0).single()
             }),
+            expires_at: self.expires_at,
             embedding: self.embedding.clone(),
             tags: self.tags.clone(),
             source: self.source.clone(),
@@ -495,6 +500,7 @@ mod tests {
             created_at: 1_234_567_890,
             updated_at: 1_234_567_890,
             tombstoned_at: None,
+            expires_at: None,
             embedding: None,
             tags: vec!["test".to_string()],
             source: Some("test.rs".to_string()),

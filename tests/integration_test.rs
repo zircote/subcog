@@ -473,6 +473,7 @@ mod consolidation_integration_tests {
             created_at: now,
             updated_at: now,
             tombstoned_at: None,
+            expires_at: None,
             embedding,
             tags: vec!["test".to_string()],
             source: None,
@@ -949,6 +950,7 @@ mod consolidation_integration_tests {
                 tags: vec!["redis".to_string(), "caching".to_string()],
                 source: Some("architecture-decision.md".to_string()),
                 skip_security_check: true,
+                ttl_seconds: None,
             },
             CaptureRequest {
                 namespace: Namespace::Decisions,
@@ -959,6 +961,7 @@ mod consolidation_integration_tests {
                 tags: vec!["redis".to_string(), "persistence".to_string()],
                 source: Some("architecture-decision.md".to_string()),
                 skip_security_check: true,
+                ttl_seconds: None,
             },
             CaptureRequest {
                 namespace: Namespace::Decisions,
@@ -969,6 +972,7 @@ mod consolidation_integration_tests {
                 tags: vec!["redis".to_string(), "configuration".to_string()],
                 source: Some("architecture-decision.md".to_string()),
                 skip_security_check: true,
+                ttl_seconds: None,
             },
         ];
 

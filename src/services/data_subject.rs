@@ -829,6 +829,7 @@ mod tests {
             created_at: 1_700_000_000,
             updated_at: 1_700_000_000,
             tombstoned_at: None,
+            expires_at: None,
             embedding: None,
             tags: vec!["test".to_string()],
             source: Some("test.rs".to_string()),

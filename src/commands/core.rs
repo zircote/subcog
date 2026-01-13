@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use subcog::config::SubcogConfig;
+use subcog::config::{SubcogConfig, parse_duration_to_seconds};
 use subcog::storage::PersistenceBackend;
 use subcog::{CaptureRequest, Domain, Namespace, SearchFilter, SearchMode};
 
@@ -44,6 +44,7 @@ pub fn cmd_capture(
     namespace: String,
     tags: Option<String>,
     source: Option<String>,
+    ttl: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let services = subcog::services::ServiceContainer::from_current_dir_or_user()?;
     let service = services.capture();
@@ -51,6 +52,9 @@ pub fn cmd_capture(
     let tag_list = tags
         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
         .unwrap_or_default();
+
+    // Parse TTL from duration string if provided
+    let ttl_seconds = ttl.as_ref().and_then(|s| parse_duration_to_seconds(s));
 
     // Use context-aware domain: project if in git repo, user if not
     let request = CaptureRequest {
@@ -60,6 +64,7 @@ pub fn cmd_capture(
         tags: tag_list,
         source,
         skip_security_check: false,
+        ttl_seconds,
     };
 
     let result = service.capture(request)?;
@@ -90,6 +95,7 @@ pub fn cmd_recall(
     limit: usize,
     raw: bool,
     include_tombstoned: bool,
+    entity: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use subcog::services::ServiceContainer;
 
@@ -103,6 +109,16 @@ pub fn cmd_recall(
     }
     if include_tombstoned {
         filter = filter.with_include_tombstoned(true);
+    }
+    // Apply entity filter if provided (comma-separated for OR logic)
+    if let Some(ref entity_arg) = entity {
+        let entities: Vec<String> = entity_arg
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string)
+            .collect();
+        filter = filter.with_entities(entities);
     }
 
     let result = service.search(&query, parse_search_mode(&mode), &filter, limit);

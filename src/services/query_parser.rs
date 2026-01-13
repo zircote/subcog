@@ -11,6 +11,8 @@
 //! - `project:github.com/org/repo` - Filter by project identifier
 //! - `branch:main` - Filter by branch name
 //! - `path:src/main.rs` - Filter by file path
+//! - `entity:PostgreSQL` - Filter by entity name (memories mentioning this entity)
+//! - `entity:Rust,Python` - Filter by multiple entities (OR logic)
 
 use crate::models::{MemoryStatus, Namespace, SearchFilter};
 
@@ -87,6 +89,16 @@ fn parse_token(token: &str, filter: &mut SearchFilter) {
             if let Some(status) = parse_status(value) {
                 filter.statuses.push(status);
             }
+        },
+        "entity" | "ent" | "entities" => {
+            // Entity filter: entity:PostgreSQL or entity:Rust,Python (OR logic)
+            filter.entity_names.extend(
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(ToString::to_string),
+            );
         },
         _ => {
             // Unknown key, ignore
@@ -304,5 +316,42 @@ mod tests {
         assert_eq!(filter.tags.len(), 1);
         assert_eq!(filter.tags[0], "Rust"); // Tag value preserves case
         assert_eq!(filter.statuses.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_entity_filter() {
+        let filter = parse_filter_query("entity:PostgreSQL");
+        assert_eq!(filter.entity_names.len(), 1);
+        assert_eq!(filter.entity_names[0], "PostgreSQL");
+    }
+
+    #[test]
+    fn test_parse_entity_filter_multiple() {
+        let filter = parse_filter_query("entity:Rust,Python,Go");
+        assert_eq!(filter.entity_names.len(), 3);
+        assert!(filter.entity_names.contains(&"Rust".to_string()));
+        assert!(filter.entity_names.contains(&"Python".to_string()));
+        assert!(filter.entity_names.contains(&"Go".to_string()));
+    }
+
+    #[test]
+    fn test_parse_entity_filter_with_other_filters() {
+        let filter = parse_filter_query("ns:decisions entity:PostgreSQL tag:database");
+        assert_eq!(filter.namespaces.len(), 1);
+        assert_eq!(filter.entity_names.len(), 1);
+        assert_eq!(filter.entity_names[0], "PostgreSQL");
+        assert_eq!(filter.tags.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_entity_filter_aliases() {
+        // Test "ent" alias
+        let filter = parse_filter_query("ent:Redis");
+        assert_eq!(filter.entity_names.len(), 1);
+        assert_eq!(filter.entity_names[0], "Redis");
+
+        // Test "entities" alias
+        let filter2 = parse_filter_query("entities:Kafka,RabbitMQ");
+        assert_eq!(filter2.entity_names.len(), 2);
     }
 }
