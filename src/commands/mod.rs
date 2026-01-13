@@ -6,6 +6,7 @@
 //! - `enrich.rs`: LLM-powered tag enrichment command
 //! - `graph.rs`: Knowledge graph commands (entities, relationships, stats)
 //! - `hook.rs`: Claude Code hook event handlers
+//! - `io.rs`: Import/export commands
 //! - `migrate.rs`: Migration commands (embeddings)
 //! - `prompt.rs`: Prompt template management
 //! - `webhook.rs`: Webhook management commands
@@ -15,6 +16,7 @@ mod core;
 mod enrich;
 mod graph;
 mod hook;
+mod io;
 mod migrate;
 mod prompt;
 mod webhook;
@@ -29,6 +31,7 @@ pub use core::{cmd_capture, cmd_consolidate, cmd_recall, cmd_reindex, cmd_status
 pub use enrich::cmd_enrich;
 pub use graph::{GraphAction, cmd_graph};
 pub use hook::cmd_hook;
+pub use io::{cmd_export, cmd_import};
 pub use migrate::cmd_migrate_embeddings;
 pub use prompt::cmd_prompt;
 pub use webhook::cmd_webhook;

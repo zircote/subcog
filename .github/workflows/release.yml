@@ -38,6 +38,10 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -58,10 +62,18 @@ jobs:
         run: |
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
-      - name: Install musl tools
+      - name: Install musl tools (x86_64)
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
           sudo apt-get install -y musl-tools musl-dev
+
+      - name: Install musl tools (aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: |
+          sudo apt-get install -y musl-tools musl-dev gcc-aarch64-linux-gnu
+          # Install aarch64 musl cross-compiler
+          wget -qO- https://musl.cc/aarch64-linux-musl-cross.tgz | sudo tar xzf - -C /opt
+          echo "/opt/aarch64-linux-musl-cross/bin" >> "$GITHUB_PATH"
 
       - name: Build binary
         shell: bash
@@ -70,6 +82,9 @@ jobs:
         run: |
           if [[ "$TARGET" == "aarch64-unknown-linux-gnu" ]]; then
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          elif [[ "$TARGET" == "aarch64-unknown-linux-musl" ]]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-musl-gcc
+            export CC_aarch64_unknown_linux_musl=aarch64-linux-musl-gcc
           fi
           cargo build --release --target "$TARGET"
 
@@ -87,8 +102,9 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Package binary
-        id: package
+      - name: Package binary (Unix)
+        if: runner.os != 'Windows'
+        id: package-unix
         env:
           TARGET: ${{ matrix.target }}
           VERSION: ${{ steps.version.outputs.version }}
@@ -109,11 +125,36 @@ jobs:
           echo "archive=${ARCHIVE_NAME}" >> "$GITHUB_OUTPUT"
           echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
 
+      - name: Package binary (Windows)
+        if: runner.os == 'Windows'
+        id: package-windows
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $BINARY_NAME = "subcog.exe"
+          $ARCHIVE_NAME = "subcog-$env:VERSION-$env:TARGET.zip"
+
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item "target/$env:TARGET/release/$BINARY_NAME" -Destination dist/
+          Copy-Item README.md -Destination dist/ -ErrorAction SilentlyContinue
+          Copy-Item LICENSE -Destination dist/ -ErrorAction SilentlyContinue
+
+          Compress-Archive -Path dist/* -DestinationPath $ARCHIVE_NAME
+
+          $SHA256 = (Get-FileHash -Algorithm SHA256 $ARCHIVE_NAME).Hash.ToLower()
+
+          "archive=$ARCHIVE_NAME" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "sha256=$SHA256" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Upload artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.1
         with:
           name: subcog-${{ matrix.target }}
-          path: subcog-*.tar.gz
+          path: |
+            subcog-*.tar.gz
+            subcog-*.zip
 
   release:
     name: Create Release
@@ -137,12 +178,13 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -name "*.tar.gz" -exec mv {} release/ \;
+          find artifacts -name "*.zip" -exec mv {} release/ \;
           ls -la release/
 
       - name: Calculate checksums
         run: |
           cd release
-          shasum -a 256 *.tar.gz > checksums.txt
+          shasum -a 256 *.tar.gz *.zip > checksums.txt
           cat checksums.txt
 
       - name: Determine version
@@ -179,7 +221,18 @@ jobs:
           body: |
             ## Installation
 
-            ### Homebrew (macOS)
+            ### Docker
+            ```bash
+            docker pull ghcr.io/zircote/subcog:${{ steps.version.outputs.version }}
+            docker run --rm ghcr.io/zircote/subcog:${{ steps.version.outputs.version }} --help
+            ```
+
+            ### npx (Node.js)
+            ```bash
+            npx @zircote/subcog --help
+            ```
+
+            ### Homebrew (macOS/Linux)
             ```bash
             brew tap zircote/tap
             brew install subcog
@@ -194,7 +247,9 @@ jobs:
             | macOS | Apple Silicon | `subcog-${{ steps.version.outputs.version }}-aarch64-apple-darwin.tar.gz` |
             | Linux | x86_64 (glibc) | `subcog-${{ steps.version.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz` |
             | Linux | x86_64 (musl) | `subcog-${{ steps.version.outputs.version }}-x86_64-unknown-linux-musl.tar.gz` |
-            | Linux | ARM64 | `subcog-${{ steps.version.outputs.version }}-aarch64-unknown-linux-gnu.tar.gz` |
+            | Linux | ARM64 (glibc) | `subcog-${{ steps.version.outputs.version }}-aarch64-unknown-linux-gnu.tar.gz` |
+            | Linux | ARM64 (musl) | `subcog-${{ steps.version.outputs.version }}-aarch64-unknown-linux-musl.tar.gz` |
+            | Windows | x86_64 | `subcog-${{ steps.version.outputs.version }}-x86_64-pc-windows-msvc.zip` |
 
             ### From Source
             ```bash

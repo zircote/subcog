@@ -274,6 +274,54 @@ enum Commands {
         #[command(subcommand)]
         action: WebhookAction,
     },
+
+    /// Import memories from a file.
+    Import {
+        /// Input file path.
+        file: PathBuf,
+
+        /// File format: json, yaml, csv (auto-detected from extension if not specified).
+        #[arg(short, long)]
+        format: Option<String>,
+
+        /// Default namespace for imported memories.
+        #[arg(short, long)]
+        namespace: Option<String>,
+
+        /// Default domain for imported memories: project, user, or org.
+        #[arg(short, long)]
+        domain: Option<String>,
+
+        /// Skip duplicate memories (based on content hash).
+        #[arg(long, default_value = "true")]
+        skip_duplicates: bool,
+
+        /// Dry run (validate without storing).
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Export memories to a file.
+    Export {
+        /// Output file path.
+        output: PathBuf,
+
+        /// File format: json, yaml, csv, parquet (auto-detected from extension if not specified).
+        #[arg(short, long)]
+        format: Option<String>,
+
+        /// Filter query (GitHub-style syntax: ns:decisions tag:rust).
+        #[arg(long)]
+        filter: Option<String>,
+
+        /// Maximum number of memories to export.
+        #[arg(short, long)]
+        limit: Option<usize>,
+
+        /// Filter by domain: project, user, or org.
+        #[arg(short, long)]
+        domain: Option<String>,
+    },
 }
 
 /// Main entry point.
@@ -344,6 +392,8 @@ async fn run_command(cli: Cli, config: SubcogConfig) -> Result<(), Box<dyn std::
         Commands::Delete { .. } => "delete",
         Commands::Graph { .. } => "graph",
         Commands::Webhook { .. } => "webhook",
+        Commands::Import { .. } => "import",
+        Commands::Export { .. } => "export",
     };
 
     let request_context = RequestContext::new();
@@ -510,6 +560,41 @@ async fn dispatch_command(
         },
         Commands::Webhook { action } => {
             run_blocking_cmd!(move || { commands::cmd_webhook(action).map_err(|e| e.to_string()) })
+        },
+        Commands::Import {
+            file,
+            format,
+            namespace,
+            domain,
+            skip_duplicates,
+            dry_run,
+        } => {
+            let service_config = subcog::config::Config::from(config.clone());
+            run_blocking_cmd!(move || {
+                commands::cmd_import(
+                    &service_config,
+                    file,
+                    format,
+                    namespace,
+                    domain,
+                    skip_duplicates,
+                    dry_run,
+                )
+                .map_err(|e| e.to_string())
+            })
+        },
+        Commands::Export {
+            output,
+            format,
+            filter,
+            limit,
+            domain,
+        } => {
+            let config = config.clone();
+            run_blocking_cmd!(move || {
+                commands::cmd_export(&config, output, format, filter, limit, domain)
+                    .map_err(|e| e.to_string())
+            })
         },
     }
 }

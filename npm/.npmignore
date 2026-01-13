@@ -1,0 +1,48 @@
+# Development files
+.git
+.github
+.gitignore
+.editorconfig
+.eslintrc*
+.prettierrc*
+tsconfig.json
+jest.config.*
+
+# Build artifacts (binary is downloaded at install time)
+bin/subcog
+bin/subcog.exe
+
+# Test files
+__tests__
+*.test.js
+*.spec.js
+coverage
+
+# Documentation source
+docs
+
+# CI/CD
+.travis.yml
+.circleci
+azure-pipelines.yml
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local development
+.env
+.env.local

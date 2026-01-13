@@ -65,13 +65,33 @@ Subcog achieves **97% accuracy on factual recall** (LongMemEval) and **57% on pe
 
 ## Installation
 
-```bash
-# From source
-cargo install --path .
+Multiple installation methods are available. See [INSTALLATION.md](docs/INSTALLATION.md) for detailed instructions.
 
-# Or build locally
-cargo build --release
+```bash
+# npm/npx (recommended for quick start)
+npx @zircote/subcog --help
+npm install -g @zircote/subcog
+
+# Homebrew (macOS/Linux)
+brew install zircote/tap/subcog
+
+# Cargo (Rust developers)
+cargo install subcog
+
+# Docker
+docker run --rm ghcr.io/zircote/subcog --help
+
+# Binary download
+curl -LO https://github.com/zircote/subcog/releases/latest/download/subcog-VERSION-TARGET.tar.gz
 ```
+
+| Method | Platforms | Auto-update |
+|--------|-----------|-------------|
+| npm/npx | macOS, Linux, Windows | Via npm |
+| Homebrew | macOS, Linux | `brew upgrade` |
+| Cargo | All | `cargo install` |
+| Docker | linux/amd64, linux/arm64 | Pull latest tag |
+| Binary | All | Manual |
 
 ## Quick Start
 
@@ -568,6 +588,7 @@ For performance tuning, see [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 | Document | Description |
 |----------|-------------|
+| [INSTALLATION.md](docs/INSTALLATION.md) | Complete installation guide (npm, Docker, Homebrew, Cargo) |
 | [QUICKSTART.md](docs/QUICKSTART.md) | Getting started guide |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and solutions |
 | [PERFORMANCE.md](docs/PERFORMANCE.md) | Performance tuning guide |

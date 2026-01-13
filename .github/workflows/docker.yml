@@ -1,0 +1,238 @@
+# Docker Build and Publish Workflow
+# Builds multi-arch images and publishes to ghcr.io
+
+name: Docker
+
+on:
+  # Triggered after release workflow completes
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+    branches: [main]
+
+  # Manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., 0.6.1)'
+        required: true
+        type: string
+      push:
+        description: 'Push to registry'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Prepare: Determine version and check prerequisites
+  # --------------------------------------------------------------------------
+  prepare:
+    name: Prepare Build
+    runs-on: ubuntu-latest
+    # Only run if release workflow succeeded (or manual dispatch)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      push: ${{ steps.version.outputs.push }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_PUSH: ${{ inputs.push }}
+        run: |
+          if [[ -n "$INPUT_VERSION" ]]; then
+            # Manual dispatch
+            VERSION="$INPUT_VERSION"
+            PUSH="${INPUT_PUSH:-false}"
+          else
+            # Triggered by release workflow - get version from latest tag
+            VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+            if [[ -z "$VERSION" ]]; then
+              echo "No version tag found"
+              exit 1
+            fi
+            PUSH="true"
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "push=$PUSH" >> "$GITHUB_OUTPUT"
+          echo "Building Docker image for version: $VERSION (push: $PUSH)"
+
+      - name: Verify musl binaries exist
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Check that musl binaries are available in the release
+          for arch in x86_64 aarch64; do
+            ASSET="subcog-${VERSION}-${arch}-unknown-linux-musl.tar.gz"
+            echo "Checking for $ASSET..."
+            if ! gh release view "v${VERSION}" --json assets -q ".assets[].name" | grep -q "$ASSET"; then
+              echo "Error: Required asset $ASSET not found in release v${VERSION}"
+              echo "Available assets:"
+              gh release view "v${VERSION}" --json assets -q ".assets[].name"
+              exit 1
+            fi
+          done
+          echo "All required musl binaries found"
+
+  # --------------------------------------------------------------------------
+  # Build: Multi-arch Docker image
+  # --------------------------------------------------------------------------
+  build:
+    name: Build and Push
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:v0.12.0
+            network=host
+
+      - name: Log in to Container Registry
+        if: needs.prepare.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Semver tags
+            type=semver,pattern={{version}},value=v${{ needs.prepare.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ needs.prepare.outputs.version }}
+            type=semver,pattern={{major}},value=v${{ needs.prepare.outputs.version }},enable=${{ !startsWith(needs.prepare.outputs.version, '0.') }}
+            # Latest tag (only for non-prerelease)
+            type=raw,value=latest,enable=${{ !contains(needs.prepare.outputs.version, '-') }}
+            # SHA tag for traceability
+            type=sha,prefix=sha-,format=short
+          labels: |
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/subcog/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ needs.prepare.outputs.push == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ needs.prepare.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      - name: Generate SBOM
+        if: needs.prepare.outputs.push == 'true'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}
+          artifact-name: sbom-subcog-${{ needs.prepare.outputs.version }}.spdx.json
+          output-file: sbom.spdx.json
+
+      - name: Run Trivy vulnerability scanner
+        if: needs.prepare.outputs.push == 'true'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy scan results
+        if: needs.prepare.outputs.push == 'true'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # --------------------------------------------------------------------------
+  # Verify: Test the published image
+  # --------------------------------------------------------------------------
+  verify:
+    name: Verify Image (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    needs: [prepare, build]
+    if: needs.prepare.outputs.push == 'true'
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+    steps:
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: ${{ matrix.platform }}
+
+      - name: Pull and test image
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}"
+
+          echo "Testing image: $IMAGE on ${{ matrix.platform }}"
+
+          # Pull image for specific platform
+          docker pull --platform=${{ matrix.platform }} "$IMAGE"
+
+          # Verify version output
+          docker run --platform=${{ matrix.platform }} --rm "$IMAGE" --version
+
+          # Verify help output
+          docker run --platform=${{ matrix.platform }} --rm "$IMAGE" --help
+
+          # Check image size
+          docker image inspect "$IMAGE" --format='Image size: {{.Size}} bytes'
+
+      - name: Test with volume mount
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}"
+
+          # Create temp directory for data
+          mkdir -p /tmp/subcog-test
+
+          # Test status command
+          docker run --platform=${{ matrix.platform }} --rm \
+            -v /tmp/subcog-test:/data \
+            "$IMAGE" status || true
+
+          echo "Volume mount test completed"

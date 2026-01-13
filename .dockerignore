@@ -1,0 +1,58 @@
+# Build artifacts
+target/
+*.tar.gz
+*.zip
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# CI/CD (not needed in image build context)
+.github/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Development
+.claude/
+.claude-plugin/
+.auto-claude/
+.worktrees/
+.subcog/
+.fastembed_cache/
+
+# Tests and benchmarks
+tests/
+benches/
+
+# Observability stack (not needed in subcog image)
+docker/grafana/
+docker/loki/
+docker/otel-collector/
+docker/postgres/
+docker/prometheus/
+docker/promtail/
+docker/tempo/
+docker/*.yml
+docker/*.yaml
+
+# npm package (separate distribution)
+npm/
+
+# Scripts and config
+scripts/
+hooks/
+commands/
+skills/
+*.toml
+!Cargo.toml
+*.json
+!package.json

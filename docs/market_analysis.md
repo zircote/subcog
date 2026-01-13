@@ -140,11 +140,11 @@ Subcog is a **mature, feature-rich memory system** that exceeds many competitors
 2. Add background job for expired memory cleanup
 3. Add `--ttl` flag to capture command
 4. New tool parameter: `subcog_capture --expires "7d"`
-5. Add expiration filters to recall -->
+5. Add expiration filters to recall 
 
 ---
 
-#### 2. Webhooks / Event Notifications
+ #### 2. Webhooks / Event Notifications
 
 **Industry Standard (Mem0, Zep):**
 - Real-time notifications for memory events
@@ -166,13 +166,12 @@ Subcog is a **mature, feature-rich memory system** that exceeds many competitors
 2. Implement async webhook delivery with retry
 3. Support events: captured, updated, deleted, consolidated
 4. Add webhook management CLI: `subcog webhook add/list/delete`
-5. New MCP resource: `subcog://webhooks`
+5. New MCP resource: `subcog://webhooks` 
 
 ---
 
 ### 🟡 Important Gaps (Medium Priority)
-
-<!-- #### 5. Automatic Entity Extraction
+#### 5. Automatic Entity Extraction
 
 **Industry Standard (Mem0, Zep, LangMem):**
 - Auto-extract entities (people, organizations, concepts)
@@ -274,7 +273,7 @@ Subcog is a **mature, feature-rich memory system** that exceeds many competitors
 4. New tools: `subcog_context_template_save/run`
 5. Use in hooks for consistent context injection -->
 
----
+<!-- ---
 
 #### 4. Memory Import / Direct Injection
 
@@ -326,7 +325,8 @@ Subcog is a **mature, feature-rich memory system** that exceeds many competitors
 4. Custom field selection
 5. Enhance `subcog_gdpr_export` with options
 
----
+--- 
+-->
 
 ### 🟢 Nice-to-Have Features (Lower Priority)
 

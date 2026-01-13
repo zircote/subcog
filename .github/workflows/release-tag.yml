@@ -1,0 +1,120 @@
+# Release Tag Workflow
+# Automatically creates and pushes a git tag when a release PR is merged.
+#
+# This workflow bridges the gap between release-automation.yml (creates PR)
+# and release.yml (builds/publishes on tag push).
+#
+# Flow:
+# 1. release-automation.yml creates release PR
+# 2. Maintainer reviews and merges PR to main
+# 3. This workflow detects the merge and creates the tag
+# 4. release.yml triggers on the new tag and builds/publishes
+#
+# Safety:
+# - Only triggers on PRs with 'release' label
+# - Only triggers on merges to main branch
+# - Validates version format before tagging
+# - Does not force push or overwrite existing tags
+
+name: Release Tag
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  create-tag:
+    name: Create Release Tag
+    runs-on: ubuntu-latest
+    # Only run if:
+    # 1. PR was merged (not just closed)
+    # 2. PR has the 'release' label
+    # 3. PR title matches release pattern
+    if: |
+      github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.labels.*.name, 'release')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from Cargo.toml
+        id: version
+        run: |
+          VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+
+          # Validate version format (semver)
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid version format: $VERSION"
+            exit 1
+          fi
+
+          TAG="v${VERSION}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Extracted version: $VERSION (tag: $TAG)"
+
+      - name: Check if tag already exists
+        id: check-tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::warning::Tag $TAG already exists, skipping"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag $TAG does not exist, will create"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push tag
+        if: steps.check-tag.outputs.exists == 'false'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Create annotated tag
+          git tag -a "$TAG" -m "Release $TAG
+
+          Automated release from PR #${PR_NUMBER}
+
+          See CHANGELOG.md for release notes."
+
+          # Push tag to trigger release workflow
+          git push origin "$TAG"
+
+          echo "Created and pushed tag: $TAG"
+
+      - name: Summary
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG_EXISTS: ${{ steps.check-tag.outputs.exists }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          echo "## Release Tag" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$TAG_EXISTS" == "true" ]]; then
+            echo "Tag **$TAG** already exists. No action taken." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Created tag **$TAG** for release **v${VERSION}**" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "The [Release workflow](../actions/workflows/release.yml) will now:" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Build binaries for all platforms" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Create GitHub release with assets" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Update Homebrew formula" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Triggered by merge of PR #${PR_NUMBER}" >> "$GITHUB_STEP_SUMMARY"

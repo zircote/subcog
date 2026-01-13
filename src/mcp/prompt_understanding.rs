@@ -117,13 +117,49 @@ ns:decisions tag:rust -tag:deprecated since:7d source:src/*
 **Variable syntax**: `{{variable_name}}`
 **Domain resolution**: project → user → org
 
-### 3.6 Privacy & Compliance Tools
+### 3.6 Import/Export CLI Commands
+
+Subcog provides bulk memory import and export via CLI commands:
+
+| Command | Description |
+|---------|-------------|
+| `subcog import <file>` | Import memories from JSON, YAML, or CSV |
+| `subcog export <file>` | Export memories to JSON, YAML, CSV, or Parquet |
+
+**Import options**:
+- `--format`: Force format (auto-detected from extension)
+- `--namespace`: Default namespace for imported memories
+- `--domain`: Default domain (project, user, org)
+- `--skip-duplicates`: Skip content-hash duplicates (default: true)
+- `--dry-run`: Validate without storing
+
+**Export options**:
+- `--format`: Force format (auto-detected from extension)
+- `--filter`: GitHub-style filter query (e.g., `ns:decisions tag:rust`)
+- `--limit`: Maximum memories to export
+- `--domain`: Filter by domain
+
+**Supported formats**:
+| Format | Import | Export | Extension |
+|--------|--------|--------|-----------|
+| JSON | Yes | Yes | `.json`, `.ndjson`, `.jsonl` |
+| YAML | Yes | Yes | `.yaml`, `.yml` |
+| CSV | Yes | Yes | `.csv`, `.tsv` |
+| Parquet | No | Yes (feature-gated) | `.parquet`, `.pq` |
+
+**Import file structure** (JSON example):
+```json
+{"content": "Memory content here", "namespace": "decisions", "tags": ["rust", "api"]}
+{"content": "Another memory", "tags": ["frontend"]}
+```
+
+### 3.7 Privacy & Compliance Tools
 
 | Tool | Description |
 |------|-------------|
 | `subcog_gdpr_export` | Export all user data (GDPR Article 20) |
 
-### 3.7 Context Template Tools
+### 3.8 Context Template Tools
 
 Context templates format memories and statistics for hooks and tool responses.
 
@@ -440,6 +476,32 @@ context_template_list:
   domain: user
   tags: [formatting]
   limit: 20
+```
+
+### 9.13 Import Memories from File (CLI)
+
+```bash
+# Import from JSON (newline-delimited)
+subcog import memories.json --namespace decisions
+
+# Import from YAML with dry-run
+subcog import exported.yaml --dry-run
+
+# Import from CSV with domain override
+subcog import data.csv --domain user --namespace learnings
+```
+
+### 9.14 Export Memories to File (CLI)
+
+```bash
+# Export all decisions to JSON
+subcog export decisions.json --filter "ns:decisions"
+
+# Export recent learnings to YAML
+subcog export learnings.yaml --filter "ns:learnings since:30d" --limit 100
+
+# Export with tags to CSV
+subcog export tagged.csv --filter "tag:rust tag:api"
 ```
 
 ## 10. Safety and Integrity

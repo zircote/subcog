@@ -47,6 +47,7 @@ pub mod embedding;
 pub mod gc;
 pub mod git;
 pub mod hooks;
+pub mod io;
 pub mod llm;
 pub mod mcp;
 pub mod models;

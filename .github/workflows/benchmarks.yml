@@ -1,0 +1,468 @@
+# Performance Benchmarks Workflow
+# Runs Criterion benchmarks on PRs and tracks performance over time.
+#
+# Features:
+# - Runs cargo bench on PR changes
+# - Compares against baseline from develop branch
+# - Comments benchmark results on PRs
+# - Stores baseline results as artifacts
+# - Detects performance regressions (>10% threshold)
+#
+# Integration points:
+# - Triggered on PRs to develop/main
+# - Uses cached Hugging Face models (same as ci.yml)
+# - Stores baselines in GitHub Actions cache
+# - Optional: Can be made a required check for performance-critical PRs
+#
+# Note: Benchmarks are resource-intensive and require fastembed-embeddings feature
+
+name: Benchmarks
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      # Only run on changes that might affect performance
+      - 'src/**'
+      - 'benches/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  push:
+    branches: [develop]
+    paths:
+      - 'src/**'
+      - 'benches/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: 'Git ref to use as baseline (default: develop)'
+        required: false
+        default: 'develop'
+        type: string
+
+concurrency:
+  group: benchmarks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # Benchmark configuration
+  BENCHMARK_REGRESSION_THRESHOLD: 10  # Percentage threshold for regression detection
+
+jobs:
+  # ==========================================================================
+  # Run Benchmarks - Execute Criterion benchmarks
+  # ==========================================================================
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      has_regression: ${{ steps.compare.outputs.has_regression }}
+      summary: ${{ steps.compare.outputs.summary }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0  # Need full history for baseline comparison
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # master
+        with:
+          toolchain: stable
+
+      - name: Install cmake (for vendored libgit2)
+        run: sudo apt-get update && sudo apt-get install -y cmake
+
+      - name: Cache cargo registry
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bench-
+
+      - name: Cache Hugging Face models
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/fastembed
+          key: ${{ runner.os }}-huggingface-all-minilm-l6-v2-v1
+          restore-keys: |
+            ${{ runner.os }}-huggingface-
+
+      - name: Cache benchmark baselines
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: target/criterion
+          key: ${{ runner.os }}-criterion-baseline-${{ github.base_ref || 'develop' }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-criterion-baseline-${{ github.base_ref || 'develop' }}-
+            ${{ runner.os }}-criterion-baseline-develop-
+
+      - name: Restore baseline from develop
+        if: github.event_name == 'pull_request'
+        id: baseline
+        env:
+          INPUT_BASELINE_REF: ${{ inputs.baseline_ref }}
+        run: |
+          BASELINE_REF="${INPUT_BASELINE_REF:-develop}"
+          echo "baseline_ref=$BASELINE_REF" >> "$GITHUB_OUTPUT"
+
+          # Check if we have cached baseline results
+          if [[ -d "target/criterion" ]]; then
+            echo "Found cached baseline results"
+            echo "has_baseline=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No cached baseline found, will create one"
+            echo "has_baseline=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build benchmarks
+        run: |
+          cargo build --release --benches --features "usearch-hnsw,fastembed-embeddings"
+
+      - name: Run benchmarks
+        id: bench
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Create output directory
+          mkdir -p benchmark-results
+
+          # Run each benchmark and save output
+          # Note: Using --save-baseline for PR runs to compare against cached baseline
+          BENCH_FLAGS="--features usearch-hnsw,fastembed-embeddings"
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            # For PRs, compare against baseline
+            BENCH_FLAGS="$BENCH_FLAGS --save-baseline pr-$PR_NUMBER"
+          else
+            # For pushes to develop, save as new baseline
+            BENCH_FLAGS="$BENCH_FLAGS --save-baseline develop"
+          fi
+
+          # Run benchmarks with JSON output for parsing
+          cargo bench $BENCH_FLAGS -- --noplot 2>&1 | tee benchmark-results/output.txt
+
+          # Also generate machine-readable format
+          cargo bench $BENCH_FLAGS -- --noplot --format json 2>/dev/null | \
+            grep -v "^$" > benchmark-results/results.json || true
+
+      - name: Parse benchmark results
+        id: parse
+        run: |
+          # Extract key metrics from benchmark output
+          cat > parse_benchmarks.py << 'PYTHON_SCRIPT'
+          import re
+          import json
+          import sys
+
+          results = []
+          current_group = None
+
+          with open('benchmark-results/output.txt', 'r') as f:
+              for line in f:
+                  # Match benchmark group
+                  group_match = re.match(r'^(\w+)', line)
+                  if group_match and '/' in line:
+                      parts = line.strip().split('/')
+                      if len(parts) >= 2:
+                          current_group = parts[0]
+
+                  # Match timing results: "time:   [1.2345 ms 1.2500 ms 1.2678 ms]"
+                  time_match = re.search(
+                      r'time:\s+\[[\d.]+ \w+ ([\d.]+) (\w+)',
+                      line
+                  )
+                  if time_match:
+                      value = float(time_match.group(1))
+                      unit = time_match.group(2)
+
+                      # Normalize to microseconds
+                      if unit == 'ns':
+                          value /= 1000
+                      elif unit == 'ms':
+                          value *= 1000
+                      elif unit == 's':
+                          value *= 1_000_000
+
+                      results.append({
+                          'name': current_group or 'unknown',
+                          'value': value,
+                          'unit': 'us'
+                      })
+
+                  # Match regression/improvement indicators
+                  change_match = re.search(
+                      r'change:\s+\[([-+]?\d+\.?\d*)%',
+                      line
+                  )
+                  if change_match and results:
+                      results[-1]['change'] = float(change_match.group(1))
+
+          print(json.dumps(results, indent=2))
+          PYTHON_SCRIPT
+
+          python3 parse_benchmarks.py > benchmark-results/parsed.json
+
+      - name: Compare against baseline
+        id: compare
+        env:
+          THRESHOLD: ${{ env.BENCHMARK_REGRESSION_THRESHOLD }}
+        run: |
+          # Analyze results for regressions
+          cat > compare_benchmarks.py << 'PYTHON_SCRIPT'
+          import json
+          import os
+          import sys
+
+          threshold = float(os.environ.get('THRESHOLD', 10))
+
+          with open('benchmark-results/parsed.json', 'r') as f:
+              results = json.load(f)
+
+          regressions = []
+          improvements = []
+          summary_lines = []
+
+          for r in results:
+              name = r.get('name', 'unknown')
+              value = r.get('value', 0)
+              change = r.get('change')
+
+              if change is not None:
+                  if change > threshold:
+                      regressions.append(f"- {name}: +{change:.1f}% ({value:.2f} us)")
+                  elif change < -threshold:
+                      improvements.append(f"- {name}: {change:.1f}% ({value:.2f} us)")
+
+              summary_lines.append(f"| {name} | {value:.2f} us | {change:+.1f}% |" if change else f"| {name} | {value:.2f} us | - |")
+
+          has_regression = len(regressions) > 0
+
+          # Build summary
+          summary = "## Benchmark Results\\n\\n"
+          summary += "| Benchmark | Time | Change |\\n"
+          summary += "|-----------|------|--------|\\n"
+          summary += "\\n".join(summary_lines)
+
+          if regressions:
+              summary += "\\n\\n### Regressions Detected\\n" + "\\n".join(regressions)
+          if improvements:
+              summary += "\\n\\n### Improvements\\n" + "\\n".join(improvements)
+
+          # Output for GitHub Actions
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"has_regression={'true' if has_regression else 'false'}\\n")
+              # Escape newlines for multiline output
+              escaped_summary = summary.replace('\\n', '%0A').replace('\\r', '%0D')
+              f.write(f"summary={escaped_summary}\\n")
+
+          # Also write to step summary
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write(summary.replace('\\n', '\n'))
+
+          sys.exit(0)
+          PYTHON_SCRIPT
+
+          python3 compare_benchmarks.py
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.1
+        with:
+          name: benchmark-results-${{ github.sha }}
+          path: |
+            benchmark-results/
+            target/criterion/
+          retention-days: 30
+
+      - name: Save baseline for develop
+        if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: target/criterion
+          key: ${{ runner.os }}-criterion-baseline-develop-${{ hashFiles('**/Cargo.lock') }}-${{ github.sha }}
+
+  # ==========================================================================
+  # Comment on PR - Post benchmark results as PR comment
+  # ==========================================================================
+  comment:
+    name: Comment Results
+    runs-on: ubuntu-latest
+    needs: benchmark
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Download benchmark results
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: benchmark-results-${{ github.sha }}
+          path: benchmark-results
+
+      - name: Find existing comment
+        uses: peter-evans/find-comment@3eae4d37986fb5a8592848f6a574fdf654e61f9e # v3.1.0
+        id: find-comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '## Benchmark Results'
+
+      - name: Build comment body
+        id: build-comment
+        env:
+          HAS_REGRESSION: ${{ needs.benchmark.outputs.has_regression }}
+          REGRESSION_THRESHOLD: ${{ env.BENCHMARK_REGRESSION_THRESHOLD }}
+          COMMIT_SHA: ${{ github.sha }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # Read parsed results
+          RESULTS_FILE="benchmark-results/parsed.json"
+
+          if [[ -f "$RESULTS_FILE" ]]; then
+            # Build markdown table
+            BODY="## Benchmark Results
+
+          <details>
+          <summary>Click to expand benchmark details</summary>
+
+          | Benchmark | Time (us) | Change |
+          |-----------|-----------|--------|"
+
+            # Parse JSON and build table rows
+            while IFS= read -r line; do
+              name=$(echo "$line" | jq -r '.name // "unknown"')
+              value=$(echo "$line" | jq -r '.value // 0')
+              change=$(echo "$line" | jq -r '.change // "N/A"')
+
+              if [[ "$change" != "N/A" && "$change" != "null" ]]; then
+                BODY="$BODY
+          | $name | $value | ${change}% |"
+              else
+                BODY="$BODY
+          | $name | $value | - |"
+              fi
+            done < <(jq -c '.[]' "$RESULTS_FILE")
+
+            BODY="$BODY
+
+          </details>"
+
+            # Add regression warning if needed
+            if [[ "$HAS_REGRESSION" == "true" ]]; then
+              BODY="$BODY
+
+          > **Warning**: Performance regression detected! Some benchmarks exceeded the ${REGRESSION_THRESHOLD}% threshold."
+            fi
+
+            BODY="$BODY
+
+          ---
+          *Benchmarks run on \`${COMMIT_SHA}\` comparing against \`${BASE_REF}\`*"
+
+          else
+            BODY="## Benchmark Results
+
+          No benchmark results available. Check the workflow run for details."
+          fi
+
+          # Write to file for the next step (avoids escaping issues)
+          echo "$BODY" > comment-body.md
+
+      - name: Create or update comment
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: comment-body.md
+          edit-mode: replace
+
+  # ==========================================================================
+  # Regression Gate - Fail if significant regression detected
+  # ==========================================================================
+  regression-check:
+    name: Regression Check
+    runs-on: ubuntu-latest
+    needs: benchmark
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Check for regressions
+        env:
+          HAS_REGRESSION: ${{ needs.benchmark.outputs.has_regression }}
+        run: |
+          if [[ "$HAS_REGRESSION" == "true" ]]; then
+            echo "::warning::Performance regression detected in benchmarks"
+            echo "Review the benchmark results in the PR comment."
+            echo ""
+            echo "If the regression is expected (e.g., adding features), you can:"
+            echo "1. Document the reason in your PR description"
+            echo "2. Request a review from a maintainer"
+            echo ""
+            # Note: We warn but don't fail - maintainers can decide
+            # Uncomment the next line to make this a hard gate:
+            # exit 1
+          else
+            echo "No significant performance regressions detected."
+          fi
+
+  # ==========================================================================
+  # Performance Trends - Track metrics over time (on develop pushes)
+  # ==========================================================================
+  track-trends:
+    name: Track Performance Trends
+    runs-on: ubuntu-latest
+    needs: benchmark
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    steps:
+      - name: Download benchmark results
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: benchmark-results-${{ github.sha }}
+          path: benchmark-results
+
+      - name: Store benchmark data
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          # Create a data point for trend tracking
+          cat > benchmark-results/datapoint.json << EOF
+          {
+            "commit": "$COMMIT_SHA",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "ref": "$REF",
+            "run_id": "$RUN_ID"
+          }
+          EOF
+
+          echo "Benchmark data point created for trend tracking"
+          cat benchmark-results/datapoint.json
+
+      # Note: For full trend tracking, you would:
+      # 1. Use github-action-benchmark to push to gh-pages
+      # 2. Or use a dedicated metrics service
+      # 3. Or store in a separate repository
+      #
+      # Example with github-action-benchmark:
+      # - name: Store benchmark result
+      #   uses: benchmark-action/github-action-benchmark@v1
+      #   with:
+      #     tool: 'cargo'
+      #     output-file-path: benchmark-results/output.txt
+      #     github-token: ${{ secrets.GITHUB_TOKEN }}
+      #     auto-push: true
+      #     benchmark-data-dir-path: 'dev/bench'

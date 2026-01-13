@@ -1,6 +1,6 @@
 [package]
 name = "subcog"
-version = "0.6.1"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.88"
 description = "A persistent memory system for AI coding assistants"
@@ -35,6 +35,11 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml_ng = "0.10"
 toml = "0.9"
+csv = "1.3"
+
+# Parquet support (optional)
+arrow = { version = "54", optional = true, default-features = false }
+parquet = { version = "54", optional = true, default-features = false, features = ["arrow"] }
 rmcp = { version = "0.12.0", features = ["transport-io", "transport-streamable-http-server"] }
 
 # Async runtime
@@ -220,5 +225,7 @@ encryption = ["dep:aes-gcm", "dep:rand", "dep:base64"]
 # Organization-scoped storage (requires PostgreSQL, optionally Redis)
 # Feature-gated stub for future implementation
 org-scope = []
+# Parquet export format support (Apache Arrow columnar)
+parquet-export = ["dep:arrow", "dep:parquet"]
 # All features enabled
-full = ["postgres", "postgres-tls", "redis", "usearch-hnsw", "fastembed-embeddings", "http", "encryption"]
+full = ["postgres", "postgres-tls", "redis", "usearch-hnsw", "fastembed-embeddings", "http", "encryption", "parquet-export"]

@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-01-13
+
 ### Added
+
+#### Release Infrastructure
+- **Docker Distribution**: Multi-arch Docker images (amd64/arm64) on ghcr.io
+  - Distroless static base image (~15MB compressed)
+  - SBOM generation and Trivy vulnerability scanning
+  - Automatic build triggered after releases
+- **npm Package**: `@zircote/subcog` for Node.js users
+  - Binary download with SHA256 checksum verification
+  - Automatic platform detection (macOS, Linux, Windows)
+  - Fallback to `cargo install` if binary unavailable
+  - Run via `npx @zircote/subcog` or install globally
+- **Windows Support**: Native Windows x64 builds (.zip format)
+- **ARM64 musl**: Static Linux ARM64 binaries for containers
+- **Security Workflows**: CodeQL, Trivy, cargo-audit, dependency review
+- **Benchmark Workflows**: Criterion benchmarks with regression detection
+- **Release Automation**: Version bump, changelog generation, auto-tagging
 
 #### Webhooks/Event Notifications
 - New webhook system for real-time notifications when memory events occur

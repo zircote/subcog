@@ -1,0 +1,48 @@
+{
+  "name": "@zircote/subcog",
+  "version": "0.7.0",
+  "description": "A persistent memory system for AI coding assistants",
+  "keywords": [
+    "memory",
+    "ai",
+    "mcp",
+    "claude",
+    "semantic-search",
+    "cli"
+  ],
+  "homepage": "https://github.com/zircote/subcog",
+  "bugs": {
+    "url": "https://github.com/zircote/subcog/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zircote/subcog.git"
+  },
+  "license": "MIT",
+  "author": "zircote",
+  "bin": {
+    "subcog": "bin/subcog"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js",
+    "preuninstall": "node scripts/preuninstall.js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}

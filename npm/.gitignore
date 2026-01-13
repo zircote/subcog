@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Binary (downloaded at install time)
+bin/subcog
+bin/subcog.exe
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test coverage
+coverage/
+
+# Build output
+dist/

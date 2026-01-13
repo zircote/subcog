@@ -1,0 +1,493 @@
+# Release Automation Workflow
+# Automates the release process including:
+# - Version bump automation (patch/minor/major)
+# - Changelog generation from conventional commits
+# - Create release PR with version changes
+# - Tag and release on merge
+#
+# Integration points:
+# - Triggered manually via workflow_dispatch
+# - Creates PR to main branch
+# - On merge, triggers existing release.yml workflow
+# - Uses conventional commit format for changelog generation
+#
+# Prerequisites:
+# - Commits follow Conventional Commits format (feat:, fix:, docs:, etc.)
+# - CHANGELOG.md follows Keep a Changelog format
+# - Cargo.toml contains version field
+
+name: Release Automation
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_type:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: 'patch'
+      prerelease:
+        description: 'Pre-release identifier (e.g., alpha, beta, rc.1). Leave empty for stable release.'
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        description: 'Dry run (do not create PR or tag)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ==========================================================================
+  # Prepare Release - Calculate version, generate changelog, create PR
+  # ==========================================================================
+  prepare-release:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      current_version: ${{ steps.version.outputs.current }}
+      new_version: ${{ steps.version.outputs.new }}
+      pr_number: ${{ steps.create-pr.outputs.pull-request-number }}
+      pr_url: ${{ steps.create-pr.outputs.pull-request-url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # master
+        with:
+          toolchain: stable
+
+      - name: Calculate new version
+        id: version
+        env:
+          VERSION_TYPE: ${{ inputs.version_type }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          # Extract current version from Cargo.toml
+          CURRENT_VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "current=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Current version: $CURRENT_VERSION"
+
+          # Parse version components
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT_VERSION%%-*}"
+
+          # Handle pre-release suffix in current version
+          PATCH="${PATCH%%-*}"
+
+          # Calculate new version based on bump type
+          case "$VERSION_TYPE" in
+            major)
+              NEW_MAJOR=$((MAJOR + 1))
+              NEW_VERSION="${NEW_MAJOR}.0.0"
+              ;;
+            minor)
+              NEW_MINOR=$((MINOR + 1))
+              NEW_VERSION="${MAJOR}.${NEW_MINOR}.0"
+              ;;
+            patch)
+              NEW_PATCH=$((PATCH + 1))
+              NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+              ;;
+          esac
+
+          # Add pre-release suffix if specified
+          if [[ -n "$PRERELEASE" ]]; then
+            NEW_VERSION="${NEW_VERSION}-${PRERELEASE}"
+          fi
+
+          echo "new=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "New version: $NEW_VERSION"
+
+      - name: Generate changelog entries
+        id: changelog
+        env:
+          CURRENT_VERSION: ${{ steps.version.outputs.current }}
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+        run: |
+          # Get the last release tag
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [[ -z "$LAST_TAG" ]]; then
+            # No previous tag, get all commits
+            COMMIT_RANGE="HEAD"
+          else
+            COMMIT_RANGE="${LAST_TAG}..HEAD"
+          fi
+
+          echo "Analyzing commits from: $COMMIT_RANGE"
+
+          # Generate changelog from conventional commits
+          cat > generate_changelog.py << 'PYTHON_SCRIPT'
+          import subprocess
+          import re
+          import sys
+          from datetime import datetime
+          from collections import defaultdict
+
+          # Get commit range from environment or use HEAD
+          import os
+          commit_range = os.environ.get('COMMIT_RANGE', 'HEAD')
+
+          # Get commits
+          result = subprocess.run(
+              ['git', 'log', commit_range, '--pretty=format:%s|||%h|||%an'],
+              capture_output=True, text=True
+          )
+
+          commits = result.stdout.strip().split('\n') if result.stdout.strip() else []
+
+          # Conventional commit patterns
+          patterns = {
+              'feat': ('Added', r'^feat(?:\([^)]+\))?:\s*(.+)'),
+              'fix': ('Fixed', r'^fix(?:\([^)]+\))?:\s*(.+)'),
+              'docs': ('Documentation', r'^docs(?:\([^)]+\))?:\s*(.+)'),
+              'perf': ('Performance', r'^perf(?:\([^)]+\))?:\s*(.+)'),
+              'refactor': ('Changed', r'^refactor(?:\([^)]+\))?:\s*(.+)'),
+              'test': ('Testing', r'^test(?:\([^)]+\))?:\s*(.+)'),
+              'build': ('Build', r'^build(?:\([^)]+\))?:\s*(.+)'),
+              'ci': ('CI/CD', r'^ci(?:\([^)]+\))?:\s*(.+)'),
+              'chore': ('Chore', r'^chore(?:\([^)]+\))?:\s*(.+)'),
+          }
+
+          # Group commits by type
+          grouped = defaultdict(list)
+          breaking = []
+
+          for commit in commits:
+              if not commit or '|||' not in commit:
+                  continue
+
+              parts = commit.split('|||')
+              if len(parts) < 2:
+                  continue
+
+              message, sha = parts[0], parts[1]
+
+              # Check for breaking changes
+              if '!' in message.split(':')[0] or 'BREAKING CHANGE' in message:
+                  breaking.append(f"- {message} ({sha})")
+
+              # Match conventional commit type
+              for commit_type, (section, pattern) in patterns.items():
+                  match = re.match(pattern, message, re.IGNORECASE)
+                  if match:
+                      desc = match.group(1).strip()
+                      # Extract scope if present
+                      scope_match = re.match(r'^(\w+)\(([^)]+)\):', message)
+                      if scope_match:
+                          scope = scope_match.group(2)
+                          grouped[section].append(f"- **{scope}**: {desc} ({sha})")
+                      else:
+                          grouped[section].append(f"- {desc} ({sha})")
+                      break
+
+          # Generate markdown
+          version = os.environ.get('NEW_VERSION', 'Unreleased')
+          date = datetime.now().strftime('%Y-%m-%d')
+
+          output = [f"## [{version}] - {date}", ""]
+
+          # Add breaking changes first
+          if breaking:
+              output.append("### BREAKING CHANGES")
+              output.extend(breaking)
+              output.append("")
+
+          # Add other sections in preferred order
+          section_order = ['Added', 'Changed', 'Fixed', 'Performance', 'Documentation', 'Testing', 'Build', 'CI/CD', 'Chore']
+          for section in section_order:
+              if section in grouped:
+                  output.append(f"### {section}")
+                  output.extend(grouped[section])
+                  output.append("")
+
+          # If no conventional commits found, add a note
+          if not grouped and not breaking:
+              output.append("### Changed")
+              output.append("- Various updates and improvements")
+              output.append("")
+
+          print('\n'.join(output))
+          PYTHON_SCRIPT
+
+          COMMIT_RANGE="$COMMIT_RANGE" NEW_VERSION="$NEW_VERSION" python3 generate_changelog.py > changelog_entry.md
+
+          echo "Generated changelog entry:"
+          cat changelog_entry.md
+
+          # Save for later steps
+          {
+            echo 'changelog<<EOF'
+            cat changelog_entry.md
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Update version in Cargo.toml
+        if: inputs.dry_run != true
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+        run: |
+          # Update version in Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" Cargo.toml
+
+          echo "Updated Cargo.toml version to $NEW_VERSION"
+          grep -m1 '^version = ' Cargo.toml
+
+      - name: Update Cargo.lock
+        if: inputs.dry_run != true
+        run: |
+          cargo generate-lockfile
+          echo "Updated Cargo.lock"
+
+      - name: Update CHANGELOG.md
+        if: inputs.dry_run != true
+        env:
+          CHANGELOG_ENTRY: ${{ steps.changelog.outputs.changelog }}
+        run: |
+          # Insert new changelog entry after "## [Unreleased]" section
+          # Create a temporary file with the new content
+
+          # Read the current changelog
+          CHANGELOG_FILE="CHANGELOG.md"
+
+          # Find the line number of [Unreleased] section
+          UNRELEASED_LINE=$(grep -n "## \[Unreleased\]" "$CHANGELOG_FILE" | head -1 | cut -d: -f1)
+
+          if [[ -z "$UNRELEASED_LINE" ]]; then
+            echo "Warning: [Unreleased] section not found, prepending to changelog"
+            {
+              echo "$CHANGELOG_ENTRY"
+              cat "$CHANGELOG_FILE"
+            } > "$CHANGELOG_FILE.tmp"
+          else
+            # Find the next version section (## [x.y.z])
+            NEXT_VERSION_LINE=$(tail -n +$((UNRELEASED_LINE + 1)) "$CHANGELOG_FILE" | grep -n "^## \[" | head -1 | cut -d: -f1)
+
+            if [[ -z "$NEXT_VERSION_LINE" ]]; then
+              # No next version, append after unreleased section content
+              NEXT_VERSION_LINE=$(wc -l < "$CHANGELOG_FILE")
+            else
+              NEXT_VERSION_LINE=$((UNRELEASED_LINE + NEXT_VERSION_LINE))
+            fi
+
+            # Build new changelog
+            {
+              # Header up to and including [Unreleased]
+              head -n "$UNRELEASED_LINE" "$CHANGELOG_FILE"
+              echo ""
+              # New changelog entry
+              echo "$CHANGELOG_ENTRY"
+              # Rest of the file from next version section
+              tail -n +$NEXT_VERSION_LINE "$CHANGELOG_FILE"
+            } > "$CHANGELOG_FILE.tmp"
+          fi
+
+          mv "$CHANGELOG_FILE.tmp" "$CHANGELOG_FILE"
+
+          echo "Updated CHANGELOG.md"
+          head -50 "$CHANGELOG_FILE"
+
+      - name: Create release branch
+        if: inputs.dry_run != true
+        id: branch
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+        run: |
+          BRANCH_NAME="release/v${NEW_VERSION}"
+          echo "branch=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$BRANCH_NAME"
+          git add Cargo.toml Cargo.lock CHANGELOG.md
+          git commit -m "chore(release): prepare v${NEW_VERSION}
+
+          - Bump version in Cargo.toml
+          - Update CHANGELOG.md with release notes
+          - Regenerate Cargo.lock"
+
+          git push origin "$BRANCH_NAME"
+
+          echo "Created and pushed branch: $BRANCH_NAME"
+
+      - name: Create Pull Request
+        if: inputs.dry_run != true
+        id: create-pr
+        uses: peter-evans/create-pull-request@5e914681df9dc83aa4e4905692ca88beb2f9e91f # v7.0.5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ steps.branch.outputs.branch }}
+          base: main
+          title: "chore(release): v${{ steps.version.outputs.new }}"
+          body: |
+            ## Release v${{ steps.version.outputs.new }}
+
+            This PR prepares the release of version **v${{ steps.version.outputs.new }}**.
+
+            ### Changes
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ### Checklist
+
+            - [ ] Version bumped in `Cargo.toml`
+            - [ ] `Cargo.lock` updated
+            - [ ] `CHANGELOG.md` updated with release notes
+            - [ ] All CI checks pass
+
+            ### Release Process
+
+            1. Review and approve this PR
+            2. Merge to `main`
+            3. Create and push tag: `git tag -a v${{ steps.version.outputs.new }} -m "Release v${{ steps.version.outputs.new }}" && git push origin v${{ steps.version.outputs.new }}`
+            4. The [Release workflow](.github/workflows/release.yml) will automatically:
+               - Build binaries for all platforms
+               - Create GitHub release with assets
+               - Update Homebrew formula
+
+            ---
+            *Automated by [Release Automation workflow](.github/workflows/release-automation.yml)*
+          labels: |
+            release
+            automated
+          draft: false
+
+      - name: Dry run summary
+        if: inputs.dry_run == true
+        env:
+          CURRENT_VERSION: ${{ steps.version.outputs.current }}
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+          CHANGELOG_ENTRY: ${{ steps.changelog.outputs.changelog }}
+        run: |
+          echo "## Dry Run Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Current Version:** $CURRENT_VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "**New Version:** $NEW_VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Changelog Entry" >> "$GITHUB_STEP_SUMMARY"
+          echo '```markdown' >> "$GITHUB_STEP_SUMMARY"
+          echo "$CHANGELOG_ENTRY" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**No changes were made (dry run mode)**" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Release PR summary
+        if: inputs.dry_run != true
+        env:
+          CURRENT_VERSION: ${{ steps.version.outputs.current }}
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+          PR_URL: ${{ steps.create-pr.outputs.pull-request-url }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+        run: |
+          echo "## Release Preparation Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Version Bump:** $CURRENT_VERSION -> $NEW_VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Pull Request:** [#${PR_NUMBER}](${PR_URL})" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Next Steps" >> "$GITHUB_STEP_SUMMARY"
+          echo "1. Review the PR" >> "$GITHUB_STEP_SUMMARY"
+          echo "2. Merge to main" >> "$GITHUB_STEP_SUMMARY"
+          echo "3. Create tag: \`git tag -a v${NEW_VERSION} -m \"Release v${NEW_VERSION}\"\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "4. Push tag: \`git push origin v${NEW_VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # ==========================================================================
+  # Auto-tag on Merge - Create tag when release PR is merged
+  # ==========================================================================
+  # Note: This job would be triggered by a separate workflow on PR merge
+  # For now, tagging is a manual step after PR merge to ensure human review
+
+  # ==========================================================================
+  # Validate Release - Run full CI before allowing release
+  # ==========================================================================
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    needs: prepare-release
+    if: inputs.dry_run != true
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          ref: release/v${{ needs.prepare-release.outputs.new_version }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Install cmake (for vendored libgit2)
+        run: sudo apt-get update && sudo apt-get install -y cmake
+
+      - name: Cache cargo registry
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+
+      - name: Verify version in Cargo.toml
+        env:
+          EXPECTED_VERSION: ${{ needs.prepare-release.outputs.new_version }}
+        run: |
+          ACTUAL_VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          if [[ "$ACTUAL_VERSION" != "$EXPECTED_VERSION" ]]; then
+            echo "::error::Version mismatch: expected $EXPECTED_VERSION, got $ACTUAL_VERSION"
+            exit 1
+          fi
+          echo "Version verified: $ACTUAL_VERSION"
+
+      - name: Run format check
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all-features
+        timeout-minutes: 30
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Verify binary version
+        env:
+          EXPECTED_VERSION: ${{ needs.prepare-release.outputs.new_version }}
+        run: |
+          BINARY_VERSION=$(./target/release/subcog --version | awk '{print $2}')
+          if [[ "$BINARY_VERSION" != "$EXPECTED_VERSION" ]]; then
+            echo "::error::Binary version mismatch: expected $EXPECTED_VERSION, got $BINARY_VERSION"
+            exit 1
+          fi
+          echo "Binary version verified: $BINARY_VERSION"
+
+      - name: Validation complete
+        env:
+          PR_URL: ${{ needs.prepare-release.outputs.pr_url }}
+        run: |
+          echo "## Release Validation Passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "All validation checks passed for release v${{ needs.prepare-release.outputs.new_version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "The release PR is ready for review: ${PR_URL}" >> "$GITHUB_STEP_SUMMARY"
