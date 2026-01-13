@@ -1,8 +1,10 @@
 //! Configuration management.
 
 mod features;
+mod org;
 
 pub use features::FeatureFlags;
+pub use org::{ConfigFileOrg, OrgBackendConfig, OrgConfig};
 
 use serde::Deserialize;
 use std::borrow::Cow;
@@ -170,6 +172,8 @@ pub struct SubcogConfig {
     pub timeouts: OperationTimeoutConfig,
     /// Context template configuration.
     pub context_templates: ContextTemplatesConfig,
+    /// Organization configuration for shared memory graphs.
+    pub org: OrgConfig,
     /// Config files that were loaded (for debugging).
     pub config_sources: Vec<PathBuf>,
 }
@@ -812,6 +816,8 @@ pub struct ConfigFile {
     pub ttl: Option<ConfigFileTtl>,
     /// Context template configuration.
     pub context_templates: Option<ConfigFileContextTemplates>,
+    /// Organization configuration for shared memory graphs.
+    pub org: Option<ConfigFileOrg>,
 }
 
 /// Features section in config file.
@@ -2164,6 +2170,7 @@ impl Default for SubcogConfig {
             ttl: TtlConfig::default(),
             timeouts: OperationTimeoutConfig::from_env(),
             context_templates: ContextTemplatesConfig::default(),
+            org: OrgConfig::default(),
             config_sources: Vec::new(),
         }
     }
@@ -2340,6 +2347,9 @@ impl SubcogConfig {
         }
         if let Some(ref context_templates) = file.context_templates {
             self.context_templates = ContextTemplatesConfig::from_config_file(context_templates);
+        }
+        if let Some(ref org) = file.org {
+            self.org = OrgConfig::from_config_file(org, self.features.org_scope_enabled);
         }
     }
 

@@ -20,6 +20,7 @@
 //!     source: Some("ARCHITECTURE.md".to_string()),
 //!     skip_security_check: false,
 //!     ttl_seconds: None,
+//!     scope: None,
 //! };
 //!
 //! let result = service.capture(request).expect("capture should succeed");
@@ -41,6 +42,7 @@
 //!     source: None,
 //!     skip_security_check: false,
 //!     ttl_seconds: None,
+//!     scope: None,
 //! };
 //!
 //! let validation = service.validate(&request).expect("validation should succeed");
@@ -169,6 +171,11 @@ pub struct CaptureService {
     /// When set, a probabilistic cleanup of TTL-expired memories is triggered
     /// after each successful capture (default 5% probability).
     expiration_config: Option<ExpirationConfig>,
+    /// Organization-scoped index backend (optional).
+    ///
+    /// When set and the capture request has `scope: Some(DomainScope::Org)`,
+    /// the memory is stored in the org-shared index instead of the user-local index.
+    org_index: Option<Arc<dyn IndexBackend + Send + Sync>>,
 }
 
 impl CaptureService {
@@ -199,6 +206,7 @@ impl CaptureService {
             vector: None,
             entity_extraction: None,
             expiration_config: None,
+            org_index: None,
         }
     }
 
@@ -224,6 +232,7 @@ impl CaptureService {
             vector: Some(vector),
             entity_extraction: None,
             expiration_config: None,
+            org_index: None,
         }
     }
 
@@ -246,6 +255,22 @@ impl CaptureService {
     pub fn with_vector(mut self, vector: Arc<dyn VectorBackend + Send + Sync>) -> Self {
         self.vector = Some(vector);
         self
+    }
+
+    /// Adds an org-scoped index backend for shared memory storage.
+    ///
+    /// When configured and a capture request has `scope: Some(DomainScope::Org)`,
+    /// the memory will be stored in the org-shared index instead of the user-local index.
+    #[must_use]
+    pub fn with_org_index(mut self, index: Arc<dyn IndexBackend + Send + Sync>) -> Self {
+        self.org_index = Some(index);
+        self
+    }
+
+    /// Returns whether an org-scoped index is configured.
+    #[must_use]
+    pub fn has_org_index(&self) -> bool {
+        self.org_index.is_some()
     }
 
     /// Adds an entity extraction callback for graph-augmented retrieval.
@@ -362,6 +387,7 @@ impl CaptureService {
     ///     source: Some("src/config.rs".to_string()),
     ///     skip_security_check: false,
     ///     ttl_seconds: None,
+    ///     scope: None,
     /// };
     ///
     /// let result = service.capture(request)?;
@@ -737,6 +763,7 @@ impl CaptureService {
     ///     source: None,
     ///     skip_security_check: false,
     ///     ttl_seconds: None,
+    ///     scope: None,
     /// };
     /// let result = service.validate(&request)?;
     /// assert!(result.is_valid);
@@ -750,6 +777,7 @@ impl CaptureService {
     ///     source: None,
     ///     skip_security_check: false,
     ///     ttl_seconds: None,
+    ///     scope: None,
     /// };
     /// let result = service.validate(&empty_request)?;
     /// assert!(!result.is_valid);
@@ -866,6 +894,7 @@ mod tests {
             source: Some("test.rs".to_string()),
             skip_security_check: false,
             ttl_seconds: None,
+            scope: None,
         }
     }
 
@@ -1058,6 +1087,7 @@ mod tests {
             source: Some(file_path.to_string_lossy().to_string()),
             skip_security_check: false,
             ttl_seconds: None,
+            scope: None,
         };
 
         let result = service.capture(request).expect("capture");

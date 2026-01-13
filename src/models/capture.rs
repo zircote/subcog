@@ -1,6 +1,7 @@
 //! Capture request and result types.
 
 use super::{Domain, MemoryId, Namespace};
+use crate::storage::index::DomainScope;
 
 /// Request to capture a new memory.
 #[derive(Debug, Clone, Default)]
@@ -22,6 +23,13 @@ pub struct CaptureRequest {
     /// When set, `expires_at` is calculated as `created_at + ttl_seconds`.
     /// `None` means no expiration (memory lives until manually deleted).
     pub ttl_seconds: Option<u64>,
+    /// Target storage scope for the memory.
+    ///
+    /// - `Project`/`User`: Stored in user-local index (default)
+    /// - `Org`: Stored in organization-shared index (requires org feature enabled)
+    ///
+    /// Default: `None` (uses context-appropriate scope based on git status)
+    pub scope: Option<DomainScope>,
 }
 
 impl CaptureRequest {
@@ -69,6 +77,16 @@ impl CaptureRequest {
     #[must_use]
     pub const fn with_ttl(mut self, ttl_seconds: u64) -> Self {
         self.ttl_seconds = Some(ttl_seconds);
+        self
+    }
+
+    /// Sets the storage scope for the memory.
+    ///
+    /// - `Project`/`User`: Stored in user-local index
+    /// - `Org`: Stored in organization-shared index
+    #[must_use]
+    pub const fn with_scope(mut self, scope: DomainScope) -> Self {
+        self.scope = Some(scope);
         self
     }
 }

@@ -95,6 +95,7 @@ pub fn execute_capture(arguments: Value) -> Result<ToolResult> {
         source: args.source,
         skip_security_check: false,
         ttl_seconds,
+        scope: None, // Use default scope based on context
     };
 
     let services = ServiceContainer::from_current_dir_or_user()?;

@@ -951,6 +951,7 @@ mod consolidation_integration_tests {
                 source: Some("architecture-decision.md".to_string()),
                 skip_security_check: true,
                 ttl_seconds: None,
+                scope: None,
             },
             CaptureRequest {
                 namespace: Namespace::Decisions,
@@ -962,6 +963,7 @@ mod consolidation_integration_tests {
                 source: Some("architecture-decision.md".to_string()),
                 skip_security_check: true,
                 ttl_seconds: None,
+                scope: None,
             },
             CaptureRequest {
                 namespace: Namespace::Decisions,
@@ -973,6 +975,7 @@ mod consolidation_integration_tests {
                 source: Some("architecture-decision.md".to_string()),
                 skip_security_check: true,
                 ttl_seconds: None,
+                scope: None,
             },
         ];
 

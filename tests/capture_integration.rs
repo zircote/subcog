@@ -95,6 +95,7 @@ fn test_capture_rejects_empty_content() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -124,6 +125,7 @@ fn test_capture_rejects_whitespace_only_content() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -152,6 +154,7 @@ fn test_capture_rejects_oversized_content() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -184,6 +187,7 @@ fn test_capture_accepts_content_at_size_limit() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -211,6 +215,7 @@ fn test_capture_blocks_secrets_when_configured() {
         source: None,
         skip_security_check: false, // Don't skip security check
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -244,6 +249,7 @@ fn test_capture_allows_secrets_when_skip_security_check() {
         source: None,
         skip_security_check: true, // Skip security check
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -269,6 +275,7 @@ fn test_capture_allows_content_without_secrets() {
         source: None,
         skip_security_check: false,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -433,6 +440,7 @@ fn test_capture_result_has_valid_urn() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -467,6 +475,7 @@ fn test_capture_result_has_valid_memory_id() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -508,6 +517,7 @@ fn test_capture_preserves_tags() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -538,6 +548,7 @@ fn test_capture_adds_hash_tag() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -584,6 +595,7 @@ fn test_capture_accepts_all_namespaces() {
             source: None,
             skip_security_check: true,
             ttl_seconds: None,
+            scope: None,
         };
 
         let result = capture_service.capture(request);
@@ -616,6 +628,7 @@ fn test_capture_accepts_default_domain() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -638,6 +651,7 @@ fn test_capture_accepts_context_aware_domain() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -667,6 +681,7 @@ fn test_capture_accepts_source_path() {
         source: Some("src/main.rs".to_string()),
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -689,6 +704,7 @@ fn test_capture_accepts_none_source_path() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);

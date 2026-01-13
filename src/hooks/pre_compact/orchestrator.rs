@@ -96,6 +96,7 @@ impl CaptureOrchestrator {
                 source: Some("PreCompactHandler".to_string()),
                 skip_security_check: false,
                 ttl_seconds: None,
+                scope: None, // Use default scope
             };
 
             if let Ok(result) = capture.capture(request.clone()) {

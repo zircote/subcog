@@ -79,6 +79,10 @@ pub struct AuthContext {
     scopes: HashSet<String>,
     /// Whether this is a local/CLI context (implicitly trusted).
     is_local: bool,
+    /// Organization name (for org-scoped operations).
+    org_name: Option<String>,
+    /// Role within the organization (admin, member, etc.).
+    org_role: Option<String>,
 }
 
 impl Default for AuthContext {
@@ -100,6 +104,8 @@ impl AuthContext {
             subject: None,
             scopes: HashSet::new(),
             is_local: true,
+            org_name: None,
+            org_role: None,
         }
     }
 
@@ -114,6 +120,8 @@ impl AuthContext {
             subject: None,
             scopes: scopes.into_iter().collect(),
             is_local: false,
+            org_name: None,
+            org_role: None,
         }
     }
 
@@ -140,6 +148,31 @@ impl AuthContext {
     #[must_use]
     pub const fn is_local(&self) -> bool {
         self.is_local
+    }
+
+    /// Returns the organization name if set.
+    #[must_use]
+    pub fn org_name(&self) -> Option<&str> {
+        self.org_name.as_deref()
+    }
+
+    /// Returns the organization role if set.
+    #[must_use]
+    pub fn org_role(&self) -> Option<&str> {
+        self.org_role.as_deref()
+    }
+
+    /// Returns whether this context has org access.
+    #[must_use]
+    pub fn has_org_access(&self) -> bool {
+        // Local contexts have org access if org is configured
+        if self.is_local {
+            return true;
+        }
+        // Remote contexts need org:read or org:write scope
+        self.scopes.contains("org:read")
+            || self.scopes.contains("org:write")
+            || self.scopes.contains("*")
     }
 
     /// Checks if the context has a specific scope.
@@ -219,6 +252,8 @@ pub struct AuthContextBuilder {
     subject: Option<String>,
     scopes: HashSet<String>,
     is_local: bool,
+    org_name: Option<String>,
+    org_role: Option<String>,
 }
 
 impl AuthContextBuilder {
@@ -252,6 +287,20 @@ impl AuthContextBuilder {
         self
     }
 
+    /// Sets the organization name.
+    #[must_use]
+    pub fn org_name(mut self, name: impl Into<String>) -> Self {
+        self.org_name = Some(name.into());
+        self
+    }
+
+    /// Sets the organization role.
+    #[must_use]
+    pub fn org_role(mut self, role: impl Into<String>) -> Self {
+        self.org_role = Some(role.into());
+        self
+    }
+
     /// Builds the auth context.
     #[must_use]
     pub fn build(self) -> AuthContext {
@@ -259,6 +308,8 @@ impl AuthContextBuilder {
             subject: self.subject,
             scopes: self.scopes,
             is_local: self.is_local,
+            org_name: self.org_name,
+            org_role: self.org_role,
         }
     }
 }

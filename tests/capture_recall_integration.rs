@@ -116,6 +116,7 @@ fn test_capture_recall_text_search_roundtrip() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -175,6 +176,7 @@ fn test_capture_recall_vector_search_roundtrip() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -271,6 +273,7 @@ fn test_capture_recall_hybrid_search_roundtrip() {
             source: None,
             skip_security_check: true,
             ttl_seconds: None,
+            scope: None,
         };
 
         let result = capture_service.capture(request);
@@ -326,6 +329,7 @@ fn test_capture_recall_namespace_filtering() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
     capture_service
         .capture(request1)
@@ -340,6 +344,7 @@ fn test_capture_recall_namespace_filtering() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
     capture_service
         .capture(request2)
@@ -395,6 +400,7 @@ fn test_captured_memory_has_embedding() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -432,6 +438,7 @@ fn test_capture_graceful_degradation() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     // Note: This may fail without a repo context, but the point is it doesn't crash
@@ -460,6 +467,7 @@ fn test_recall_limit_parameter_honored() {
             source: None,
             skip_security_check: true,
             ttl_seconds: None,
+            scope: None,
         };
 
         let result = capture_service.capture(request);
@@ -509,6 +517,7 @@ fn test_multiple_captures_searchable() {
             source: None,
             skip_security_check: true,
             ttl_seconds: None,
+            scope: None,
         };
 
         let result = capture_service.capture(request);
@@ -573,6 +582,7 @@ fn test_full_workflow_capture_recall_update() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let result = capture_service.capture(request);
@@ -595,6 +605,7 @@ fn test_full_workflow_capture_recall_update() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let update_result = capture_service.capture(update_request);
@@ -645,6 +656,7 @@ fn test_cross_namespace_workflow() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
     capture_service
         .capture(decision)
@@ -659,6 +671,7 @@ fn test_cross_namespace_workflow() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
     capture_service
         .capture(pattern)
@@ -673,6 +686,7 @@ fn test_cross_namespace_workflow() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
     capture_service
         .capture(learning)
@@ -723,6 +737,7 @@ fn test_semantic_search_related_concepts() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
     capture_service
         .capture(request)
@@ -763,6 +778,7 @@ fn test_score_normalization_in_results() {
             source: None,
             skip_security_check: true,
             ttl_seconds: None,
+            scope: None,
         };
         capture_service
             .capture(request)
@@ -863,6 +879,7 @@ fn test_service_container_from_current_dir_or_user_always_succeeds() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     // Capture should succeed regardless of scope
@@ -891,6 +908,7 @@ fn test_user_scope_capture_recall_roundtrip() {
         source: None,
         skip_security_check: true,
         ttl_seconds: None,
+        scope: None,
     };
 
     let capture_result = capture.capture(request);

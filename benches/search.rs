@@ -113,6 +113,7 @@ fn populate_index(capture_service: &CaptureService, count: usize) {
             source: None,
             skip_security_check: true,
             ttl_seconds: None,
+            scope: None,
         };
 
         if let Err(e) = capture_service.capture(request) {

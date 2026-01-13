@@ -65,6 +65,7 @@ pub fn cmd_capture(
         source,
         skip_security_check: false,
         ttl_seconds,
+        scope: None,
     };
 
     let result = service.capture(request)?;
