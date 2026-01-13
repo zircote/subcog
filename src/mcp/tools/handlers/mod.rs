@@ -9,9 +9,9 @@ mod prompts;
 
 pub use core::{
     execute_capture, execute_consolidate, execute_delete, execute_delete_all, execute_enrich,
-    execute_gdpr_export, execute_get, execute_get_summary, execute_history, execute_list,
-    execute_namespaces, execute_prompt_understanding, execute_recall, execute_reindex,
-    execute_restore, execute_status, execute_update,
+    execute_gdpr_export, execute_get, execute_get_summary, execute_history, execute_init,
+    execute_list, execute_namespaces, execute_prompt_understanding, execute_recall,
+    execute_reindex, execute_restore, execute_status, execute_update,
 };
 pub use graph::{
     execute_entities, execute_entity_merge, execute_extract_entities, execute_graph_query,

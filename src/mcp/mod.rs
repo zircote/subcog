@@ -49,6 +49,7 @@ mod prompt_understanding;
 mod prompts;
 mod resources;
 mod server;
+mod session;
 mod tool_types;
 mod tools;
 

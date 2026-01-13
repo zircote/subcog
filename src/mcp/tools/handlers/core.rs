@@ -3,12 +3,14 @@
 //! Contains handlers for subcog's core memory operations:
 //! capture, recall, status, namespaces, prompt understanding, consolidate, enrich, reindex.
 
-use crate::config::{ConsolidationConfig, LlmProvider, StorageBackendType, SubcogConfig};
+use crate::config::{
+    ConsolidationConfig, LlmProvider, StorageBackendType, SubcogConfig, parse_duration_to_seconds,
+};
 use crate::llm::ResilientLlmProvider;
 use crate::mcp::prompt_understanding::PROMPT_UNDERSTANDING;
 use crate::mcp::tool_types::{
-    CaptureArgs, ConsolidateArgs, DeleteArgs, EnrichArgs, GetArgs, RecallArgs, ReindexArgs,
-    UpdateArgs, build_filter_description, format_content_for_detail, parse_namespace,
+    CaptureArgs, ConsolidateArgs, DeleteArgs, EnrichArgs, GetArgs, InitArgs, RecallArgs,
+    ReindexArgs, UpdateArgs, build_filter_description, format_content_for_detail, parse_namespace,
     parse_search_mode,
 };
 #[cfg(test)]
@@ -81,6 +83,9 @@ pub fn execute_capture(arguments: Value) -> Result<ToolResult> {
 
     let namespace = parse_namespace(&args.namespace);
 
+    // Parse TTL from duration string if provided
+    let ttl_seconds = args.ttl.as_ref().and_then(|s| parse_duration_to_seconds(s));
+
     // Use context-aware domain: project if in git repo, user if not
     let request = CaptureRequest {
         content: args.content,
@@ -89,6 +94,7 @@ pub fn execute_capture(arguments: Value) -> Result<ToolResult> {
         tags: args.tags.unwrap_or_default(),
         source: args.source,
         skip_security_check: false,
+        ttl_seconds,
     };
 
     let services = ServiceContainer::from_current_dir_or_user()?;
@@ -134,6 +140,17 @@ pub fn execute_recall(arguments: Value) -> Result<ToolResult> {
     // Support legacy namespace parameter (deprecated but still works)
     if let Some(ns) = &args.namespace {
         filter = filter.with_namespace(parse_namespace(ns));
+    }
+
+    // Apply entity filter if provided (comma-separated for OR logic)
+    if let Some(ref entity_arg) = args.entity {
+        let entities: Vec<String> = entity_arg
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string)
+            .collect();
+        filter = filter.with_entities(entities);
     }
 
     let limit = args.limit.unwrap_or(10).min(50);
@@ -1773,6 +1790,145 @@ pub fn execute_history(arguments: Value) -> Result<ToolResult> {
     })
 }
 
+/// Formats the status section for init output.
+fn format_init_status(services: &ServiceContainer) -> String {
+    let mut output = String::new();
+
+    let Ok(recall) = services.recall() else {
+        output.push_str("- **Status**: ✅ Healthy\n");
+        return output;
+    };
+
+    let filter = SearchFilter::new();
+    let Ok(result) = recall.search("*", SearchMode::Text, &filter, 1000) else {
+        output.push_str("- **Status**: ✅ Healthy\n");
+        return output;
+    };
+
+    output.push_str(&format!("- **Total memories**: {}\n", result.memories.len()));
+
+    // Count by namespace
+    let mut ns_counts = std::collections::HashMap::new();
+    for hit in &result.memories {
+        *ns_counts
+            .entry(format!("{:?}", hit.memory.namespace))
+            .or_insert(0) += 1;
+    }
+    if !ns_counts.is_empty() {
+        output.push_str("- **By namespace**: ");
+        let ns_summary: Vec<String> = ns_counts
+            .iter()
+            .map(|(ns, count)| format!("{ns}: {count}"))
+            .collect();
+        output.push_str(&ns_summary.join(", "));
+        output.push('\n');
+    }
+    output.push_str("- **Status**: ✅ Healthy\n");
+    output
+}
+
+/// Formats the recall section for init output.
+fn format_init_recall(services: &ServiceContainer, query: &str, limit: usize) -> String {
+    let mut output = String::new();
+
+    let Ok(recall) = services.recall() else {
+        output.push_str("_Could not access recall service._\n");
+        return output;
+    };
+
+    let filter = SearchFilter::new();
+    match recall.search(query, SearchMode::Hybrid, &filter, limit) {
+        Ok(result) if !result.memories.is_empty() => {
+            output.push_str(&format!(
+                "Found **{}** relevant memories for context:\n\n",
+                result.memories.len()
+            ));
+            for (i, hit) in result.memories.iter().enumerate() {
+                let preview = if hit.memory.content.len() > 150 {
+                    format!("{}...", &hit.memory.content[..150])
+                } else {
+                    hit.memory.content.clone()
+                };
+                output.push_str(&format!(
+                    "{}. **{:?}** (score: {:.2})\n   {}\n\n",
+                    i + 1,
+                    hit.memory.namespace,
+                    hit.score,
+                    preview.replace('\n', " ")
+                ));
+            }
+        },
+        Ok(_) => {
+            output.push_str(
+                "_No existing context memories found. This may be a new project._\n\n",
+            );
+            output.push_str("**Tip**: Capture decisions, patterns, and learnings as you work!\n");
+        },
+        Err(e) => {
+            output.push_str(&format!("_Could not recall context: {e}_\n"));
+        },
+    }
+    output
+}
+
+/// Executes the init tool for session initialization.
+///
+/// Combines `prompt_understanding`, status, and optional context recall into
+/// a single initialization call. Marks the session as initialized.
+pub fn execute_init(arguments: Value) -> Result<ToolResult> {
+    let args: InitArgs =
+        serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+    // Mark session as initialized
+    crate::mcp::session::mark_initialized();
+
+    let mut output = String::new();
+
+    // Section 1: Guidance (prompt_understanding)
+    output.push_str("# Subcog Session Initialized\n\n");
+    output.push_str("## 📚 Usage Guidance\n\n");
+    output.push_str(PROMPT_UNDERSTANDING);
+    output.push_str("\n\n---\n\n");
+
+    // Section 2: Status check
+    output.push_str("## 🔍 System Status\n\n");
+    let services_result = ServiceContainer::from_current_dir_or_user();
+    match &services_result {
+        Ok(services) => output.push_str(&format_init_status(services)),
+        Err(e) => output.push_str(&format!("- **Status**: ⚠️ Degraded ({e})\n")),
+    }
+    output.push_str("\n---\n\n");
+
+    // Section 3: Optional context recall
+    if args.include_recall {
+        output.push_str("## 🧠 Project Context\n\n");
+        let query = args
+            .recall_query
+            .unwrap_or_else(|| "project setup OR architecture OR conventions".to_string());
+        let limit = args.recall_limit.unwrap_or(5).min(20) as usize;
+
+        if let Ok(services) = &services_result {
+            output.push_str(&format_init_recall(services, &query, limit));
+        }
+    } else {
+        output.push_str("_Context recall skipped (include_recall=false)_\n");
+    }
+
+    output.push_str("\n---\n\n");
+    output.push_str("✅ **Session initialized.** You now have full memory context.\n\n");
+    output.push_str("**Next steps**:\n");
+    output.push_str("- Use `subcog_recall` to search for relevant memories\n");
+    output.push_str("- Use `subcog_capture` to store decisions, patterns, and learnings\n");
+    output.push_str("- Use `subcog_status` for detailed health checks\n");
+
+    metrics::counter!("mcp_init_total").increment(1);
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text { text: output }],
+        is_error: false,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1863,6 +2019,7 @@ mod tests {
             created_at: 1,
             updated_at: 1,
             tombstoned_at: None,
+            expires_at: None,
             embedding: None,
             tags: Vec::new(),
             source: None,

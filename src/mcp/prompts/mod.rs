@@ -63,7 +63,55 @@ impl PromptRegistry {
             Self::context_capture_alias_prompt(),
             Self::discover_prompt(),
             Self::discover_alias_prompt(),
+            // Session initialization prompts
+            Self::session_start_prompt(),
+            Self::session_start_alias_prompt(),
         ]
+    }
+
+    fn session_start_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "subcog_session_start".to_string(),
+            description: Some(
+                "Initialize a Subcog session with guidance, status, and optional context recall"
+                    .to_string(),
+            ),
+            arguments: vec![
+                PromptArgument {
+                    name: "include_recall".to_string(),
+                    description: Some(
+                        "Whether to recall project context (default: true)".to_string(),
+                    ),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "project".to_string(),
+                    description: Some("Project name or context for recall".to_string()),
+                    required: false,
+                },
+            ],
+        }
+    }
+
+    fn session_start_alias_prompt() -> PromptDefinition {
+        PromptDefinition {
+            name: "session_start".to_string(),
+            description: Some("Alias for subcog_session_start".to_string()),
+            arguments: vec![
+                PromptArgument {
+                    name: "include_recall".to_string(),
+                    description: Some(
+                        "Whether to recall project context (default: true)".to_string(),
+                    ),
+                    required: false,
+                },
+                PromptArgument {
+                    name: "project".to_string(),
+                    description: Some("Project name or context for recall".to_string()),
+                    required: false,
+                },
+            ],
+        }
     }
 
     fn subcog_prompt() -> PromptDefinition {
@@ -610,6 +658,10 @@ impl PromptRegistry {
                 Some(generators::generate_context_capture_prompt(arguments))
             },
             "subcog_discover" | "discover" => Some(generators::generate_discover_prompt(arguments)),
+            // Session initialization
+            "subcog_session_start" | "session_start" => {
+                Some(generators::generate_session_start_prompt(arguments))
+            },
             _ => None,
         }
     }

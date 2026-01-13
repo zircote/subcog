@@ -10,8 +10,9 @@ use super::templates::{
     DISCOVER_RESPONSE, GENERATE_TUTORIAL_RESPONSE, GENERATE_TUTORIAL_STRUCTURE,
     INTENT_SEARCH_INSTRUCTIONS, INTENT_SEARCH_RESPONSE, LIST_FORMAT_INSTRUCTIONS,
     QUERY_SUGGEST_INSTRUCTIONS, QUERY_SUGGEST_RESPONSE, SEARCH_HELP_SYSTEM,
-    TUTORIAL_BEST_PRACTICES, TUTORIAL_CAPTURE, TUTORIAL_NAMESPACES, TUTORIAL_OVERVIEW,
-    TUTORIAL_SEARCH, TUTORIAL_WORKFLOWS,
+    SESSION_START_INSTRUCTIONS, SESSION_START_RESPONSE, TUTORIAL_BEST_PRACTICES,
+    TUTORIAL_CAPTURE, TUTORIAL_NAMESPACES, TUTORIAL_OVERVIEW, TUTORIAL_SEARCH,
+    TUTORIAL_WORKFLOWS,
 };
 use super::types::{PromptContent, PromptMessage};
 
@@ -486,6 +487,49 @@ pub fn generate_discover_prompt(arguments: &Value) -> Vec<PromptMessage> {
             role: "assistant".to_string(),
             content: PromptContent::Text {
                 text: DISCOVER_RESPONSE.to_string(),
+            },
+        },
+    ]
+}
+
+/// Generates the session start prompt.
+///
+/// This prompt guides AI clients through proper session initialization.
+pub fn generate_session_start_prompt(arguments: &Value) -> Vec<PromptMessage> {
+    let include_recall = arguments
+        .get("include_recall")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true);
+
+    let project = arguments
+        .get("project")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let mut prompt = String::from("Initialize my Subcog session.\n\n");
+
+    if include_recall {
+        prompt.push_str("**Include context recall**: Yes - search for project setup and architecture.\n");
+    } else {
+        prompt.push_str("**Include context recall**: No - skip initial recall.\n");
+    }
+
+    if !project.is_empty() {
+        prompt.push_str(&format!("**Project context**: {project}\n"));
+    }
+
+    prompt.push('\n');
+    prompt.push_str(SESSION_START_INSTRUCTIONS);
+
+    vec![
+        PromptMessage {
+            role: "user".to_string(),
+            content: PromptContent::Text { text: prompt },
+        },
+        PromptMessage {
+            role: "assistant".to_string(),
+            content: PromptContent::Text {
+                text: SESSION_START_RESPONSE.to_string(),
             },
         },
     ]

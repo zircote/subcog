@@ -61,6 +61,7 @@
 use crate::mcp::{
     ResourceContent, ResourceDefinition, ResourceHandler, ToolContent, ToolDefinition,
     ToolRegistry, ToolResult,
+    prompts::{PromptContent, PromptDefinition, PromptRegistry},
 };
 use crate::models::{EventMeta, MemoryEvent};
 use crate::observability::{
@@ -84,8 +85,10 @@ use axum::{Json, Router};
 use rmcp::model::{
     AnnotateAble, CallToolRequestParam, CallToolResult, Content, GetPromptRequestParam,
     GetPromptResult, Implementation, ListPromptsResult, ListResourceTemplatesResult,
-    ListResourcesResult, ListToolsResult, PaginatedRequestParam, RawResource, Resource,
-    ResourceContents, ServerCapabilities, ServerInfo, Tool,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParam, Prompt,
+    PromptArgument as RmcpPromptArgument, PromptMessage as RmcpPromptMessage,
+    PromptMessageContent, PromptMessageRole, RawResource, Resource, ResourceContents,
+    ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::transport::stdio;
@@ -593,6 +596,7 @@ pub enum Transport {
 struct McpState {
     tools: ToolRegistry,
     resources: Mutex<ResourceHandler>,
+    prompts: PromptRegistry,
     #[cfg(feature = "http")]
     tool_auth: ToolAuthorization,
 }
@@ -603,11 +607,12 @@ struct McpHandler {
 }
 
 impl McpHandler {
-    fn new(tools: ToolRegistry, resources: ResourceHandler) -> Self {
+    fn new(tools: ToolRegistry, resources: ResourceHandler, prompts: PromptRegistry) -> Self {
         Self {
             state: Arc::new(McpState {
                 tools,
                 resources: Mutex::new(resources),
+                prompts,
                 #[cfg(feature = "http")]
                 tool_auth: ToolAuthorization::default(),
             }),
@@ -622,6 +627,7 @@ impl ServerHandler for McpHandler {
             capabilities: ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
+                .enable_prompts()
                 .build(),
             server_info: Implementation::from_build_env(),
             instructions: Some("Subcog MCP server".to_string()),
@@ -802,6 +808,7 @@ impl ServerHandler for McpHandler {
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListPromptsResult>> + Send + '_ {
+        let state = self.state.clone();
         let (request_context, request_id) = init_request_context();
         async move {
             let span = info_span!(
@@ -815,7 +822,13 @@ impl ServerHandler for McpHandler {
             );
 
             run_mcp_with_context(request_context, span, "list_prompts", |_start| async move {
-                Ok(ListPromptsResult::with_all_items(Vec::new()))
+                let prompts = state
+                    .prompts
+                    .list_prompts()
+                    .into_iter()
+                    .map(prompt_definition_to_rmcp)
+                    .collect();
+                Ok(ListPromptsResult::with_all_items(prompts))
             })
             .await
         }
@@ -826,8 +839,12 @@ impl ServerHandler for McpHandler {
         request: GetPromptRequestParam,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<GetPromptResult>> + Send + '_ {
+        let state = self.state.clone();
         let (request_context, request_id) = init_request_context();
-        let prompt_name = request.name;
+        let prompt_name = request.name.clone();
+        let arguments = request
+            .arguments
+            .map_or_else(|| serde_json::Value::Object(serde_json::Map::new()), serde_json::Value::Object);
         async move {
             let span = info_span!(
                 parent: None,
@@ -841,14 +858,34 @@ impl ServerHandler for McpHandler {
             );
 
             run_mcp_with_context(request_context, span, "get_prompt", |_start| async move {
-                Err(McpError::invalid_params(
-                    format!("Prompts are not supported (requested: {prompt_name})"),
-                    None,
-                ))
+                resolve_prompt(&state.prompts, &prompt_name, &arguments)
             })
             .await
         }
     }
+}
+
+/// Resolves a prompt by name and arguments into a `GetPromptResult`.
+fn resolve_prompt(
+    registry: &PromptRegistry,
+    name: &str,
+    arguments: &serde_json::Value,
+) -> McpResult<GetPromptResult> {
+    let prompt_def = registry.get_prompt(name);
+    let messages = registry.get_prompt_messages(name, arguments);
+
+    let Some(messages) = messages else {
+        let err = format!("Unknown prompt: {name}");
+        return Err(McpError::invalid_params(err, None));
+    };
+
+    let rmcp_messages: Vec<RmcpPromptMessage> =
+        messages.into_iter().map(prompt_message_to_rmcp).collect();
+
+    Ok(GetPromptResult {
+        description: prompt_def.and_then(|p| p.description.clone()),
+        messages: rmcp_messages,
+    })
 }
 
 fn tool_definition_to_rmcp(def: &ToolDefinition) -> Tool {
@@ -898,6 +935,60 @@ fn resource_definition_to_rmcp(def: ResourceDefinition) -> Resource {
         meta: None,
     }
     .no_annotation()
+}
+
+fn prompt_definition_to_rmcp(def: &PromptDefinition) -> Prompt {
+    let arguments = if def.arguments.is_empty() {
+        None
+    } else {
+        Some(
+            def.arguments
+                .iter()
+                .map(|arg| RmcpPromptArgument {
+                    name: arg.name.clone(),
+                    title: None,
+                    description: arg.description.clone(),
+                    required: Some(arg.required),
+                })
+                .collect(),
+        )
+    };
+
+    Prompt {
+        name: def.name.clone(),
+        title: None,
+        description: def.description.clone(),
+        arguments,
+        icons: None,
+        meta: None,
+    }
+}
+
+fn prompt_message_to_rmcp(msg: crate::mcp::prompts::PromptMessage) -> RmcpPromptMessage {
+    let role = match msg.role.as_str() {
+        "assistant" => PromptMessageRole::Assistant,
+        _ => PromptMessageRole::User,
+    };
+
+    let content = match msg.content {
+        PromptContent::Text { text } => PromptMessageContent::Text { text },
+        PromptContent::Image { data, mime_type } => {
+            // Convert to text representation for simplicity
+            // (our prompts rarely use images)
+            PromptMessageContent::Text {
+                text: format!("[Image: {mime_type}, {} bytes]", data.len()),
+            }
+        },
+        PromptContent::Resource { uri } => {
+            // Convert resource to text representation since PromptMessageContent
+            // doesn't have a direct resource variant in the same form
+            PromptMessageContent::Text {
+                text: format!("[Resource: {uri}]"),
+            }
+        },
+    };
+
+    RmcpPromptMessage { role, content }
 }
 
 fn resource_content_to_rmcp(content: ResourceContent) -> ResourceContents {
@@ -1085,7 +1176,8 @@ impl McpServer {
     fn build_handler(&mut self) -> McpHandler {
         let tools = std::mem::take(&mut self.tools);
         let resources = std::mem::take(&mut self.resources);
-        McpHandler::new(tools, resources)
+        let prompts = PromptRegistry::new();
+        McpHandler::new(tools, resources, prompts)
     }
 
     /// Runs the server over stdio with graceful shutdown (RES-M4).

@@ -525,3 +525,46 @@ Starting with your specified point (or an overview if none given), I'll:
 
 Each hop shows the most relevant items, up to your specified depth. I'll highlight interesting connections between seemingly unrelated topics.
 ";
+
+// Session initialization prompt
+
+pub const SESSION_START_INSTRUCTIONS: &str = r#"
+## Session Initialization
+
+Welcome to Subcog! This prompt helps you start a coding session with full memory context.
+
+**What happens during initialization**:
+1. Load usage guidance and best practices (`prompt_understanding`)
+2. Check system health and statistics (`subcog_status`)
+3. Optionally recall project context (`subcog_recall` with "project setup OR architecture")
+
+**Recommended workflow**:
+1. Call `subcog_init` at the start of every session
+2. Review the returned context and guidance
+3. Use `subcog_recall` to search for relevant memories as you work
+4. Capture decisions, patterns, and learnings with `subcog_capture`
+
+**Available tools**:
+- `subcog_init` - Combined initialization (this prompt)
+- `subcog_recall` - Search memories
+- `subcog_capture` - Store new memories
+- `subcog_status` - Check system health
+- `prompt_understanding` - Full usage guidance
+
+**Quick reference**:
+- Namespaces: decisions, patterns, learnings, context, tech-debt, apis, config, security, performance, testing
+- Search filters: `ns:X`, `tag:X`, `since:Nd`, `source:X`
+- Search modes: hybrid (default), vector, text
+"#;
+
+pub const SESSION_START_RESPONSE: &str = r"
+I'll initialize your Subcog session by:
+
+1. Loading the full usage guidance and best practices
+2. Checking system health and memory statistics
+3. Recalling relevant project context (if requested)
+
+This ensures you have all the context needed for an effective coding session.
+
+Let me call `subcog_init` to get started...
+";

@@ -30,6 +30,10 @@ pub fn capture_tool() -> ToolDefinition {
                 "source": {
                     "type": "string",
                     "description": "Optional source reference (file path, URL)"
+                },
+                "ttl": {
+                    "type": "string",
+                    "description": "Optional TTL for automatic expiration. Supports: '7d' (days), '24h' (hours), '60m' (minutes), '3600s' or '3600' (seconds), '0' (never expire)"
                 }
             },
             "required": ["content", "namespace"]
@@ -73,6 +77,10 @@ pub fn recall_tool() -> ToolDefinition {
                     "description": "Maximum number of results (default: 10)",
                     "minimum": 1,
                     "maximum": 50
+                },
+                "entity": {
+                    "type": "string",
+                    "description": "Filter by entity names (memories mentioning these entities). Comma-separated for OR logic (e.g., 'PostgreSQL,Redis')"
                 }
             },
             "required": ["query"]
@@ -966,6 +974,39 @@ pub fn graph_visualize_tool() -> ToolDefinition {
                     "minimum": 1,
                     "maximum": 200,
                     "default": 50
+                }
+            },
+            "required": []
+        }),
+    }
+}
+
+/// Defines the init tool for session initialization.
+///
+/// Combines `prompt_understanding`, status, and optional context recall
+/// into a single initialization call. Marks the session as initialized.
+pub fn init_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_init".to_string(),
+        description: "Initialize a Subcog session. Combines prompt_understanding (guidance), status (health check), and optional context recall into one call. Call this at the start of every session for optimal memory integration.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "include_recall": {
+                    "type": "boolean",
+                    "description": "Whether to recall project context (default: true)",
+                    "default": true
+                },
+                "recall_query": {
+                    "type": "string",
+                    "description": "Custom recall query (default: 'project setup OR architecture OR conventions')"
+                },
+                "recall_limit": {
+                    "type": "integer",
+                    "description": "Maximum memories to recall (default: 5)",
+                    "minimum": 1,
+                    "maximum": 20,
+                    "default": 5
                 }
             },
             "required": []

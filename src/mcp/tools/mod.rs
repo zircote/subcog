@@ -111,6 +111,9 @@ impl ToolRegistry {
             definitions::graph_visualize_tool(),
         );
 
+        // Session initialization tool
+        tools.insert("subcog_init".to_string(), definitions::init_tool());
+
         Self { tools }
     }
 
@@ -132,7 +135,7 @@ impl ToolRegistry {
     ///
     /// Returns an error if the tool execution fails.
     pub fn execute(&self, name: &str, arguments: Value) -> Result<ToolResult> {
-        match name {
+        let result = match name {
             "subcog_capture" => handlers::execute_capture(arguments),
             "subcog_recall" => handlers::execute_recall(arguments),
             "subcog_status" => handlers::execute_status(arguments),
@@ -166,8 +169,30 @@ impl ToolRegistry {
             "subcog_entity_merge" => handlers::execute_entity_merge(arguments),
             "subcog_relationship_infer" => handlers::execute_relationship_infer(arguments),
             "subcog_graph_visualize" => handlers::execute_graph_visualize(arguments),
+            // Session initialization
+            "subcog_init" => handlers::execute_init(arguments),
             _ => Err(Error::InvalidInput(format!("Unknown tool: {name}"))),
+        }?;
+
+        // Append hint for uninitialized sessions (except for init/prompt_understanding tools)
+        let skip_hint = matches!(
+            name,
+            "subcog_init" | "prompt_understanding" | "subcog_status"
+        );
+
+        if !skip_hint && super::session::should_show_hint() {
+            // Append hint to the result
+            let mut new_content = result.content;
+            if let Some(ToolContent::Text { text }) = new_content.last_mut() {
+                text.push_str(super::session::get_hint_message());
+            }
+            return Ok(ToolResult {
+                content: new_content,
+                is_error: result.is_error,
+            });
         }
+
+        Ok(result)
     }
 }
 

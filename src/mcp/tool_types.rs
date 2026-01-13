@@ -25,6 +25,10 @@ pub struct CaptureArgs {
     pub tags: Option<Vec<String>>,
     /// Optional source reference (file path, URL, etc.).
     pub source: Option<String>,
+    /// Optional TTL (time-to-live) for automatic expiration.
+    /// Supports duration strings like "7d", "30d", "24h", "60m", or seconds.
+    /// Use "0" for no expiration (default behavior).
+    pub ttl: Option<String>,
 }
 
 /// Arguments for the recall tool.
@@ -43,6 +47,8 @@ pub struct RecallArgs {
     pub detail: Option<String>,
     /// Maximum number of results to return (default: 10).
     pub limit: Option<usize>,
+    /// Entity filter: filter to memories mentioning these entities (comma-separated for OR logic).
+    pub entity: Option<String>,
 }
 
 /// Arguments for the consolidate tool.
@@ -457,6 +463,19 @@ pub struct PromptDeleteArgs {
     pub name: String,
     /// Domain scope to delete from (required for safety).
     pub domain: String,
+}
+
+/// Arguments for the `subcog_init` tool.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InitArgs {
+    /// Whether to recall project context (default: true).
+    #[serde(default = "default_true")]
+    pub include_recall: bool,
+    /// Custom recall query (default: "project setup OR architecture OR conventions").
+    pub recall_query: Option<String>,
+    /// Maximum memories to recall (default: 5).
+    pub recall_limit: Option<u32>,
 }
 
 /// Parses a namespace string to Namespace enum.
