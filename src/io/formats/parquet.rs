@@ -11,7 +11,8 @@ use arrow::array::{ArrayRef, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::ArrowWriter;
-use parquet::basic::Compression;
+// Note: SNAPPY/ZSTD compression requires additional features on parquet crate.
+// Using uncompressed for simplicity since memory export files are typically small.
 use parquet::file::properties::WriterProperties;
 use std::io::Write;
 use std::sync::Arc;
@@ -141,9 +142,7 @@ impl<W: Write + Send + 'static> ExportSink for ParquetExportSink<W> {
         })?;
 
         let schema = Arc::new(Self::schema());
-        let props = WriterProperties::builder()
-            .set_compression(Compression::SNAPPY)
-            .build();
+        let props = WriterProperties::builder().build();
 
         let mut arrow_writer =
             ArrowWriter::try_new(writer, schema, Some(props)).map_err(|e| {

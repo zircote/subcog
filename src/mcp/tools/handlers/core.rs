@@ -1434,9 +1434,14 @@ pub fn execute_delete_all(arguments: Value) -> Result<ToolResult> {
     let matching_count = result.memories.len();
 
     if matching_count == 0 {
+        let msg = if args.dry_run {
+            "[DRY-RUN] No memories would be deleted - no memories found matching the filter criteria."
+        } else {
+            "No memories found matching the filter criteria."
+        };
         return Ok(ToolResult {
             content: vec![ToolContent::Text {
-                text: "No memories found matching the filter criteria.".to_string(),
+                text: msg.to_string(),
             }],
             is_error: false,
         });
