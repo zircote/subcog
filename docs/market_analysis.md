@@ -223,10 +223,10 @@ Subcog is a **mature, feature-rich memory system** that exceeds many competitors
 
 ---
 
-#### 3. Group/Shared Memory Graphs
+#### 3. Group/Shared Memory Graphs for an Organization Domain
 
 **Industry Standard (Zep):**
-- Shared graphs across users
+- Shared graphs across users 
 - Group-level context distribution
 - Multi-tenant memory sharing
 
@@ -247,6 +247,7 @@ Subcog is a **mature, feature-rich memory system** that exceeds many competitors
 4. New tools: `subcog_group_create`, `subcog_share_memory`
 5. Access control for group resources
 
+These features enable team collaboration and shared knowledge bases and currently should be CLI+MCP only with an API for future UI integration.
 ---
 
 <!-- #### 8. Context Templates
