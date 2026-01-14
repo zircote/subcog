@@ -6,8 +6,8 @@ use crate::io::formats::{Format, create_export_sink};
 use crate::io::traits::{ExportField, ExportSink, ExportableMemory};
 use crate::models::{Memory, SearchFilter};
 use crate::services::parse_filter_query;
-use crate::storage::index::SqliteBackend;
 use crate::storage::IndexBackend;
+use crate::storage::index::SqliteBackend;
 use crate::{Error, Result};
 use std::io::Write;
 use std::path::Path;
@@ -202,15 +202,13 @@ impl ExportService {
         let ids: Vec<_> = memory_ids.iter().map(|(id, _)| id.clone()).collect();
         let memories = self.index.get_memories_batch(&ids)?;
 
-        for maybe_memory in memories {
-            if let Some(memory) = maybe_memory {
-                let exportable = ExportableMemory::from(&memory);
-                sink.write(&exportable)?;
-                result.exported += 1;
+        for memory in memories.into_iter().flatten() {
+            let exportable = ExportableMemory::from(&memory);
+            sink.write(&exportable)?;
+            result.exported += 1;
 
-                if let Some(ref cb) = progress {
-                    cb(result.exported, Some(total_matched));
-                }
+            if let Some(ref cb) = progress {
+                cb(result.exported, Some(total_matched));
             }
         }
 
@@ -312,7 +310,7 @@ mod tests {
         let index = Arc::new(SqliteBackend::in_memory().unwrap());
         let service = ExportService::new(index);
 
-        let memories = vec![
+        let memories = [
             test_memory("1", "First memory"),
             test_memory("2", "Second memory"),
         ];

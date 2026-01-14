@@ -43,13 +43,13 @@ impl<R: BufRead> JsonImportSource<R> {
     fn detect_format(&mut self) -> Result<bool> {
         // Read first line to detect format
         let mut first_line = String::new();
-        let bytes_read = self
-            .reader
-            .read_line(&mut first_line)
-            .map_err(|e| Error::OperationFailed {
-                operation: "read_json".to_string(),
-                cause: e.to_string(),
-            })?;
+        let bytes_read =
+            self.reader
+                .read_line(&mut first_line)
+                .map_err(|e| Error::OperationFailed {
+                    operation: "read_json".to_string(),
+                    cause: e.to_string(),
+                })?;
         if bytes_read == 0 {
             return Ok(false); // Empty file
         }
@@ -73,10 +73,8 @@ impl<R: BufRead> JsonImportSource<R> {
                 })?;
             let full_content = format!("{first_line}{remaining}");
 
-            let memories: Vec<ImportedMemory> =
-                serde_json::from_str(&full_content).map_err(|e| {
-                    Error::InvalidInput(format!("Failed to parse JSON array: {e}"))
-                })?;
+            let memories: Vec<ImportedMemory> = serde_json::from_str(&full_content)
+                .map_err(|e| Error::InvalidInput(format!("Failed to parse JSON array: {e}")))?;
 
             self.buffer = memories;
             self.buffer_index = 0;
@@ -122,13 +120,13 @@ impl<R: BufRead> ImportSource for JsonImportSource<R> {
         let mut line = String::new();
         loop {
             line.clear();
-            let bytes_read = self
-                .reader
-                .read_line(&mut line)
-                .map_err(|e| Error::OperationFailed {
-                    operation: "read_json".to_string(),
-                    cause: e.to_string(),
-                })?;
+            let bytes_read =
+                self.reader
+                    .read_line(&mut line)
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "read_json".to_string(),
+                        cause: e.to_string(),
+                    })?;
             if bytes_read == 0 {
                 return Ok(None);
             }
@@ -141,7 +139,10 @@ impl<R: BufRead> ImportSource for JsonImportSource<R> {
         }
 
         let memory: ImportedMemory = serde_json::from_str(line.trim()).map_err(|e| {
-            Error::InvalidInput(format!("Line {}: Failed to parse JSON: {e}", self.line_number))
+            Error::InvalidInput(format!(
+                "Line {}: Failed to parse JSON: {e}",
+                self.line_number
+            ))
         })?;
 
         Ok(Some(memory))

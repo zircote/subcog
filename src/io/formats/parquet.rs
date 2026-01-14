@@ -144,19 +144,20 @@ impl<W: Write + Send + 'static> ExportSink for ParquetExportSink<W> {
         let schema = Arc::new(Self::schema());
         let props = WriterProperties::builder().build();
 
-        let mut arrow_writer =
-            ArrowWriter::try_new(writer, schema, Some(props)).map_err(|e| {
-                Error::OperationFailed {
-                    operation: "parquet_writer_create".to_string(),
-                    cause: format!("Failed to create Parquet writer: {e}"),
-                }
-            })?;
+        let mut arrow_writer = ArrowWriter::try_new(writer, schema, Some(props)).map_err(|e| {
+            Error::OperationFailed {
+                operation: "parquet_writer_create".to_string(),
+                cause: format!("Failed to create Parquet writer: {e}"),
+            }
+        })?;
 
         let batch = self.to_record_batch()?;
-        arrow_writer.write(&batch).map_err(|e| Error::OperationFailed {
-            operation: "parquet_write".to_string(),
-            cause: format!("Failed to write Parquet batch: {e}"),
-        })?;
+        arrow_writer
+            .write(&batch)
+            .map_err(|e| Error::OperationFailed {
+                operation: "parquet_write".to_string(),
+                cause: format!("Failed to write Parquet batch: {e}"),
+            })?;
 
         arrow_writer.close().map_err(|e| Error::OperationFailed {
             operation: "parquet_close".to_string(),

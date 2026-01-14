@@ -43,10 +43,7 @@ pub fn cmd_import(
         .unwrap_or(Namespace::Decisions);
 
     // Parse domain
-    let default_domain = domain
-        .as_deref()
-        .map(parse_domain)
-        .unwrap_or_else(Domain::new);
+    let default_domain = domain.as_deref().map(parse_domain).unwrap_or_default();
 
     let options = ImportOptions {
         format,

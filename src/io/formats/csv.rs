@@ -43,7 +43,7 @@ impl ColumnMap {
                 "source" | "src" | "origin" | "file" => map.source = Some(i),
                 "created_at" | "created" | "timestamp" | "date" => map.created_at = Some(i),
                 "ttl" | "ttl_seconds" | "expiry" => map.ttl_seconds = Some(i),
-                _ => {} // Ignore unknown columns
+                _ => {}, // Ignore unknown columns
             }
         }
 
@@ -100,7 +100,7 @@ impl<R: BufRead> CsvImportSource<R> {
 
         let tags = get_field(self.column_map.tags)
             .map(|t| {
-                t.split(|c| c == ',' || c == ';' || c == '|')
+                t.split([',', ';', '|'])
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                     .map(String::from)
@@ -108,11 +108,10 @@ impl<R: BufRead> CsvImportSource<R> {
             })
             .unwrap_or_default();
 
-        let created_at = get_field(self.column_map.created_at)
-            .and_then(|s| s.parse::<u64>().ok());
+        let created_at = get_field(self.column_map.created_at).and_then(|s| s.parse::<u64>().ok());
 
-        let ttl_seconds = get_field(self.column_map.ttl_seconds)
-            .and_then(|s| s.parse::<u64>().ok());
+        let ttl_seconds =
+            get_field(self.column_map.ttl_seconds).and_then(|s| s.parse::<u64>().ok());
 
         Ok(ImportedMemory {
             content,
@@ -130,13 +129,13 @@ impl<R: BufRead> ImportSource for CsvImportSource<R> {
     fn next(&mut self) -> Result<Option<ImportedMemory>> {
         let mut record = csv::StringRecord::new();
 
-        let has_record = self
-            .reader
-            .read_record(&mut record)
-            .map_err(|e| Error::OperationFailed {
-                operation: "read_csv".to_string(),
-                cause: e.to_string(),
-            })?;
+        let has_record =
+            self.reader
+                .read_record(&mut record)
+                .map_err(|e| Error::OperationFailed {
+                    operation: "read_csv".to_string(),
+                    cause: e.to_string(),
+                })?;
         if !has_record {
             return Ok(None);
         }

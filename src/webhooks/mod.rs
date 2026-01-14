@@ -272,5 +272,4 @@ mod tests {
         assert_eq!(service.webhook_count(), 1);
         assert_eq!(service.enabled_webhook_count(), 1);
     }
-
 }

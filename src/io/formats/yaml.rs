@@ -51,7 +51,10 @@ impl YamlImportSource {
         for (doc_index, document) in serde_yaml_ng::Deserializer::from_str(&content).enumerate() {
             let memory: ImportedMemory =
                 serde::Deserialize::deserialize(document).map_err(|e| {
-                    Error::InvalidInput(format!("Document {}: Failed to parse YAML: {e}", doc_index + 1))
+                    Error::InvalidInput(format!(
+                        "Document {}: Failed to parse YAML: {e}",
+                        doc_index + 1
+                    ))
                 })?;
             memories.push(memory);
         }

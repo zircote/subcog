@@ -324,10 +324,9 @@ impl ImportService {
                     },
                     Err(e) => {
                         if options.skip_invalid {
-                            result.errors.push(format!(
-                                "Record {}: capture failed: {}",
-                                prog.current, e
-                            ));
+                            result
+                                .errors
+                                .push(format!("Record {}: capture failed: {}", prog.current, e));
                             prog.skipped_invalid += 1;
                             result.skipped_invalid += 1;
                         } else {

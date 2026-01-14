@@ -3,8 +3,8 @@
 //! Defines the [`ImportSource`] and [`ExportSink`] traits that format adapters
 //! implement to support different file formats.
 
-use crate::models::Memory;
 use crate::Result;
+use crate::models::Memory;
 use serde::{Deserialize, Serialize};
 
 /// Intermediate representation for imported memory data.
@@ -331,11 +331,9 @@ impl ExportField {
 
     /// Parses a field name string.
     ///
-    /// # Errors
-    ///
     /// Returns `None` if the field name is not recognized.
     #[must_use]
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "id" => Some(Self::Id),
             "content" => Some(Self::Content),
@@ -376,11 +374,14 @@ mod tests {
 
     #[test]
     fn test_export_field_parsing() {
-        assert_eq!(ExportField::from_str("id"), Some(ExportField::Id));
-        assert_eq!(ExportField::from_str("content"), Some(ExportField::Content));
-        assert_eq!(ExportField::from_str("ns"), Some(ExportField::Namespace));
-        assert_eq!(ExportField::from_str("namespace"), Some(ExportField::Namespace));
-        assert_eq!(ExportField::from_str("unknown"), None);
+        assert_eq!(ExportField::parse("id"), Some(ExportField::Id));
+        assert_eq!(ExportField::parse("content"), Some(ExportField::Content));
+        assert_eq!(ExportField::parse("ns"), Some(ExportField::Namespace));
+        assert_eq!(
+            ExportField::parse("namespace"),
+            Some(ExportField::Namespace)
+        );
+        assert_eq!(ExportField::parse("unknown"), None);
     }
 
     #[test]

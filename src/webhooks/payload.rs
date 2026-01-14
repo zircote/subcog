@@ -198,27 +198,12 @@ impl WebhookPayload {
     /// Formats a human-readable message for the event.
     fn format_message(&self) -> String {
         match self.event_type.as_str() {
-            "captured" => format!(
-                "Memory captured in {} domain",
-                self.domain
-            ),
-            "deleted" => format!(
-                "Memory deleted in {} domain",
-                self.domain
-            ),
-            "updated" => format!(
-                "Memory updated in {} domain",
-                self.domain
-            ),
-            "consolidated" => format!(
-                "Memories consolidated in {} domain",
-                self.domain
-            ),
+            "captured" => format!("Memory captured in {} domain", self.domain),
+            "deleted" => format!("Memory deleted in {} domain", self.domain),
+            "updated" => format!("Memory updated in {} domain", self.domain),
+            "consolidated" => format!("Memories consolidated in {} domain", self.domain),
             "test" => "Subcog webhook test event".to_string(),
-            _ => format!(
-                "{} event in {} domain",
-                self.event_type, self.domain
-            ),
+            _ => format!("{} event in {} domain", self.event_type, self.domain),
         }
     }
 

@@ -272,7 +272,12 @@ mod tests {
 
         let result = validator.validate(&imported);
         assert!(!result.is_valid);
-        assert!(result.issues.iter().any(|i| i.message.contains("maximum size")));
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|i| i.message.contains("maximum size"))
+        );
     }
 
     #[test]
@@ -282,16 +287,17 @@ mod tests {
 
         let result = validator.validate(&imported);
         assert!(result.is_valid); // Warning, not error
-        assert!(result
-            .issues
-            .iter()
-            .any(|i| i.severity == ValidationSeverity::Warning));
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|i| i.severity == ValidationSeverity::Warning)
+        );
     }
 
     #[test]
     fn test_to_capture_request() {
-        let validator = ImportValidator::new()
-            .with_default_namespace(Namespace::Learnings);
+        let validator = ImportValidator::new().with_default_namespace(Namespace::Learnings);
 
         let imported = ImportedMemory::new("Test content")
             .with_tag("rust")
