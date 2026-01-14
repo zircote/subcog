@@ -63,7 +63,7 @@ pub struct ValidationResult {
 impl ValidationResult {
     /// Creates a successful validation result.
     #[must_use]
-    pub fn valid(content_hash: String) -> Self {
+    pub const fn valid(content_hash: String) -> Self {
         Self {
             is_valid: true,
             issues: Vec::new(),
@@ -73,7 +73,7 @@ impl ValidationResult {
 
     /// Creates a failed validation result.
     #[must_use]
-    pub fn invalid(issues: Vec<ValidationIssue>) -> Self {
+    pub const fn invalid(issues: Vec<ValidationIssue>) -> Self {
         Self {
             is_valid: false,
             issues,
@@ -174,7 +174,7 @@ impl ImportValidator {
             if Namespace::parse(ns).is_none() {
                 issues.push(ValidationIssue::warning(
                     "namespace",
-                    format!("Unknown namespace '{}', using default", ns),
+                    format!("Unknown namespace '{ns}', using default"),
                 ));
             }
         } else {
@@ -206,8 +206,7 @@ impl ImportValidator {
         let domain = imported
             .domain
             .as_ref()
-            .map(|d| parse_domain(d))
-            .unwrap_or_else(|| self.default_domain.clone());
+            .map_or_else(|| self.default_domain.clone(), |d| parse_domain(d));
 
         CaptureRequest {
             content: imported.content,
