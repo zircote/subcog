@@ -39,10 +39,14 @@ impl Format {
     /// Returns all available formats for export.
     #[must_use]
     pub fn export_formats() -> Vec<Self> {
-        let formats = vec![Self::Json, Self::Yaml, Self::Csv];
         #[cfg(feature = "parquet-export")]
-        formats.push(Self::Parquet);
-        formats
+        {
+            vec![Self::Json, Self::Yaml, Self::Csv, Self::Parquet]
+        }
+        #[cfg(not(feature = "parquet-export"))]
+        {
+            vec![Self::Json, Self::Yaml, Self::Csv]
+        }
     }
 
     /// Returns the file extension for this format.

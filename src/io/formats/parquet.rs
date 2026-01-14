@@ -117,8 +117,10 @@ impl<W: Write + Send> ParquetExportSink<W> {
             Arc::new(sources),
         ];
 
-        RecordBatch::try_new(schema, columns)
-            .map_err(|e| Error::Internal(format!("Failed to create record batch: {e}")))
+        RecordBatch::try_new(schema, columns).map_err(|e| Error::OperationFailed {
+            operation: "create_record_batch".to_string(),
+            cause: format!("Failed to create record batch: {e}"),
+        })
     }
 }
 
@@ -133,27 +135,34 @@ impl<W: Write + Send + 'static> ExportSink for ParquetExportSink<W> {
             return Ok(());
         }
 
-        let writer = self
-            .writer
-            .take()
-            .ok_or_else(|| Error::Internal("Writer already consumed".to_string()))?;
+        let writer = self.writer.take().ok_or_else(|| Error::OperationFailed {
+            operation: "parquet_finalize".to_string(),
+            cause: "Writer already consumed".to_string(),
+        })?;
 
         let schema = Arc::new(Self::schema());
         let props = WriterProperties::builder()
             .set_compression(Compression::SNAPPY)
             .build();
 
-        let mut arrow_writer = ArrowWriter::try_new(writer, schema, Some(props))
-            .map_err(|e| Error::Internal(format!("Failed to create Parquet writer: {e}")))?;
+        let mut arrow_writer =
+            ArrowWriter::try_new(writer, schema, Some(props)).map_err(|e| {
+                Error::OperationFailed {
+                    operation: "parquet_writer_create".to_string(),
+                    cause: format!("Failed to create Parquet writer: {e}"),
+                }
+            })?;
 
         let batch = self.to_record_batch()?;
-        arrow_writer
-            .write(&batch)
-            .map_err(|e| Error::Internal(format!("Failed to write Parquet batch: {e}")))?;
+        arrow_writer.write(&batch).map_err(|e| Error::OperationFailed {
+            operation: "parquet_write".to_string(),
+            cause: format!("Failed to write Parquet batch: {e}"),
+        })?;
 
-        arrow_writer
-            .close()
-            .map_err(|e| Error::Internal(format!("Failed to close Parquet writer: {e}")))?;
+        arrow_writer.close().map_err(|e| Error::OperationFailed {
+            operation: "parquet_close".to_string(),
+            cause: format!("Failed to close Parquet writer: {e}"),
+        })?;
 
         Ok(())
     }
