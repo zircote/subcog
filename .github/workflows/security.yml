@@ -1,9 +1,11 @@
 # Security Scanning Workflow
 # Performs comprehensive security analysis including:
-# - CodeQL static analysis for Rust
 # - Trivy container/filesystem scanning
 # - Dependency review for PR checks
+# - Cargo audit for RustSec advisories
 # - SARIF upload for GitHub Security tab
+#
+# Note: CodeQL analysis is handled by GitHub's default setup (separate workflow)
 #
 # Integration points:
 # - Runs on all PRs to develop/main (required check)
@@ -38,65 +40,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # ==========================================================================
-  # CodeQL Analysis - Static code analysis for security vulnerabilities
-  # ==========================================================================
-  codeql:
-    name: CodeQL Analysis
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      security-events: write
-      contents: read
-    env:
-      # Rust analysis is experimental and requires this flag
-      CODEQL_ENABLE_EXPERIMENTAL_FEATURES: true
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@ff0a06e83cb2de871e5a09832bc6a81e7276941f # v3.28.18
-        with:
-          languages: rust
-          # Use extended query suite for more comprehensive analysis
-          queries: security-extended,security-and-quality
-          # Config file for custom queries (optional)
-          # config-file: .github/codeql/codeql-config.yml
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # master
-        with:
-          toolchain: stable
-
-      - name: Install cmake (for vendored libgit2)
-        run: sudo apt-get update && sudo apt-get install -y cmake
-
-      - name: Cache cargo registry
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-codeql-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-codeql-
-
-      # Build the project for CodeQL to analyze
-      - name: Build for CodeQL
-        run: cargo build --all-features
-        env:
-          # Prevent CodeQL from analyzing dependencies
-          CARGO_INCREMENTAL: 0
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@ff0a06e83cb2de871e5a09832bc6a81e7276941f # v3.28.18
-        with:
-          category: "/language:rust"
-          # Upload SARIF to GitHub Security tab
-          upload: always
-
   # ==========================================================================
   # Trivy Scanning - Vulnerability scanning for filesystem and containers
   # ==========================================================================
@@ -286,12 +229,11 @@ jobs:
   security-summary:
     name: Security Summary
     if: always()
-    needs: [codeql, trivy-fs, cargo-audit]
+    needs: [trivy-fs, cargo-audit]
     runs-on: ubuntu-latest
     steps:
       - name: Check security scan results
         env:
-          CODEQL_RESULT: ${{ needs.codeql.result }}
           TRIVY_RESULT: ${{ needs.trivy-fs.result }}
           AUDIT_RESULT: ${{ needs.cargo-audit.result }}
         run: |
@@ -299,15 +241,15 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Scanner | Result |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---------|--------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| CodeQL | $CODEQL_RESULT |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Trivy Filesystem | $TRIVY_RESULT |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Cargo Audit | $AUDIT_RESULT |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Note: CodeQL analysis is handled by GitHub's default setup" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          # Fail if any critical scanner failed
-          if [[ "$CODEQL_RESULT" == "failure" ]] || \
-             [[ "$TRIVY_RESULT" == "failure" ]]; then
-            echo "::error::One or more security scans failed"
+          # Fail if Trivy failed (cargo-audit is advisory only)
+          if [[ "$TRIVY_RESULT" == "failure" ]]; then
+            echo "::error::Trivy security scan failed"
             exit 1
           fi
 
