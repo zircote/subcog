@@ -1225,7 +1225,8 @@ impl Default for RecallService {
 }
 
 /// Creates a placeholder memory for search results.
-const fn create_placeholder_memory(id: MemoryId) -> Memory {
+#[allow(clippy::missing_const_for_fn)] // Can't be const due to cfg attributes
+fn create_placeholder_memory(id: MemoryId) -> Memory {
     use crate::models::{Domain, Namespace};
 
     Memory {
@@ -1243,6 +1244,8 @@ const fn create_placeholder_memory(id: MemoryId) -> Memory {
         expires_at: None,
         embedding: None,
         tags: Vec::new(),
+        #[cfg(feature = "group-scope")]
+        group_id: None,
         source: None,
         is_summary: false,
         source_memory_ids: None,
@@ -1273,6 +1276,8 @@ mod tests {
             expires_at: None,
             embedding: None,
             tags: Vec::new(),
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             is_summary: false,
             source_memory_ids: None,
@@ -1841,6 +1846,8 @@ mod proptests {
             expires_at: None,
             embedding: None,
             tags: Vec::new(),
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             is_summary: false,
             source_memory_ids: None,

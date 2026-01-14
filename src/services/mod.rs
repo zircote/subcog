@@ -97,6 +97,9 @@ mod sync;
 mod tombstone;
 mod topic_index;
 
+#[cfg(feature = "group-scope")]
+pub mod group;
+
 pub use auth::{AuthContext, AuthContextBuilder, Permission};
 pub use backend_factory::{BackendFactory, BackendSet};
 pub use capture::{CaptureService, EntityExtractionCallback, EntityExtractionStats};
@@ -137,6 +140,10 @@ pub use recall::RecallService;
 pub use sync::SyncService;
 pub use tombstone::TombstoneService;
 pub use topic_index::{TopicIndexService, TopicInfo};
+
+// Group service (feature-gated)
+#[cfg(feature = "group-scope")]
+pub use group::GroupService;
 
 use crate::config::SubcogConfig;
 use crate::context::GitContext;

@@ -121,6 +121,10 @@ pub struct SearchFilter {
     /// Filter by entity names (memories mentioning these entities).
     /// Uses OR logic - matches memories mentioning ANY of the listed entities.
     pub entity_names: Vec<String>,
+    /// Filter by group identifiers (group-scoped memories).
+    /// Uses OR logic - matches memories in ANY of the listed groups.
+    #[cfg(feature = "group-scope")]
+    pub group_ids: Vec<String>,
 }
 
 impl SearchFilter {
@@ -143,6 +147,8 @@ impl SearchFilter {
             min_score: None,
             include_tombstoned: false,
             entity_names: Vec::new(),
+            #[cfg(feature = "group-scope")]
+            group_ids: Vec::new(),
         }
     }
 
@@ -246,8 +252,9 @@ impl SearchFilter {
 
     /// Returns true if the filter is empty (matches all).
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.namespaces.is_empty()
+    #[allow(clippy::missing_const_for_fn)] // Can't be const due to cfg attributes
+    pub fn is_empty(&self) -> bool {
+        let base_empty = self.namespaces.is_empty()
             && self.domains.is_empty()
             && self.statuses.is_empty()
             && self.tags.is_empty()
@@ -260,7 +267,16 @@ impl SearchFilter {
             && self.created_after.is_none()
             && self.created_before.is_none()
             && self.min_score.is_none()
-            && self.entity_names.is_empty()
+            && self.entity_names.is_empty();
+
+        #[cfg(feature = "group-scope")]
+        {
+            base_empty && self.group_ids.is_empty()
+        }
+        #[cfg(not(feature = "group-scope"))]
+        {
+            base_empty
+        }
     }
 
     /// Adds an entity name filter.
@@ -276,6 +292,27 @@ impl SearchFilter {
     pub fn with_entities(mut self, entities: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.entity_names
             .extend(entities.into_iter().map(Into::into));
+        self
+    }
+
+    /// Adds a group identifier filter.
+    ///
+    /// Filters to memories belonging to this group (OR logic with other groups).
+    #[cfg(feature = "group-scope")]
+    #[must_use]
+    pub fn with_group_id(mut self, group_id: impl Into<String>) -> Self {
+        self.group_ids.push(group_id.into());
+        self
+    }
+
+    /// Adds multiple group identifier filters.
+    #[cfg(feature = "group-scope")]
+    #[must_use]
+    pub fn with_group_ids(
+        mut self,
+        group_ids: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.group_ids.extend(group_ids.into_iter().map(Into::into));
         self
     }
 }

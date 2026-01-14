@@ -105,6 +105,8 @@ pub fn execute_capture(arguments: Value) -> Result<ToolResult> {
         skip_security_check: false,
         ttl_seconds,
         scope: Some(scope),
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let services = ServiceContainer::from_current_dir_or_user()?;
@@ -2038,6 +2040,8 @@ mod tests {
             expires_at: None,
             embedding: None,
             tags: Vec::new(),
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             is_summary: false,
             source_memory_ids: None,

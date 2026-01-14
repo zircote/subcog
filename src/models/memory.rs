@@ -79,6 +79,12 @@ pub struct Memory {
     pub embedding: Option<Vec<f32>>,
     /// Optional tags for categorization.
     pub tags: Vec<String>,
+    /// Optional group identifier for group-scoped memories.
+    ///
+    /// When set, this memory belongs to a specific group within an organization.
+    /// Group members with sufficient permissions can access these memories.
+    #[cfg(feature = "group-scope")]
+    pub group_id: Option<String>,
     /// Optional source reference (file path, URL, etc.).
     pub source: Option<String>,
     /// Whether this memory is a consolidation summary.

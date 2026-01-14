@@ -1352,6 +1352,8 @@ mod tests {
             expires_at: None,
             embedding: None,
             tags: vec!["alpha".to_string()],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             is_summary: false,
             source_memory_ids: None,
@@ -1372,6 +1374,8 @@ mod tests {
             expires_at: None,
             embedding: None,
             tags: vec!["beta".to_string()],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             is_summary: false,
             source_memory_ids: None,
@@ -1653,6 +1657,8 @@ mod tests {
             expires_at: None,
             embedding: None,
             tags: vec!["tag1".to_string()],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             is_summary: false,
             source_memory_ids: None,
@@ -1675,6 +1681,8 @@ mod tests {
             expires_at: None,
             embedding: None,
             tags: vec!["tag1".to_string()],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: Some("consolidation".to_string()),
             is_summary: true,
             source_memory_ids: Some(vec![MemoryId::new("regular-1")]),
@@ -1719,6 +1727,8 @@ mod tests {
             expires_at: None,
             embedding: None,
             tags: vec!["db".to_string()],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             is_summary: false,
             source_memory_ids: None,
@@ -1740,6 +1750,8 @@ mod tests {
             expires_at: None,
             embedding: None,
             tags: vec!["cache".to_string()],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             is_summary: false,
             source_memory_ids: None,
@@ -1762,6 +1774,8 @@ mod tests {
             expires_at: None,
             embedding: None,
             tags: vec!["db".to_string(), "cache".to_string()],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: Some("consolidation".to_string()),
             is_summary: true,
             source_memory_ids: Some(vec![MemoryId::new("source-1"), MemoryId::new("source-2")]),
@@ -1817,6 +1831,8 @@ mod tests {
             expires_at: None,
             embedding: None,
             tags: vec![],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             is_summary: false,
             source_memory_ids: None,

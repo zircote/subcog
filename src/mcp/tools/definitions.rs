@@ -1238,3 +1238,168 @@ pub fn context_template_delete_tool() -> ToolDefinition {
         }),
     }
 }
+
+// ============================================================================
+// Group Management Tools (Feature-gated: group-scope)
+// ============================================================================
+
+/// Defines the `group_create` tool for creating new groups.
+#[cfg(feature = "group-scope")]
+pub fn group_create_tool() -> super::ToolDefinition {
+    super::ToolDefinition {
+        name: "subcog_group_create".to_string(),
+        description:
+            "Create a new group for shared memory access. You become the admin of the group."
+                .to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Group name (must be unique)"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Optional description of the group's purpose"
+                }
+            },
+            "required": ["name"]
+        }),
+    }
+}
+
+/// Defines the `group_list` tool for listing groups.
+#[cfg(feature = "group-scope")]
+pub fn group_list_tool() -> super::ToolDefinition {
+    super::ToolDefinition {
+        name: "subcog_group_list".to_string(),
+        description: "List all groups you have access to, including your role in each.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    }
+}
+
+/// Defines the `group_get` tool for getting group details.
+#[cfg(feature = "group-scope")]
+pub fn group_get_tool() -> super::ToolDefinition {
+    super::ToolDefinition {
+        name: "subcog_group_get".to_string(),
+        description: "Get details of a specific group, including members and their roles."
+            .to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "string",
+                    "description": "The ID of the group to retrieve"
+                }
+            },
+            "required": ["group_id"]
+        }),
+    }
+}
+
+/// Defines the `group_add_member` tool for adding members to a group.
+#[cfg(feature = "group-scope")]
+pub fn group_add_member_tool() -> super::ToolDefinition {
+    super::ToolDefinition {
+        name: "subcog_group_add_member".to_string(),
+        description:
+            "Add a member to a group with a specified role. Requires admin role in the group."
+                .to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "string",
+                    "description": "The ID of the group"
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": "The user ID to add"
+                },
+                "role": {
+                    "type": "string",
+                    "description": "Role for the new member",
+                    "enum": ["read", "write", "admin"],
+                    "default": "read"
+                }
+            },
+            "required": ["group_id", "user_id"]
+        }),
+    }
+}
+
+/// Defines the `group_remove_member` tool for removing members from a group.
+#[cfg(feature = "group-scope")]
+pub fn group_remove_member_tool() -> super::ToolDefinition {
+    super::ToolDefinition {
+        name: "subcog_group_remove_member".to_string(),
+        description: "Remove a member from a group. Requires admin role in the group.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "string",
+                    "description": "The ID of the group"
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": "The user ID to remove"
+                }
+            },
+            "required": ["group_id", "user_id"]
+        }),
+    }
+}
+
+/// Defines the `group_update_role` tool for updating a member's role.
+#[cfg(feature = "group-scope")]
+pub fn group_update_role_tool() -> super::ToolDefinition {
+    super::ToolDefinition {
+        name: "subcog_group_update_role".to_string(),
+        description: "Update a member's role in a group. Requires admin role in the group."
+            .to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "string",
+                    "description": "The ID of the group"
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": "The user ID to update"
+                },
+                "role": {
+                    "type": "string",
+                    "description": "New role for the member",
+                    "enum": ["read", "write", "admin"]
+                }
+            },
+            "required": ["group_id", "user_id", "role"]
+        }),
+    }
+}
+
+/// Defines the `group_delete` tool for deleting a group.
+#[cfg(feature = "group-scope")]
+pub fn group_delete_tool() -> super::ToolDefinition {
+    super::ToolDefinition {
+        name: "subcog_group_delete".to_string(),
+        description: "Delete a group. Requires admin role. Warning: This does not delete memories, but they will no longer be group-accessible.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "string",
+                    "description": "The ID of the group to delete"
+                }
+            },
+            "required": ["group_id"]
+        }),
+    }
+}

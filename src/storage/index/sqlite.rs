@@ -173,6 +173,8 @@ struct MemoryRow {
     is_summary: bool,
     source_memory_ids: Option<String>,
     consolidation_timestamp: Option<i64>,
+    #[cfg(feature = "group-scope")]
+    group_id: Option<String>,
 }
 
 impl SqliteBackend {
@@ -281,6 +283,10 @@ impl SqliteBackend {
             "ALTER TABLE memories ADD COLUMN consolidation_timestamp INTEGER",
             [],
         );
+
+        // Add group_id column for group-scoped memories (ADR-0057: Group Memory Graphs)
+        #[cfg(feature = "group-scope")]
+        let _ = conn.execute("ALTER TABLE memories ADD COLUMN group_id TEXT", []);
 
         // Create FTS5 virtual table for full-text search (standalone, not synced with memories)
         // Note: FTS5 virtual tables use inverted indexes for MATCH queries and don't support
@@ -863,18 +869,23 @@ impl SqliteBackend {
 }
 
 fn fetch_memory_row(conn: &Connection, id: &MemoryId) -> Result<Option<MemoryRow>> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT m.id, m.namespace, m.domain, m.project_id, m.branch, m.file_path, m.status, m.created_at,
+    #[cfg(feature = "group-scope")]
+    let query = "SELECT m.id, m.namespace, m.domain, m.project_id, m.branch, m.file_path, m.status, m.created_at,
+                    m.tombstoned_at, m.expires_at, m.tags, m.source, f.content, m.is_summary, m.source_memory_ids, m.consolidation_timestamp, m.group_id
+             FROM memories m
+             JOIN memories_fts f ON m.id = f.id
+             WHERE m.id = ?1";
+    #[cfg(not(feature = "group-scope"))]
+    let query = "SELECT m.id, m.namespace, m.domain, m.project_id, m.branch, m.file_path, m.status, m.created_at,
                     m.tombstoned_at, m.expires_at, m.tags, m.source, f.content, m.is_summary, m.source_memory_ids, m.consolidation_timestamp
              FROM memories m
              JOIN memories_fts f ON m.id = f.id
-             WHERE m.id = ?1",
-        )
-        .map_err(|e| Error::OperationFailed {
-            operation: "prepare_get_memory".to_string(),
-            cause: e.to_string(),
-        })?;
+             WHERE m.id = ?1";
+
+    let mut stmt = conn.prepare(query).map_err(|e| Error::OperationFailed {
+        operation: "prepare_get_memory".to_string(),
+        cause: e.to_string(),
+    })?;
 
     let result: std::result::Result<Option<_>, _> = stmt
         .query_row(params![id.as_str()], |row| {
@@ -895,6 +906,8 @@ fn fetch_memory_row(conn: &Connection, id: &MemoryId) -> Result<Option<MemoryRow
                 is_summary: row.get::<_, Option<bool>>(13)?.unwrap_or(false),
                 source_memory_ids: row.get(14)?,
                 consolidation_timestamp: row.get(15)?,
+                #[cfg(feature = "group-scope")]
+                group_id: row.get(16)?,
             })
         })
         .optional();
@@ -974,6 +987,8 @@ fn build_memory_from_row(row: MemoryRow) -> Memory {
         expires_at,
         embedding: None,
         tags,
+        #[cfg(feature = "group-scope")]
+        group_id: row.group_id,
         source: row.source,
         is_summary: row.is_summary,
         source_memory_ids: row.source_memory_ids.as_ref().map(|json| {
@@ -999,6 +1014,7 @@ impl IndexBackend for SqliteBackend {
             domain = %memory.domain.to_string()
         )
     )]
+    #[allow(clippy::too_many_lines)]
     fn index(&self, memory: &Memory) -> Result<()> {
         let start = Instant::now();
         let result = (|| {
@@ -1027,6 +1043,36 @@ impl IndexBackend for SqliteBackend {
                     .as_ref()
                     .map(|ids| serde_json::to_string(ids).unwrap_or_default());
                 let expires_at_i64 = memory.expires_at.map(u64::cast_signed);
+                #[cfg(feature = "group-scope")]
+                let group_id = memory.group_id.as_deref();
+                #[cfg(feature = "group-scope")]
+                conn.execute(
+                    "INSERT OR REPLACE INTO memories (id, namespace, domain, project_id, branch, file_path, status, created_at, tags, source, tombstoned_at, expires_at, is_summary, source_memory_ids, consolidation_timestamp, group_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                    params![
+                        memory.id.as_str(),
+                        memory.namespace.as_str(),
+                        domain_str,
+                        memory.project_id.as_deref(),
+                        memory.branch.as_deref(),
+                        memory.file_path.as_deref(),
+                        memory.status.as_str(),
+                        created_at_i64,
+                        tags_str,
+                        memory.source.as_deref(),
+                        tombstoned_at_i64,
+                        expires_at_i64,
+                        memory.is_summary,
+                        source_ids_json,
+                        consolidation_ts_i64,
+                        group_id
+                    ],
+                )
+                .map_err(|e| Error::OperationFailed {
+                    operation: "insert_memory".to_string(),
+                    cause: e.to_string(),
+                })?;
+                #[cfg(not(feature = "group-scope"))]
                 conn.execute(
                     "INSERT OR REPLACE INTO memories (id, namespace, domain, project_id, branch, file_path, status, created_at, tags, source, tombstoned_at, expires_at, is_summary, source_memory_ids, consolidation_timestamp)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
@@ -1409,6 +1455,16 @@ impl IndexBackend for SqliteBackend {
             // Build placeholders for IN clause
             let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
 
+            #[cfg(feature = "group-scope")]
+            let sql = format!(
+                "SELECT m.id, m.namespace, m.domain, m.project_id, m.branch, m.file_path, m.status, m.created_at,
+                        m.tombstoned_at, m.expires_at, m.tags, m.source, f.content, m.is_summary, m.source_memory_ids, m.consolidation_timestamp, m.group_id
+                 FROM memories m
+                 JOIN memories_fts f ON m.id = f.id
+                 WHERE m.id IN ({})",
+                placeholders.join(", ")
+            );
+            #[cfg(not(feature = "group-scope"))]
             let sql = format!(
                 "SELECT m.id, m.namespace, m.domain, m.project_id, m.branch, m.file_path, m.status, m.created_at,
                         m.tombstoned_at, m.expires_at, m.tags, m.source, f.content, m.is_summary, m.source_memory_ids, m.consolidation_timestamp
@@ -1447,6 +1503,8 @@ impl IndexBackend for SqliteBackend {
                         is_summary: row.get::<_, Option<bool>>(13)?.unwrap_or(false),
                         source_memory_ids: row.get(14)?,
                         consolidation_timestamp: row.get(15)?,
+                        #[cfg(feature = "group-scope")]
+                        group_id: row.get(16)?,
                     })
                 })
                 .map_err(|e| Error::OperationFailed {
@@ -1654,6 +1712,8 @@ mod tests {
             expires_at: None,
             embedding: None,
             tags: vec!["test".to_string()],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             is_summary: false,
             source_memory_ids: None,

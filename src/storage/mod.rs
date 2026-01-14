@@ -22,6 +22,8 @@
 pub mod bulkhead;
 pub mod context_template;
 pub mod graph;
+#[cfg(feature = "group-scope")]
+pub mod group;
 pub mod index;
 pub mod migrations;
 pub mod persistence;
@@ -47,6 +49,10 @@ pub use resilience::{
     StorageResilienceConfig, is_retryable_storage_error, retry_connection,
 };
 pub use traits::{IndexBackend, PersistenceBackend, VectorBackend};
+
+// Group storage (feature-gated)
+#[cfg(feature = "group-scope")]
+pub use group::{GroupBackend, GroupBackendType, GroupStorageFactory, SqliteGroupBackend};
 
 /// Composite storage combining all three layers.
 pub struct CompositeStorage<P, I, V>

@@ -225,6 +225,9 @@ encryption = ["dep:aes-gcm", "dep:rand", "dep:base64"]
 # Organization-scoped storage (requires PostgreSQL, optionally Redis)
 # Feature-gated stub for future implementation
 org-scope = []
+# Group-scoped shared memory graphs (requires org-scope)
+# Enables team collaboration through shared memory groups within an organization
+group-scope = ["org-scope"]
 # Parquet export format support (Apache Arrow columnar)
 parquet-export = ["dep:arrow", "dep:parquet"]
 # All features enabled

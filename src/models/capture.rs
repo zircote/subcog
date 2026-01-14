@@ -30,6 +30,13 @@ pub struct CaptureRequest {
     ///
     /// Default: `None` (uses context-appropriate scope based on git status)
     pub scope: Option<DomainScope>,
+    /// Optional group identifier for group-scoped memories.
+    ///
+    /// When set, the memory is associated with a specific group and requires
+    /// write permission to that group. Group-scoped memories are visible to
+    /// all group members during recall.
+    #[cfg(feature = "group-scope")]
+    pub group_id: Option<String>,
 }
 
 impl CaptureRequest {
@@ -87,6 +94,17 @@ impl CaptureRequest {
     #[must_use]
     pub const fn with_scope(mut self, scope: DomainScope) -> Self {
         self.scope = Some(scope);
+        self
+    }
+
+    /// Sets the group identifier for group-scoped memories.
+    ///
+    /// When set, the memory is associated with a specific group and requires
+    /// write permission to that group.
+    #[cfg(feature = "group-scope")]
+    #[must_use]
+    pub fn with_group_id(mut self, group_id: impl Into<String>) -> Self {
+        self.group_id = Some(group_id.into());
         self
     }
 }

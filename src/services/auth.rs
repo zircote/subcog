@@ -33,6 +33,12 @@
 use crate::{Error, Result};
 use std::collections::HashSet;
 
+#[cfg(feature = "group-scope")]
+use std::collections::HashMap;
+
+#[cfg(feature = "group-scope")]
+use crate::models::group::GroupRole;
+
 /// Permissions for service operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Permission {
@@ -83,6 +89,9 @@ pub struct AuthContext {
     org_name: Option<String>,
     /// Role within the organization (admin, member, etc.).
     org_role: Option<String>,
+    /// Group roles (`group_id` → role string).
+    #[cfg(feature = "group-scope")]
+    group_roles: HashMap<String, String>,
 }
 
 impl Default for AuthContext {
@@ -106,6 +115,8 @@ impl AuthContext {
             is_local: true,
             org_name: None,
             org_role: None,
+            #[cfg(feature = "group-scope")]
+            group_roles: HashMap::new(),
         }
     }
 
@@ -122,6 +133,8 @@ impl AuthContext {
             is_local: false,
             org_name: None,
             org_role: None,
+            #[cfg(feature = "group-scope")]
+            group_roles: HashMap::new(),
         }
     }
 
@@ -244,6 +257,92 @@ impl AuthContext {
             )))
         }
     }
+
+    /// Returns the user's role in a specific group.
+    ///
+    /// # Arguments
+    ///
+    /// * `group_id` - The group identifier.
+    ///
+    /// # Returns
+    ///
+    /// `Some(GroupRole)` if the user has a role in the group, `None` otherwise.
+    /// For local contexts, always returns `Some(GroupRole::Admin)`.
+    #[cfg(feature = "group-scope")]
+    #[must_use]
+    pub fn get_group_role(&self, group_id: &str) -> Option<GroupRole> {
+        // Local contexts have admin access to all groups
+        if self.is_local {
+            return Some(GroupRole::Admin);
+        }
+        // Wildcard scope grants admin to all groups
+        if self.scopes.contains("*") {
+            return Some(GroupRole::Admin);
+        }
+        // Look up the specific group role
+        self.group_roles
+            .get(group_id)
+            .and_then(|role| GroupRole::parse(role))
+    }
+
+    /// Checks if the user has at least the specified role in a group.
+    ///
+    /// # Arguments
+    ///
+    /// * `group_id` - The group identifier.
+    /// * `min_role` - The minimum required role.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the user has sufficient permissions, `false` otherwise.
+    #[cfg(feature = "group-scope")]
+    #[must_use]
+    pub fn has_group_permission(&self, group_id: &str, min_role: GroupRole) -> bool {
+        let Some(role) = self.get_group_role(group_id) else {
+            return false;
+        };
+        match min_role {
+            GroupRole::Admin => role.can_manage(),
+            GroupRole::Write => role.can_write(),
+            GroupRole::Read => role.can_read(),
+        }
+    }
+
+    /// Requires at least the specified role in a group.
+    ///
+    /// # Arguments
+    ///
+    /// * `group_id` - The group identifier.
+    /// * `min_role` - The minimum required role.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::Unauthorized` if the user doesn't have the required role.
+    #[cfg(feature = "group-scope")]
+    pub fn require_group_role(&self, group_id: &str, min_role: GroupRole) -> Result<()> {
+        if self.has_group_permission(group_id, min_role) {
+            tracing::debug!(
+                subject = ?self.subject,
+                group_id = group_id,
+                required_role = min_role.as_str(),
+                is_local = self.is_local,
+                "Group authorization granted"
+            );
+            Ok(())
+        } else {
+            tracing::warn!(
+                subject = ?self.subject,
+                group_id = group_id,
+                required_role = min_role.as_str(),
+                actual_role = ?self.get_group_role(group_id),
+                "Group authorization denied"
+            );
+            Err(Error::Unauthorized(format!(
+                "Role '{}' required in group '{group_id}'",
+                min_role.as_str()
+            )))
+        }
+    }
 }
 
 /// Builder for constructing an [`AuthContext`].
@@ -254,6 +353,8 @@ pub struct AuthContextBuilder {
     is_local: bool,
     org_name: Option<String>,
     org_role: Option<String>,
+    #[cfg(feature = "group-scope")]
+    group_roles: HashMap<String, String>,
 }
 
 impl AuthContextBuilder {
@@ -301,6 +402,19 @@ impl AuthContextBuilder {
         self
     }
 
+    /// Sets a group role for the user.
+    ///
+    /// # Arguments
+    ///
+    /// * `group_id` - The group identifier
+    /// * `role` - The role in that group (admin, write, read)
+    #[cfg(feature = "group-scope")]
+    #[must_use]
+    pub fn group_role(mut self, group_id: impl Into<String>, role: impl Into<String>) -> Self {
+        self.group_roles.insert(group_id.into(), role.into());
+        self
+    }
+
     /// Builds the auth context.
     #[must_use]
     pub fn build(self) -> AuthContext {
@@ -310,6 +424,8 @@ impl AuthContextBuilder {
             is_local: self.is_local,
             org_name: self.org_name,
             org_role: self.org_role,
+            #[cfg(feature = "group-scope")]
+            group_roles: self.group_roles,
         }
     }
 }
@@ -426,5 +542,140 @@ mod tests {
         assert_eq!(Permission::Read.as_str(), "read");
         assert_eq!(Permission::Write.as_str(), "write");
         assert_eq!(Permission::Admin.as_str(), "admin");
+    }
+
+    // Group permission tests (only compiled with group-scope feature)
+
+    #[test]
+    #[cfg(feature = "group-scope")]
+    fn test_local_context_has_admin_group_role() {
+        use crate::models::group::GroupRole;
+
+        let ctx = AuthContext::local();
+
+        assert_eq!(ctx.get_group_role("any-group"), Some(GroupRole::Admin));
+        assert!(ctx.has_group_permission("any-group", GroupRole::Admin));
+        assert!(ctx.has_group_permission("any-group", GroupRole::Write));
+        assert!(ctx.has_group_permission("any-group", GroupRole::Read));
+    }
+
+    #[test]
+    #[cfg(feature = "group-scope")]
+    fn test_wildcard_scope_has_admin_group_role() {
+        use crate::models::group::GroupRole;
+
+        let ctx = AuthContext::from_scopes(vec!["*".to_string()]);
+
+        assert_eq!(ctx.get_group_role("any-group"), Some(GroupRole::Admin));
+        assert!(ctx.has_group_permission("any-group", GroupRole::Admin));
+    }
+
+    #[test]
+    #[cfg(feature = "group-scope")]
+    fn test_builder_with_group_role() {
+        use crate::models::group::GroupRole;
+
+        let ctx = AuthContext::builder()
+            .subject("test-user")
+            .group_role("group-123", "write")
+            .build();
+
+        assert_eq!(ctx.get_group_role("group-123"), Some(GroupRole::Write));
+        assert!(ctx.has_group_permission("group-123", GroupRole::Write));
+        assert!(ctx.has_group_permission("group-123", GroupRole::Read));
+        assert!(!ctx.has_group_permission("group-123", GroupRole::Admin));
+    }
+
+    #[test]
+    #[cfg(feature = "group-scope")]
+    fn test_group_role_not_found() {
+        use crate::models::group::GroupRole;
+
+        let ctx = AuthContext::builder()
+            .subject("test-user")
+            .group_role("group-123", "read")
+            .build();
+
+        // Different group ID returns None
+        assert_eq!(ctx.get_group_role("group-456"), None);
+        assert!(!ctx.has_group_permission("group-456", GroupRole::Read));
+    }
+
+    #[test]
+    #[cfg(feature = "group-scope")]
+    fn test_require_group_role_success() {
+        use crate::models::group::GroupRole;
+
+        let ctx = AuthContext::builder()
+            .group_role("group-123", "admin")
+            .build();
+
+        assert!(
+            ctx.require_group_role("group-123", GroupRole::Admin)
+                .is_ok()
+        );
+        assert!(
+            ctx.require_group_role("group-123", GroupRole::Write)
+                .is_ok()
+        );
+        assert!(ctx.require_group_role("group-123", GroupRole::Read).is_ok());
+    }
+
+    #[test]
+    #[cfg(feature = "group-scope")]
+    fn test_require_group_role_denied() {
+        use crate::models::group::GroupRole;
+
+        let ctx = AuthContext::builder()
+            .group_role("group-123", "read")
+            .build();
+
+        assert!(ctx.require_group_role("group-123", GroupRole::Read).is_ok());
+        assert!(
+            ctx.require_group_role("group-123", GroupRole::Write)
+                .is_err()
+        );
+        assert!(
+            ctx.require_group_role("group-123", GroupRole::Admin)
+                .is_err()
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "group-scope")]
+    fn test_require_group_role_not_member() {
+        use crate::models::group::GroupRole;
+
+        let ctx = AuthContext::builder().subject("test-user").build();
+
+        // No group roles set, should fail
+        assert!(
+            ctx.require_group_role("group-123", GroupRole::Read)
+                .is_err()
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "group-scope")]
+    fn test_multiple_group_roles() {
+        use crate::models::group::GroupRole;
+
+        let ctx = AuthContext::builder()
+            .subject("test-user")
+            .group_role("group-1", "admin")
+            .group_role("group-2", "write")
+            .group_role("group-3", "read")
+            .build();
+
+        assert_eq!(ctx.get_group_role("group-1"), Some(GroupRole::Admin));
+        assert_eq!(ctx.get_group_role("group-2"), Some(GroupRole::Write));
+        assert_eq!(ctx.get_group_role("group-3"), Some(GroupRole::Read));
+
+        // Check permissions hierarchy
+        assert!(ctx.has_group_permission("group-1", GroupRole::Admin));
+        assert!(ctx.has_group_permission("group-2", GroupRole::Write));
+        assert!(!ctx.has_group_permission("group-2", GroupRole::Admin));
+        assert!(ctx.has_group_permission("group-3", GroupRole::Read));
+        assert!(!ctx.has_group_permission("group-3", GroupRole::Write));
     }
 }

@@ -26,6 +26,7 @@ pub struct ToolRegistry {
 impl ToolRegistry {
     /// Creates a new tool registry with all subcog tools.
     #[must_use]
+    #[allow(clippy::too_many_lines)]
     pub fn new() -> Self {
         let mut tools = HashMap::new();
 
@@ -136,6 +137,39 @@ impl ToolRegistry {
             definitions::context_template_delete_tool(),
         );
 
+        // Group management tools (feature-gated)
+        #[cfg(feature = "group-scope")]
+        {
+            tools.insert(
+                "subcog_group_create".to_string(),
+                definitions::group_create_tool(),
+            );
+            tools.insert(
+                "subcog_group_list".to_string(),
+                definitions::group_list_tool(),
+            );
+            tools.insert(
+                "subcog_group_get".to_string(),
+                definitions::group_get_tool(),
+            );
+            tools.insert(
+                "subcog_group_add_member".to_string(),
+                definitions::group_add_member_tool(),
+            );
+            tools.insert(
+                "subcog_group_remove_member".to_string(),
+                definitions::group_remove_member_tool(),
+            );
+            tools.insert(
+                "subcog_group_update_role".to_string(),
+                definitions::group_update_role_tool(),
+            );
+            tools.insert(
+                "subcog_group_delete".to_string(),
+                definitions::group_delete_tool(),
+            );
+        }
+
         Self { tools }
     }
 
@@ -157,6 +191,30 @@ impl ToolRegistry {
     ///
     /// Returns an error if the tool execution fails.
     pub fn execute(&self, name: &str, arguments: Value) -> Result<ToolResult> {
+        // Handle group management tools (feature-gated)
+        #[cfg(feature = "group-scope")]
+        {
+            let group_result = match name {
+                "subcog_group_create" => Some(handlers::execute_group_create(arguments.clone())),
+                "subcog_group_list" => Some(handlers::execute_group_list(arguments.clone())),
+                "subcog_group_get" => Some(handlers::execute_group_get(arguments.clone())),
+                "subcog_group_add_member" => {
+                    Some(handlers::execute_group_add_member(arguments.clone()))
+                },
+                "subcog_group_remove_member" => {
+                    Some(handlers::execute_group_remove_member(arguments.clone()))
+                },
+                "subcog_group_update_role" => {
+                    Some(handlers::execute_group_update_role(arguments.clone()))
+                },
+                "subcog_group_delete" => Some(handlers::execute_group_delete(arguments.clone())),
+                _ => None,
+            };
+            if let Some(result) = group_result {
+                return result;
+            }
+        }
+
         let result = match name {
             "subcog_capture" => handlers::execute_capture(arguments),
             "subcog_recall" => handlers::execute_recall(arguments),

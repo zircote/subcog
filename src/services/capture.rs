@@ -21,6 +21,7 @@
 //!     skip_security_check: false,
 //!     ttl_seconds: None,
 //!     scope: None,
+//!     ..Default::default()
 //! };
 //!
 //! let result = service.capture(request).expect("capture should succeed");
@@ -43,6 +44,7 @@
 //!     skip_security_check: false,
 //!     ttl_seconds: None,
 //!     scope: None,
+//!     ..Default::default()
 //! };
 //!
 //! let validation = service.validate(&request).expect("validation should succeed");
@@ -388,6 +390,7 @@ impl CaptureService {
     ///     skip_security_check: false,
     ///     ttl_seconds: None,
     ///     scope: None,
+    ///     ..Default::default()
     /// };
     ///
     /// let result = service.capture(request)?;
@@ -545,6 +548,8 @@ impl CaptureService {
                 expires_at,
                 embedding: embedding.clone(),
                 tags,
+                #[cfg(feature = "group-scope")]
+                group_id: request.group_id,
                 source: request.source,
                 is_summary: false,
                 source_memory_ids: None,
@@ -764,6 +769,7 @@ impl CaptureService {
     ///     skip_security_check: false,
     ///     ttl_seconds: None,
     ///     scope: None,
+    ///     ..Default::default()
     /// };
     /// let result = service.validate(&request)?;
     /// assert!(result.is_valid);
@@ -778,6 +784,7 @@ impl CaptureService {
     ///     skip_security_check: false,
     ///     ttl_seconds: None,
     ///     scope: None,
+    ///     ..Default::default()
     /// };
     /// let result = service.validate(&empty_request)?;
     /// assert!(!result.is_valid);
@@ -816,6 +823,9 @@ impl CaptureService {
     /// This method requires [`super::auth::Permission::Write`] to be present in the auth context.
     /// Use this for MCP/HTTP endpoints where authorization is required.
     ///
+    /// When the request contains a `group_id`, this method also validates that the
+    /// auth context has write permission to that group.
+    ///
     /// # Arguments
     ///
     /// * `request` - The capture request
@@ -824,6 +834,7 @@ impl CaptureService {
     /// # Errors
     ///
     /// Returns [`Error::Unauthorized`] if write permission is not granted.
+    /// Returns [`Error::Unauthorized`] if group write permission is required but not granted.
     /// Returns other errors as per [`capture`](Self::capture).
     pub fn capture_authorized(
         &self,
@@ -831,6 +842,14 @@ impl CaptureService {
         auth: &super::auth::AuthContext,
     ) -> Result<CaptureResult> {
         auth.require(super::auth::Permission::Write)?;
+
+        // Check group write permission if group_id is specified
+        #[cfg(feature = "group-scope")]
+        if let Some(ref group_id) = request.group_id {
+            use crate::models::group::GroupRole;
+            auth.require_group_role(group_id, GroupRole::Write)?;
+        }
+
         self.capture(request)
     }
 }
@@ -895,6 +914,8 @@ mod tests {
             skip_security_check: false,
             ttl_seconds: None,
             scope: None,
+            #[cfg(feature = "group-scope")]
+            group_id: None,
         }
     }
 
@@ -996,6 +1017,8 @@ mod tests {
             expires_at: None,
             embedding: None,
             tags: vec![],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             is_summary: false,
             source_memory_ids: None,
@@ -1088,6 +1111,8 @@ mod tests {
             skip_security_check: false,
             ttl_seconds: None,
             scope: None,
+            #[cfg(feature = "group-scope")]
+            group_id: None,
         };
 
         let result = service.capture(request).expect("capture");
@@ -1242,5 +1267,134 @@ mod tests {
         assert!(service.has_embedder());
         assert!(service.has_index());
         assert!(!service.has_vector()); // Not configured
+    }
+
+    // ========================================================================
+    // Group-scoped capture tests
+    // ========================================================================
+
+    #[cfg(feature = "group-scope")]
+    mod group_scope_tests {
+        use super::*;
+        use crate::services::auth::AuthContext;
+
+        fn test_config() -> Config {
+            Config::default()
+        }
+
+        #[test]
+        fn test_capture_with_group_id() {
+            let index: Arc<dyn IndexBackend + Send + Sync> =
+                Arc::new(SqliteBackend::in_memory().unwrap());
+            let service = CaptureService::new(test_config()).with_index(Arc::clone(&index));
+
+            let request = CaptureRequest::new("Group-scoped memory content")
+                .with_namespace(Namespace::Decisions)
+                .with_group_id("team-alpha");
+
+            let result = service.capture(request).expect("capture should succeed");
+
+            // Verify the memory was stored with group_id
+            let stored = index
+                .get_memory(&result.memory_id)
+                .expect("get memory")
+                .expect("stored memory");
+            assert_eq!(stored.group_id.as_deref(), Some("team-alpha"));
+        }
+
+        #[test]
+        fn test_capture_authorized_with_group_permission() {
+            let service = CaptureService::new(test_config());
+
+            // Use builder to create auth with write scope and group permission
+            let auth = AuthContext::builder()
+                .scope("write")
+                .group_role("team-alpha", "write")
+                .build();
+
+            let request = CaptureRequest::new("Group content")
+                .with_namespace(Namespace::Decisions)
+                .with_group_id("team-alpha");
+
+            let result = service.capture_authorized(request, &auth);
+            assert!(result.is_ok(), "Should succeed with group permission");
+        }
+
+        #[test]
+        fn test_capture_authorized_fails_without_group_permission() {
+            let service = CaptureService::new(test_config());
+
+            // Auth with write scope but NO group permission
+            let auth = AuthContext::builder().scope("write").build();
+
+            let request = CaptureRequest::new("Group content")
+                .with_namespace(Namespace::Decisions)
+                .with_group_id("team-alpha");
+
+            let result = service.capture_authorized(request, &auth);
+            assert!(result.is_err(), "Should fail without group permission");
+            assert!(matches!(result, Err(Error::Unauthorized { .. })));
+        }
+
+        #[test]
+        fn test_capture_authorized_fails_with_read_only_group_permission() {
+            let service = CaptureService::new(test_config());
+
+            // Auth with write scope but only read permission to group
+            let auth = AuthContext::builder()
+                .scope("write")
+                .group_role("team-alpha", "read")
+                .build();
+
+            let request = CaptureRequest::new("Group content")
+                .with_namespace(Namespace::Decisions)
+                .with_group_id("team-alpha");
+
+            let result = service.capture_authorized(request, &auth);
+            assert!(result.is_err(), "Should fail with read-only group access");
+        }
+
+        #[test]
+        fn test_capture_authorized_without_group_id_succeeds() {
+            let service = CaptureService::new(test_config());
+
+            // Auth with write scope
+            let auth = AuthContext::builder().scope("write").build();
+
+            // No group_id in request - should not require group permission
+            let request =
+                CaptureRequest::new("Non-group content").with_namespace(Namespace::Decisions);
+
+            let result = service.capture_authorized(request, &auth);
+            assert!(result.is_ok(), "Should succeed without group_id");
+        }
+
+        #[test]
+        fn test_capture_request_builder_with_group_id() {
+            let request = CaptureRequest::new("Content")
+                .with_namespace(Namespace::Learnings)
+                .with_tag("test")
+                .with_group_id("my-group");
+
+            assert_eq!(request.group_id.as_deref(), Some("my-group"));
+            assert_eq!(request.namespace, Namespace::Learnings);
+        }
+
+        #[test]
+        fn test_capture_with_local_auth_and_group_id() {
+            // Local auth context should have implicit group admin access
+            let service = CaptureService::new(test_config());
+            let auth = AuthContext::local();
+
+            let request = CaptureRequest::new("Local group content")
+                .with_namespace(Namespace::Decisions)
+                .with_group_id("any-group");
+
+            let result = service.capture_authorized(request, &auth);
+            assert!(
+                result.is_ok(),
+                "Local auth should have implicit group access"
+            );
+        }
     }
 }

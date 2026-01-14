@@ -8,6 +8,7 @@ mod context_template;
 mod domain;
 mod events;
 pub mod graph;
+pub mod group;
 mod memory;
 mod prompt;
 mod search;
@@ -28,3 +29,10 @@ pub use prompt::{
     sanitize_variable_value, substitute_variables, validate_prompt_content,
 };
 pub use search::{DetailLevel, SearchFilter, SearchHit, SearchMode, SearchResult};
+
+// Group types (feature-gated)
+#[cfg(feature = "group-scope")]
+pub use group::{
+    AddMemberRequest, CreateGroupRequest, CreateInviteRequest, Group, GroupId, GroupInvite,
+    GroupMember, GroupMembership, GroupRole, is_valid_email, normalize_email,
+};
