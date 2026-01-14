@@ -2,6 +2,8 @@
 //!
 //! Orchestrates bulk memory export to various formats.
 
+#![allow(clippy::needless_pass_by_value)]
+
 use crate::io::formats::{Format, create_export_sink};
 use crate::io::traits::{ExportField, ExportSink, ExportableMemory};
 use crate::models::{Memory, SearchFilter};
@@ -66,7 +68,7 @@ impl ExportOptions {
         self
     }
 
-    /// Parses the filter query into a SearchFilter.
+    /// Parses the filter query into a `SearchFilter`.
     #[must_use]
     pub fn parse_filter(&self) -> SearchFilter {
         self.filter
@@ -120,7 +122,7 @@ pub struct ExportService {
 impl ExportService {
     /// Creates a new export service.
     #[must_use]
-    pub fn new(index: Arc<SqliteBackend>) -> Self {
+    pub const fn new(index: Arc<SqliteBackend>) -> Self {
         Self { index }
     }
 
@@ -144,8 +146,7 @@ impl ExportService {
 
         if !format.supports_export() {
             return Err(Error::InvalidInput(format!(
-                "Format {} does not support export",
-                format
+                "Format {format} does not support export"
             )));
         }
 

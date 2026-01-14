@@ -91,7 +91,7 @@ pub struct YamlExportSink<W: Write> {
 impl<W: Write> YamlExportSink<W> {
     /// Creates a new YAML export sink.
     #[must_use]
-    pub fn new(writer: W) -> Self {
+    pub const fn new(writer: W) -> Self {
         Self { writer, count: 0 }
     }
 }
@@ -130,13 +130,13 @@ mod tests {
 
     #[test]
     fn test_import_single_document() {
-        let input = r#"
+        let input = r"
 content: Test memory
 namespace: decisions
 tags:
   - rust
   - test
-"#;
+";
         let mut source = YamlImportSource::new(Cursor::new(input)).unwrap();
 
         let memory = source.next().unwrap().unwrap();
@@ -149,12 +149,12 @@ tags:
 
     #[test]
     fn test_import_multi_document() {
-        let input = r#"---
+        let input = r"---
 content: First memory
 ---
 content: Second memory
 namespace: learnings
-"#;
+";
         let mut source = YamlImportSource::new(Cursor::new(input)).unwrap();
 
         let first = source.next().unwrap().unwrap();
@@ -169,12 +169,12 @@ namespace: learnings
 
     #[test]
     fn test_import_array_format() {
-        let input = r#"
+        let input = r"
 - content: First memory
 - content: Second memory
   tags:
     - test
-"#;
+";
         let mut source = YamlImportSource::new(Cursor::new(input)).unwrap();
 
         let first = source.next().unwrap().unwrap();

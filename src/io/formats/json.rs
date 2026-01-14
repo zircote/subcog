@@ -28,7 +28,7 @@ pub struct JsonImportSource<R: BufRead> {
 impl<R: BufRead> JsonImportSource<R> {
     /// Creates a new JSON import source.
     #[must_use]
-    pub fn new(reader: R) -> Self {
+    pub const fn new(reader: R) -> Self {
         Self {
             reader,
             buffer: Vec::new(),
@@ -77,16 +77,15 @@ impl<R: BufRead> JsonImportSource<R> {
                 .map_err(|e| Error::InvalidInput(format!("Failed to parse JSON array: {e}")))?;
 
             self.buffer = memories;
-            self.buffer_index = 0;
         } else {
             // NDJSON mode - parse first line as object
             let memory: ImportedMemory = serde_json::from_str(trimmed).map_err(|e| {
                 Error::InvalidInput(format!("Line 1: Failed to parse JSON object: {e}"))
             })?;
             self.buffer.push(memory);
-            self.buffer_index = 0;
         }
 
+        self.buffer_index = 0;
         self.started = true;
         Ok(true)
     }
@@ -169,7 +168,7 @@ pub struct JsonExportSink<W: Write> {
 impl<W: Write> JsonExportSink<W> {
     /// Creates a new JSON export sink.
     #[must_use]
-    pub fn new(writer: W) -> Self {
+    pub const fn new(writer: W) -> Self {
         Self { writer, count: 0 }
     }
 }

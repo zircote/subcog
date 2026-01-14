@@ -295,8 +295,8 @@ mod tests {
                 branch: None,
                 file_path: None,
                 status: "active".to_string(),
-                created_at: 1234567890,
-                updated_at: 1234567890,
+                created_at: 1_234_567_890,
+                updated_at: 1_234_567_890,
                 tags: vec!["rust".to_string(), "test".to_string()],
                 source: None,
             })

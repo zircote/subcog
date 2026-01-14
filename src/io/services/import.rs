@@ -2,6 +2,13 @@
 //!
 //! Orchestrates bulk memory import from various formats.
 
+#![allow(
+    clippy::needless_pass_by_value,
+    clippy::cast_precision_loss,
+    clippy::unused_self,
+    clippy::unnecessary_wraps
+)]
+
 use crate::io::formats::{Format, create_import_source};
 use crate::io::traits::ImportSource;
 use crate::io::validation::{ImportValidator, ValidationSeverity};
@@ -153,7 +160,7 @@ impl ImportResult {
 
     /// Returns whether any errors occurred.
     #[must_use]
-    pub fn has_errors(&self) -> bool {
+    pub const fn has_errors(&self) -> bool {
         !self.errors.is_empty()
     }
 }
@@ -173,7 +180,7 @@ pub struct ImportService {
 impl ImportService {
     /// Creates a new import service.
     #[must_use]
-    pub fn new(capture_service: Arc<CaptureService>) -> Self {
+    pub const fn new(capture_service: Arc<CaptureService>) -> Self {
         Self { capture_service }
     }
 
@@ -315,7 +322,11 @@ impl ImportService {
             }
 
             // Store the memory (unless dry run)
-            if !options.dry_run {
+            if options.dry_run {
+                // Dry run counts as imported
+                prog.imported += 1;
+                result.imported += 1;
+            } else {
                 let request = validator.to_capture_request(imported);
                 match self.capture_service.capture(request) {
                     Ok(_) => {
@@ -334,10 +345,6 @@ impl ImportService {
                         }
                     },
                 }
-            } else {
-                // Dry run counts as imported
-                prog.imported += 1;
-                result.imported += 1;
             }
 
             if let Some(ref cb) = progress {
@@ -349,7 +356,7 @@ impl ImportService {
     }
 
     /// Checks if a memory with the given hash tag already exists.
-    fn memory_exists_with_tag(&self, _hash_tag: &str) -> Result<bool> {
+    const fn memory_exists_with_tag(&self, _hash_tag: &str) -> Result<bool> {
         // For now, we'll rely on the capture service's deduplication
         // The hash tag is added during capture and can be checked there
         // This is a simplified check - in production, we'd query the index

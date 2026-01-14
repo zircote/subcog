@@ -33,7 +33,7 @@ impl<W: Write + Send> ParquetExportSink<W> {
     /// # Errors
     ///
     /// Returns an error if initialization fails.
-    pub fn new(writer: W) -> Result<Self> {
+    pub const fn new(writer: W) -> Result<Self> {
         Ok(Self {
             writer: Some(writer),
             memories: Vec::new(),
@@ -218,8 +218,8 @@ mod tests {
             branch: Some("main".to_string()),
             file_path: None,
             status: "active".to_string(),
-            created_at: 1234567890,
-            updated_at: 1234567890,
+            created_at: 1_234_567_890,
+            updated_at: 1_234_567_890,
             tags: vec!["rust".to_string(), "test".to_string()],
             source: Some("test.rs".to_string()),
         })

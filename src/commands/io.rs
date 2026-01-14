@@ -1,5 +1,6 @@
 //! Import and export command handlers.
 
+use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -31,8 +32,7 @@ pub fn cmd_import(
 
     if !format.supports_import() {
         return Err(Error::InvalidInput(format!(
-            "Format '{}' does not support import",
-            format
+            "Format '{format}' does not support import"
         )));
     }
 
@@ -80,7 +80,6 @@ pub fn cmd_import(
             );
         }
         // Flush to ensure output appears immediately
-        use std::io::Write;
         let _ = std::io::stdout().flush();
     });
 
@@ -144,8 +143,7 @@ pub fn cmd_export(
 
     if !format.supports_export() {
         return Err(Error::InvalidInput(format!(
-            "Format '{}' does not support export",
-            format
+            "Format '{format}' does not support export"
         )));
     }
 
@@ -181,11 +179,10 @@ pub fn cmd_export(
     // Progress callback
     let progress_callback = Box::new(|exported: usize, total: Option<usize>| {
         if let Some(t) = total {
-            print!("\rExporting: {}/{}", exported, t);
+            print!("\rExporting: {exported}/{t}");
         } else {
-            print!("\rExporting: {}", exported);
+            print!("\rExporting: {exported}");
         }
-        use std::io::Write;
         let _ = std::io::stdout().flush();
     });
 
