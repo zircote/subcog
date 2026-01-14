@@ -87,7 +87,7 @@ brew upgrade subcog
 
 ## Cargo (Rust)
 
-Requires [Rust 1.85+](https://rustup.rs/).
+Requires [Rust 1.88+](https://rustup.rs/).
 
 ```bash
 # From crates.io
@@ -239,7 +239,7 @@ shasum -a 256 -c checksums.txt --ignore-missing
 
 ### Prerequisites
 
-- Rust 1.85+ (Edition 2024)
+- Rust 1.88+ (Edition 2024)
 - Git 2.30+
 - C compiler (for native dependencies)
 

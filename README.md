@@ -1,7 +1,7 @@
 # Subcog
 
 [![CI](https://github.com/zircote/subcog/actions/workflows/ci.yml/badge.svg)](https://github.com/zircote/subcog/actions/workflows/ci.yml)
-[![Rust Version](https://img.shields.io/badge/rust-1.85%2B-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Rust Version](https://img.shields.io/badge/rust-1.88%2B-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Clippy](https://img.shields.io/badge/linting-clippy-orange?logo=rust&logoColor=white)](https://github.com/rust-lang/rust-clippy)
 [![cargo-deny](https://img.shields.io/badge/security-cargo--deny-blue?logo=rust&logoColor=white)](https://github.com/EmbarkStudios/cargo-deny)
@@ -463,7 +463,7 @@ For detailed architecture documentation, see [`src/storage/traits/mod.rs`](src/s
 
 ### Prerequisites
 
-- Rust 1.85+ (Edition 2024)
+- Rust 1.88+ (Edition 2024)
 - Git 2.30+
 - [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) for supply chain security
 

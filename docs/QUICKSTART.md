@@ -4,7 +4,7 @@ Get up and running with Subcog in 5 minutes.
 
 ## Prerequisites
 
-- Rust 1.85 or later
+- Rust 1.88 or later
 - Git
 - Claude Code (optional, for IDE integration)
 
@@ -198,17 +198,64 @@ subcog prompt list
 subcog prompt list --domain user
 ```
 
-## Sync with Remote
+## Webhooks
+
+Configure webhook notifications for memory events:
 
 ```bash
-# Push memories to remote
-subcog sync push
+# List configured webhooks
+subcog webhook list
 
-# Fetch from remote
-subcog sync fetch
+# Test a webhook
+subcog webhook test my-webhook
 
-# Full sync (fetch + push)
-subcog sync
+# View delivery history
+subcog webhook history
+
+# View statistics
+subcog webhook stats
+
+# Export audit logs (GDPR)
+subcog webhook export my-domain --output audit.json
+
+# Delete audit logs (GDPR right to erasure)
+subcog webhook delete-logs my-domain
+```
+
+Configure webhooks in `~/.config/subcog/config.toml`:
+
+```toml
+[[webhooks]]
+name = "slack-notify"
+url = "https://hooks.slack.com/services/..."
+events = ["captured", "consolidated"]
+format = "slack"
+```
+
+## Import/Export
+
+Transfer memories between systems:
+
+```bash
+# Export memories to JSON
+subcog export memories.json
+
+# Export with filters
+subcog export --filter "ns:decisions" --domain project decisions.json
+
+# Export to different formats
+subcog export memories.yaml
+subcog export memories.csv
+subcog export memories.parquet
+
+# Import memories
+subcog import memories.json
+
+# Import with default namespace
+subcog import --namespace learnings --skip-duplicates imported.json
+
+# Dry run (validate without storing)
+subcog import --dry-run data.json
 ```
 
 ## Branch Garbage Collection
