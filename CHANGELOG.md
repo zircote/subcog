@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### Group/Shared Memory Graphs (feature-gated: `group-scope`)
+- **Group Management**: New group CRUD operations for team collaboration
+  - `subcog_group_create`: Create groups with name, description, and automatic admin role
+  - `subcog_group_list`: List all groups the user belongs to
+  - `subcog_group_get`: Get group details including member list
+  - `subcog_group_add_member`: Add members with role (admin/write/read)
+  - `subcog_group_remove_member`: Remove members from groups
+  - `subcog_group_update_role`: Change member role permissions
+  - `subcog_group_delete`: Delete groups (admin only)
+- **Role-Based Access Control**: Three-tier permission model
+  - `admin`: Full control (manage members, delete group)
+  - `write`: Create and edit memories
+  - `read`: View-only access
+- **SQLite Group Backend**: Dedicated `groups.db` storage with:
+  - Groups table with org_id, name, description, timestamps
+  - Group members table with email-based identity and roles
+  - Proper `ON CONFLICT` handling to preserve `joined_at` timestamps
+- **MCP Tool Integration**: Full tool definitions and handlers for all group operations
+- **Environment Configuration**: `SUBCOG_USER_ID` and `SUBCOG_ORG_ID` environment variables
+
 ## [0.7.0] - 2026-01-13
 
 ### Added
