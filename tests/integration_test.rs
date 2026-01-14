@@ -480,6 +480,8 @@ mod consolidation_integration_tests {
             is_summary: false,
             source_memory_ids: None,
             consolidation_timestamp: None,
+            #[cfg(feature = "group-scope")]
+            group_id: None,
         }
     }
 
@@ -952,6 +954,8 @@ mod consolidation_integration_tests {
                 skip_security_check: true,
                 ttl_seconds: None,
                 scope: None,
+                #[cfg(feature = "group-scope")]
+                group_id: None,
             },
             CaptureRequest {
                 namespace: Namespace::Decisions,
@@ -964,6 +968,8 @@ mod consolidation_integration_tests {
                 skip_security_check: true,
                 ttl_seconds: None,
                 scope: None,
+                #[cfg(feature = "group-scope")]
+                group_id: None,
             },
             CaptureRequest {
                 namespace: Namespace::Decisions,
@@ -976,6 +982,8 @@ mod consolidation_integration_tests {
                 skip_security_check: true,
                 ttl_seconds: None,
                 scope: None,
+                #[cfg(feature = "group-scope")]
+                group_id: None,
             },
         ];
 

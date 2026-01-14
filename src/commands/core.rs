@@ -79,6 +79,8 @@ pub fn cmd_capture(
         skip_security_check: false,
         ttl_seconds,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = service.capture(request)?;

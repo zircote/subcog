@@ -503,6 +503,8 @@ mod tests {
             expires_at: None,
             embedding: None,
             tags: vec!["test".to_string()],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             is_summary: false,
             source_memory_ids: None,

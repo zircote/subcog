@@ -799,6 +799,8 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             expires_at: None,
             embedding: None, // Will need re-embedding
             tags: merged_tags,
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: target.source.or(source_source),
             is_summary: false,
             source_memory_ids: None,
@@ -1353,6 +1355,8 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
             expires_at: None,
             embedding: None, // Will need embedding in future for searchability
             tags: merged_tags,
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: Some("consolidation".to_string()),
             is_summary: true,
             source_memory_ids: Some(source_memory_ids.clone()),
@@ -1694,6 +1698,8 @@ mod tests {
             expires_at: None,
             embedding: None,
             tags: vec!["test".to_string()],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             is_summary: false,
             source_memory_ids: None,

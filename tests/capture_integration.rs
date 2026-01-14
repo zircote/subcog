@@ -96,6 +96,8 @@ fn test_capture_rejects_empty_content() {
         skip_security_check: true,
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);
@@ -126,6 +128,8 @@ fn test_capture_rejects_whitespace_only_content() {
         skip_security_check: true,
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);
@@ -155,6 +159,8 @@ fn test_capture_rejects_oversized_content() {
         skip_security_check: true,
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);
@@ -188,6 +194,8 @@ fn test_capture_accepts_content_at_size_limit() {
         skip_security_check: true,
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);
@@ -216,6 +224,8 @@ fn test_capture_blocks_secrets_when_configured() {
         skip_security_check: false, // Don't skip security check
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);
@@ -250,6 +260,8 @@ fn test_capture_allows_secrets_when_skip_security_check() {
         skip_security_check: true, // Skip security check
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);
@@ -276,6 +288,8 @@ fn test_capture_allows_content_without_secrets() {
         skip_security_check: false,
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);
@@ -441,6 +455,8 @@ fn test_capture_result_has_valid_urn() {
         skip_security_check: true,
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);
@@ -476,6 +492,8 @@ fn test_capture_result_has_valid_memory_id() {
         skip_security_check: true,
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);
@@ -518,6 +536,8 @@ fn test_capture_preserves_tags() {
         skip_security_check: true,
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);
@@ -549,6 +569,8 @@ fn test_capture_adds_hash_tag() {
         skip_security_check: true,
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);
@@ -596,6 +618,8 @@ fn test_capture_accepts_all_namespaces() {
             skip_security_check: true,
             ttl_seconds: None,
             scope: None,
+            #[cfg(feature = "group-scope")]
+            group_id: None,
         };
 
         let result = capture_service.capture(request);
@@ -629,6 +653,8 @@ fn test_capture_accepts_default_domain() {
         skip_security_check: true,
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);
@@ -652,6 +678,8 @@ fn test_capture_accepts_context_aware_domain() {
         skip_security_check: true,
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);
@@ -682,6 +710,8 @@ fn test_capture_accepts_source_path() {
         skip_security_check: true,
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);
@@ -705,6 +735,8 @@ fn test_capture_accepts_none_source_path() {
         skip_security_check: true,
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);

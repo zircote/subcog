@@ -217,6 +217,8 @@ impl ImportValidator {
             skip_security_check: false,
             ttl_seconds: imported.ttl_seconds,
             scope: None,
+            #[cfg(feature = "group-scope")]
+            group_id: None,
         }
     }
 

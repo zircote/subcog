@@ -242,6 +242,8 @@ impl<P: LlmProvider> EnrichmentService<P> {
             expires_at: memory.expires_at,
             embedding: memory.embedding.clone(),
             tags: new_tags.to_vec(),
+            #[cfg(feature = "group-scope")]
+            group_id: memory.group_id.clone(),
             source: memory.source.clone(),
             is_summary: memory.is_summary,
             source_memory_ids: memory.source_memory_ids.clone(),

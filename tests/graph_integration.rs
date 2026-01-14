@@ -164,6 +164,8 @@ fn test_entity_extraction_triggered_during_capture() {
         skip_security_check: true,
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);
@@ -197,6 +199,8 @@ fn test_entities_stored_in_graph_after_capture() {
         skip_security_check: true,
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);
@@ -506,6 +510,8 @@ fn test_capture_without_extraction() {
         skip_security_check: true,
         ttl_seconds: None,
         scope: None,
+        #[cfg(feature = "group-scope")]
+        group_id: None,
     };
 
     let result = capture_service.capture(request);

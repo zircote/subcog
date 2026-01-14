@@ -97,6 +97,8 @@ impl CaptureOrchestrator {
                 skip_security_check: false,
                 ttl_seconds: None,
                 scope: None, // Use default scope
+                #[cfg(feature = "group-scope")]
+                group_id: None,
             };
 
             if let Ok(result) = capture.capture(request.clone()) {

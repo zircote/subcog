@@ -154,6 +154,8 @@ impl StoredMemory {
             expires_at: self.expires_at,
             embedding: self.embedding.clone(),
             tags: self.tags.clone(),
+            #[cfg(feature = "group-scope")]
+            group_id: None, // TODO: Add group_id to filesystem persistence
             source: self.source.clone(),
             is_summary: self.is_summary,
             source_memory_ids: self
@@ -503,6 +505,8 @@ mod tests {
             expires_at: None,
             embedding: None,
             tags: vec!["test".to_string()],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: Some("test.rs".to_string()),
             is_summary: false,
             source_memory_ids: None,
