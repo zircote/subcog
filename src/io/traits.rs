@@ -260,7 +260,7 @@ pub trait ExportSink {
 
 /// Fields that can be selected for export.
 ///
-/// Used with [`ExportOptions::fields`] to customize output.
+/// Used with [`crate::io::services::export::ExportOptions::fields`] to customize output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExportField {
