@@ -171,47 +171,77 @@ impl<W: Write + Send + 'static> ExportSink for ParquetExportSink<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
+    use std::io::Write as IoWrite;
+    use std::sync::{Arc, Mutex};
+
+    /// Shared buffer writer for tests that satisfies `'static` bound.
+    #[derive(Clone)]
+    struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
+
+    impl SharedBuffer {
+        fn new() -> Self {
+            Self(Arc::new(Mutex::new(Vec::new())))
+        }
+
+        fn into_inner(self) -> Vec<u8> {
+            Arc::try_unwrap(self.0)
+                .map(|m| m.into_inner().unwrap_or_default())
+                .unwrap_or_default()
+        }
+    }
+
+    impl IoWrite for SharedBuffer {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .map_err(|e| std::io::Error::other(e.to_string()))?
+                .write(buf)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn test_parquet_export() {
-        let mut output = Cursor::new(Vec::new());
-        {
-            let mut sink = ParquetExportSink::new(&mut output).unwrap();
-            sink.write(&ExportableMemory {
-                id: "test-1".to_string(),
-                content: "Test memory content".to_string(),
-                namespace: "decisions".to_string(),
-                domain: "project".to_string(),
-                project_id: Some("test-repo".to_string()),
-                branch: Some("main".to_string()),
-                file_path: None,
-                status: "active".to_string(),
-                created_at: 1234567890,
-                updated_at: 1234567890,
-                tags: vec!["rust".to_string(), "test".to_string()],
-                source: Some("test.rs".to_string()),
-            })
-            .unwrap();
-            Box::new(sink).finalize().unwrap();
-        }
+        let buffer = SharedBuffer::new();
+        let buffer_clone = buffer.clone();
+
+        let mut sink = ParquetExportSink::new(buffer).unwrap();
+        sink.write(&ExportableMemory {
+            id: "test-1".to_string(),
+            content: "Test memory content".to_string(),
+            namespace: "decisions".to_string(),
+            domain: "project".to_string(),
+            project_id: Some("test-repo".to_string()),
+            branch: Some("main".to_string()),
+            file_path: None,
+            status: "active".to_string(),
+            created_at: 1234567890,
+            updated_at: 1234567890,
+            tags: vec!["rust".to_string(), "test".to_string()],
+            source: Some("test.rs".to_string()),
+        })
+        .unwrap();
+        Box::new(sink).finalize().unwrap();
 
         // Verify Parquet magic bytes (PAR1)
-        let data = output.into_inner();
+        let data = buffer_clone.into_inner();
         assert!(!data.is_empty());
         assert_eq!(&data[0..4], b"PAR1");
     }
 
     #[test]
     fn test_parquet_empty_export() {
-        let mut output = Cursor::new(Vec::new());
-        {
-            let sink = ParquetExportSink::new(&mut output).unwrap();
-            Box::new(sink).finalize().unwrap();
-        }
+        let buffer = SharedBuffer::new();
+        let buffer_clone = buffer.clone();
+
+        let sink = ParquetExportSink::new(buffer).unwrap();
+        Box::new(sink).finalize().unwrap();
 
         // Empty export should produce empty output
-        let data = output.into_inner();
+        let data = buffer_clone.into_inner();
         assert!(data.is_empty());
     }
 
