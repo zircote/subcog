@@ -109,7 +109,7 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
       - name: Run Trivy vulnerability scanner (filesystem)
-        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -147,7 +147,7 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
       - name: Scan Grafana Dockerfile
-        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
         with:
           scan-type: 'config'
           scan-ref: 'docker/grafana/Dockerfile'
@@ -156,7 +156,7 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM'
 
       - name: Scan OTEL Collector Dockerfile
-        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
         with:
           scan-type: 'config'
           scan-ref: 'docker/otel-collector/Dockerfile'
@@ -195,7 +195,7 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
       - name: Dependency Review
-        uses: actions/dependency-review-action@da24556b548a50705dd671f47852072ea4c105d9 # v4.7.1
+        uses: actions/dependency-review-action@3c4e3dcb1aa7874d2c16be7d79418e9b7efd6261 # v4.8.2
         with:
           # Fail on high and critical vulnerabilities
           fail-on-severity: high
@@ -232,7 +232,7 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
       - name: Install cargo-audit
-        uses: taiki-e/install-action@0e76c5c569f13f7eb21e8e5b26fe710062b57b62 # v2.65.13
+        uses: taiki-e/install-action@90558ad1e179036f31467972b00dec6cb80701fa # v2.66.3
         with:
           tool: cargo-audit
 
