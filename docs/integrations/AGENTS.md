@@ -142,20 +142,18 @@ Before ending a session, review and capture:
 4. **Blockers resolved**: Any solutions worth remembering?
 5. **Tech debt created**: Any TODOs or shortcuts taken?
 
-If you made significant progress, run:
-```
-Use the subcog_sync tool with direction "push" to sync memories to remote.
-```
+> **Note**: As of v0.8.0, `subcog_sync` is deprecated. SQLite is now the authoritative storage layer and memories persist automatically.
 
 ---
 
 ## Advanced Features
 
-### Prompt Templates
+### Prompt Templates (v0.8.0+)
 
-Save reusable prompts for common tasks:
+Save reusable prompts for common tasks using the consolidated `subcog_prompts` tool:
 ```
-Use the prompt_save tool with:
+Use the subcog_prompts tool with:
+- action: "save"
 - name: "code-review"
 - content: "Review {{file}} for {{focus_area}} issues"
 - tags: ["review", "quality"]
@@ -163,10 +161,13 @@ Use the prompt_save tool with:
 
 Run saved prompts:
 ```
-Use the prompt_run tool with:
+Use the subcog_prompts tool with:
+- action: "run"
 - name: "code-review"
 - variables: {"file": "src/main.rs", "focus_area": "security"}
 ```
+
+> **Note**: Legacy `prompt_save`, `prompt_list`, `prompt_get`, `prompt_run`, and `prompt_delete` tools are deprecated. Use `subcog_prompts` with the appropriate `action` parameter instead.
 
 ### Memory Consolidation
 

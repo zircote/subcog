@@ -18,22 +18,27 @@ Subcog provides these MCP tools for memory operations:
 | Tool | Purpose |
 |------|---------|
 | `subcog_capture` | Save memories (decisions, patterns, learnings) |
-| `subcog_recall` | Search and retrieve memories |
+| `subcog_recall` | Search and retrieve memories (omit query to list all) |
+| `subcog_get` | Retrieve a memory by ID |
+| `subcog_update` | Update memory content and/or tags |
+| `subcog_delete` | Delete a memory |
 | `subcog_status` | Check memory system status |
 | `subcog_namespaces` | List available memory categories |
-| `subcog_sync` | Sync memories with git remote |
 | `subcog_consolidate` | Merge related memories |
 | `subcog_enrich` | Enhance memory metadata via LLM |
 
-### Prompt Management Tools
+### Consolidated Tools (v0.8.0+)
 
-| Tool | Purpose |
-|------|---------|
-| `prompt_save` | Save reusable prompt templates |
-| `prompt_list` | List saved prompts |
-| `prompt_get` | Retrieve a prompt by name |
-| `prompt_run` | Execute a prompt with variables |
-| `prompt_delete` | Remove a saved prompt |
+| Tool | Actions | Purpose |
+|------|---------|---------|
+| `subcog_prompts` | save, list, get, run, delete | Prompt template management |
+| `subcog_templates` | save, list, get, render, delete | Context template management |
+| `subcog_graph` | neighbors, path, stats, visualize | Knowledge graph operations |
+| `subcog_entities` | create, get, list, delete, extract, merge | Entity management |
+| `subcog_relationships` | create, get, list, delete, infer | Relationship management |
+
+> **Note**: Legacy `prompt_*` tools are deprecated. Use `subcog_prompts` with the appropriate `action` parameter.
+> **Note**: `subcog_sync` is deprecated. SQLite is now the authoritative storage layer.
 
 ---
 
@@ -106,7 +111,9 @@ Begin every session by checking memory status:
 
 Before ending significant sessions:
 1. Review for uncaptured decisions or learnings
-2. Call `subcog_sync` with direction "push" if memories were captured
+2. Capture any important information that was discussed
+
+> **Note**: `subcog_sync` is deprecated. Memories persist automatically via SQLite.
 
 ---
 

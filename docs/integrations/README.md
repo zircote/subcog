@@ -119,9 +119,9 @@ Before ending a session, review and capture:
 3. Learnings discovered
 4. Blockers resolved
 5. Tech debt created
-
-If memories were captured, call subcog_sync with direction "push".
 ```
+
+> **Note**: `subcog_sync` is deprecated as of v0.8.0. SQLite is now the authoritative storage layer and memories persist automatically.
 
 ---
 
@@ -296,24 +296,40 @@ RECALL before acting on:
 
 | Tool | Required Params | Optional Params | Description |
 |------|-----------------|-----------------|-------------|
-| `subcog_capture` | `content`, `namespace` | `tags`, `source` | Save a memory |
-| `subcog_recall` | `query` | `filter`, `namespace`, `mode`, `detail`, `limit` | Search memories |
+| `subcog_capture` | `content`, `namespace` | `tags`, `source`, `domain` | Save a memory |
+| `subcog_recall` | - | `query`, `filter`, `namespace`, `mode`, `detail`, `limit`, `offset` | Search or list memories |
+| `subcog_get` | `memory_id` | - | Retrieve a memory by ID |
+| `subcog_update` | `memory_id` | `content`, `tags` | Update memory |
+| `subcog_delete` | `memory_id` | `hard` | Delete a memory |
 | `subcog_status` | - | - | Get system status |
 | `subcog_namespaces` | - | - | List namespaces |
-| `subcog_sync` | - | `direction` (push/fetch/full) | Sync with remote |
 | `subcog_consolidate` | `namespace` | `query`, `strategy`, `dry_run` | Merge memories |
 | `subcog_enrich` | `memory_id` | `enrich_tags`, `enrich_structure`, `add_context` | Enhance metadata |
 | `subcog_reindex` | - | `repo_path` | Rebuild index |
 
-### Prompt Management Tools
+> **Note**: `subcog_recall` now supports listing all memories when `query` is omitted. `subcog_sync` is deprecated (SQLite is now authoritative).
 
-| Tool | Required Params | Optional Params | Description |
-|------|-----------------|-----------------|-------------|
-| `prompt_save` | `name` | `content`, `file_path`, `description`, `tags`, `domain`, `variables` | Save template |
-| `prompt_list` | - | `domain`, `tags`, `name_pattern`, `limit` | List prompts |
-| `prompt_get` | `name` | `domain` | Get prompt |
-| `prompt_run` | `name` | `variables`, `domain` | Execute prompt |
-| `prompt_delete` | `name`, `domain` | - | Delete prompt |
+### Consolidated Tools (v0.8.0+)
+
+| Tool | Required Params | Description |
+|------|-----------------|-------------|
+| `subcog_prompts` | `action` | Prompt management: save, list, get, run, delete |
+| `subcog_templates` | `action` | Context template management: save, list, get, render, delete |
+| `subcog_graph` | `operation` | Knowledge graph: neighbors, path, stats, visualize |
+| `subcog_entities` | `action` | Entity management: create, get, list, delete, extract, merge |
+| `subcog_relationships` | `action` | Relationship management: create, get, list, delete, infer |
+
+### Legacy Prompt Tools (Deprecated)
+
+> **⚠️ Deprecated**: Use `subcog_prompts` with the appropriate `action` parameter instead.
+
+| Tool | Replacement |
+|------|-------------|
+| `prompt_save` | `subcog_prompts` with `action: save` |
+| `prompt_list` | `subcog_prompts` with `action: list` |
+| `prompt_get` | `subcog_prompts` with `action: get` |
+| `prompt_run` | `subcog_prompts` with `action: run` |
+| `prompt_delete` | `subcog_prompts` with `action: delete` |
 
 ### Namespace Reference
 

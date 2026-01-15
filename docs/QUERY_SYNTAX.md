@@ -1,6 +1,8 @@
 # Subcog Query Syntax
 
-This document describes the filter syntax used by the `subcog_browse` and `subcog_list` MCP prompts for discovering and filtering memories.
+This document describes the filter syntax used by `subcog_recall` and `subcog_browse` for discovering and filtering memories.
+
+> **v0.8.0+**: The `subcog_recall` tool now supports listing all memories when the `query` parameter is omitted. The legacy `subcog_list` prompt is deprecated.
 
 ## Overview
 
@@ -197,9 +199,23 @@ ns:tech-debt source:src/target-module/*
 ns:decisions tag:architecture
 ```
 
-## MCP Prompts
+## MCP Tools and Prompts
 
-### `subcog_browse`
+### `subcog_recall` (Tool)
+
+Search for memories or list all memories when query is omitted:
+
+```
+Arguments:
+  query   - Search query (optional; omit to list all)
+  filter  - Filter expression (see syntax above)
+  mode    - "hybrid" | "vector" | "text" (default: hybrid)
+  detail  - "light" | "medium" | "everything" (default: medium)
+  limit   - Maximum results (default: 10 for search, 50 for list)
+  offset  - Pagination offset (for list mode)
+```
+
+### `subcog_browse` (Prompt)
 
 Interactive memory browser with faceted discovery dashboard:
 
@@ -216,7 +232,9 @@ The dashboard view shows:
 - Recent activity timeline
 - Source file clusters
 
-### `subcog_list`
+### `subcog_list` (Prompt - DEPRECATED)
+
+> **⚠️ Deprecated**: Use `subcog_recall` without a query parameter instead.
 
 Formatted memory listing for export:
 

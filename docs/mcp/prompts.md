@@ -86,7 +86,9 @@ Interactive memory browser with faceted discovery.
 
 ---
 
-### subcog_list
+### subcog_list (DEPRECATED)
+
+> **⚠️ Deprecated**: Use `subcog_recall` without a query parameter instead. The `subcog_recall` tool now supports listing all memories when query is omitted.
 
 Formatted memory listing for export.
 
@@ -318,9 +320,11 @@ Capture rich context from a conversation.
 ## Custom Prompts
 
 User-defined prompts are managed separately. See:
-- [prompt_save](tools.md#prompt_save) tool
+- [subcog_prompts](tools.md#subcog_prompts) tool (v0.8.0+ consolidated API)
 - [Prompt Templates](../prompts/README.md) documentation
 - `subcog://_prompts` resources
+
+> **Note**: The legacy `prompt_save`, `prompt_list`, `prompt_get`, `prompt_run`, and `prompt_delete` tools are deprecated. Use `subcog_prompts` with the appropriate `action` parameter instead.
 
 ---
 

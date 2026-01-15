@@ -8,7 +8,7 @@ The MCP server exposes three types of capabilities:
 
 | Type | Description | Count |
 |------|-------------|-------|
-| [Tools](tools.md) | Callable functions for memory operations | 13 |
+| [Tools](tools.md) | Callable functions for memory operations | ~22 |
 | [Resources](resources.md) | URI-based data access | 26+ |
 | [Prompts](./prompts.md) | Pre-defined prompt templates | 11 |
 
@@ -19,23 +19,39 @@ The MCP server exposes three types of capabilities:
 | Tool | Description |
 |------|-------------|
 | `subcog_capture` | Capture a memory |
-| `subcog_recall` | Search memories |
+| `subcog_recall` | Search memories (omit query to list all) |
+| `subcog_get` | Retrieve a memory by ID |
+| `subcog_update` | Update memory content and/or tags |
+| `subcog_delete` | Delete a memory (soft or hard) |
 | `subcog_status` | System status |
 | `subcog_namespaces` | List namespaces |
 | `subcog_consolidate` | Merge similar memories |
 | `subcog_enrich` | Enhance with LLM |
-| `subcog_sync` | Sync with remote |
 | `subcog_reindex` | Rebuild search index |
 
-### Prompt Tools
+### Consolidated Tools (v0.8.0+)
 
-| Tool | Description |
+| Tool | Actions | Description |
+|------|---------|-------------|
+| `subcog_prompts` | save, list, get, run, delete | Prompt template management |
+| `subcog_templates` | save, list, get, render, delete | Context template management |
+| `subcog_graph` | neighbors, path, stats, visualize | Knowledge graph operations |
+| `subcog_entities` | create, get, list, delete, extract, merge | Entity management |
+| `subcog_relationships` | create, get, list, delete, infer | Relationship management |
+| `subcog_groups` | create, list, get, add_member, remove_member, update_role, delete | Group management (feature-gated) |
+
+### Deprecated Tools
+
+| Tool | Replacement |
 |------|-------------|
-| `prompt_save` | Save a prompt template |
-| `prompt_list` | List prompts |
-| `prompt_get` | Get a prompt |
-| `prompt_run` | Execute a prompt |
-| `prompt_delete` | Delete a prompt |
+| `subcog_sync` | SQLite is now authoritative |
+| `subcog_list` | Use `subcog_recall` without query |
+| `prompt_save/list/get/run/delete` | Use `subcog_prompts` with action |
+| `context_template_*` | Use `subcog_templates` with action |
+| `subcog_graph_query/visualize` | Use `subcog_graph` with operation |
+| `subcog_extract_entities` | Use `subcog_entities` with `action: extract` |
+| `subcog_entity_merge` | Use `subcog_entities` with `action: merge` |
+| `subcog_relationship_infer` | Use `subcog_relationships` with `action: infer` |
 
 ### Key Resources
 

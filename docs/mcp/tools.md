@@ -1,6 +1,14 @@
 # MCP Tools
 
-Subcog provides 14 MCP tools for memory operations, garbage collection, and prompt management.
+Subcog provides ~22 MCP tools for memory operations, knowledge graph, and prompt/template management.
+
+## Tool Architecture (v0.8.0+)
+
+Subcog uses **action-based tool consolidation** to reduce tool count while maintaining functionality:
+
+- **Consolidated tools**: Single tool with `action` parameter for related operations
+- **Legacy tools**: Still available for backward compatibility
+- **Security**: All tools use `additionalProperties: false` for parameter validation
 
 ## Claude Code Invocation
 
@@ -10,23 +18,25 @@ All subcog MCP tools are accessible using the `subcog:` prefix in Claude Code:
 |----------|-------------------|
 | `subcog_capture` | `subcog:capture` |
 | `subcog_recall` | `subcog:recall` |
+| `subcog_get` | `subcog:get` |
+| `subcog_update` | `subcog:update` |
+| `subcog_delete` | `subcog:delete` |
 | `subcog_status` | `subcog:status` |
-| `subcog_sync` | `subcog:sync` |
 | `subcog_gc` | `subcog:gc` |
 | `subcog_namespaces` | `subcog:namespaces` |
 | `subcog_reindex` | `subcog:reindex` |
 | `subcog_enrich` | `subcog:enrich` |
 | `subcog_consolidate` | `subcog:consolidate` |
-| `prompt_save` | `subcog:prompt:save` |
-| `prompt_list` | `subcog:prompt:list` |
-| `prompt_get` | `subcog:prompt:get` |
-| `prompt_run` | `subcog:prompt:run` |
-| `prompt_delete` | `subcog:prompt:delete` |
+| `subcog_prompts` | `subcog:prompts` |
+| `subcog_templates` | `subcog:templates` |
+| `subcog_graph` | `subcog:graph` |
+| `subcog_entities` | `subcog:entities` |
+| `subcog_relationships` | `subcog:relationships` |
 
 **Example - Claude Code:**
 ```
 subcog:recall "database decision" --filter "ns:decisions since:7d"
-subcog:prompt:run code-review --var file=src/main.rs --var issue_type=security
+subcog:prompts --action run --name code-review --variables '{"file":"src/main.rs"}'
 ```
 
 ---
@@ -75,18 +85,23 @@ Capture a memory to persistent storage.
 
 ### subcog_recall
 
-Search for relevant memories using semantic and text search.
+Search for relevant memories using semantic and text search, or list all memories when query is omitted.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `query` | string | Yes | Search query |
+| `query` | string | No | Search query (omit to list all memories) |
 | `namespace` | string | No | Filter by namespace |
 | `filter` | string | No | Filter expression (see [Query Syntax](../QUERY_SYNTAX.md)) |
 | `mode` | string | No | Search mode: `hybrid`, `vector`, `text` (default: `hybrid`) |
 | `detail` | string | No | Detail level: `light`, `medium`, `everything` (default: `medium`) |
-| `limit` | integer | No | Maximum results (default: 10, max: 50) |
+| `limit` | integer | No | Maximum results (default: 10 for search, 50 for list) |
+| `offset` | integer | No | Pagination offset for list mode |
+| `user_id` | string | No | Filter by user ID (multi-tenant) |
+| `agent_id` | string | No | Filter by agent ID (multi-tenant) |
+
+> **Note**: `subcog_recall` now subsumes `subcog_list`. Omit the `query` parameter to list all memories with filtering and pagination support.
 
 **Example:**
 
@@ -345,7 +360,9 @@ Enrich a memory with better structure, tags, and context using LLM.
 
 ---
 
-### subcog_sync
+### subcog_sync (DEPRECATED)
+
+> **⚠️ Deprecated**: SQLite is now the authoritative storage layer. This tool is a no-op and will be removed in a future version.
 
 Sync memories with git remote.
 
@@ -370,10 +387,8 @@ Sync memories with git remote.
 
 ```json
 {
-  "direction": "full",
-  "fetched": 3,
-  "pushed": 5,
-  "status": "success"
+  "message": "subcog_sync is deprecated. SQLite is now the authoritative storage layer.",
+  "status": "deprecated"
 }
 ```
 
@@ -410,175 +425,46 @@ Rebuild the search index from the persistence layer.
 
 ---
 
-## Prompt Tools
+## Consolidated Tools (v0.8.0+)
 
-### prompt_save
+### subcog_prompts
 
-Save a user-defined prompt template.
+Unified prompt template management with action-based dispatch.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
+| `action` | string | Yes | One of: `save`, `list`, `get`, `run`, `delete` |
+
+**Action-specific parameters:**
+
+#### action: save
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
 | `name` | string | Yes | Unique prompt name (kebab-case) |
-| `content` | string | No* | Prompt content with `{{variable}}` placeholders |
-| `file_path` | string | No* | Path to file containing prompt |
+| `content` | string | Yes | Prompt content with `{{variable}}` placeholders |
 | `description` | string | No | Human-readable description |
 | `domain` | string | No | `project`, `user`, or `org` (default: `project`) |
 | `tags` | array[string] | No | Tags for categorization |
-| `variables` | array[object] | No | Explicit variable definitions |
 
-*Either `content` or `file_path` required, not both.
-
-**Variable Object:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | Yes | Variable name (without braces) |
-| `description` | string | No | Human-readable description |
-| `required` | boolean | No | Whether required (default: true) |
-| `default` | string | No | Default value if not provided |
-
-**Example:**
-
-```json
-{
-  "name": "prompt_save",
-  "arguments": {
-    "name": "code-review",
-    "description": "Comprehensive code review",
-    "content": "Review {{file}} for:\n- {{issue_type}} issues\n- Best practices\n- Edge cases",
-    "domain": "project",
-    "tags": ["review", "quality"],
-    "variables": [
-      {
-        "name": "file",
-        "description": "File path to review",
-        "required": true
-      },
-      {
-        "name": "issue_type",
-        "description": "Type of issues to focus on",
-        "default": "general"
-      }
-    ]
-  }
-}
-```
-
-**Response:**
-
-```json
-{
-  "name": "code-review",
-  "domain": "project",
-  "status": "saved"
-}
-```
-
----
-
-### prompt_list
-
-List saved prompt templates with optional filtering.
-
-**Parameters:**
+#### action: list
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `domain` | string | No | Filter by domain |
 | `tags` | array[string] | No | Filter by tags (AND logic) |
-| `name_pattern` | string | No | Filter by name pattern (glob) |
-| `limit` | integer | No | Maximum results (default: 20, max: 100) |
+| `limit` | integer | No | Maximum results (default: 20) |
 
-**Example:**
-
-```json
-{
-  "name": "prompt_list",
-  "arguments": {
-    "domain": "project",
-    "tags": ["review"],
-    "limit": 10
-  }
-}
-```
-
-**Response:**
-
-```json
-{
-  "prompts": [
-    {
-      "name": "code-review",
-      "description": "Comprehensive code review",
-      "domain": "project",
-      "tags": ["review", "quality"],
-      "variables": ["file", "issue_type"]
-    }
-  ],
-  "total": 1
-}
-```
-
----
-
-### prompt_get
-
-Get a prompt template by name.
-
-**Parameters:**
+#### action: get
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `name` | string | Yes | Prompt name to retrieve |
-| `domain` | string | No | Domain to search (cascades if not specified) |
+| `domain` | string | No | Domain to search (cascades: project → user → org) |
 
-**Domain Cascade:** If domain not specified, searches Project → User → Org.
-
-**Example:**
-
-```json
-{
-  "name": "prompt_get",
-  "arguments": {
-    "name": "code-review"
-  }
-}
-```
-
-**Response:**
-
-```json
-{
-  "name": "code-review",
-  "description": "Comprehensive code review",
-  "content": "Review {{file}} for:\n- {{issue_type}} issues\n...",
-  "domain": "project",
-  "tags": ["review", "quality"],
-  "variables": [
-    {
-      "name": "file",
-      "description": "File path to review",
-      "required": true
-    },
-    {
-      "name": "issue_type",
-      "description": "Type of issues to focus on",
-      "required": false,
-      "default": "general"
-    }
-  ]
-}
-```
-
----
-
-### prompt_run
-
-Run a saved prompt, substituting variable values.
-
-**Parameters:**
+#### action: run
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -586,12 +472,36 @@ Run a saved prompt, substituting variable values.
 | `variables` | object | No | Variable values (key: value pairs) |
 | `domain` | string | No | Domain to search |
 
-**Example:**
+#### action: delete
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | Yes | Prompt name to delete |
+| `domain` | string | Yes | Domain scope (required for safety) |
+
+**Example - Save:**
 
 ```json
 {
-  "name": "prompt_run",
+  "name": "subcog_prompts",
   "arguments": {
+    "action": "save",
+    "name": "code-review",
+    "description": "Comprehensive code review",
+    "content": "Review {{file}} for:\n- {{issue_type}} issues\n- Best practices",
+    "domain": "project",
+    "tags": ["review", "quality"]
+  }
+}
+```
+
+**Example - Run:**
+
+```json
+{
+  "name": "subcog_prompts",
+  "arguments": {
+    "action": "run",
     "name": "code-review",
     "variables": {
       "file": "src/main.rs",
@@ -601,52 +511,256 @@ Run a saved prompt, substituting variable values.
 }
 ```
 
-**Response:**
+---
+
+### subcog_templates
+
+Unified context template management for formatting memories in hooks and responses.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | string | Yes | One of: `save`, `list`, `get`, `render`, `delete` |
+
+**Action-specific parameters:**
+
+#### action: save
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | Yes | Template name (kebab-case) |
+| `content` | string | Yes | Template content with `{{variable}}` syntax |
+| `description` | string | No | Human-readable description |
+| `domain` | string | No | `project`, `user`, or `org` (default: `project`) |
+| `tags` | array[string] | No | Tags for categorization |
+
+#### action: render
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | Yes | Template name to render |
+| `query` | string | No | Search query to populate `{{memories}}` |
+| `limit` | integer | No | Max memories to include |
+| `format` | string | No | Output format: `markdown`, `json`, `xml` |
+| `variables` | object | No | Additional variables to substitute |
+
+**Example - Save:**
 
 ```json
 {
-  "content": "Review src/main.rs for:\n- security issues\n- Best practices\n- Edge cases",
-  "variables_used": {
-    "file": "src/main.rs",
-    "issue_type": "security"
+  "name": "subcog_templates",
+  "arguments": {
+    "action": "save",
+    "name": "search-results",
+    "content": "# {{title}}\n\n{{#each memories}}\n- **{{memory.namespace}}**: {{memory.content}}\n{{/each}}",
+    "description": "Format search results for display",
+    "domain": "user"
+  }
+}
+```
+
+**Example - Render:**
+
+```json
+{
+  "name": "subcog_templates",
+  "arguments": {
+    "action": "render",
+    "name": "search-results",
+    "query": "authentication patterns",
+    "limit": 10,
+    "variables": { "title": "Auth Patterns" }
   }
 }
 ```
 
 ---
 
-### prompt_delete
+### subcog_graph
 
-Delete a saved prompt template.
+Unified knowledge graph operations for entity-centric memory retrieval.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `name` | string | Yes | Prompt name to delete |
-| `domain` | string | Yes | Domain scope (required for safety) |
+| `operation` | string | Yes | One of: `neighbors`, `path`, `stats`, `visualize` |
 
-**Example:**
+**Operation-specific parameters:**
+
+#### operation: neighbors
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `entity_id` | string | Yes | Entity ID to find neighbors for |
+| `depth` | integer | No | Traversal depth (default: 1, max: 3) |
+| `relationship_types` | array[string] | No | Filter by relationship types |
+
+#### operation: path
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `from_entity` | string | Yes | Starting entity ID |
+| `to_entity` | string | Yes | Target entity ID |
+| `max_hops` | integer | No | Maximum path length (default: 5) |
+
+#### operation: stats
+
+No additional parameters. Returns graph statistics.
+
+#### operation: visualize
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `format` | string | No | Output format: `mermaid`, `dot`, `json` (default: `mermaid`) |
+| `entity_id` | string | No | Center visualization on entity |
+| `entity_types` | array[string] | No | Filter by entity types |
+| `depth` | integer | No | Visualization depth (default: 2) |
+| `limit` | integer | No | Max nodes to include (default: 50) |
+
+**Example - Neighbors:**
 
 ```json
 {
-  "name": "prompt_delete",
+  "name": "subcog_graph",
   "arguments": {
-    "name": "old-template",
-    "domain": "project"
+    "operation": "neighbors",
+    "entity_id": "entity_postgres",
+    "depth": 2
   }
 }
 ```
 
-**Response:**
+**Example - Visualize:**
 
 ```json
 {
-  "name": "old-template",
-  "domain": "project",
-  "status": "deleted"
+  "name": "subcog_graph",
+  "arguments": {
+    "operation": "visualize",
+    "format": "mermaid",
+    "entity_types": ["Person", "Technology"],
+    "depth": 2
+  }
 }
 ```
+
+---
+
+### subcog_entities
+
+Unified entity management with CRUD, extraction, and merge operations.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | string | Yes | One of: `create`, `get`, `list`, `delete`, `extract`, `merge` |
+
+**Action-specific parameters:**
+
+#### action: create
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | Yes | Entity name |
+| `entity_type` | string | Yes | One of: `Person`, `Organization`, `Technology`, `Concept`, `File` |
+| `properties` | object | No | Additional properties |
+
+#### action: list
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `entity_type` | string | No | Filter by type |
+| `limit` | integer | No | Maximum results (default: 50) |
+
+#### action: extract (LLM-powered)
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `content` | string | Yes | Text to extract entities from |
+| `store` | boolean | No | Store extracted entities (default: false) |
+| `min_confidence` | float | No | Minimum confidence threshold (default: 0.6) |
+
+#### action: merge
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `entity_ids` | array[string] | Yes | Entity IDs to merge |
+| `canonical_name` | string | No | Name for merged entity |
+| `dry_run` | boolean | No | Preview without applying (default: false) |
+
+**Example - Extract:**
+
+```json
+{
+  "name": "subcog_entities",
+  "arguments": {
+    "action": "extract",
+    "content": "Alice from Anthropic uses Rust to build the Claude API.",
+    "store": true,
+    "min_confidence": 0.7
+  }
+}
+```
+
+---
+
+### subcog_relationships
+
+Unified relationship management with CRUD and inference operations.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | string | Yes | One of: `create`, `get`, `list`, `delete`, `infer` |
+
+**Relationship types:** `WorksAt`, `Created`, `Uses`, `Implements`, `PartOf`, `RelatesTo`, `MentionedIn`, `Supersedes`, `ConflictsWith`
+
+#### action: create
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `from_entity` | string | Yes | Source entity ID |
+| `to_entity` | string | Yes | Target entity ID |
+| `relationship_type` | string | Yes | Type of relationship |
+| `properties` | object | No | Additional properties |
+
+#### action: infer (LLM-powered)
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `entity_ids` | array[string] | Yes | Entities to infer relationships between |
+| `store` | boolean | No | Store inferred relationships (default: false) |
+| `min_confidence` | float | No | Minimum confidence threshold (default: 0.7) |
+
+**Example - Infer:**
+
+```json
+{
+  "name": "subcog_relationships",
+  "arguments": {
+    "action": "infer",
+    "entity_ids": ["entity_alice", "entity_postgres"],
+    "store": true,
+    "min_confidence": 0.7
+  }
+}
+```
+
+---
+
+## Legacy Prompt Tools (Deprecated)
+
+> **⚠️ Deprecated**: Use `subcog_prompts` with the appropriate `action` parameter instead. Legacy tools remain available for backward compatibility.
+
+### prompt_save, prompt_list, prompt_get, prompt_run, prompt_delete
+
+These tools are deprecated. Use `subcog_prompts` with `action: save|list|get|run|delete` instead.
+
+See [subcog_prompts](#subcog_prompts) documentation above for the new API.
 
 ---
 

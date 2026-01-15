@@ -109,12 +109,19 @@ Converts markdown structure to XML:
 
 ## MCP Tools
 
-### `context_template_save`
+> **v0.8.0+**: Context template operations are now consolidated into a single `subcog_templates` tool with an `action` parameter. Legacy `context_template_*` tools remain available for backward compatibility.
+
+### `subcog_templates` (Recommended)
+
+Unified context template management with action-based dispatch.
+
+#### action: save
 
 Save or update a context template. Version auto-increments on each save.
 
 ```yaml
-context_template_save:
+subcog_templates:
+  action: save
   name: search-results          # Required: kebab-case name
   content: |                    # Required: template content
     # {{title}}
@@ -124,63 +131,70 @@ context_template_save:
   description: Format search results
   tags: [search, formatting]
   domain: project               # project, user, or org
-  output_format: markdown       # markdown, json, or xml
-  variables:                    # Optional: variable metadata
-    - name: title
-      description: Section title
-      default: "Search Results"
-      required: false
 ```
 
-### `context_template_list`
+#### action: list
 
 List templates with optional filtering.
 
 ```yaml
-context_template_list:
+subcog_templates:
+  action: list
   domain: user                  # Optional: filter by domain
   tags: [formatting]            # Optional: filter by tags
-  name_pattern: "search-*"      # Optional: glob pattern
   limit: 20                     # Optional: max results (default 20)
 ```
 
-### `context_template_get`
+#### action: get
 
 Fetch a template by name.
 
 ```yaml
-context_template_get:
+subcog_templates:
+  action: get
   name: search-results          # Required: template name
-  version: 2                    # Optional: specific version (default: latest)
   domain: user                  # Optional: domain scope
 ```
 
-### `context_template_render`
+#### action: render
 
 Render a template with memories and variables.
 
 ```yaml
-context_template_render:
+subcog_templates:
+  action: render
   name: search-results          # Required: template name
-  version: 1                    # Optional: specific version
   query: "authentication"       # Optional: search query for memories
-  namespaces: [decisions]       # Optional: filter namespaces
   limit: 10                     # Optional: max memories (default 10)
   format: json                  # Optional: override output format
   variables:                    # Optional: custom variables
     title: "Auth Patterns"
 ```
 
-### `context_template_delete`
+#### action: delete
 
-Delete a template or specific version.
+Delete a template.
 
 ```yaml
-context_template_delete:
+subcog_templates:
+  action: delete
   name: search-results          # Required: template name
   domain: project               # Required: domain scope
-  version: 1                    # Optional: specific version (default: all)
 ```
+
+---
+
+### Legacy Tools (Deprecated)
+
+> **⚠️ Deprecated**: Use `subcog_templates` with the appropriate `action` parameter instead.
+
+The following legacy tools remain available for backward compatibility:
+
+- `context_template_save` → Use `subcog_templates` with `action: save`
+- `context_template_list` → Use `subcog_templates` with `action: list`
+- `context_template_get` → Use `subcog_templates` with `action: get`
+- `context_template_render` → Use `subcog_templates` with `action: render`
+- `context_template_delete` → Use `subcog_templates` with `action: delete`
 
 ## Configuration
 
@@ -231,7 +245,8 @@ Templates use auto-increment versioning:
 ### Search Results Formatter
 
 ```yaml
-context_template_save:
+subcog_templates:
+  action: save
   name: search-results
   content: |
     # {{title}}
@@ -254,7 +269,8 @@ context_template_save:
 ### Session Context Builder
 
 ```yaml
-context_template_save:
+subcog_templates:
+  action: save
   name: session-context
   content: |
     # Project Context
@@ -273,7 +289,8 @@ context_template_save:
 ### XML API Response
 
 ```yaml
-context_template_save:
+subcog_templates:
+  action: save
   name: api-response
   content: |
     # API Response
@@ -281,7 +298,6 @@ context_template_save:
     {{#each memories}}
     - {{memory.content}}
     {{/each}}
-  output_format: xml
   tags: [api, integration]
   domain: user
 ```
