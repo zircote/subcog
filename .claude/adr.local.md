@@ -2,7 +2,7 @@
 adr_paths:
   - docs/adrs
 
-default_format: custom-frontmatter
+default_format: structured-madr
 file_pattern: "adr_{id}.md"
 
 numbering:
@@ -25,17 +25,18 @@ frontmatter:
   required:
     - title
     - description
-    - status
-    - created
-  optional:
     - type
     - category
     - tags
+    - status
+    - created
     - updated
     - author
     - project
+  optional:
     - technologies
     - audience
+    - related
     - confidence
     - completeness
 
@@ -43,13 +44,16 @@ sections:
   required:
     - Status
     - Context
+    - Decision Drivers
+    - Considered Options
     - Decision
     - Consequences
+    - Audit
   optional:
-    - Considered Options
     - Decision Outcome
-    - Compliance Verification
+    - Related Decisions
     - Links
+    - More Information
 
 git:
   enabled: true
