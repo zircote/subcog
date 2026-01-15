@@ -165,17 +165,11 @@ Subcog provides bulk memory import and export via CLI commands:
 |------|-------------|
 | `subcog_gdpr_export` | Export all user data (GDPR Article 20) |
 
-### 3.8 Context Template Tools
+### 3.8 Template Syntax Reference
 
 Context templates format memories and statistics for hooks and tool responses.
 
-| Tool | Description |
-|------|-------------|
-| `context_template_save` | Save a context template with variables and iteration |
-| `context_template_list` | List templates with filtering by domain/tags |
-| `context_template_get` | Fetch template by name (optionally specific version) |
-| `context_template_render` | Render template with memories and custom variables |
-| `context_template_delete` | Delete a template (specific version or all) |
+Use `subcog_templates` with appropriate action (see Section 3.6).
 
 **Template syntax**:
 - **Variables**: `{{variable_name}}` - substituted at render time
@@ -221,7 +215,7 @@ When enabled (`auto_extract_entities: true`), memories are analyzed for:
 - **Concepts** (Microservices, CQRS)
 - **Files** (src/main.rs, README.md)
 
-Use `subcog_extract_entities` for manual extraction.
+Use `subcog_entities` with `action: extract` for manual extraction.
 
 ### 4.4 Memory Consolidation
 
@@ -296,34 +290,37 @@ subcog_entities: action=list, entity_type=Technology
 # Create an entity manually
 subcog_entities: action=create, name="PostgreSQL", entity_type=Technology
 
+# Extract entities from text (LLM-powered)
+subcog_entities: action=extract, content="Alice uses PostgreSQL for the API", store=true
+
 # Find duplicates before merging
-subcog_entity_merge: action=find_duplicates, entity_id="..."
+subcog_entities: action=merge, entity_id="...", dry_run=true
 
 # Merge duplicate entities
-subcog_entity_merge: action=merge, entity_ids=["id1", "id2"], canonical_name="PostgreSQL"
+subcog_entities: action=merge, entity_ids=["id1", "id2"], canonical_name="PostgreSQL"
 ```
 
 ### 7.3 Graph Traversal
 
 ```
 # Get neighbors of an entity
-subcog_graph_query: operation=neighbors, entity_id="...", depth=2
+subcog_graph: operation=neighbors, entity_id="...", depth=2
 
 # Find path between entities
-subcog_graph_query: operation=path, from_entity="...", to_entity="..."
+subcog_graph: operation=path, from_entity="...", to_entity="..."
 
 # Get graph statistics
-subcog_graph_query: operation=stats
+subcog_graph: operation=stats
 ```
 
 ### 7.4 Visualization
 
 ```
 # Generate Mermaid diagram centered on entity
-subcog_graph_visualize: format=mermaid, entity_id="...", depth=2
+subcog_graph: operation=visualize, format=mermaid, entity_id="...", depth=2
 
 # Full graph as DOT format
-subcog_graph_visualize: format=dot, limit=50
+subcog_graph: operation=visualize, format=dot, limit=50
 ```
 
 ## 8. Prompt Template Best Practices
@@ -414,7 +411,8 @@ subcog_consolidate:
 ### 9.6 Extract Entities from Text
 
 ```yaml
-subcog_extract_entities:
+subcog_entities:
+  action: extract
   content: "Alice from Anthropic uses Rust to build the Claude API integration."
   store: true
   min_confidence: 0.6
@@ -423,7 +421,8 @@ subcog_extract_entities:
 ### 9.7 Visualize Entity Relationships
 
 ```yaml
-subcog_graph_visualize:
+subcog_graph:
+  operation: visualize
   format: mermaid
   entity_types: [Person, Technology]
   depth: 2
@@ -432,7 +431,8 @@ subcog_graph_visualize:
 ### 9.8 Infer Relationships Between Entities
 
 ```yaml
-subcog_relationship_infer:
+subcog_relationships:
+  action: infer
   entity_ids: ["entity_alice", "entity_postgres"]
   store: true
   min_confidence: 0.7
@@ -447,7 +447,8 @@ subcog_gdpr_export: {}
 ### 9.10 Create a Context Template
 
 ```yaml
-context_template_save:
+subcog_templates:
+  action: save
   name: search-results
   content: |
     # {{title}}
@@ -466,7 +467,8 @@ context_template_save:
 ### 9.11 Render a Context Template with Query
 
 ```yaml
-context_template_render:
+subcog_templates:
+  action: render
   name: search-results
   query: "authentication patterns"
   limit: 10
@@ -478,7 +480,8 @@ context_template_render:
 ### 9.12 List Context Templates
 
 ```yaml
-context_template_list:
+subcog_templates:
+  action: list
   domain: user
   tags: [formatting]
   limit: 20
@@ -527,7 +530,7 @@ subcog export tagged.csv --filter "tag:rust tag:api"
 | Prompts missing | Verify domain scope, check storage config |
 | Search slow | Use `subcog_reindex` to rebuild index |
 | Duplicates appearing | Deduplication may be disabled; check config |
-| Graph empty | Enable `auto_extract_entities` or use `subcog_extract_entities` |
+| Graph empty | Enable `auto_extract_entities` or use `subcog_entities` with `action: extract` |
 | Consolidation fails | Check LLM provider config; falls back to edge-only mode |
 | Stale index | Run `subcog_reindex` after direct DB changes |
 
