@@ -114,6 +114,8 @@ fn populate_index(capture_service: &CaptureService, count: usize) {
             skip_security_check: true,
             ttl_seconds: None,
             scope: None,
+            #[cfg(feature = "group-scope")]
+            group_id: None,
         };
 
         if let Err(e) = capture_service.capture(request) {

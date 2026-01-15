@@ -61,7 +61,9 @@ impl ToolRegistry {
             definitions::prompt_understanding_tool(),
         );
 
-        // Prompt management tools
+        // Consolidated prompt management tool
+        tools.insert("subcog_prompts".to_string(), definitions::prompts_tool());
+        // Legacy prompt management tools (for backward compatibility)
         tools.insert("prompt_save".to_string(), definitions::prompt_save_tool());
         tools.insert("prompt_list".to_string(), definitions::prompt_list_tool());
         tools.insert("prompt_get".to_string(), definitions::prompt_get_tool());
@@ -111,11 +113,18 @@ impl ToolRegistry {
             "subcog_graph_visualize".to_string(),
             definitions::graph_visualize_tool(),
         );
+        // Consolidated graph tool
+        tools.insert("subcog_graph".to_string(), definitions::graph_tool());
 
         // Session initialization tool
         tools.insert("subcog_init".to_string(), definitions::init_tool());
 
-        // Context template tools
+        // Consolidated context template tool
+        tools.insert(
+            "subcog_templates".to_string(),
+            definitions::templates_tool(),
+        );
+        // Legacy context template tools (for backward compatibility)
         tools.insert(
             "context_template_save".to_string(),
             definitions::context_template_save_tool(),
@@ -140,6 +149,9 @@ impl ToolRegistry {
         // Group management tools (feature-gated)
         #[cfg(feature = "group-scope")]
         {
+            // Consolidated group management tool
+            tools.insert("subcog_groups".to_string(), definitions::groups_tool());
+            // Legacy group management tools (for backward compatibility)
             tools.insert(
                 "subcog_group_create".to_string(),
                 definitions::group_create_tool(),
@@ -195,6 +207,9 @@ impl ToolRegistry {
         #[cfg(feature = "group-scope")]
         {
             let group_result = match name {
+                // Consolidated group management tool
+                "subcog_groups" => Some(handlers::execute_groups(arguments.clone())),
+                // Legacy group management tools
                 "subcog_group_create" => Some(handlers::execute_group_create(arguments.clone())),
                 "subcog_group_list" => Some(handlers::execute_group_list(arguments.clone())),
                 "subcog_group_get" => Some(handlers::execute_group_get(arguments.clone())),
@@ -226,7 +241,9 @@ impl ToolRegistry {
             "subcog_enrich" => handlers::execute_enrich(arguments),
             "subcog_reindex" => handlers::execute_reindex(arguments),
             "subcog_gdpr_export" => handlers::execute_gdpr_export(arguments),
-            // Prompt management tools
+            // Consolidated prompt management tool
+            "subcog_prompts" => handlers::execute_prompts(arguments),
+            // Legacy prompt management tools
             "prompt_save" => handlers::execute_prompt_save(arguments),
             "prompt_list" => handlers::execute_prompt_list(arguments),
             "prompt_get" => handlers::execute_prompt_get(arguments),
@@ -249,9 +266,13 @@ impl ToolRegistry {
             "subcog_entity_merge" => handlers::execute_entity_merge(arguments),
             "subcog_relationship_infer" => handlers::execute_relationship_infer(arguments),
             "subcog_graph_visualize" => handlers::execute_graph_visualize(arguments),
+            // Consolidated graph tool
+            "subcog_graph" => handlers::execute_graph(arguments),
             // Session initialization
             "subcog_init" => handlers::execute_init(arguments),
-            // Context template tools
+            // Consolidated context template tool
+            "subcog_templates" => handlers::execute_templates(arguments),
+            // Legacy context template tools
             "context_template_save" => handlers::execute_context_template_save(arguments),
             "context_template_list" => handlers::execute_context_template_list(arguments),
             "context_template_get" => handlers::execute_context_template_get(arguments),

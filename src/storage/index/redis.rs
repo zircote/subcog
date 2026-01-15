@@ -530,6 +530,8 @@ mod implementation {
                         expires_at: None,
                         embedding: None,
                         tags,
+                        #[cfg(feature = "group-scope")]
+                        group_id: None,
                         source: None,
                         is_summary: false,
                         source_memory_ids: None,

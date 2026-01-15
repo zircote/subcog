@@ -392,6 +392,8 @@ mod implementation {
                 file_path,
                 status,
                 tags,
+                #[cfg(feature = "group-scope")]
+                group_id: None,
                 source,
                 embedding,
                 created_at: created_at as u64,
@@ -607,6 +609,8 @@ mod tests {
             tombstoned_at: None,
             embedding: None,
             tags: vec!["test".to_string(), "integration".to_string()],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: Some("test.rs".to_string()),
             is_summary: false,
             source_memory_ids: None,

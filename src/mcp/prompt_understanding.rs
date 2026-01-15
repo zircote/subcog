@@ -56,7 +56,6 @@ Memories are categorized by namespace:
 |------|-------------|
 | `subcog_capture` | Create a memory (required: content, namespace) |
 | `subcog_get` | Retrieve a memory by ID |
-| `subcog_list` | List memories with filtering and pagination |
 | `subcog_update` | Update memory content and/or tags |
 | `subcog_delete` | Delete a memory (soft by default, hard optional) |
 | `subcog_delete_all` | Bulk delete with filter (dry-run by default) |
@@ -67,10 +66,12 @@ Memories are categorized by namespace:
 
 | Tool | Description |
 |------|-------------|
-| `subcog_recall` | Semantic + text search (primary search tool) |
+| `subcog_recall` | Semantic + text search, or list all (when no query) |
 | `subcog_status` | System health and statistics |
 | `subcog_namespaces` | List namespace descriptions |
 | `subcog_reindex` | Rebuild search index |
+
+**Note**: `subcog_recall` now subsumes `subcog_list`. Omit the `query` parameter to list all memories with filtering and pagination support.
 
 **Filter syntax** (GitHub-style):
 ```
@@ -84,13 +85,13 @@ ns:decisions tag:rust -tag:deprecated since:7d source:src/*
 
 | Tool | Description |
 |------|-------------|
-| `subcog_entities` | CRUD for entities (Person, Org, Tech, Concept, File) |
-| `subcog_relationships` | CRUD for entity relationships |
-| `subcog_graph_query` | Traverse graph (neighbors, paths, stats) |
-| `subcog_extract_entities` | LLM entity extraction from text |
-| `subcog_entity_merge` | Deduplicate similar entities |
-| `subcog_relationship_infer` | Infer relationships via LLM |
-| `subcog_graph_visualize` | Generate Mermaid/DOT/ASCII diagrams |
+| `subcog_entities` | CRUD + extract + merge for entities |
+| `subcog_relationships` | CRUD + infer for entity relationships |
+| `subcog_graph` | **Consolidated**: Query (neighbors, paths, stats) + visualize |
+
+**Entity actions**: `create`, `get`, `list`, `delete`, `extract`, `merge`
+**Relationship actions**: `create`, `get`, `list`, `delete`, `infer`
+**Graph operations**: `neighbors`, `path`, `stats`, `visualize`
 
 **Entity types**: Person, Organization, Technology, Concept, File
 **Relationship types**: WorksAt, Created, Uses, Implements, PartOf, RelatesTo, MentionedIn, Supersedes, ConflictsWith
@@ -102,22 +103,27 @@ ns:decisions tag:rust -tag:deprecated since:7d source:src/*
 | `subcog_consolidate` | Group and summarize related memories (LLM-powered) |
 | `subcog_get_summary` | Retrieve a summary with its source memories |
 | `subcog_enrich` | Improve memory structure/tags via LLM |
-| `subcog_sync` | Sync with git remote (push/fetch/full) |
+| `subcog_sync` | **DEPRECATED** - SQLite is now authoritative |
 
 ### 3.5 Prompt Management Tools
 
 | Tool | Description |
 |------|-------------|
-| `prompt_save` | Save a reusable prompt template |
-| `prompt_list` | List saved prompts with filtering |
-| `prompt_get` | Fetch a prompt by name |
-| `prompt_run` | Execute prompt with variable substitution |
-| `prompt_delete` | Remove a prompt template |
+| `subcog_prompts` | **Consolidated**: Prompt template management |
 
+**Prompt actions**: `save`, `list`, `get`, `run`, `delete`
 **Variable syntax**: `{{variable_name}}`
 **Domain resolution**: project → user → org
 
-### 3.6 Import/Export CLI Commands
+### 3.6 Context Template Tools
+
+| Tool | Description |
+|------|-------------|
+| `subcog_templates` | **Consolidated**: Context template management |
+
+**Template actions**: `save`, `list`, `get`, `render`, `delete`
+
+### 3.7 Import/Export CLI Commands
 
 Subcog provides bulk memory import and export via CLI commands:
 

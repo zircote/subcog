@@ -37,11 +37,14 @@ pub struct CaptureArgs {
 }
 
 /// Arguments for the recall tool.
+///
+/// When `query` is omitted or empty, behaves like `subcog_list` and returns
+/// all memories matching the filter criteria (with pagination support).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecallArgs {
-    /// Search query text.
-    pub query: String,
+    /// Search query text. If omitted or empty, lists all memories (like `subcog_list`).
+    pub query: Option<String>,
     /// GitHub-style filter query (e.g., "ns:decisions tag:rust -tag:test since:7d").
     pub filter: Option<String>,
     /// Filter by namespace (deprecated: use `filter` instead).
@@ -50,10 +53,18 @@ pub struct RecallArgs {
     pub mode: Option<String>,
     /// Detail level: "light", "medium" (default), or "everything".
     pub detail: Option<String>,
-    /// Maximum number of results to return (default: 10).
+    /// Maximum number of results to return (default: 10 for search, 50 for list).
     pub limit: Option<usize>,
     /// Entity filter: filter to memories mentioning these entities (comma-separated for OR logic).
     pub entity: Option<String>,
+    /// Offset for pagination (default: 0). Used when listing without query.
+    /// Note: Reserved for future pagination support in `list_all()`.
+    #[allow(dead_code)]
+    pub offset: Option<usize>,
+    /// Filter by user ID (for multi-tenant scoping).
+    pub user_id: Option<String>,
+    /// Filter by agent ID (for multi-agent scoping).
+    pub agent_id: Option<String>,
 }
 
 /// Arguments for the consolidate tool.
@@ -223,13 +234,14 @@ const fn default_true() -> bool {
 
 /// Arguments for the entities tool.
 ///
-/// Provides CRUD operations for entities in the knowledge graph.
+/// Provides CRUD and advanced operations for entities in the knowledge graph.
+/// Actions: create, get, list, delete, extract, merge.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EntitiesArgs {
-    /// Operation to perform: create, get, list, delete.
+    /// Operation to perform: create, get, list, delete, extract, merge.
     pub action: String,
-    /// Entity ID (required for get/delete).
+    /// Entity ID (required for get/delete, `find_duplicates` sub-action of merge).
     pub entity_id: Option<String>,
     /// Entity name (required for create).
     pub name: Option<String>,
@@ -239,15 +251,35 @@ pub struct EntitiesArgs {
     pub aliases: Option<Vec<String>>,
     /// Maximum results for list operation (default: 20).
     pub limit: Option<usize>,
+    // --- Fields for `extract` action ---
+    /// Text content to extract entities from (for extract action).
+    pub content: Option<String>,
+    /// Whether to store extracted entities in the graph (for extract/merge, default: false).
+    #[serde(default)]
+    pub store: bool,
+    /// Optional memory ID to link extracted entities to (for extract action).
+    pub memory_id: Option<String>,
+    /// Minimum confidence threshold 0.0-1.0 (for extract action, default: 0.5).
+    pub min_confidence: Option<f32>,
+    // --- Fields for `merge` action ---
+    /// Sub-action for merge: `find_duplicates`, `merge` (for merge action).
+    pub merge_action: Option<String>,
+    /// Entity IDs to merge (for merge action, minimum 2).
+    pub entity_ids: Option<Vec<String>>,
+    /// Name for the merged entity (for merge action).
+    pub canonical_name: Option<String>,
+    /// Similarity threshold for finding duplicates 0.0-1.0 (for merge action, default: 0.7).
+    pub threshold: Option<f32>,
 }
 
 /// Arguments for the relationships tool.
 ///
-/// Provides CRUD operations for relationships between entities.
+/// Provides CRUD and inference operations for relationships between entities.
+/// Actions: create, get, list, delete, infer.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RelationshipsArgs {
-    /// Operation to perform: create, get, list, delete.
+    /// Operation to perform: create, get, list, delete, infer.
     pub action: String,
     /// Source entity ID (required for create).
     pub from_entity: Option<String>,
@@ -261,6 +293,14 @@ pub struct RelationshipsArgs {
     pub direction: Option<String>,
     /// Maximum results (default: 20).
     pub limit: Option<usize>,
+    // --- Fields for `infer` action ---
+    /// Entity IDs to analyze for relationships (for infer action).
+    pub entity_ids: Option<Vec<String>>,
+    /// Whether to store inferred relationships (for infer action, default: false).
+    #[serde(default)]
+    pub store: bool,
+    /// Minimum confidence threshold 0.0-1.0 (for infer action, default: 0.6).
+    pub min_confidence: Option<f32>,
 }
 
 /// Arguments for the graph query tool.
@@ -353,6 +393,34 @@ pub struct GraphVisualizeArgs {
     pub limit: Option<usize>,
 }
 
+/// Arguments for the consolidated `subcog_graph` tool.
+///
+/// Combines graph query and visualization operations.
+/// Operations: neighbors, path, stats, visualize.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GraphArgs {
+    /// Operation to perform: neighbors, path, stats, visualize.
+    pub operation: String,
+    /// Starting entity ID (required for neighbors, optional for visualize).
+    pub entity_id: Option<String>,
+    /// Source entity ID (required for path).
+    pub from_entity: Option<String>,
+    /// Target entity ID (required for path).
+    pub to_entity: Option<String>,
+    /// Traversal depth (default: 2, max: 5).
+    pub depth: Option<usize>,
+    // --- Fields for `visualize` operation ---
+    /// Output format for visualize: mermaid, dot, ascii (default: mermaid).
+    pub format: Option<String>,
+    /// Filter to specific entity types (for visualize).
+    pub entity_types: Option<Vec<String>>,
+    /// Filter to specific relationship types (for visualize).
+    pub relationship_types: Option<Vec<String>>,
+    /// Maximum entities to include (default: 50, for visualize).
+    pub limit: Option<usize>,
+}
+
 /// Parses an entity type string to `EntityType` enum.
 pub fn parse_entity_type(s: &str) -> Option<crate::models::graph::EntityType> {
     use crate::models::graph::EntityType;
@@ -384,10 +452,64 @@ pub fn parse_relationship_type(s: &str) -> Option<crate::models::graph::Relation
 }
 
 // ============================================================================
-// Prompt Tool Arguments
+// Prompt Tool Arguments (Consolidated)
 // ============================================================================
 
-/// Arguments for the prompt.save tool.
+/// Arguments for the consolidated `subcog_prompts` tool.
+///
+/// Supports all prompt operations via the `action` field:
+/// - `save`: Save or update a prompt template
+/// - `list`: List prompts with optional filtering
+/// - `get`: Get a prompt by name
+/// - `run`: Execute a prompt with variable substitution
+/// - `delete`: Delete a prompt
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PromptsArgs {
+    /// Operation to perform: save, list, get, run, delete.
+    pub action: String,
+    /// Prompt name (required for save/get/run/delete).
+    pub name: Option<String>,
+    /// Prompt content with `{{variable}}` placeholders (for save).
+    pub content: Option<String>,
+    /// Path to file containing prompt (alternative to content, for save).
+    pub file_path: Option<String>,
+    /// Human-readable description of the prompt (for save).
+    pub description: Option<String>,
+    /// Tags for categorization and search (for save/list).
+    pub tags: Option<Vec<String>>,
+    /// Storage scope: "project" (default), "user", or "org".
+    pub domain: Option<String>,
+    /// Explicit variable definitions with metadata (for save).
+    pub variables_def: Option<Vec<PromptVariableArg>>,
+    /// Variable values to substitute (for run).
+    pub variables: Option<HashMap<String, String>>,
+    /// Skip LLM-powered metadata enrichment (for save).
+    #[serde(default)]
+    pub skip_enrichment: bool,
+    /// Filter by name pattern (glob-style, for list).
+    pub name_pattern: Option<String>,
+    /// Maximum number of results (for list).
+    pub limit: Option<usize>,
+}
+
+/// Variable definition argument for prompt save.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PromptVariableArg {
+    /// Variable name (without braces).
+    pub name: String,
+    /// Human-readable description for elicitation.
+    pub description: Option<String>,
+    /// Default value if not provided.
+    pub default: Option<String>,
+    /// Whether variable is required (default: true).
+    pub required: Option<bool>,
+}
+
+// Legacy prompt argument types (for backward compatibility during transition)
+
+/// Arguments for the prompt.save tool (legacy).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PromptSaveArgs {
@@ -410,21 +532,7 @@ pub struct PromptSaveArgs {
     pub skip_enrichment: bool,
 }
 
-/// Variable definition argument for prompt.save.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PromptVariableArg {
-    /// Variable name (without braces).
-    pub name: String,
-    /// Human-readable description for elicitation.
-    pub description: Option<String>,
-    /// Default value if not provided.
-    pub default: Option<String>,
-    /// Whether variable is required (default: true).
-    pub required: Option<bool>,
-}
-
-/// Arguments for the prompt.list tool.
+/// Arguments for the prompt.list tool (legacy).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PromptListArgs {
@@ -438,7 +546,7 @@ pub struct PromptListArgs {
     pub limit: Option<usize>,
 }
 
-/// Arguments for the prompt.get tool.
+/// Arguments for the prompt.get tool (legacy).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PromptGetArgs {
@@ -448,7 +556,7 @@ pub struct PromptGetArgs {
     pub domain: Option<String>,
 }
 
-/// Arguments for the prompt.run tool.
+/// Arguments for the prompt.run tool (legacy).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PromptRunArgs {
@@ -460,7 +568,7 @@ pub struct PromptRunArgs {
     pub domain: Option<String>,
 }
 
-/// Arguments for the prompt.delete tool.
+/// Arguments for the prompt.delete tool (legacy).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PromptDeleteArgs {
@@ -471,10 +579,69 @@ pub struct PromptDeleteArgs {
 }
 
 // =============================================================================
-// Context Template Arguments
+// Context Template Arguments (Consolidated)
 // =============================================================================
 
-/// Arguments for the `context_template_save` tool.
+/// Arguments for the consolidated `subcog_templates` tool.
+///
+/// Supports all context template operations via the `action` field:
+/// - `save`: Save or update a context template
+/// - `list`: List templates with optional filtering
+/// - `get`: Get a template by name
+/// - `render`: Render a template with memories
+/// - `delete`: Delete a template
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemplatesArgs {
+    /// Operation to perform: save, list, get, render, delete.
+    pub action: String,
+    /// Template name (required for save/get/render/delete).
+    pub name: Option<String>,
+    /// Template content with `{{variable}}` placeholders (for save).
+    pub content: Option<String>,
+    /// Human-readable description of the template (for save).
+    pub description: Option<String>,
+    /// Tags for categorization and search (for save/list).
+    pub tags: Option<Vec<String>>,
+    /// Storage scope: "project" (default), "user", or "org".
+    pub domain: Option<String>,
+    /// Default output format: "markdown" (default), "json", or "xml" (for save).
+    pub output_format: Option<String>,
+    /// Explicit variable definitions with metadata (for save).
+    pub variables_def: Option<Vec<ContextTemplateVariableArg>>,
+    /// Custom variable values (for render).
+    pub variables: Option<std::collections::HashMap<String, String>>,
+    /// Filter by name pattern (for list).
+    pub name_pattern: Option<String>,
+    /// Maximum results (for list) or memories (for render).
+    pub limit: Option<u32>,
+    /// Specific version (for get/render/delete).
+    pub version: Option<u32>,
+    /// Query string for memory search (for render).
+    pub query: Option<String>,
+    /// Namespaces to filter memories (for render).
+    pub namespaces: Option<Vec<String>>,
+    /// Output format override (for render).
+    pub format: Option<String>,
+}
+
+/// Variable definition argument for context template save.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContextTemplateVariableArg {
+    /// Variable name (without `{{}}`).
+    pub name: String,
+    /// Variable description for documentation.
+    pub description: Option<String>,
+    /// Default value if not provided.
+    pub default: Option<String>,
+    /// Whether the variable is required (default: true).
+    pub required: Option<bool>,
+}
+
+// Legacy context template argument types (for backward compatibility)
+
+/// Arguments for the `context_template_save` tool (legacy).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContextTemplateSaveArgs {
@@ -494,21 +661,7 @@ pub struct ContextTemplateSaveArgs {
     pub variables: Option<Vec<ContextTemplateVariableArg>>,
 }
 
-/// Variable definition argument for `context_template_save`.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ContextTemplateVariableArg {
-    /// Variable name (without `{{}}`).
-    pub name: String,
-    /// Variable description for documentation.
-    pub description: Option<String>,
-    /// Default value if not provided.
-    pub default: Option<String>,
-    /// Whether the variable is required (default: true).
-    pub required: Option<bool>,
-}
-
-/// Arguments for the `context_template_list` tool.
+/// Arguments for the `context_template_list` tool (legacy).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContextTemplateListArgs {
@@ -522,7 +675,7 @@ pub struct ContextTemplateListArgs {
     pub limit: Option<usize>,
 }
 
-/// Arguments for the `context_template_get` tool.
+/// Arguments for the `context_template_get` tool (legacy).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContextTemplateGetArgs {
@@ -534,7 +687,7 @@ pub struct ContextTemplateGetArgs {
     pub domain: Option<String>,
 }
 
-/// Arguments for the `context_template_render` tool.
+/// Arguments for the `context_template_render` tool (legacy).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContextTemplateRenderArgs {
@@ -554,7 +707,7 @@ pub struct ContextTemplateRenderArgs {
     pub format: Option<String>,
 }
 
-/// Arguments for the `context_template_delete` tool.
+/// Arguments for the `context_template_delete` tool (legacy).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContextTemplateDeleteArgs {
@@ -577,6 +730,38 @@ pub struct InitArgs {
     pub recall_query: Option<String>,
     /// Maximum memories to recall (default: 5).
     pub recall_limit: Option<u32>,
+}
+
+// =============================================================================
+// Group Management Arguments (Consolidated, Feature-gated: group-scope)
+// =============================================================================
+
+/// Arguments for the consolidated `subcog_groups` tool.
+///
+/// Supports all group management operations via the `action` field:
+/// - `create`: Create a new group
+/// - `list`: List groups you belong to
+/// - `get`: Get group details including members
+/// - `add_member`: Add a member to a group
+/// - `remove_member`: Remove a member from a group
+/// - `update_role`: Update a member's role
+/// - `delete`: Delete a group
+#[cfg(feature = "group-scope")]
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupsArgs {
+    /// Operation to perform: `create`, `list`, `get`, `add_member`, `remove_member`, `update_role`, `delete`.
+    pub action: String,
+    /// Group ID (required for `get`/`add_member`/`remove_member`/`update_role`/`delete`).
+    pub group_id: Option<String>,
+    /// Group name (required for create).
+    pub name: Option<String>,
+    /// Group description (for create).
+    pub description: Option<String>,
+    /// User ID to add/remove/update (for `add_member/remove_member/update_role`).
+    pub user_id: Option<String>,
+    /// Role for the member: read, write, admin (for `add_member/update_role`).
+    pub role: Option<String>,
 }
 
 /// Parses a namespace string to Namespace enum.

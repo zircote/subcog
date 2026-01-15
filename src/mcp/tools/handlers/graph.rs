@@ -10,8 +10,9 @@
 //! - Graph visualization
 
 use crate::mcp::tool_types::{
-    EntitiesArgs, EntityMergeArgs, ExtractEntitiesArgs, GraphQueryArgs, GraphVisualizeArgs,
-    RelationshipInferArgs, RelationshipsArgs, parse_entity_type, parse_relationship_type,
+    EntitiesArgs, EntityMergeArgs, ExtractEntitiesArgs, GraphArgs, GraphQueryArgs,
+    GraphVisualizeArgs, RelationshipInferArgs, RelationshipsArgs, parse_entity_type,
+    parse_relationship_type,
 };
 use crate::mcp::tools::{ToolContent, ToolResult};
 use crate::models::Domain;
@@ -47,8 +48,10 @@ pub fn execute_entities(arguments: Value) -> Result<ToolResult> {
         "get" => execute_entity_get(&args),
         "list" => execute_entity_list(&args),
         "delete" => execute_entity_delete(&args),
+        "extract" => execute_entity_extract(&args),
+        "merge" => execute_entity_merge_action(&args),
         _ => Err(Error::InvalidInput(format!(
-            "Unknown entity action: {}. Valid actions: create, get, list, delete",
+            "Unknown entity action: {}. Valid actions: create, get, list, delete, extract, merge",
             args.action
         ))),
     }
@@ -206,6 +209,226 @@ fn execute_entity_delete(args: &EntitiesArgs) -> Result<ToolResult> {
     })
 }
 
+/// Handles the `extract` action for `subcog_entities`.
+///
+/// Extracts entities from text content using pattern-based extraction.
+fn execute_entity_extract(args: &EntitiesArgs) -> Result<ToolResult> {
+    let content = args.content.as_ref().ok_or_else(|| {
+        Error::InvalidInput("'content' is required for extract action".to_string())
+    })?;
+
+    if content.trim().is_empty() {
+        return Err(Error::InvalidInput(
+            "Content is required for entity extraction".to_string(),
+        ));
+    }
+
+    let container = ServiceContainer::from_current_dir_or_user()?;
+
+    // Use pattern-based extractor (LLM support requires provider injection)
+    let extractor = container.entity_extractor();
+
+    let min_confidence = args.min_confidence.unwrap_or(0.5);
+    let extractor = extractor.with_min_confidence(min_confidence);
+
+    let result = extractor.extract(content)?;
+
+    let mut text = format!(
+        "**Entity Extraction Results**{}{}\n\n",
+        if result.used_fallback {
+            " (fallback mode)"
+        } else {
+            ""
+        },
+        if let Some(ref memory_id) = args.memory_id {
+            format!("\nSource memory: `{memory_id}`")
+        } else {
+            String::new()
+        }
+    );
+
+    if result.entities.is_empty() && result.relationships.is_empty() {
+        text.push_str("No entities or relationships extracted.\n");
+    } else {
+        if !result.entities.is_empty() {
+            text.push_str(&format!("**Entities ({}):**\n", result.entities.len()));
+            for entity in &result.entities {
+                text.push_str(&format!(
+                    "- **{}** ({}) - confidence: {:.2}\n",
+                    entity.name, entity.entity_type, entity.confidence
+                ));
+            }
+            text.push('\n');
+        }
+
+        if !result.relationships.is_empty() {
+            text.push_str(&format!(
+                "**Relationships ({}):**\n",
+                result.relationships.len()
+            ));
+            for rel in &result.relationships {
+                text.push_str(&format!(
+                    "- {} --[{}]--> {} (confidence: {:.2})\n",
+                    rel.from, rel.relationship_type, rel.to, rel.confidence
+                ));
+            }
+        }
+    }
+
+    // Store entities if requested
+    if args.store && !result.entities.is_empty() {
+        let graph = container.graph()?;
+        let graph_entities = extractor.to_graph_entities(&result);
+
+        for entity in &graph_entities {
+            graph.store_entity(entity)?;
+        }
+
+        // Store relationships too
+        let entity_map: HashMap<String, Entity> = graph_entities
+            .iter()
+            .map(|e| (e.name.clone(), e.clone()))
+            .collect();
+        let graph_rels = extractor.to_graph_relationships(&result, &entity_map);
+
+        for rel in &graph_rels {
+            graph.store_relationship(rel)?;
+        }
+
+        text.push_str(&format!(
+            "\n✓ Stored {} entities and {} relationships in graph.\n",
+            graph_entities.len(),
+            graph_rels.len()
+        ));
+    }
+
+    if !result.warnings.is_empty() {
+        text.push_str("\n**Warnings:**\n");
+        for warning in &result.warnings {
+            text.push_str(&format!("- {warning}\n"));
+        }
+    }
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text { text }],
+        is_error: false,
+    })
+}
+
+/// Handles the `merge` action for `subcog_entities`.
+///
+/// Supports sub-actions: `find_duplicates`, merge.
+fn execute_entity_merge_action(args: &EntitiesArgs) -> Result<ToolResult> {
+    let merge_action = args.merge_action.as_deref().unwrap_or("find_duplicates");
+
+    match merge_action {
+        "find_duplicates" => execute_entity_find_duplicates(args),
+        "merge" => execute_entity_merge_impl(args),
+        _ => Err(Error::InvalidInput(format!(
+            "Unknown merge sub-action: '{merge_action}'. Valid sub-actions: find_duplicates, merge"
+        ))),
+    }
+}
+
+/// Finds duplicate entities for the `merge` action.
+fn execute_entity_find_duplicates(args: &EntitiesArgs) -> Result<ToolResult> {
+    let entity_id = args.entity_id.as_ref().ok_or_else(|| {
+        Error::InvalidInput("'entity_id' is required for find_duplicates".to_string())
+    })?;
+
+    let container = ServiceContainer::from_current_dir_or_user()?;
+    let graph = container.graph()?;
+
+    let id = EntityId::new(entity_id);
+    let entity = graph
+        .get_entity(&id)?
+        .ok_or_else(|| Error::OperationFailed {
+            operation: "find_duplicates".to_string(),
+            cause: format!("Entity not found: {entity_id}"),
+        })?;
+
+    let threshold = args.threshold.unwrap_or(0.7);
+    let duplicates = graph.find_duplicates(&entity, threshold)?;
+
+    if duplicates.is_empty() {
+        return Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!(
+                    "No potential duplicates found for '{}' (threshold: {:.0}%)",
+                    entity.name,
+                    threshold * 100.0
+                ),
+            }],
+            is_error: false,
+        });
+    }
+
+    let mut text = format!(
+        "**Potential duplicates for '{}'** (threshold: {:.0}%)\n\n",
+        entity.name,
+        threshold * 100.0
+    );
+    for dup in &duplicates {
+        text.push_str(&format!(
+            "- **{}** ({:?}) `{}`\n",
+            dup.name, dup.entity_type, dup.id
+        ));
+    }
+    text.push_str(&format!(
+        "\nTo merge, use: action=merge, merge_action=merge, entity_ids=[\"{}\", {}], canonical_name=\"...\"",
+        entity_id,
+        duplicates
+            .iter()
+            .map(|e| format!("\"{}\"", e.id))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text { text }],
+        is_error: false,
+    })
+}
+
+/// Merges entities for the `merge` action.
+fn execute_entity_merge_impl(args: &EntitiesArgs) -> Result<ToolResult> {
+    let entity_ids = args.entity_ids.as_ref().ok_or_else(|| {
+        Error::InvalidInput("'entity_ids' is required for merge (minimum 2)".to_string())
+    })?;
+
+    if entity_ids.len() < 2 {
+        return Err(Error::InvalidInput(
+            "At least 2 entity IDs are required for merge".to_string(),
+        ));
+    }
+
+    let canonical_name = args
+        .canonical_name
+        .as_ref()
+        .ok_or_else(|| Error::InvalidInput("'canonical_name' is required for merge".to_string()))?;
+
+    let container = ServiceContainer::from_current_dir_or_user()?;
+    let graph = container.graph()?;
+
+    let ids: Vec<EntityId> = entity_ids.iter().map(EntityId::new).collect();
+    let merged = graph.merge_entities(&ids, canonical_name)?;
+
+    let text = format!(
+        "**Entities Merged Successfully**\n\n\
+         - **Canonical Entity**: {} `{}`\n\
+         - **Merged IDs**: {}\n\n\
+         All relationships and mentions have been transferred to the canonical entity.",
+        merged.name,
+        merged.id,
+        entity_ids.join(", ")
+    );
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text { text }],
+        is_error: false,
+    })
+}
+
 // ============================================================================
 // Relationship Operations
 // ============================================================================
@@ -223,8 +446,9 @@ pub fn execute_relationships(arguments: Value) -> Result<ToolResult> {
         "create" => execute_relationship_create(&args),
         "get" | "list" => execute_relationship_list(&args),
         "delete" => execute_relationship_delete(&args),
+        "infer" => execute_relationship_infer_action(&args),
         _ => Err(Error::InvalidInput(format!(
-            "Unknown relationship action: {}. Valid actions: create, get, list, delete",
+            "Unknown relationship action: {}. Valid actions: create, get, list, delete, infer",
             args.action
         ))),
     }
@@ -348,8 +572,355 @@ fn execute_relationship_delete(args: &RelationshipsArgs) -> Result<ToolResult> {
     })
 }
 
+/// Handles the `infer` action for `subcog_relationships`.
+///
+/// Infers implicit relationships between entities using pattern-based extraction.
+fn execute_relationship_infer_action(args: &RelationshipsArgs) -> Result<ToolResult> {
+    let container = ServiceContainer::from_current_dir_or_user()?;
+    let graph = container.graph()?;
+
+    // Get entities to analyze
+    let entities = if let Some(entity_ids) = &args.entity_ids {
+        let mut entities = Vec::new();
+        for id_str in entity_ids {
+            let id = EntityId::new(id_str);
+            if let Some(entity) = graph.get_entity(&id)? {
+                entities.push(entity);
+            }
+        }
+        entities
+    } else {
+        // Get recent entities
+        let limit = args.limit.unwrap_or(50);
+        let query = EntityQuery::new().with_limit(limit);
+        graph.query_entities(&query)?
+    };
+
+    if entities.is_empty() {
+        return Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: "No entities found to analyze.".to_string(),
+            }],
+            is_error: false,
+        });
+    }
+
+    // Use pattern-based extractor for inference (LLM support requires provider injection)
+    let extractor = container.entity_extractor();
+
+    let min_confidence = args.min_confidence.unwrap_or(0.6);
+    let extractor = extractor.with_min_confidence(min_confidence);
+
+    let result = extractor.infer_relationships(&entities)?;
+
+    let mut text = format!(
+        "**Relationship Inference Results**{}\n\n",
+        if result.used_fallback {
+            " (fallback mode)"
+        } else {
+            ""
+        }
+    );
+
+    if result.relationships.is_empty() {
+        text.push_str("No relationships inferred.\n");
+    } else {
+        text.push_str(&format!(
+            "**Inferred Relationships ({}):**\n",
+            result.relationships.len()
+        ));
+        for rel in &result.relationships {
+            text.push_str(&format!(
+                "- {} --[{}]--> {} (confidence: {:.2})",
+                rel.from, rel.relationship_type, rel.to, rel.confidence
+            ));
+            if let Some(reasoning) = &rel.reasoning {
+                text.push_str(&format!("\n  Reasoning: {reasoning}"));
+            }
+            text.push('\n');
+        }
+    }
+
+    // Store relationships if requested
+    if args.store && !result.relationships.is_empty() {
+        // Build entity map for lookup
+        let entity_map: HashMap<String, &Entity> =
+            entities.iter().map(|e| (e.name.clone(), e)).collect();
+
+        let mut stored = 0;
+        for inferred in &result.relationships {
+            if let (Some(from), Some(to)) =
+                (entity_map.get(&inferred.from), entity_map.get(&inferred.to))
+                && let Some(rel_type) = parse_relationship_type(&inferred.relationship_type)
+            {
+                let mut rel = Relationship::new(from.id.clone(), to.id.clone(), rel_type);
+                rel.confidence = inferred.confidence;
+                graph.store_relationship(&rel)?;
+                stored += 1;
+            }
+        }
+
+        text.push_str(&format!("\n✓ Stored {stored} relationships in graph.\n"));
+    }
+
+    if !result.warnings.is_empty() {
+        text.push_str("\n**Warnings:**\n");
+        for warning in &result.warnings {
+            text.push_str(&format!("- {warning}\n"));
+        }
+    }
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text { text }],
+        is_error: false,
+    })
+}
+
 // ============================================================================
-// Graph Query Operations
+// Consolidated Graph Tool
+// ============================================================================
+
+/// Executes the consolidated `subcog_graph` tool.
+///
+/// Combines graph query (neighbors, path, stats) and visualization operations.
+///
+/// # Errors
+///
+/// Returns an error if argument parsing or the operation fails.
+pub fn execute_graph(arguments: Value) -> Result<ToolResult> {
+    let args: GraphArgs = serde_json::from_value(arguments)
+        .map_err(|e| Error::InvalidInput(format!("Invalid graph arguments: {e}")))?;
+
+    match args.operation.as_str() {
+        "neighbors" => execute_graph_neighbors(&args),
+        "path" => execute_graph_path(&args),
+        "stats" => execute_graph_stats(),
+        "visualize" => execute_graph_visualize_action(&args),
+        _ => Err(Error::InvalidInput(format!(
+            "Unknown graph operation: {}. Valid operations: neighbors, path, stats, visualize",
+            args.operation
+        ))),
+    }
+}
+
+/// Handles the `neighbors` operation for `subcog_graph`.
+fn execute_graph_neighbors(args: &GraphArgs) -> Result<ToolResult> {
+    let entity_id = args.entity_id.as_ref().ok_or_else(|| {
+        Error::InvalidInput("'entity_id' is required for neighbors operation".to_string())
+    })?;
+
+    let container = ServiceContainer::from_current_dir_or_user()?;
+    let graph = container.graph()?;
+
+    let id = EntityId::new(entity_id);
+    let depth = u32::try_from(args.depth.unwrap_or(2).min(5)).unwrap_or(2);
+
+    let neighbors = graph.get_neighbors(&id, depth)?;
+
+    if neighbors.is_empty() {
+        return Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!("No neighbors found for entity `{entity_id}` within depth {depth}."),
+            }],
+            is_error: false,
+        });
+    }
+
+    let mut text = format!(
+        "**Neighbors of `{entity_id}` (depth {depth})**\n\nFound {} entities:\n\n",
+        neighbors.len()
+    );
+    for entity in &neighbors {
+        text.push_str(&format!(
+            "- **{}** ({:?}) `{}`\n",
+            entity.name, entity.entity_type, entity.id
+        ));
+    }
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text { text }],
+        is_error: false,
+    })
+}
+
+/// Handles the `path` operation for `subcog_graph`.
+fn execute_graph_path(args: &GraphArgs) -> Result<ToolResult> {
+    let from_id = args.from_entity.as_ref().ok_or_else(|| {
+        Error::InvalidInput("'from_entity' is required for path operation".to_string())
+    })?;
+    let to_id = args.to_entity.as_ref().ok_or_else(|| {
+        Error::InvalidInput("'to_entity' is required for path operation".to_string())
+    })?;
+
+    let container = ServiceContainer::from_current_dir_or_user()?;
+    let graph = container.graph()?;
+
+    let from = EntityId::new(from_id);
+    let to = EntityId::new(to_id);
+    let max_depth = u32::try_from(args.depth.unwrap_or(5).min(5)).unwrap_or(5);
+
+    match graph.find_path(&from, &to, max_depth)? {
+        Some(result) => {
+            let mut text = format!(
+                "**Path from `{from_id}` to `{to_id}`**\n\n\
+                 Path length: {} entities, {} relationships\n\n",
+                result.entities.len(),
+                result.relationships.len()
+            );
+
+            text.push_str("**Entities in path:**\n");
+            for entity in &result.entities {
+                text.push_str(&format!("- {} ({:?})\n", entity.name, entity.entity_type));
+            }
+
+            if !result.relationships.is_empty() {
+                text.push_str("\n**Relationships:**\n");
+                for rel in &result.relationships {
+                    text.push_str(&format!(
+                        "- `{}` --[{:?}]--> `{}`\n",
+                        rel.from_entity, rel.relationship_type, rel.to_entity
+                    ));
+                }
+            }
+
+            Ok(ToolResult {
+                content: vec![ToolContent::Text { text }],
+                is_error: false,
+            })
+        },
+        None => Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!(
+                    "No path found from `{from_id}` to `{to_id}` within depth {max_depth}."
+                ),
+            }],
+            is_error: false,
+        }),
+    }
+}
+
+/// Handles the `stats` operation for `subcog_graph`.
+fn execute_graph_stats() -> Result<ToolResult> {
+    let container = ServiceContainer::from_current_dir_or_user()?;
+    let graph = container.graph()?;
+
+    let stats = graph.get_stats()?;
+
+    let text = format!(
+        "**Knowledge Graph Statistics**\n\n\
+         - **Entities**: {}\n\
+         - **Relationships**: {}\n\
+         - **Mentions**: {}\n\n\
+         **Entity Types:**\n{}\n\
+         **Relationship Types:**\n{}",
+        stats.entity_count,
+        stats.relationship_count,
+        stats.mention_count,
+        format_type_counts(&stats.entities_by_type),
+        format_type_counts(&stats.relationships_by_type),
+    );
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text { text }],
+        is_error: false,
+    })
+}
+
+/// Handles the `visualize` operation for `subcog_graph`.
+fn execute_graph_visualize_action(args: &GraphArgs) -> Result<ToolResult> {
+    let container = ServiceContainer::from_current_dir_or_user()?;
+    let graph = container.graph()?;
+
+    let format = args.format.as_deref().unwrap_or("mermaid");
+    let limit = args.limit.unwrap_or(50);
+    let depth = u32::try_from(args.depth.unwrap_or(2).min(4)).unwrap_or(2);
+
+    // Get entities and relationships to visualize
+    let (entities, relationships) = if let Some(entity_id) = &args.entity_id {
+        // Center on specific entity
+        let id = EntityId::new(entity_id);
+        let result = graph.traverse(&id, depth, None, None)?;
+        (result.entities, result.relationships)
+    } else {
+        // Get all entities up to limit
+        let query = EntityQuery::new().with_limit(limit);
+        let entities = graph.query_entities(&query)?;
+
+        // Get all relationships between these entities
+        let entity_ids: std::collections::HashSet<_> = entities.iter().map(|e| &e.id).collect();
+        let all_rels =
+            graph.query_relationships(&RelationshipQuery::new().with_limit(limit * 2))?;
+        let relationships: Vec<_> = all_rels
+            .into_iter()
+            .filter(|r| entity_ids.contains(&r.from_entity) && entity_ids.contains(&r.to_entity))
+            .collect();
+
+        (entities, relationships)
+    };
+
+    // Apply type filters if specified
+    let entities: Vec<_> = if let Some(type_filter) = &args.entity_types {
+        let allowed_types: std::collections::HashSet<_> = type_filter
+            .iter()
+            .filter_map(|s| parse_entity_type(s))
+            .collect();
+        entities
+            .into_iter()
+            .filter(|e| allowed_types.is_empty() || allowed_types.contains(&e.entity_type))
+            .collect()
+    } else {
+        entities
+    };
+
+    let relationships: Vec<_> = if let Some(type_filter) = &args.relationship_types {
+        let allowed_types: std::collections::HashSet<_> = type_filter
+            .iter()
+            .filter_map(|s| parse_relationship_type(s))
+            .collect();
+        relationships
+            .into_iter()
+            .filter(|r| allowed_types.is_empty() || allowed_types.contains(&r.relationship_type))
+            .collect()
+    } else {
+        relationships
+    };
+
+    if entities.is_empty() {
+        return Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: "No entities to visualize.".to_string(),
+            }],
+            is_error: false,
+        });
+    }
+
+    let visualization = match format {
+        "mermaid" => generate_mermaid(&entities, &relationships),
+        "dot" => generate_dot(&entities, &relationships),
+        "ascii" => generate_ascii(&entities, &relationships),
+        _ => {
+            return Err(Error::InvalidInput(format!(
+                "Unknown visualization format: {format}. Valid formats: mermaid, dot, ascii"
+            )));
+        },
+    };
+
+    let text = format!(
+        "**Graph Visualization ({} entities, {} relationships)**\n\n```{}\n{}\n```",
+        entities.len(),
+        relationships.len(),
+        if format == "dot" { "dot" } else { format },
+        visualization
+    );
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text { text }],
+        is_error: false,
+    })
+}
+
+// ============================================================================
+// Graph Query Operations (Legacy)
 // ============================================================================
 
 /// Executes the graph query tool (traversal operations).

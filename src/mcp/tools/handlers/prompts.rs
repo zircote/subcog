@@ -2,12 +2,14 @@
 //!
 //! Contains handlers for prompt management operations:
 //! save, list, get, run, delete.
+//!
+//! Provides both consolidated (`execute_prompts`) and legacy handlers.
 
 use std::collections::HashMap;
 use std::path::Path;
 
 use crate::mcp::tool_types::{
-    PromptDeleteArgs, PromptGetArgs, PromptListArgs, PromptRunArgs, PromptSaveArgs,
+    PromptDeleteArgs, PromptGetArgs, PromptListArgs, PromptRunArgs, PromptSaveArgs, PromptsArgs,
     domain_scope_to_display, find_missing_required_variables, format_variable_info,
     parse_domain_scope,
 };
@@ -419,6 +421,417 @@ pub fn execute_prompt_delete(arguments: Value) -> Result<ToolResult> {
                 text: format!(
                     "Prompt '{}' not found in {} scope.",
                     args.name,
+                    domain_scope_to_display(domain)
+                ),
+            }],
+            is_error: true,
+        })
+    }
+}
+
+// =============================================================================
+// Consolidated Prompt Handler
+// =============================================================================
+
+/// Executes the consolidated `subcog_prompts` tool.
+///
+/// Dispatches to the appropriate action handler based on the `action` field.
+/// Valid actions: save, list, get, run, delete.
+pub fn execute_prompts(arguments: Value) -> Result<ToolResult> {
+    let args: PromptsArgs =
+        serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
+
+    match args.action.as_str() {
+        "save" => execute_prompts_save(&args),
+        "list" => execute_prompts_list(&args),
+        "get" => execute_prompts_get(&args),
+        "run" => execute_prompts_run(&args),
+        "delete" => execute_prompts_delete(&args),
+        _ => Err(Error::InvalidInput(format!(
+            "Unknown prompts action: '{}'. Valid actions: save, list, get, run, delete",
+            args.action
+        ))),
+    }
+}
+
+/// Handles the `save` action for `subcog_prompts`.
+fn execute_prompts_save(args: &PromptsArgs) -> Result<ToolResult> {
+    use crate::services::{EnrichmentStatus, PartialMetadata, SaveOptions};
+
+    let name = args
+        .name
+        .as_ref()
+        .ok_or_else(|| Error::InvalidInput("'name' is required for save action".to_string()))?;
+
+    // Parse domain scope
+    let domain = parse_domain_scope(args.domain.as_deref());
+
+    // Get content either directly or from file
+    let (content, mut base_template) = if let Some(content) = &args.content {
+        (content.clone(), PromptTemplate::new(name, content))
+    } else if let Some(file_path) = &args.file_path {
+        let template = PromptParser::from_file(file_path)?;
+        (template.content.clone(), template)
+    } else {
+        return Err(Error::InvalidInput(
+            "Either 'content' or 'file_path' must be provided for save action".to_string(),
+        ));
+    };
+
+    // Build partial metadata from user-provided values
+    let mut existing = PartialMetadata::new();
+    if let Some(desc) = &args.description {
+        existing = existing.with_description(desc.clone());
+    }
+    if let Some(tags) = &args.tags {
+        existing = existing.with_tags(tags.clone());
+    }
+    if let Some(vars) = &args.variables_def {
+        use crate::models::PromptVariable;
+        let variables: Vec<PromptVariable> = vars
+            .iter()
+            .map(|v| PromptVariable {
+                name: v.name.clone(),
+                description: v.description.clone(),
+                default: v.default.clone(),
+                required: v.required.unwrap_or(true),
+            })
+            .collect();
+        existing = existing.with_variables(variables);
+    } else if !base_template.variables.is_empty() {
+        existing = existing.with_variables(std::mem::take(&mut base_template.variables));
+    }
+
+    // Configure save options
+    let options = SaveOptions::new().with_skip_enrichment(args.skip_enrichment);
+
+    // Get repo path and create service
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let mut prompt_service = if let Some(repo_path) = services.repo_path() {
+        create_prompt_service(repo_path)
+    } else {
+        let user_dir = crate::storage::get_user_data_dir()?;
+        create_prompt_service(&user_dir)
+    };
+
+    // Use save_with_enrichment
+    let result = prompt_service.save_with_enrichment::<crate::llm::OllamaClient>(
+        name,
+        &content,
+        domain,
+        &options,
+        None,
+        if existing.is_empty() {
+            None
+        } else {
+            Some(existing)
+        },
+    )?;
+
+    // Format enrichment status
+    let enrichment_str = match result.enrichment_status {
+        EnrichmentStatus::Full => "LLM-enhanced",
+        EnrichmentStatus::Fallback => "Basic (LLM unavailable)",
+        EnrichmentStatus::Skipped => "Skipped",
+    };
+
+    let var_names: Vec<String> = result
+        .template
+        .variables
+        .iter()
+        .map(|v| v.name.clone())
+        .collect();
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text {
+            text: format!(
+                "Prompt saved successfully!\n\n\
+                 Name: {}\n\
+                 ID: {}\n\
+                 Domain: {}\n\
+                 Enrichment: {}\n\
+                 Description: {}\n\
+                 Tags: {}\n\
+                 Variables: {}",
+                result.template.name,
+                result.id,
+                domain_scope_to_display(domain),
+                enrichment_str,
+                format_field_or_none(&result.template.description),
+                format_list_or_none(&result.template.tags),
+                format_list_or_none(&var_names),
+            ),
+        }],
+        is_error: false,
+    })
+}
+
+/// Handles the `list` action for `subcog_prompts`.
+fn execute_prompts_list(args: &PromptsArgs) -> Result<ToolResult> {
+    // Build filter
+    let mut filter = PromptFilter::new();
+    if let Some(domain) = &args.domain {
+        filter = filter.with_domain(parse_domain_scope(Some(domain)));
+    }
+    if let Some(tags) = &args.tags {
+        filter = filter.with_tags(tags.clone());
+    }
+    if let Some(pattern) = &args.name_pattern {
+        filter = filter.with_name_pattern(pattern.clone());
+    }
+    if let Some(limit) = args.limit {
+        filter = filter.with_limit(limit);
+    } else {
+        filter = filter.with_limit(20);
+    }
+
+    // Get prompts
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let mut prompt_service = if let Some(repo_path) = services.repo_path() {
+        create_prompt_service(repo_path)
+    } else {
+        let user_dir = crate::storage::get_user_data_dir()?;
+        create_prompt_service(&user_dir)
+    };
+    let prompts = prompt_service.list(&filter)?;
+
+    if prompts.is_empty() {
+        return Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: "No prompts found matching the filter.".to_string(),
+            }],
+            is_error: false,
+        });
+    }
+
+    let mut output = format!("Found {} prompt(s):\n\n", prompts.len());
+    for (i, prompt) in prompts.iter().enumerate() {
+        let tags_display = if prompt.tags.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", prompt.tags.join(", "))
+        };
+
+        let vars_count = prompt.variables.len();
+        let usage_info = if prompt.usage_count > 0 {
+            format!(" (used {} times)", prompt.usage_count)
+        } else {
+            String::new()
+        };
+
+        output.push_str(&format!(
+            "{}. **{}**{}{}\n   {}\n   Variables: {}\n\n",
+            i + 1,
+            prompt.name,
+            tags_display,
+            usage_info,
+            if prompt.description.is_empty() {
+                "(no description)"
+            } else {
+                &prompt.description
+            },
+            if vars_count == 0 {
+                "none".to_string()
+            } else {
+                format!(
+                    "{} ({})",
+                    vars_count,
+                    prompt
+                        .variables
+                        .iter()
+                        .map(|v| v.name.clone())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+        ));
+    }
+
+    Ok(ToolResult {
+        content: vec![ToolContent::Text { text: output }],
+        is_error: false,
+    })
+}
+
+/// Handles the `get` action for `subcog_prompts`.
+fn execute_prompts_get(args: &PromptsArgs) -> Result<ToolResult> {
+    let name = args
+        .name
+        .as_ref()
+        .ok_or_else(|| Error::InvalidInput("'name' is required for get action".to_string()))?;
+
+    let domain = args.domain.as_ref().map(|d| parse_domain_scope(Some(d)));
+
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let mut prompt_service = if let Some(repo_path) = services.repo_path() {
+        create_prompt_service(repo_path)
+    } else {
+        let user_dir = crate::storage::get_user_data_dir()?;
+        create_prompt_service(&user_dir)
+    };
+    let prompt = prompt_service.get(name, domain)?;
+
+    match prompt {
+        Some(p) => {
+            let vars_info: Vec<String> = p.variables.iter().map(format_variable_info).collect();
+
+            Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: format!(
+                        "**{}**\n\n\
+                         {}\n\n\
+                         **Variables:**\n{}\n\n\
+                         **Content:**\n```\n{}\n```\n\n\
+                         Tags: {}\n\
+                         Usage count: {}",
+                        p.name,
+                        if p.description.is_empty() {
+                            "(no description)".to_string()
+                        } else {
+                            p.description.clone()
+                        },
+                        if vars_info.is_empty() {
+                            "none".to_string()
+                        } else {
+                            vars_info.join("\n")
+                        },
+                        p.content,
+                        if p.tags.is_empty() {
+                            "none".to_string()
+                        } else {
+                            p.tags.join(", ")
+                        },
+                        p.usage_count
+                    ),
+                }],
+                is_error: false,
+            })
+        },
+        None => Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!("Prompt '{name}' not found."),
+            }],
+            is_error: true,
+        }),
+    }
+}
+
+/// Handles the `run` action for `subcog_prompts`.
+fn execute_prompts_run(args: &PromptsArgs) -> Result<ToolResult> {
+    let name = args
+        .name
+        .as_ref()
+        .ok_or_else(|| Error::InvalidInput("'name' is required for run action".to_string()))?;
+
+    let domain = args.domain.as_ref().map(|d| parse_domain_scope(Some(d)));
+
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let mut prompt_service = if let Some(repo_path) = services.repo_path() {
+        create_prompt_service(repo_path)
+    } else {
+        let user_dir = crate::storage::get_user_data_dir()?;
+        create_prompt_service(&user_dir)
+    };
+    let prompt = prompt_service.get(name, domain)?;
+
+    match prompt {
+        Some(p) => {
+            let values: HashMap<String, String> = args.variables.clone().unwrap_or_default();
+
+            // Check for missing required variables
+            let missing: Vec<&str> = find_missing_required_variables(&p.variables, &values);
+
+            if !missing.is_empty() {
+                return Ok(ToolResult {
+                    content: vec![ToolContent::Text {
+                        text: format!(
+                            "Missing required variables: {}\n\n\
+                             Use the 'variables' parameter to provide values:\n\
+                             ```json\n{{\n  \"variables\": {{\n{}\n  }}\n}}\n```",
+                            missing.join(", "),
+                            missing
+                                .iter()
+                                .map(|n| format!("    \"{n}\": \"<value>\""))
+                                .collect::<Vec<_>>()
+                                .join(",\n")
+                        ),
+                    }],
+                    is_error: true,
+                });
+            }
+
+            // Substitute variables
+            let result = substitute_variables(&p.content, &values, &p.variables)?;
+
+            // Increment usage count (best effort)
+            if let Some(scope) = domain {
+                let _ = prompt_service.increment_usage(name, scope);
+            }
+
+            Ok(ToolResult {
+                content: vec![ToolContent::Text {
+                    text: format!(
+                        "**Prompt: {}**\n\n{}\n\n---\n_Variables substituted: {}_",
+                        p.name,
+                        result,
+                        if values.is_empty() {
+                            "none (defaults used)".to_string()
+                        } else {
+                            values.keys().cloned().collect::<Vec<_>>().join(", ")
+                        }
+                    ),
+                }],
+                is_error: false,
+            })
+        },
+        None => Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!("Prompt '{name}' not found."),
+            }],
+            is_error: true,
+        }),
+    }
+}
+
+/// Handles the `delete` action for `subcog_prompts`.
+fn execute_prompts_delete(args: &PromptsArgs) -> Result<ToolResult> {
+    let name = args
+        .name
+        .as_ref()
+        .ok_or_else(|| Error::InvalidInput("'name' is required for delete action".to_string()))?;
+
+    let domain_str = args.domain.as_ref().ok_or_else(|| {
+        Error::InvalidInput("'domain' is required for delete action (for safety)".to_string())
+    })?;
+
+    let domain = parse_domain_scope(Some(domain_str));
+
+    let services = ServiceContainer::from_current_dir_or_user()?;
+    let mut prompt_service = if let Some(repo_path) = services.repo_path() {
+        create_prompt_service(repo_path)
+    } else {
+        let user_dir = crate::storage::get_user_data_dir()?;
+        create_prompt_service(&user_dir)
+    };
+    let deleted = prompt_service.delete(name, domain)?;
+
+    if deleted {
+        Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!(
+                    "Prompt '{}' deleted from {} scope.",
+                    name,
+                    domain_scope_to_display(domain)
+                ),
+            }],
+            is_error: false,
+        })
+    } else {
+        Ok(ToolResult {
+            content: vec![ToolContent::Text {
+                text: format!(
+                    "Prompt '{}' not found in {} scope.",
+                    name,
                     domain_scope_to_display(domain)
                 ),
             }],

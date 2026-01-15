@@ -124,12 +124,21 @@ pub fn execute_capture(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the recall tool.
+///
+/// When `query` is omitted or empty, behaves like `subcog_list` and returns
+/// all memories matching the filter criteria (with pagination support).
 pub fn execute_recall(arguments: Value) -> Result<ToolResult> {
     let args: RecallArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
-    // SEC-M5: Validate query length before processing
-    validate_input_length(&args.query, "query", MAX_QUERY_LENGTH)?;
+    // Get query, treating None and empty string as "list all"
+    let query = args.query.as_deref().unwrap_or("");
+    let is_list_mode = query.is_empty() || query == "*";
+
+    // SEC-M5: Validate query length before processing (skip for empty/wildcard)
+    if !is_list_mode {
+        validate_input_length(query, "query", MAX_QUERY_LENGTH)?;
+    }
 
     let mode = args
         .mode
@@ -165,17 +174,33 @@ pub fn execute_recall(arguments: Value) -> Result<ToolResult> {
         filter = filter.with_entities(entities);
     }
 
-    let limit = args.limit.unwrap_or(10).min(50);
+    // Apply user_id and agent_id filters if provided (for multi-tenant scoping)
+    // These are added as tag filters: user:<id> and agent:<id>
+    if let Some(ref user_id) = args.user_id {
+        filter = filter.with_tag(format!("user:{user_id}"));
+    }
+    if let Some(ref agent_id) = args.agent_id {
+        filter = filter.with_tag(format!("agent:{agent_id}"));
+    }
+
+    // Different defaults for search vs list mode
+    // Search: default 10, max 50
+    // List: default 50, max 1000
+    let limit = if is_list_mode {
+        args.limit.unwrap_or(50).min(1000)
+    } else {
+        args.limit.unwrap_or(10).min(50)
+    };
 
     let services = ServiceContainer::from_current_dir_or_user()?;
     let recall = services.recall()?;
 
     // Use list_all for wildcard queries or filter-only queries
     // Use search for actual text queries
-    let result = if args.query == "*" || args.query.is_empty() {
+    let result = if is_list_mode {
         recall.list_all(&filter, limit)?
     } else {
-        recall.search(&args.query, mode, &filter, limit)?
+        recall.search(query, mode, &filter, limit)?
     };
 
     // Build filter description for output

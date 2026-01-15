@@ -72,6 +72,8 @@ mod persistence {
             domain: Domain::new(),
             status: MemoryStatus::Active,
             tags: vec![],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             embedding: None,
             created_at: subcog::current_timestamp(),
@@ -119,6 +121,8 @@ mod persistence {
             domain: Domain::new(),
             status: MemoryStatus::Active,
             tags: vec!["test".to_string(), "postgres".to_string()],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: Some("test_file.rs".to_string()),
             embedding: None,
             created_at: subcog::current_timestamp(),
@@ -225,6 +229,8 @@ mod persistence {
             domain: Domain::new(),
             status: MemoryStatus::Active,
             tags: vec!["original".to_string()],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             embedding: None,
             created_at: subcog::current_timestamp(),
@@ -369,6 +375,8 @@ mod index {
             domain: Domain::new(),
             status: MemoryStatus::Active,
             tags: vec!["database".to_string()],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             embedding: None,
             created_at: subcog::current_timestamp(),

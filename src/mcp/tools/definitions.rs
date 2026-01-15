@@ -48,16 +48,20 @@ pub fn capture_tool() -> ToolDefinition {
 }
 
 /// Defines the recall tool.
+///
+/// When `query` is omitted, behaves like `subcog_list` and returns all memories
+/// matching the filter criteria (with pagination support).
 pub fn recall_tool() -> ToolDefinition {
     ToolDefinition {
         name: "subcog_recall".to_string(),
-        description: "Search for relevant memories using semantic and text search. Returns normalized scores (0.0-1.0 where 1.0 is the best match) with raw RRF scores shown in parentheses for debugging.".to_string(),
+        description: "Search for relevant memories using semantic and text search, or list all memories when no query is provided. Returns normalized scores (0.0-1.0 where 1.0 is the best match) with raw RRF scores shown in parentheses for debugging. Subsumes subcog_list functionality.".to_string(),
         input_schema: serde_json::json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "The search query"
+                    "description": "The search query. If omitted, lists all memories matching the filter criteria."
                 },
                 "filter": {
                     "type": "string",
@@ -80,16 +84,30 @@ pub fn recall_tool() -> ToolDefinition {
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of results (default: 10)",
+                    "description": "Maximum number of results (default: 10 for search, 50 for list)",
                     "minimum": 1,
-                    "maximum": 50
+                    "maximum": 1000
                 },
                 "entity": {
                     "type": "string",
                     "description": "Filter by entity names (memories mentioning these entities). Comma-separated for OR logic (e.g., 'PostgreSQL,Redis')"
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Offset for pagination (default: 0). Used when listing without query.",
+                    "minimum": 0,
+                    "default": 0
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": "Filter by user ID (for multi-tenant scoping)"
+                },
+                "agent_id": {
+                    "type": "string",
+                    "description": "Filter by agent ID (for multi-agent scoping)"
                 }
             },
-            "required": ["query"]
+            "required": []
         }),
     }
 }
@@ -228,10 +246,13 @@ pub fn enrich_tool() -> ToolDefinition {
 }
 
 /// Defines the sync tool.
+///
+/// **DEPRECATED**: `SQLite` is now the authoritative storage. This tool is retained
+/// for backward compatibility but is a no-op. Will be removed in a future version.
 pub fn sync_tool() -> ToolDefinition {
     ToolDefinition {
         name: "subcog_sync".to_string(),
-        description: "Sync memories with git remote (push, fetch, or full sync)".to_string(),
+        description: "[DEPRECATED] Sync memories with git remote. No longer needed as SQLite is now authoritative storage. This tool is a no-op and will be removed in a future version.".to_string(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -284,7 +305,90 @@ pub fn gdpr_export_tool() -> ToolDefinition {
 // Prompt Management Tools
 // ============================================================================
 
-/// Defines the prompt.save tool.
+/// Defines the consolidated `subcog_prompts` tool.
+///
+/// Combines all prompt operations into a single action-based tool.
+pub fn prompts_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_prompts".to_string(),
+        description: "Manage prompt templates. Actions: save, list, get, run, delete.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "Operation to perform",
+                    "enum": ["save", "list", "get", "run", "delete"]
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Prompt name (required for save/get/run/delete)"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Prompt content with {{variable}} placeholders (for save, required if file_path not provided)"
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to file containing prompt (for save, alternative to content)"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Human-readable description (for save)"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Tags for categorization (for save/list)"
+                },
+                "domain": {
+                    "type": "string",
+                    "description": "Storage scope: project (default), user, or org",
+                    "enum": ["project", "user", "org"],
+                    "default": "project"
+                },
+                "variables_def": {
+                    "type": "array",
+                    "description": "Variable definitions with metadata (for save)",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "description": { "type": "string" },
+                            "default": { "type": "string" },
+                            "required": { "type": "boolean", "default": true }
+                        },
+                        "required": ["name"]
+                    }
+                },
+                "variables": {
+                    "type": "object",
+                    "description": "Variable values to substitute (for run)",
+                    "additionalProperties": { "type": "string" }
+                },
+                "skip_enrichment": {
+                    "type": "boolean",
+                    "description": "Skip LLM-powered metadata enrichment (for save)",
+                    "default": false
+                },
+                "name_pattern": {
+                    "type": "string",
+                    "description": "Filter by name pattern (for list, glob-style)"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of results (for list)",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 20
+                }
+            },
+            "required": ["action"]
+        }),
+    }
+}
+
+/// Defines the prompt.save tool (legacy).
 pub fn prompt_save_tool() -> ToolDefinition {
     ToolDefinition {
         name: "prompt_save".to_string(),
@@ -987,6 +1091,77 @@ pub fn graph_visualize_tool() -> ToolDefinition {
     }
 }
 
+/// Defines the consolidated graph tool for knowledge graph operations.
+///
+/// Combines query (neighbors, path, stats) and visualize operations
+/// into a single action-based tool. Reduces tool proliferation.
+pub fn graph_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_graph".to_string(),
+        description: "Consolidated knowledge graph operations. Query graph structure (neighbors, paths, stats) or generate visualizations. Combines subcog_graph_query and subcog_graph_visualize.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "description": "Graph operation to perform",
+                    "enum": ["neighbors", "path", "stats", "visualize"]
+                },
+                "entity_id": {
+                    "type": "string",
+                    "description": "Entity ID for neighbors/visualize operations (center point)"
+                },
+                "from_entity": {
+                    "type": "string",
+                    "description": "Source entity ID for path operation"
+                },
+                "to_entity": {
+                    "type": "string",
+                    "description": "Target entity ID for path operation"
+                },
+                "depth": {
+                    "type": "integer",
+                    "description": "Depth of traversal for neighbors/visualize (default: 2)",
+                    "minimum": 1,
+                    "maximum": 4,
+                    "default": 2
+                },
+                "format": {
+                    "type": "string",
+                    "description": "Output format for visualize operation",
+                    "enum": ["mermaid", "dot", "ascii"],
+                    "default": "mermaid"
+                },
+                "entity_types": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["Person", "Organization", "Technology", "Concept", "File"]
+                    },
+                    "description": "Filter to specific entity types"
+                },
+                "relationship_types": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["WorksAt", "Created", "Uses", "Implements", "PartOf", "RelatesTo", "MentionedIn", "Supersedes", "ConflictsWith"]
+                    },
+                    "description": "Filter to specific relationship types"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum entities to include (default: 50)",
+                    "minimum": 1,
+                    "maximum": 200,
+                    "default": 50
+                }
+            },
+            "required": ["operation"]
+        }),
+    }
+}
+
 /// Defines the init tool for session initialization.
 ///
 /// Combines `prompt_understanding`, status, and optional context recall
@@ -1024,7 +1199,106 @@ pub fn init_tool() -> ToolDefinition {
 // Context Template Tools
 // ============================================================================
 
-/// Defines the `context_template_save` tool.
+/// Defines the consolidated `subcog_templates` tool.
+///
+/// Combines all context template operations into a single action-based tool.
+pub fn templates_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "subcog_templates".to_string(),
+        description: "Manage context templates for formatting memories. Actions: save, list, get, render, delete.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "Operation to perform",
+                    "enum": ["save", "list", "get", "render", "delete"]
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Template name (required for save/get/render/delete)"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Template content with {{variable}} placeholders and {{#each memories}} iteration (for save)"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Human-readable description (for save)"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Tags for categorization (for save/list)"
+                },
+                "domain": {
+                    "type": "string",
+                    "description": "Storage scope: project (default), user, or org",
+                    "enum": ["project", "user", "org"],
+                    "default": "project"
+                },
+                "output_format": {
+                    "type": "string",
+                    "description": "Default output format (for save): markdown, json, or xml",
+                    "enum": ["markdown", "json", "xml"],
+                    "default": "markdown"
+                },
+                "variables_def": {
+                    "type": "array",
+                    "description": "Variable definitions with metadata (for save)",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "description": { "type": "string" },
+                            "default": { "type": "string" },
+                            "required": { "type": "boolean", "default": true }
+                        },
+                        "required": ["name"]
+                    }
+                },
+                "variables": {
+                    "type": "object",
+                    "description": "Custom variable values for rendering (for render)",
+                    "additionalProperties": { "type": "string" }
+                },
+                "name_pattern": {
+                    "type": "string",
+                    "description": "Filter by name pattern (for list, glob-style)"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum results (for list) or memories (for render)",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 20
+                },
+                "version": {
+                    "type": "integer",
+                    "description": "Specific version (for get/render/delete)",
+                    "minimum": 1
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Query string for memory search to populate template (for render)"
+                },
+                "namespaces": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Namespaces to filter memories (for render)"
+                },
+                "format": {
+                    "type": "string",
+                    "description": "Output format override (for render): markdown, json, or xml",
+                    "enum": ["markdown", "json", "xml"]
+                }
+            },
+            "required": ["action"]
+        }),
+    }
+}
+
+/// Defines the `context_template_save` tool (legacy).
 pub fn context_template_save_tool() -> ToolDefinition {
     ToolDefinition {
         name: "context_template_save".to_string(),
@@ -1400,6 +1674,50 @@ pub fn group_delete_tool() -> super::ToolDefinition {
                 }
             },
             "required": ["group_id"]
+        }),
+    }
+}
+
+/// Defines the consolidated `subcog_groups` tool.
+///
+/// Combines all group management operations into a single action-based tool.
+#[cfg(feature = "group-scope")]
+pub fn groups_tool() -> super::ToolDefinition {
+    super::ToolDefinition {
+        name: "subcog_groups".to_string(),
+        description: "Manage groups for shared memory access. Actions: create, list, get, add_member, remove_member, update_role, delete.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "Operation to perform",
+                    "enum": ["create", "list", "get", "add_member", "remove_member", "update_role", "delete"]
+                },
+                "group_id": {
+                    "type": "string",
+                    "description": "Group ID (required for get/add_member/remove_member/update_role/delete)"
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Group name (required for create)"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Group description (for create)"
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": "User ID to add/remove/update (for add_member/remove_member/update_role)"
+                },
+                "role": {
+                    "type": "string",
+                    "description": "Role for the member (for add_member/update_role)",
+                    "enum": ["read", "write", "admin"],
+                    "default": "read"
+                }
+            },
+            "required": ["action"]
         }),
     }
 }

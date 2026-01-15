@@ -131,8 +131,13 @@ mod tool_registry {
         let registry = ToolRegistry::new();
         let tool = registry.get_tool("subcog_recall").unwrap();
 
-        let required = tool.input_schema["required"].as_array().unwrap();
-        assert!(required.contains(&json!("query")));
+        // query is now optional - no required fields (acts as list mode when omitted)
+        if let Some(req_array) = tool.input_schema.get("required").and_then(|r| r.as_array()) {
+            assert!(
+                !req_array.contains(&json!("query")),
+                "query should not be required"
+            );
+        }
 
         let properties = &tool.input_schema["properties"];
         assert!(properties["query"].is_object());
@@ -279,17 +284,23 @@ mod input_validation {
     }
 
     #[test]
-    fn test_recall_rejects_missing_query() {
+    fn test_recall_accepts_missing_query_for_list_mode() {
+        // query is now optional - when omitted, subcog_recall acts like subcog_list
         let registry = ToolRegistry::new();
         let result = registry.execute(
             "subcog_recall",
             json!({
                 "limit": 10
-                // Missing "query"
+                // Missing "query" - should work in list mode
             }),
         );
 
-        assert!(result.is_err());
+        // Should succeed (list mode)
+        assert!(
+            result.is_ok(),
+            "recall without query should work: {:?}",
+            result.err()
+        );
     }
 
     #[test]

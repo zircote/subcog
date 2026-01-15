@@ -5,9 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.0] - 2026-01-14
 
 ### Added
+
+#### MCP Tool Consolidation
+- **Consolidated Tools**: Reduced tool count from ~43 to ~22 using action-based patterns
+  - `subcog_prompts`: Unified prompt management (actions: `save`, `list`, `get`, `run`, `delete`)
+  - `subcog_templates`: Unified context template management (actions: `save`, `list`, `get`, `render`, `delete`)
+  - `subcog_graph`: Unified graph operations (operations: `neighbors`, `path`, `stats`, `visualize`)
+  - `subcog_groups`: Unified group management (actions: `create`, `list`, `get`, `add_member`, `remove_member`, `update_role`, `delete`) [feature-gated: `group-scope`]
+- **Extended Entity Tool**: `subcog_entities` now supports `extract` and `merge` actions
+  - `extract`: LLM-powered entity extraction from text (previously `subcog_extract_entities`)
+  - `merge`: Deduplicate similar entities (previously `subcog_entity_merge`)
+- **Extended Relationship Tool**: `subcog_relationships` now supports `infer` action
+  - `infer`: LLM-powered relationship inference (previously `subcog_relationship_infer`)
+- **Enhanced Recall Tool**: `subcog_recall` now subsumes `subcog_list`
+  - Omit `query` parameter to list all memories with filtering and pagination
+  - Added `offset`, `user_id`, `agent_id` parameters for multi-tenant support
+  - Different defaults: 10 results for search, 50 for list mode
+- **Security**: All consolidated tools use `additionalProperties: false` for parameter validation
+
+### Changed
+
+- **Tool Descriptions**: Updated `prompt_understanding` documentation to reflect consolidated tools
+- **API Compatibility**: Legacy tools remain available for backward compatibility
+
+### Deprecated
+
+- `subcog_sync`: SQLite is now authoritative storage; this tool is a no-op
+- `subcog_list`: Use `subcog_recall` without `query` parameter instead
+- Legacy prompt tools (`prompt_save`, `prompt_list`, `prompt_get`, `prompt_run`, `prompt_delete`): Use `subcog_prompts` instead
+- Legacy template tools (`context_template_*`): Use `subcog_templates` instead
+- Legacy graph tools (`subcog_graph_query`, `subcog_graph_visualize`): Use `subcog_graph` instead
+- Legacy entity/relationship tools (`subcog_extract_entities`, `subcog_entity_merge`, `subcog_relationship_infer`): Use action parameters on `subcog_entities` and `subcog_relationships` instead
 
 #### Group/Shared Memory Graphs (feature-gated: `group-scope`)
 - **Group Management**: New group CRUD operations for team collaboration

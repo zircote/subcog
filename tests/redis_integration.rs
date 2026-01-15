@@ -76,6 +76,8 @@ mod index {
             domain: Domain::new(),
             status: MemoryStatus::Active,
             tags: vec![],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: None,
             embedding: None,
             created_at: subcog::current_timestamp(),
@@ -135,6 +137,8 @@ mod index {
             domain: Domain::new(),
             status: MemoryStatus::Active,
             tags: vec!["database".to_string(), "cache".to_string()],
+            #[cfg(feature = "group-scope")]
+            group_id: None,
             source: Some("test.rs".to_string()),
             embedding: None,
             created_at: subcog::current_timestamp(),
