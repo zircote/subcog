@@ -1,6 +1,6 @@
 # ADR Compliance Summary
 
-**Audit Date:** 2026-01-04
+**Audit Date:** 2026-01-15
 **Audited By:** Claude Code
 **Codebase:** /Users/AllenR1_1/Projects/zircote/subcog
 
@@ -65,6 +65,9 @@
 | 55 | [ADR-0056: Always Include `id` in Error Responses](./adr_0056.md) | Accepted | ✅ Compliant | None |
 | 56 | [ADR-0057: HTTP Transport Returns 204 for Notifications](./adr_0057.md) | Accepted | ✅ Compliant | None |
 | 57 | [ADR-0058: Debug-Level Logging for Notifications](./adr_0058.md) | Accepted | ✅ Compliant | None |
+| 58 | [ADR-0059: Central Event Bus for Memory Events](./adr_0059.md) | Accepted | ✅ Compliant | None |
+| 59 | [ADR-0060: Observability Expansion Priorities](./adr_0060.md) | Accepted | ✅ Compliant | None |
+| 60 | [ADR-0061: MCP Tool Consolidation](./adr_0061.md) | Proposed | 🔄 Pending | Implementation in progress |
 
 ## Critical Findings
 

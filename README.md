@@ -24,7 +24,7 @@ Subcog is a Rust rewrite of the [git-notes-memory](https://github.com/zircote/gi
 
 ## ADR Compliance
 
-ADR compliance is tracked in [`docs/adrs/README.md`](docs/adrs/README.md). Current compliance is **96% (53/55 active ADRs)** with documented partials in ADR-0003 and ADR-0039.
+ADR compliance is tracked in [`docs/adrs/README.md`](docs/adrs/README.md). Current compliance is **95% (55/58 active ADRs)** with documented partials in ADR-0003 and ADR-0039.
 
 ## Benchmark Results
 
@@ -148,14 +148,19 @@ Configure in Claude Desktop's `claude_desktop_config.json`:
 
 ### Available MCP Tools
 
-| Tool | Description |
-|------|-------------|
-| `memory.capture` | Store a new memory |
-| `memory.recall` | Search memories semantically |
-| `memory.status` | Get system statistics |
-| `memory.sync` | Sync with remote |
-| `memory.consolidate` | Run memory consolidation |
-| `memory.configure` | Get/set configuration |
+Subcog exposes ~22 consolidated MCP tools (see [ADR-0061](docs/adrs/adr_0061.md) for the consolidation design):
+
+| Category | Tools | Description |
+|----------|-------|-------------|
+| **Core** | `subcog_capture`, `subcog_recall`, `subcog_status` | Memory CRUD and search |
+| **Lifecycle** | `subcog_sync`, `subcog_consolidate`, `subcog_reindex` | Maintenance operations |
+| **CRUD** | `subcog_get`, `subcog_update`, `subcog_delete`, `subcog_list` | Individual memory operations |
+| **Bulk** | `subcog_delete_all`, `subcog_restore`, `subcog_history` | Bulk and recovery operations |
+| **Graph** | `subcog_graph`, `subcog_entities`, `subcog_relationships` | Knowledge graph queries |
+| **Prompts** | `subcog_prompts`, `prompt_understanding` | Prompt template management |
+| **Templates** | `subcog_templates` | Context template management |
+| **Session** | `subcog_init`, `subcog_get_summary`, `subcog_namespaces` | Session and namespace info |
+| **Compliance** | `subcog_gdpr_export` | Data export for compliance |
 
 When working with an agent, treat inputs that match MCP tool names as tool
 invocations (not shell commands) unless you explicitly say "shell" or "run in

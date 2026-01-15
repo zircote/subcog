@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Documentation
+
+- **ADR Expansion**: Comprehensive expansion of 24 Architecture Decision Records with pedantic detail
+  - Added weighted decision drivers, detailed options analysis, implementation code examples
+  - Each ADR now includes context, rationale, consequences, and cross-references
+  - ADRs covered: 0001-0004, 0005-0009, 0010-0014, 0017-0022, 0025-0033, 0037-0060
+
 ## [0.8.0] - 2026-01-14
 
 ### Added
@@ -265,3 +274,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Proactive memory surfacing with search intent detection
 - Prompt template management
 - Deduplication service
+
+[Unreleased]: https://github.com/zircote/subcog/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/zircote/subcog/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/zircote/subcog/compare/v0.6.1...v0.7.0
+[0.6.1]: https://github.com/zircote/subcog/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/zircote/subcog/compare/v0.2.0...v0.6.0
+[0.2.0]: https://github.com/zircote/subcog/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/zircote/subcog/releases/tag/v0.1.0
