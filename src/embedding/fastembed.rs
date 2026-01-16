@@ -503,12 +503,16 @@ mod tests {
         );
     }
 
-    // Tests that require the fastembed feature
+    // Tests that require the fastembed feature and model download.
+    // These tests are ignored by default because the model download from
+    // Hugging Face can be flaky in CI environments. Run with:
+    //   cargo test --all-features -- --ignored
     #[cfg(feature = "fastembed-embeddings")]
     mod fastembed_tests {
         use super::*;
 
         #[test]
+        #[ignore = "requires fastembed model download - flaky in CI"]
         fn test_embed_success() {
             let embedder = FastEmbedEmbedder::new();
             let result = embedder.embed("Hello, world!");
@@ -519,6 +523,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "requires fastembed model download - flaky in CI"]
         fn test_embed_deterministic() {
             let embedder = FastEmbedEmbedder::new();
             let text = "Rust programming language";
@@ -539,6 +544,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "requires fastembed model download - flaky in CI"]
         fn test_embed_different_text() {
             let embedder = FastEmbedEmbedder::new();
 
@@ -560,6 +566,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "requires fastembed model download - flaky in CI"]
         fn test_embed_normalized() {
             let embedder = FastEmbedEmbedder::new();
             let result = embedder.embed("Test embedding normalization");
@@ -576,6 +583,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "requires fastembed model download - flaky in CI"]
         fn test_embed_batch() {
             let embedder = FastEmbedEmbedder::new();
             let texts = vec!["First text", "Second text", "Third text"];
@@ -592,6 +600,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "requires fastembed model download - flaky in CI"]
         fn test_semantic_similarity_related_text() {
             let embedder = FastEmbedEmbedder::new();
 
@@ -613,6 +622,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "requires fastembed model download - flaky in CI"]
         fn test_embed_unicode_text() {
             let embedder = FastEmbedEmbedder::new();
 
@@ -625,6 +635,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "requires fastembed model download - flaky in CI"]
         fn test_embed_single_word() {
             let embedder = FastEmbedEmbedder::new();
             let result = embedder.embed("hello");
@@ -639,6 +650,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "requires fastembed model download - flaky in CI"]
         fn test_embed_all_values_finite() {
             let embedder = FastEmbedEmbedder::new();
             let result = embedder.embed("Test for finite values");
@@ -656,6 +668,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "requires fastembed model download - flaky in CI"]
         fn test_embed_values_in_range() {
             let embedder = FastEmbedEmbedder::new();
             let result = embedder.embed("Test for value range");
