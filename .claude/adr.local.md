@@ -17,7 +17,6 @@ statuses:
     - deprecated
     - superseded
   additional:
-    - published
     - rejected
   allow_rejected: true
 
