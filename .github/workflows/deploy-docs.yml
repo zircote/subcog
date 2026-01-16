@@ -70,7 +70,7 @@ jobs:
           command: generate
           input-dir: docs/adrs
           output: adr-viewer.html
-          theme: system
+          theme: auto
 
       - name: Determine version
         id: version
