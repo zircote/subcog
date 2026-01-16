@@ -1,0 +1,96 @@
+# Documentation Deployment Workflow
+# Builds rustdoc and ADR viewer, deploys to zircote.github.io/projects/subcog/
+
+name: Deploy Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "docs/adrs/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/deploy-docs.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Documentation version label"
+        required: false
+        default: "latest"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: deploy-docs
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-docs-
+
+      - name: Build documentation
+        run: |
+          cargo doc --no-deps --all-features --document-private-items
+          echo '<meta http-equiv="refresh" content="0; url=subcog/index.html">' > target/doc/index.html
+
+      - name: Add .nojekyll
+        run: touch target/doc/.nojekyll
+
+      - name: Generate ADR viewer
+        uses: zircote/adrscope@v0
+        with:
+          command: generate
+          input-dir: docs/adrs
+          output: adr-viewer.html
+          theme: system
+
+      - name: Determine version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$EVENT_NAME" == "release" ]; then
+            echo "version=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT_NAME" == "workflow_dispatch" ]; then
+            echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy documentation
+        uses: zircote/zircote.github.io/.github/actions/docs-deploy@main
+        with:
+          project-id: subcog
+          docs-path: target/doc
+          version: ${{ steps.version.outputs.version }}
+          include-adrs: adr-viewer.html
+        env:
+          DOCS_DEPLOY_TOKEN: ${{ secrets.DOCS_DEPLOY_TOKEN }}
