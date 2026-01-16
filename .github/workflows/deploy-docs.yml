@@ -31,6 +31,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  PROJECT_ID: subcog
+  TARGET_REPO: zircote/zircote.github.io
 
 jobs:
   build-and-deploy:
@@ -85,12 +87,133 @@ jobs:
             echo "version=latest" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Deploy documentation
-        uses: zircote/zircote.github.io/.github/actions/docs-deploy@main
+      - name: Validate documentation
+        run: |
+          echo "## Documentation Deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Input | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Project ID | \`$PROJECT_ID\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Docs Path | \`target/doc\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Version | \`${{ steps.version.outputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Include ADRs | \`adr-viewer.html\` |" >> "$GITHUB_STEP_SUMMARY"
+
+          # Validate docs path exists
+          if [ ! -d "target/doc" ]; then
+            echo "::error::Documentation path does not exist: target/doc"
+            exit 1
+          fi
+
+          # Validate index.html exists
+          if [ ! -f "target/doc/index.html" ]; then
+            echo "::error::No index.html found in documentation path"
+            exit 1
+          fi
+
+          # Validate ADR viewer exists
+          if [ ! -f "adr-viewer.html" ]; then
+            echo "::error::ADR viewer file not found: adr-viewer.html"
+            exit 1
+          fi
+
+      - name: Check deploy token
+        run: |
+          if [ -z "$DOCS_DEPLOY_TOKEN" ]; then
+            echo "::error::DOCS_DEPLOY_TOKEN secret is required"
+            echo "::error::Create a PAT with 'repo' scope and add it as a repository secret"
+            exit 1
+          fi
+        env:
+          DOCS_DEPLOY_TOKEN: ${{ secrets.DOCS_DEPLOY_TOKEN }}
+
+      - name: Package documentation
+        id: package
+        run: |
+          ARTIFACT_DIR="/tmp/docs-deploy-${PROJECT_ID}"
+          mkdir -p "$ARTIFACT_DIR"
+
+          echo "Packaging documentation from target/doc"
+
+          # Create zip archive
+          cd target/doc
+          zip -r "$ARTIFACT_DIR/docs.zip" . \
+            -x "*.git*" \
+            -x "*.env*" \
+            -x "*.key" \
+            -x "*.pem"
+          cd "$GITHUB_WORKSPACE"
+
+          # Copy ADR viewer
+          cp "adr-viewer.html" "$ARTIFACT_DIR/adrs.html"
+          echo "Included ADR viewer"
+
+          ARTIFACT_NAME="docs-${PROJECT_ID}"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+          echo "artifact_dir=$ARTIFACT_DIR" >> "$GITHUB_OUTPUT"
+
+          # Log artifact info
+          SIZE=$(du -h "$ARTIFACT_DIR/docs.zip" | cut -f1)
+          echo "Artifact size: $SIZE"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Artifact" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Size: $SIZE" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Name: \`$ARTIFACT_NAME\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          project-id: subcog
-          docs-path: target/doc
-          version: ${{ steps.version.outputs.version }}
-          include-adrs: adr-viewer.html
+          name: docs-${{ env.PROJECT_ID }}
+          path: /tmp/docs-deploy-${{ env.PROJECT_ID }}/
+          retention-days: 1
+
+      - name: Dispatch deployment
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Build the payload
+          PAYLOAD=$(cat << EOFPAYLOAD
+          {
+            "event_type": "deploy-docs",
+            "client_payload": {
+              "project_id": "${PROJECT_ID}",
+              "version": "${VERSION}",
+              "artifact_run_id": "${GITHUB_RUN_ID}",
+              "include_adrs": true,
+              "source_repo": "${GITHUB_REPOSITORY}",
+              "source_sha": "${GITHUB_SHA}",
+              "source_ref": "${GITHUB_REF}"
+            }
+          }
+          EOFPAYLOAD
+          )
+
+          echo "Dispatching to: $TARGET_REPO"
+
+          # Dispatch repository_dispatch event to target repo
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $DOCS_DEPLOY_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${TARGET_REPO}/dispatches" \
+            -d "$PAYLOAD")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+
+          if [ "$HTTP_CODE" != "204" ]; then
+            echo "::error::Failed to dispatch deployment. HTTP $HTTP_CODE"
+            echo "Response: $BODY"
+            exit 1
+          fi
+
+          URL="https://www.zircote.com/projects/${PROJECT_ID}/docs/"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Deployment Dispatched" >> "$GITHUB_STEP_SUMMARY"
+          echo "Documentation will be available at: $URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Monitor deployment: https://github.com/${TARGET_REPO}/actions" >> "$GITHUB_STEP_SUMMARY"
         env:
           DOCS_DEPLOY_TOKEN: ${{ secrets.DOCS_DEPLOY_TOKEN }}
