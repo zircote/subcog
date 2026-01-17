@@ -1,0 +1,48 @@
+# Subcog Memory Protocol — Copy to CLAUDE.md
+
+Copy this section to your `CLAUDE.md` (project) or `~/.claude/CLAUDE.md` (global).
+
+---
+
+## Subcog Memory Protocol
+
+Subcog provides persistent memory across coding sessions via MCP tools.
+
+### Required Workflow
+
+1. **Session Start**: Call `mcp__subcog__prompt_understanding` with `{}` to load guidance
+2. **Before Responses**: Call `mcp__subcog__subcog_recall` to search relevant memories
+3. **Capture Knowledge**: Use `mcp__subcog__subcog_capture` when detecting decisions, patterns, or learnings
+
+### When to Capture
+
+| Signal | Namespace |
+|--------|-----------|
+| "we decided", "choosing", "going with" | `decisions` |
+| "always", "never", "convention" | `patterns` |
+| "turns out", "gotcha", "realized" | `learnings` |
+| "TODO", "temporary", "hack" | `tech-debt` |
+
+### Capture Quality
+
+- Include **why** (rationale), not just **what**
+- Add `source` parameter with file paths
+- Use descriptive, searchable `tags`
+
+### Search Filters
+
+```
+ns:decisions tag:database since:30d    # Recent DB decisions
+ns:patterns source:src/api/*           # API patterns
+-tag:deprecated                        # Exclude deprecated
+```
+
+### Key Tools
+
+| Tool | Purpose |
+|------|---------|
+| `subcog_capture` | Store memory (required: content, namespace) |
+| `subcog_recall` | Search memories |
+| `subcog_status` | System health check |
+
+For full guidance: `mcp__subcog__prompt_understanding`
