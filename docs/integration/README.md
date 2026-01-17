@@ -4,12 +4,26 @@ This directory contains integration guides for using Subcog with various AI codi
 
 ## Quick Start
 
+| Platform | Guide | Features |
+|----------|-------|----------|
+| **Claude Code** | [claude-code-setup.md](claude-code-setup.md) | MCP server, hooks, CLAUDE.md |
+| **OpenAI / ChatGPT** | [openai-setup.md](openai-setup.md) | CLI, Code Interpreter, GPT Actions |
+| **Google Gemini** | [gemini-setup.md](gemini-setup.md) | Function calling, Vertex AI |
+| **OpenCode** | [opencode-setup.md](opencode-setup.md) | MCP server, CLI |
+
+### Copy-Paste Snippets
+
 | File | Purpose |
 |------|---------|
-| [claude-code-setup.md](claude-code-setup.md) | Full setup guide for Claude Code |
-| [CLAUDE.md.snippet](CLAUDE.md.snippet) | Copy-paste snippet for CLAUDE.md |
+| [CLAUDE.md.snippet](CLAUDE.md.snippet) | Minimal protocol for CLAUDE.md |
 
-## Claude Code Integration
+---
+
+## Platform Guides
+
+### Claude Code
+
+Full MCP integration with hooks for automatic context injection.
 
 Subcog integrates with Claude Code through:
 
@@ -25,6 +39,38 @@ Subcog integrates with Claude Code through:
 4. Add protocol guidance to your `CLAUDE.md`
 
 See [claude-code-setup.md](claude-code-setup.md) for detailed instructions.
+
+### OpenAI / ChatGPT
+
+CLI-based integration with support for Code Interpreter and Custom GPTs.
+
+- **Code Interpreter** - Python wrapper for subprocess calls
+- **Custom GPTs** - REST API wrapper with OpenAPI schema
+- **System Instructions** - Protocol guidance for prompts
+
+See [openai-setup.md](openai-setup.md) for detailed instructions.
+
+### Google Gemini
+
+Function calling integration with Vertex AI support.
+
+- **Function Calling** - Native Gemini tool declarations
+- **AI Studio** - System instructions integration
+- **Vertex AI** - Enterprise deployment patterns
+
+See [gemini-setup.md](gemini-setup.md) for detailed instructions.
+
+### OpenCode
+
+MCP and CLI integration for the open-source assistant.
+
+- **MCP Server** - Native Model Context Protocol support
+- **CLI Commands** - Direct shell access
+- **Configuration** - Project-level settings
+
+See [opencode-setup.md](opencode-setup.md) for detailed instructions.
+
+---
 
 ## Adding to Your Project
 
