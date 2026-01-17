@@ -83,32 +83,14 @@ subcog status
 Add to your Gemini system instructions:
 
 ```markdown
-## Subcog Memory Protocol
+## Subcog Memory Protocol (MANDATORY)
 
-You have access to Subcog for persistent memory. Use shell commands to interact.
+At the start of EVERY session, call `subcog_init` to load memory context and best practices.
 
-### Commands
-
-| Command | Purpose |
-|---------|---------|
-| `subcog capture -n <ns> -c "<text>" -t tags` | Store memory |
-| `subcog recall "<query>"` | Search memories |
-| `subcog recall --filter "ns:decisions"` | Filter search |
-| `subcog status` | System health |
-
-### Namespaces
-
-- `decisions` - Architecture choices
-- `patterns` - Coding conventions
-- `learnings` - Insights discovered
-- `context` - Project background
-- `tech-debt` - Known issues
-
-### Workflow
-
-1. Search before responding: `subcog recall "relevant keywords"`
-2. Capture decisions: `subcog capture -n decisions -c "..." -t tag1,tag2`
-3. Capture learnings: `subcog capture -n learnings -c "..."`
+During the session:
+- **Before implementing**: Recall relevant decisions and patterns
+- **Capture immediately**: When decisions, patterns, learnings, or fixes are identified
+- Access Subcog only via MCP tools, never shell commands
 ```
 
 ---

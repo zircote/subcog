@@ -61,52 +61,14 @@ subcog_status     - System health
 Add to your OpenCode system prompt or configuration:
 
 ```markdown
-## Subcog Memory Protocol
+## Subcog Memory Protocol (MANDATORY)
 
-Subcog provides persistent memory across coding sessions via MCP tools.
+At the start of EVERY session, call `subcog_init` to load memory context and best practices.
 
-### Required Workflow
-
-1. **Session Start**: Call `subcog_status` to verify system health
-2. **Before Responses**: Call `subcog_recall` with relevant keywords
-3. **Capture Knowledge**: Use `subcog_capture` for decisions, patterns, learnings
-
-### MCP Tools
-
-| Tool | Purpose |
-|------|---------|
-| `subcog_capture` | Store memory (required: content, namespace) |
-| `subcog_recall` | Search memories (semantic + text hybrid) |
-| `subcog_status` | Check system health |
-| `subcog_get` | Get memory by ID |
-| `subcog_update` | Update memory |
-| `subcog_delete` | Remove memory |
-
-### Namespaces
-
-| Namespace | When to Use |
-|-----------|-------------|
-| `decisions` | Architecture choices, technology selections |
-| `patterns` | Coding conventions, standards |
-| `learnings` | Debugging insights, gotchas |
-| `context` | Project background |
-| `tech-debt` | Known issues, TODOs |
-
-### Capture Signals
-
-Capture immediately when detecting:
-- "we decided", "going with" → `decisions`
-- "always", "never", "convention" → `patterns`
-- "turns out", "gotcha" → `learnings`
-- "TODO", "temporary" → `tech-debt`
-
-### Search Filters
-
-```
-ns:decisions tag:database since:30d
-ns:patterns source:src/api/*
--tag:deprecated
-```
+During the session:
+- **Before implementing**: Recall relevant decisions and patterns
+- **Capture immediately**: When decisions, patterns, learnings, or fixes are identified
+- Access Subcog only via MCP tools, never shell commands
 ```
 
 ---

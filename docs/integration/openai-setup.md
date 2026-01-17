@@ -82,48 +82,14 @@ subcog status
 Add to your GPT's system instructions or custom instructions:
 
 ```markdown
-## Subcog Memory Protocol
+## Subcog Memory Protocol (MANDATORY)
 
-You have access to Subcog for persistent memory across sessions.
+At the start of EVERY session, call `subcog_init` to load memory context and best practices.
 
-### CLI Commands
-
-| Command | Purpose |
-|---------|---------|
-| `subcog capture -n <namespace> -c "<content>" -t tag1,tag2` | Store memory |
-| `subcog recall "<query>"` | Search memories |
-| `subcog recall --filter "ns:decisions"` | Filter by namespace |
-| `subcog status` | Check system health |
-| `subcog get <id>` | Get memory by ID |
-
-### Namespaces
-
-| Namespace | Purpose |
-|-----------|---------|
-| `decisions` | Architecture choices |
-| `patterns` | Coding conventions |
-| `learnings` | Insights and discoveries |
-| `context` | Project background |
-| `tech-debt` | Known issues |
-
-### Workflow
-
-1. **Before responding**: Run `subcog recall` with relevant keywords
-2. **Capture decisions**: When user makes choices, run `subcog capture -n decisions`
-3. **Capture learnings**: When discovering insights, run `subcog capture -n learnings`
-
-### Example Commands
-
-```bash
-# Search for authentication patterns
-subcog recall "authentication" --filter "ns:patterns"
-
-# Capture a decision
-subcog capture -n decisions -c "Using JWT for API auth. Rationale: stateless, scalable" -t auth,jwt,api
-
-# List recent memories
-subcog recall --filter "since:7d" --limit 10
-```
+During the session:
+- **Before implementing**: Recall relevant decisions and patterns
+- **Capture immediately**: When decisions, patterns, learnings, or fixes are identified
+- Access Subcog only via MCP tools, never shell commands
 ```
 
 ---
