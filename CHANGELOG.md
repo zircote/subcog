@@ -7,12 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-01-17
+
+### Added
+
+- **Subcog Integrator Skill**: New skill to help users enhance AI prompts with Subcog memory integration
+  - Analyzes CLAUDE.md, hooks, skills, and commands for integration gaps
+  - Provides recommendations with code snippets for memory protocol sections
+  - Interactive workflow via `/subcog:integrate` command
+  - Supports analyze, enhance, and create modes
+  - Files: `skills/subcog-integrator/SKILL.md`, `commands/integrate.md`
+
 ### Documentation
 
 - **ADR Expansion**: Comprehensive expansion of 24 Architecture Decision Records with pedantic detail
   - Added weighted decision drivers, detailed options analysis, implementation code examples
   - Each ADR now includes context, rationale, consequences, and cross-references
   - ADRs covered: 0001-0004, 0005-0009, 0010-0014, 0017-0022, 0025-0033, 0037-0060
+- **ADR Migration**: Migrated 39 ADRs to structured-madr format
+- **Integration Guides**: Added guides for OpenAI, Gemini, and OpenCode platforms
+  - Corrected integration guides with accurate platform info
+  - Fixed MCP server command from 'mcp-server' to 'serve'
+
+### Fixed
+
+- **Documentation**: Corrected multiple integration guide issues
+  - Restored hooks config to OpenCode guide
+  - Aligned guides with actual `subcog_init` protocol
+  - Removed fabricated integration content
+
+### Changed
+
+- **CI/CD**: Added docs deploy workflow with adrscope integration
+  - Fixed adrscope theme value to 'auto'
+  - Used inline deployment steps instead of composite action
 
 ## [0.8.0] - 2026-01-14
 
@@ -275,7 +303,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prompt template management
 - Deduplication service
 
-[Unreleased]: https://github.com/zircote/subcog/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/zircote/subcog/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/zircote/subcog/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/zircote/subcog/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/zircote/subcog/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/zircote/subcog/compare/v0.6.0...v0.6.1
