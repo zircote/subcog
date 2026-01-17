@@ -31,6 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Config**: Fixed `~` home directory expansion in logging file paths
+  - Log file paths like `~/.local/share/subcog/logs/subcog.log` now correctly expand to the user's home directory
+  - Previously would create a literal `~` folder in the working directory
+  - Also applies to `SUBCOG_LOG_FILE` environment variable
+  - Updated `example.config.toml` to use `~/.local/share/subcog` as default `data_dir`
+
 - **Documentation**: Corrected multiple integration guide issues
   - Restored hooks config to OpenCode guide
   - Aligned guides with actual `subcog_init` protocol

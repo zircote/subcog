@@ -1,7 +1,13 @@
 # Subcog full configuration with sane defaults.
 
 repo_path = "."
-data_dir = ".subcog"
+# Data directory for subcog storage. Use an absolute path or ~ for home directory.
+# Default (when not specified): platform-specific user data directory
+#   - Linux: ~/.local/share/subcog
+#   - macOS: ~/Library/Application Support/subcog
+#   - Windows: C:\Users\<user>\AppData\Local\subcog
+# Using a relative path like ".subcog" will create the folder in the current working directory.
+data_dir = "~/.local/share/subcog"
 max_results = 10
 default_search_mode = "hybrid" # text, vector, hybrid
 

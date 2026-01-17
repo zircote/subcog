@@ -111,7 +111,18 @@ fn expand_env_vars(input: &str) -> Cow<'_, str> {
     Cow::Owned(result)
 }
 
-fn expand_config_path(input: &str) -> String {
+/// Expands a configuration path, handling `~` for home directory and environment variables.
+///
+/// # Examples
+///
+/// ```ignore
+/// use subcog::config::expand_config_path;
+///
+/// let path = expand_config_path("~/.config/subcog");
+/// // Returns "/home/user/.config/subcog" on Linux
+/// ```
+#[must_use]
+pub fn expand_config_path(input: &str) -> String {
     let expanded = expand_env_vars(input);
     let expanded_ref = expanded.as_ref();
     let is_tilde_home =

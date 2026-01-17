@@ -10,7 +10,7 @@ use tracing_subscriber::field::RecordFields;
 use tracing_subscriber::fmt::FormattedFields;
 use tracing_subscriber::fmt::format::{FormatFields, Writer};
 
-use crate::config::LoggingSettings;
+use crate::config::{LoggingSettings, expand_config_path};
 
 /// Logging output format.
 #[derive(Debug, Clone, Copy)]
@@ -59,7 +59,7 @@ impl LoggingConfig {
 
         let file = settings
             .and_then(|config| config.file.as_ref())
-            .map(PathBuf::from);
+            .map(|f| PathBuf::from(expand_config_path(f)));
 
         Self {
             format: log_format_from_env_override(format),
@@ -292,7 +292,7 @@ fn log_file_from_env_override(default: Option<PathBuf>) -> Option<PathBuf> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
+        .map(|value| PathBuf::from(expand_config_path(&value)))
         .or(default)
 }
 
