@@ -59,7 +59,7 @@ completed: 2026-01-02T01:20:00Z
 
 ### Planning Accuracy
 
-**Effort Estimate**: 2-3 days -> Actual: 1 day (~50% under budget)
+**Effort Estimate**: 2-3 days → Actual: 1 day (~50% under budget)
 
 **Why Under Budget**:
 - Clear specification eliminated decision paralysis

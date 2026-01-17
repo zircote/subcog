@@ -8,9 +8,9 @@ A prompt template is a saved piece of text containing placeholders that get repl
 
 ```
 Review {{file}} for {{issue_type}} issues
- ▲ ▲
- │ └── Variable: issue_type
- └── Variable: file
+           ▲              ▲
+           │              └── Variable: issue_type
+           └── Variable: file
 ```
 
 When run with `file=main.rs` and `issue_type=security`:
@@ -78,13 +78,13 @@ Defined placeholders:
 
 ```yaml
 variables:
- - name: file
- description: File path to review
- required: true
- - name: issue_type
- description: Type of issues
- default: general
- required: false
+  - name: file
+    description: File path to review
+    required: true
+  - name: issue_type
+    description: Type of issues
+    default: general
+    required: false
 ```
 
 ### Tags
@@ -104,17 +104,17 @@ Where the template is stored:
 ## Template Lifecycle
 
 ```
-Create Store Retrieve Execute
- │ │ │ │
- ▼ ▼ ▼ ▼
-┌─────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
-│ Write │-> │ Save to │ -> │ Get by │ -> │ Variable │
-│ Content │ │ Storage │ │ Name │ │ Subst. │
-└─────────┘ └──────────┘ └──────────┘ └──────────┘
- │ │ │ │
- ▼ ▼ ▼ ▼
- Variables SQLite Domain Rendered
- Defined Storage Cascade Output
+Create          Store           Retrieve        Execute
+   │               │                │              │
+   ▼               ▼                ▼              ▼
+┌─────────┐  ┌──────────┐    ┌──────────┐   ┌──────────┐
+│  Write  │→ │  Save to │ →  │  Get by  │ → │ Variable │
+│ Content │  │  Storage │    │   Name   │   │  Subst.  │
+└─────────┘  └──────────┘    └──────────┘   └──────────┘
+     │            │               │              │
+     ▼            ▼               ▼              ▼
+  Variables    SQLite         Domain         Rendered
+  Defined      Storage        Cascade         Output
 ```
 
 ## Quick Examples
@@ -131,8 +131,8 @@ subcog prompt run greet --var name=World
 
 ```bash
 subcog prompt save deploy \
- --content "Deploy {{service}} to {{env}}" \
- --description "Deployment command"
+  --content "Deploy {{service}} to {{env}}" \
+  --description "Deployment command"
 ```
 
 ```bash
@@ -147,16 +147,16 @@ Create `review.yaml`:
 name: security-review
 description: Security-focused code review
 content: |
- ## Security Review: {{file}}
+  ## Security Review: {{file}}
 
- ### OWASP Top 10 Checklist
- - [ ] Injection
- - [ ] Broken Authentication
- - [ ] Sensitive Data Exposure
-...
+  ### OWASP Top 10 Checklist
+  - [ ] Injection
+  - [ ] Broken Authentication
+  - [ ] Sensitive Data Exposure
+  ...
 variables:
- - name: file
- required: true
+  - name: file
+    required: true
 tags: [security, review]
 ```
 

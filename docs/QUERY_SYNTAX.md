@@ -15,9 +15,9 @@ Subcog provides a GitHub-style filter syntax that is familiar to developers and 
 Filter memories by namespace:
 
 ```
-ns:decisions # Only decisions namespace
-ns:patterns # Only patterns namespace
-ns:learnings # Only learnings namespace
+ns:decisions          # Only decisions namespace
+ns:patterns           # Only patterns namespace
+ns:learnings          # Only learnings namespace
 ```
 
 **Available namespaces:**
@@ -37,8 +37,8 @@ ns:learnings # Only learnings namespace
 Filter memories by tags:
 
 ```
-tag:rust # Memories tagged with "rust"
-tag:error-handling # Memories tagged with "error-handling"
+tag:rust              # Memories tagged with "rust"
+tag:error-handling    # Memories tagged with "error-handling"
 ```
 
 #### OR Logic (comma-separated)
@@ -46,8 +46,8 @@ tag:error-handling # Memories tagged with "error-handling"
 Match ANY of the specified tags:
 
 ```
-tag:rust,python # Tagged with "rust" OR "python"
-tag:api,rest,graphql # Tagged with any of these
+tag:rust,python       # Tagged with "rust" OR "python"
+tag:api,rest,graphql  # Tagged with any of these
 ```
 
 #### AND Logic (space-separated)
@@ -55,8 +55,8 @@ tag:api,rest,graphql # Tagged with any of these
 Match ALL of the specified tags:
 
 ```
-tag:rust tag:error # Tagged with BOTH "rust" AND "error"
-tag:api tag:security # Tagged with BOTH "api" AND "security"
+tag:rust tag:error    # Tagged with BOTH "rust" AND "error"
+tag:api tag:security  # Tagged with BOTH "api" AND "security"
 ```
 
 #### Exclude Tags (`-tag:`)
@@ -64,8 +64,8 @@ tag:api tag:security # Tagged with BOTH "api" AND "security"
 Exclude memories with specific tags:
 
 ```
--tag:test # Exclude memories tagged "test"
--tag:deprecated # Exclude deprecated items
+-tag:test             # Exclude memories tagged "test"
+-tag:deprecated       # Exclude deprecated items
 ```
 
 ### Time Filter (`since:`)
@@ -73,10 +73,10 @@ Exclude memories with specific tags:
 Filter memories by creation time:
 
 ```
-since:1d # Created in the last 1 day
-since:7d # Created in the last 7 days
-since:30d # Created in the last 30 days
-since:90d # Created in the last 90 days
+since:1d              # Created in the last 1 day
+since:7d              # Created in the last 7 days
+since:30d             # Created in the last 30 days
+since:90d             # Created in the last 90 days
 ```
 
 ### Source Filter (`source:`)
@@ -84,9 +84,9 @@ since:90d # Created in the last 90 days
 Filter by source file reference:
 
 ```
-source:src/* # From any file in src/
-source:src/auth.rs # From specific file
-source:*.rs # From any Rust file
+source:src/*          # From any file in src/
+source:src/auth.rs    # From specific file
+source:*.rs           # From any Rust file
 ```
 
 ### Project Filter (`project:`)
@@ -121,10 +121,10 @@ path:src/services/*
 Filter by memory status:
 
 ```
-status:active # Active memories (default)
-status:archived # Archived memories
-status:superseded # Superseded by newer memories
-status:pending # Awaiting review
+status:active         # Active memories (default)
+status:archived       # Archived memories
+status:superseded     # Superseded by newer memories
+status:pending        # Awaiting review
 ```
 
 ## Combining Filters
@@ -207,12 +207,12 @@ Search for memories or list all memories when query is omitted:
 
 ```
 Arguments:
- query - Search query (optional; omit to list all)
- filter - Filter expression (see syntax above)
- mode - "hybrid" | "vector" | "text" (default: hybrid)
- detail - "light" | "medium" | "everything" (default: medium)
- limit - Maximum results (default: 10 for search, 50 for list)
- offset - Pagination offset (for list mode)
+  query   - Search query (optional; omit to list all)
+  filter  - Filter expression (see syntax above)
+  mode    - "hybrid" | "vector" | "text" (default: hybrid)
+  detail  - "light" | "medium" | "everything" (default: medium)
+  limit   - Maximum results (default: 10 for search, 50 for list)
+  offset  - Pagination offset (for list mode)
 ```
 
 ### `subcog_browse` (Prompt)
@@ -221,9 +221,9 @@ Interactive memory browser with faceted discovery dashboard:
 
 ```
 Arguments:
- filter - Filter expression (see syntax above)
- view - "dashboard" | "list" (default: dashboard)
- top - Number of items per facet (default: 10)
+  filter  - Filter expression (see syntax above)
+  view    - "dashboard" | "list" (default: dashboard)
+  top     - Number of items per facet (default: 10)
 ```
 
 The dashboard view shows:
@@ -234,15 +234,15 @@ The dashboard view shows:
 
 ### `subcog_list` (Prompt - DEPRECATED)
 
-> **️ Deprecated**: Use `subcog_recall` without a query parameter instead.
+> **⚠️ Deprecated**: Use `subcog_recall` without a query parameter instead.
 
 Formatted memory listing for export:
 
 ```
 Arguments:
- filter - Filter expression (see syntax above)
- format - "table" | "json" | "markdown" (default: table)
- limit - Maximum results (default: 50)
+  filter  - Filter expression (see syntax above)
+  format  - "table" | "json" | "markdown" (default: table)
+  limit   - Maximum results (default: 50)
 ```
 
 ## MCP Resources

@@ -1,8 +1,8 @@
 # Observability + Event Bus Expansion Plan
 
-**Date:** 2026-01-04 
-**Owner:** TBD 
-**Status:** Draft 
+**Date:** 2026-01-04  
+**Owner:** TBD  
+**Status:** Draft  
 **Scope:** Event bus, tracing, logging, metrics, telemetry
 
 ## Goals
@@ -20,58 +20,58 @@
 ## Plan
 
 ### Phase 0: Baseline & Inventory
-- [x] Audit current event emissions and consumers (capture, recall, consolidation, sync, GC, MCP, hooks) 
-- [x] Inventory existing tracing spans and log fields for request correlation 
-- [x] Document current metrics, exporters, and label cardinality risks 
-- [x] Identify missing observability coverage for critical paths 
+- [x] Audit current event emissions and consumers (capture, recall, consolidation, sync, GC, MCP, hooks) ✓
+- [x] Inventory existing tracing spans and log fields for request correlation ✓
+- [x] Document current metrics, exporters, and label cardinality risks ✓
+- [x] Identify missing observability coverage for critical paths ✓
 
 ### Phase 1: Event Bus Expansion
-- [x] Define event taxonomy (system, memory lifecycle, security, performance, MCP, hooks) 
-- [x] Add event payload schema guidelines (required fields, redaction rules) 
-- [x] Add event bus subscription helpers (filtered subscribers by event type) 
-- [x] Emit events from all memory lifecycle operations (capture/update/delete/tombstone/recall) 
-- [x] Emit events for MCP lifecycle (startup, auth, tool execution, request errors) 
-- [x] Emit events for hook lifecycle (invocation, classification, capture decisions, failures) 
-- [x] Add event bus health metrics (publish rate, drop rate, lag) 
-- [x] Add unit tests for event dispatch and subscriber filtering 
+- [x] Define event taxonomy (system, memory lifecycle, security, performance, MCP, hooks) ✓
+- [x] Add event payload schema guidelines (required fields, redaction rules) ✓
+- [x] Add event bus subscription helpers (filtered subscribers by event type) ✓
+- [x] Emit events from all memory lifecycle operations (capture/update/delete/tombstone/recall) ✓
+- [x] Emit events for MCP lifecycle (startup, auth, tool execution, request errors) ✓
+- [x] Emit events for hook lifecycle (invocation, classification, capture decisions, failures) ✓
+- [x] Add event bus health metrics (publish rate, drop rate, lag) ✓
+- [x] Add unit tests for event dispatch and subscriber filtering ✓
 
 ### Phase 2: Tracing & Context Propagation
-- [x] Define trace/span naming conventions and required attributes 
-- [x] Add request correlation IDs to CLI/MCP/hook flows (parity) 
-- [x] Instrument capture/recall/consolidation/GC with spans and sub-spans 
-- [x] Instrument MCP tool execution and hook handlers with spans 
-- [x] Propagate context across async boundaries (tokio tasks, hooks, MCP) 
-- [x] Add trace sampling configuration with defaults 
-- [x] Add tests for trace context propagation in at least two critical flows 
+- [x] Define trace/span naming conventions and required attributes ✓
+- [x] Add request correlation IDs to CLI/MCP/hook flows (parity) ✓
+- [x] Instrument capture/recall/consolidation/GC with spans and sub-spans ✓
+- [x] Instrument MCP tool execution and hook handlers with spans ✓
+- [x] Propagate context across async boundaries (tokio tasks, hooks, MCP) ✓
+- [x] Add trace sampling configuration with defaults ✓
+- [x] Add tests for trace context propagation in at least two critical flows ✓
 
 ### Phase 3: Logging Standardization
-- [x] Define structured log schema (level, event, request_id, memory_id, domain) 
-- [x] Ensure logs include correlation IDs and span context 
-- [x] Add log redaction rules for sensitive content 
-- [x] Normalize log levels across services (error/warn/info/debug) 
-- [x] Add log format validation tests (json format, required keys) 
+- [x] Define structured log schema (level, event, request_id, memory_id, domain) ✓
+- [x] Ensure logs include correlation IDs and span context ✓
+- [x] Add log redaction rules for sensitive content ✓
+- [x] Normalize log levels across services (error/warn/info/debug) ✓
+- [x] Add log format validation tests (json format, required keys) ✓
 
 ### Phase 4: Metrics & Telemetry
-- [x] Define metric naming conventions and required labels 
-- [x] Add metrics for event bus (queue depth, publish/subscribe counts) 
-- [x] Add metrics for memory lifecycle latency (capture/recall/GC/consolidation) 
-- [x] Add metrics for MCP request latency and error rates 
-- [x] Add metrics for hook execution latency and error rates 
-- [x] Verify OTLP exporter settings (grpc/http) and env var docs 
-- [x] Add smoke tests for metrics registry and OTLP initialization 
+- [x] Define metric naming conventions and required labels ✓
+- [x] Add metrics for event bus (queue depth, publish/subscribe counts) ✓
+- [x] Add metrics for memory lifecycle latency (capture/recall/GC/consolidation) ✓
+- [x] Add metrics for MCP request latency and error rates ✓
+- [x] Add metrics for hook execution latency and error rates ✓
+- [x] Verify OTLP exporter settings (grpc/http) and env var docs ✓
+- [x] Add smoke tests for metrics registry and OTLP initialization ✓
 
 ### Phase 5: Documentation & Rollout
-- [x] Update user-facing docs for observability configuration 
-- [x] Add troubleshooting steps for tracing/logging/metrics 
-- [x] Add deployment checklist for OTLP endpoints and log sinks 
-- [x] Provide a minimal "observability quickstart" example 
-- [x] Define rollout steps and rollback criteria 
+- [x] Update user-facing docs for observability configuration ✓
+- [x] Add troubleshooting steps for tracing/logging/metrics ✓
+- [x] Add deployment checklist for OTLP endpoints and log sinks ✓
+- [x] Provide a minimal “observability quickstart” example ✓
+- [x] Define rollout steps and rollback criteria ✓
 
 ### Phase 6: Verification
-- [x] Run `make ci` after instrumentation changes 
-- [x] Perform manual trace capture for capture/recall, MCP, and hook flows 
-- [x] Validate log/trace correlation end-to-end 
-- [x] Confirm no sensitive data leaks in logs/traces 
+- [x] Run `make ci` after instrumentation changes ✓
+- [x] Perform manual trace capture for capture/recall, MCP, and hook flows ✓
+- [x] Validate log/trace correlation end-to-end ✓
+- [x] Confirm no sensitive data leaks in logs/traces ✓
 
 ## Deliverables
 

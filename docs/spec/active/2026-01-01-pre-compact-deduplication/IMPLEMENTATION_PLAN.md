@@ -39,9 +39,9 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: None
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `src/services/deduplication/mod.rs` created with submodule declarations
- - [ ] Re-exports from `src/services/mod.rs`
- - [ ] Compiles with `cargo check`
+  - [ ] `src/services/deduplication/mod.rs` created with submodule declarations
+  - [ ] Re-exports from `src/services/mod.rs`
+  - [ ] Compiles with `cargo check`
 
 ### Task 1.2: Define DuplicateCheckResult and DuplicateReason types
 
@@ -50,10 +50,10 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: None
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `DuplicateCheckResult` struct with all fields from ARCHITECTURE.md
- - [ ] `DuplicateReason` enum (ExactMatch, SemanticSimilar, RecentCapture)
- - [ ] Implements `Debug`, `Clone`, `Serialize`, `Deserialize`
- - [ ] Doc comments with examples
+  - [ ] `DuplicateCheckResult` struct with all fields from ARCHITECTURE.md
+  - [ ] `DuplicateReason` enum (ExactMatch, SemanticSimilar, RecentCapture)
+  - [ ] Implements `Debug`, `Clone`, `Serialize`, `Deserialize`
+  - [ ] Doc comments with examples
 
 ### Task 1.3: Define DeduplicationConfig struct
 
@@ -62,10 +62,10 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: None
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `DeduplicationConfig` with all fields from ARCHITECTURE.md
- - [ ] `Default` implementation with documented defaults
- - [ ] `from_env()` method to load from environment variables
- - [ ] Per-namespace threshold loading: `SUBCOG_DEDUP_THRESHOLD_{NAMESPACE}`
+  - [ ] `DeduplicationConfig` with all fields from ARCHITECTURE.md
+  - [ ] `Default` implementation with documented defaults
+  - [ ] `from_env()` method to load from environment variables
+  - [ ] Per-namespace threshold loading: `SUBCOG_DEDUP_THRESHOLD_{NAMESPACE}`
 
 ### Task 1.4: Implement content hash utility
 
@@ -74,10 +74,10 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: `sha2` crate (add to Cargo.toml)
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `ContentHasher::hash(content: &str) -> String` returns SHA256 hex
- - [ ] Content normalized: trim, lowercase, collapse whitespace
- - [ ] `hash_to_tag(hash: &str) -> String` returns `hash:sha256:<16-char-prefix>`
- - [ ] Unit tests for normalization edge cases
+  - [ ] `ContentHasher::hash(content: &str) -> String` returns SHA256 hex
+  - [ ] Content normalized: trim, lowercase, collapse whitespace
+  - [ ] `hash_to_tag(hash: &str) -> String` returns `hash:sha256:<16-char-prefix>`
+  - [ ] Unit tests for normalization edge cases
 
 ### Task 1.5: Add sha2 dependency
 
@@ -86,8 +86,8 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: None
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `sha2 = "0.10"` added to dependencies
- - [ ] `cargo build` succeeds
+  - [ ] `sha2 = "0.10"` added to dependencies
+  - [ ] `cargo build` succeeds
 
 ### Phase 1 Deliverables
 
@@ -116,11 +116,11 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: Task 1.4 (ContentHasher)
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `ExactMatchChecker::new(recall: Arc<RecallService>)`
- - [ ] `check(&self, content: &str, namespace: Namespace) -> Result<Option<MemoryId>>`
- - [ ] Uses `SearchFilter::new().with_namespace(ns).with_tag(hash_tag)`
- - [ ] Returns `Some(id)` if exact match found, `None` otherwise
- - [ ] Unit tests with mock RecallService
+  - [ ] `ExactMatchChecker::new(recall: Arc<RecallService>)`
+  - [ ] `check(&self, content: &str, namespace: Namespace) -> Result<Option<MemoryId>>`
+  - [ ] Uses `SearchFilter::new().with_namespace(ns).with_tag(hash_tag)`
+  - [ ] Returns `Some(id)` if exact match found, `None` otherwise
+  - [ ] Unit tests with mock RecallService
 
 ### Task 2.2: Implement SemanticSimilarityChecker
 
@@ -129,13 +129,13 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: Task 1.3 (DeduplicationConfig)
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `SemanticSimilarityChecker::new(recall, embedder, thresholds)`
- - [ ] `check(&self, content: &str, namespace: Namespace) -> Result<Option<(MemoryId, f32)>>`
- - [ ] Generates embedding for content
- - [ ] Uses `SearchMode::Vector` with namespace filter
- - [ ] Returns highest similarity match above threshold
- - [ ] Skips if content length < `min_semantic_length`
- - [ ] Unit tests with mock embedder and recall
+  - [ ] `SemanticSimilarityChecker::new(recall, embedder, thresholds)`
+  - [ ] `check(&self, content: &str, namespace: Namespace) -> Result<Option<(MemoryId, f32)>>`
+  - [ ] Generates embedding for content
+  - [ ] Uses `SearchMode::Vector` with namespace filter
+  - [ ] Returns highest similarity match above threshold
+  - [ ] Skips if content length < `min_semantic_length`
+  - [ ] Unit tests with mock embedder and recall
 
 ### Task 2.3: Implement RecentCaptureChecker
 
@@ -144,12 +144,12 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: `lru` crate, Task 1.4 (ContentHasher)
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `RecentCaptureChecker::new(ttl: Duration, capacity: usize)`
- - [ ] `check(&self, content_hash: &str) -> Option<(MemoryId, Instant)>`
- - [ ] `record(&self, content_hash: &str, memory_id: &MemoryId)`
- - [ ] LRU cache with TTL-based eviction
- - [ ] Thread-safe with `RwLock` or `Mutex`
- - [ ] Unit tests for TTL expiration, capacity limits
+  - [ ] `RecentCaptureChecker::new(ttl: Duration, capacity: usize)`
+  - [ ] `check(&self, content_hash: &str) -> Option<(MemoryId, Instant)>`
+  - [ ] `record(&self, content_hash: &str, memory_id: &MemoryId)`
+  - [ ] LRU cache with TTL-based eviction
+  - [ ] Thread-safe with `RwLock` or `Mutex`
+  - [ ] Unit tests for TTL expiration, capacity limits
 
 ### Task 2.4: Add lru dependency
 
@@ -158,8 +158,8 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: None
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `lru = "0.12"` added to dependencies
- - [ ] `cargo build` succeeds
+  - [ ] `lru = "0.12"` added to dependencies
+  - [ ] `cargo build` succeeds
 
 ### Phase 2 Deliverables
 
@@ -187,12 +187,12 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: All Phase 2 tasks
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `DeduplicationService::new(recall, embedder, config)`
- - [ ] `without_embeddings(recall, config)` constructor
- - [ ] `check_duplicate(&self, content: &str, namespace: Namespace) -> Result<DuplicateCheckResult>`
- - [ ] Short-circuit: exact -> semantic -> recent
- - [ ] `record_capture(&self, content: &str, memory_id: &MemoryId)`
- - [ ] Graceful degradation on checker failures
+  - [ ] `DeduplicationService::new(recall, embedder, config)`
+  - [ ] `without_embeddings(recall, config)` constructor
+  - [ ] `check_duplicate(&self, content: &str, namespace: Namespace) -> Result<DuplicateCheckResult>`
+  - [ ] Short-circuit: exact → semantic → recent
+  - [ ] `record_capture(&self, content: &str, memory_id: &MemoryId)`
+  - [ ] Graceful degradation on checker failures
 
 ### Task 3.2: Implement Deduplicator trait
 
@@ -201,9 +201,9 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: Task 3.1
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `pub trait Deduplicator: Send + Sync` in `types.rs`
- - [ ] `check_duplicate` and `record_capture` methods
- - [ ] `DeduplicationService` implements `Deduplicator`
+  - [ ] `pub trait Deduplicator: Send + Sync` in `types.rs`
+  - [ ] `check_duplicate` and `record_capture` methods
+  - [ ] `DeduplicationService` implements `Deduplicator`
 
 ### Task 3.3: Add DeduplicationService to ServiceContainer
 
@@ -212,9 +212,9 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: Task 3.1
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `ServiceContainer::deduplication() -> Option<&DeduplicationService>`
- - [ ] Created with appropriate dependencies from container
- - [ ] Feature-flagged based on `SUBCOG_DEDUP_ENABLED`
+  - [ ] `ServiceContainer::deduplication() -> Option<&DeduplicationService>`
+  - [ ] Created with appropriate dependencies from container
+  - [ ] Feature-flagged based on `SUBCOG_DEDUP_ENABLED`
 
 ### Phase 3 Deliverables
 
@@ -241,9 +241,9 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: Task 3.1
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `PreCompactHandler::with_deduplication(dedup: DeduplicationService)`
- - [ ] Falls back to legacy prefix dedup if service not provided
- - [ ] Handler construction updated in main/CLI
+  - [ ] `PreCompactHandler::with_deduplication(dedup: DeduplicationService)`
+  - [ ] Falls back to legacy prefix dedup if service not provided
+  - [ ] Handler construction updated in main/CLI
 
 ### Task 4.2: Refactor deduplicate_candidates to use service
 
@@ -252,10 +252,10 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: Task 4.1
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `deduplicate_candidates()` calls `dedup.check_duplicate()` for each candidate
- - [ ] Skips candidates where `result.is_duplicate == true`
- - [ ] Records skips with reason for output
- - [ ] Fail-open on service errors
+  - [ ] `deduplicate_candidates()` calls `dedup.check_duplicate()` for each candidate
+  - [ ] Skips candidates where `result.is_duplicate == true`
+  - [ ] Records skips with reason for output
+  - [ ] Fail-open on service errors
 
 ### Task 4.3: Update hook output format to include skipped duplicates
 
@@ -264,10 +264,10 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: Task 4.2
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] Output includes "Skipped N duplicates" section
- - [ ] Each skip shows reason (Exact/Semantic/Recent) and matched ID
- - [ ] Semantic matches show similarity percentage
- - [ ] Format matches ARCHITECTURE.md example
+  - [ ] Output includes "Skipped N duplicates" section
+  - [ ] Each skip shows reason (Exact/Semantic/Recent) and matched ID
+  - [ ] Semantic matches show similarity percentage
+  - [ ] Format matches ARCHITECTURE.md example
 
 ### Task 4.4: Record captures in deduplication service
 
@@ -276,8 +276,8 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: Task 4.2
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `dedup.record_capture()` called after `capture_service.capture()` succeeds
- - [ ] Hash computed once and reused for efficiency
+  - [ ] `dedup.record_capture()` called after `capture_service.capture()` succeeds
+  - [ ] Hash computed once and reused for efficiency
 
 ### Phase 4 Deliverables
 
@@ -303,10 +303,10 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: Phase 2 complete
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] ExactMatchChecker: hash generation, tag format, namespace filtering
- - [ ] SemanticSimilarityChecker: threshold comparison, min length skip
- - [ ] RecentCaptureChecker: TTL expiration, capacity eviction
- - [ ] >80% coverage for deduplication module
+  - [ ] ExactMatchChecker: hash generation, tag format, namespace filtering
+  - [ ] SemanticSimilarityChecker: threshold comparison, min length skip
+  - [ ] RecentCaptureChecker: TTL expiration, capacity eviction
+  - [ ] >80% coverage for deduplication module
 
 ### Task 5.2: Integration tests with real backends
 
@@ -315,10 +315,10 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: Phase 3 complete
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] Test with real SQLite index backend
- - [ ] Test with real usearch vector backend
- - [ ] End-to-end hook invocation with deduplication
- - [ ] Verify skipped duplicates in output
+  - [ ] Test with real SQLite index backend
+  - [ ] Test with real usearch vector backend
+  - [ ] End-to-end hook invocation with deduplication
+  - [ ] Verify skipped duplicates in output
 
 ### Task 5.3: Property-based tests for similarity
 
@@ -327,9 +327,9 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: `proptest` crate (already in devDependencies)
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] Identical content always detected as duplicate
- - [ ] Slight variations not detected as exact match
- - [ ] Threshold boundary behavior correct
+  - [ ] Identical content always detected as duplicate
+  - [ ] Slight variations not detected as exact match
+  - [ ] Threshold boundary behavior correct
 
 ### Task 5.4: Benchmark tests for performance
 
@@ -338,10 +338,10 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: Phase 3 complete
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] Benchmark `check_duplicate` cold path (<50ms)
- - [ ] Benchmark `check_duplicate` with cached embedding (<30ms)
- - [ ] Benchmark recent capture lookup (<1ms)
- - [ ] CI fails if performance regresses >20%
+  - [ ] Benchmark `check_duplicate` cold path (<50ms)
+  - [ ] Benchmark `check_duplicate` with cached embedding (<30ms)
+  - [ ] Benchmark recent capture lookup (<1ms)
+  - [ ] CI fails if performance regresses >20%
 
 ### Task 5.5: Graceful degradation tests
 
@@ -350,9 +350,9 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: Task 3.1
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] Test with no embedder (falls back to exact + recent)
- - [ ] Test with index error (proceeds with capture)
- - [ ] Test with cache disabled (skips recent check)
+  - [ ] Test with no embedder (falls back to exact + recent)
+  - [ ] Test with index error (proceeds with capture)
+  - [ ] Test with cache disabled (skips recent check)
 
 ### Phase 5 Deliverables
 
@@ -381,11 +381,11 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: Task 3.1
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `dedup_checks_total{namespace, result}` counter
- - [ ] `dedup_skipped_total{namespace, reason}` counter
- - [ ] `dedup_check_duration_ms{check_type}` histogram
- - [ ] `dedup_similarity_score{namespace}` histogram
- - [ ] `dedup_cache_size` gauge
+  - [ ] `dedup_checks_total{namespace, result}` counter
+  - [ ] `dedup_skipped_total{namespace, reason}` counter
+  - [ ] `dedup_check_duration_ms{check_type}` histogram
+  - [ ] `dedup_similarity_score{namespace}` histogram
+  - [ ] `dedup_cache_size` gauge
 
 ### Task 6.2: Add tracing spans
 
@@ -394,9 +394,9 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: Task 3.1
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] `#[instrument]` on `check_duplicate` with fields
- - [ ] Child spans for exact/semantic/recent checks
- - [ ] Span attributes: content_length, namespace, is_duplicate, reason
+  - [ ] `#[instrument]` on `check_duplicate` with fields
+  - [ ] Child spans for exact/semantic/recent checks
+  - [ ] Span attributes: content_length, namespace, is_duplicate, reason
 
 ### Task 6.3: Add debug logging
 
@@ -405,10 +405,10 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: Task 3.1
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] Log content hash (not content) for each check
- - [ ] Log similarity scores for semantic matches
- - [ ] Log cache hits/misses for recent captures
- - [ ] No content leakage in logs
+  - [ ] Log content hash (not content) for each check
+  - [ ] Log similarity scores for semantic matches
+  - [ ] Log cache hits/misses for recent captures
+  - [ ] No content leakage in logs
 
 ### Phase 6 Deliverables
 
@@ -435,11 +435,11 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: All implementation complete
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] Document exact match (SHA256 hash tag)
- - [ ] Document semantic similarity (configurable thresholds)
- - [ ] Document recent capture (LRU cache with TTL)
- - [ ] Add configuration section with env vars
- - [ ] Update performance targets
+  - [ ] Document exact match (SHA256 hash tag)
+  - [ ] Document semantic similarity (configurable thresholds)
+  - [ ] Document recent capture (LRU cache with TTL)
+  - [ ] Add configuration section with env vars
+  - [ ] Update performance targets
 
 ### Task 7.2: Update CLAUDE.md with new service
 
@@ -448,9 +448,9 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 - **Dependencies**: Task 7.1
 - **Assignee**: TBD
 - **Acceptance Criteria**:
- - [ ] Add `deduplication/` to services directory listing
- - [ ] Document new environment variables
- - [ ] Link to spec documents
+  - [ ] Add `deduplication/` to services directory listing
+  - [ ] Document new environment variables
+  - [ ] Link to spec documents
 
 ### Phase 7 Deliverables
 
@@ -469,39 +469,39 @@ This plan implements the three-tier deduplication system for the pre-compact hoo
 
 ```
 Phase 1: Foundation
- Task 1.1 (module structure) ──┐
- Task 1.2 (types) ─┼──▶ Phase 2: Checkers
- Task 1.3 (config) ─┤
- Task 1.4 (hasher) ◀──────────┤
- Task 1.5 (sha2) ───────────┘
- │
- ▼
+  Task 1.1 (module structure) ──┐
+  Task 1.2 (types)             ─┼──▶ Phase 2: Checkers
+  Task 1.3 (config)            ─┤
+  Task 1.4 (hasher)  ◀──────────┤
+  Task 1.5 (sha2)    ───────────┘
+                                │
+                                ▼
 Phase 2: Checkers
- Task 2.1 (exact match) ───────┐
- Task 2.2 (semantic) ──────────┼──▶ Phase 3: Service
- Task 2.3 (recent) ────────────┤
- Task 2.4 (lru) ───────────────┘
- │
- ▼
+  Task 2.1 (exact match) ───────┐
+  Task 2.2 (semantic) ──────────┼──▶ Phase 3: Service
+  Task 2.3 (recent) ────────────┤
+  Task 2.4 (lru) ───────────────┘
+                                │
+                                ▼
 Phase 3: Service
- Task 3.1 (core service) ──────┐
- Task 3.2 (trait) ─────────────┼──▶ Phase 4: Integration
- Task 3.3 (container) ─────────┘
- │
- ├──▶ Phase 5: Testing (parallel start possible)
- │
- ▼
+  Task 3.1 (core service) ──────┐
+  Task 3.2 (trait) ─────────────┼──▶ Phase 4: Integration
+  Task 3.3 (container) ─────────┘
+                                │
+                                ├──▶ Phase 5: Testing (parallel start possible)
+                                │
+                                ▼
 Phase 4: Integration
- Task 4.1 (handler update) ────┐
- Task 4.2 (dedup refactor) ────┤
- Task 4.3 (output format) ─────┼──▶ Phase 6: Observability
- Task 4.4 (record captures) ───┘
- │
- ▼
+  Task 4.1 (handler update) ────┐
+  Task 4.2 (dedup refactor) ────┤
+  Task 4.3 (output format) ─────┼──▶ Phase 6: Observability
+  Task 4.4 (record captures) ───┘
+                                │
+                                ▼
 Phase 6: Observability
- Task 6.1 (metrics) ───────────┐
- Task 6.2 (tracing) ───────────┼──▶ Phase 7: Documentation
- Task 6.3 (logging) ───────────┘
+  Task 6.1 (metrics) ───────────┐
+  Task 6.2 (tracing) ───────────┼──▶ Phase 7: Documentation
+  Task 6.3 (logging) ───────────┘
 ```
 
 ## Risk Mitigation Tasks

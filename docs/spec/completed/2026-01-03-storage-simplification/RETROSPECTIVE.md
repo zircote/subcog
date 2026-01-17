@@ -55,63 +55,63 @@ satisfaction: very_satisfied
 
 ### Added
 - **Code Review Remediation** (176 tasks)
- - 7 CRITICAL security fixes (CRIT-001 to CRIT-007)
- - 30 HIGH priority fixes (security, performance, testing, database)
- - 77 MEDIUM priority fixes (quality, architecture, compliance)
- - 62 LOW priority items (deferred)
+  - 7 CRITICAL security fixes (CRIT-001 to CRIT-007)
+  - 30 HIGH priority fixes (security, performance, testing, database)
+  - 77 MEDIUM priority fixes (quality, architecture, compliance)
+  - 62 LOW priority items (deferred)
 - **Docker Infrastructure** 
- - PostgreSQL/pgvector and Redis Stack added to observability stack
- - Port remapping (postgres 5433) for host conflict avoidance
+  - PostgreSQL/pgvector and Redis Stack added to observability stack
+  - Port remapping (postgres 5433) for host conflict avoidance
 - **Rustdoc Fixes**
- - Fixed broken intra-doc links (Permission::Read/Write)
+  - Fixed broken intra-doc links (Permission::Read/Write)
 
 ### Removed
 - None - all planned features delivered
 
 ### Modified
 - URN scope changed from 'global' to 'project' for consistency (post-implementation)
-- Version bumps: 0.2.0 -> 0.3.0 -> 0.3.1
+- Version bumps: 0.2.0 → 0.3.0 → 0.3.1
 
 ## Key Learnings
 
 ### Technical Learnings
 
 1. **Rust Bottom-Up Development Works**
- - Building traits first, then implementations, prevents interface churn
- - Type system catches integration issues early
- - Minimal refactoring needed when stacking layers
+   - Building traits first, then implementations, prevents interface churn
+   - Type system catches integration issues early
+   - Minimal refactoring needed when stacking layers
 
 2. **Code Review Timing Matters**
- - 176 findings discovered post-implementation
- - Earlier review would have caught issues during development
- - Parallel specialist agents (12 agents) highly effective
+   - 176 findings discovered post-implementation
+   - Earlier review would have caught issues during development
+   - Parallel specialist agents (12 agents) highly effective
 
 3. **LRU Caches Require Careful Const Handling**
- - `NonZeroUsize` const requires const block with match pattern
- - Clippy's `expect_used` lint catches runtime panics
- - Compile-time guarantees > runtime checks
+   - `NonZeroUsize` const requires const block with match pattern
+   - Clippy's `expect_used` lint catches runtime panics
+   - Compile-time guarantees > runtime checks
 
 4. **Rustdoc Link Resolution Is Strict**
- - Must use full module paths for cross-module links
- - `super::auth::Permission::Read` > `Permission::Read`
- - `-D warnings` catches broken links in CI
+   - Must use full module paths for cross-module links
+   - `super::auth::Permission::Read` > `Permission::Read`
+   - `-D warnings` catches broken links in CI
 
 ### Process Learnings
 
 1. **Exhaustive Remediation Protocol Effective**
- - "Do NOT stop until grep returns 0" ensures completion
- - Priority labels (HIGH/MEDIUM/LOW) indicate SEQUENCE, not importance
- - All tasks mandatory regardless of label
+   - "Do NOT stop until grep returns 0" ensures completion
+   - Priority labels (HIGH/MEDIUM/LOW) indicate SEQUENCE, not importance
+   - All tasks mandatory regardless of label
 
 2. **Parallel Specialist Agents Scale Well**
- - 12 agents (security, performance, architecture, etc.) run concurrently
- - Each agent has domain expertise and dedicated tools
- - Synthesis phase deduplicates and prioritizes findings
+   - 12 agents (security, performance, architecture, etc.) run concurrently
+   - Each agent has domain expertise and dedicated tools
+   - Synthesis phase deduplicates and prioritizes findings
 
 3. **Git Worktree Workflow Isolates Work**
- - `plan/storage-simplification` branch kept changes organized
- - Rebase onto `chore/code-review-arch-security` integrated fixes cleanly
- - PR #44 contains all work with clear commit history
+   - `plan/storage-simplification` branch kept changes organized
+   - Rebase onto `chore/code-review-arch-security` integrated fixes cleanly
+   - PR #44 contains all work with clear commit history
 
 ### Planning Accuracy
 
@@ -134,35 +134,35 @@ satisfaction: very_satisfied
 
 ### Process
 1. **Run deep-clean code review DURING implementation, not after**
- - Integrate review gates at phase boundaries
- - Use specialist agents continuously, not just at end
- - Catch issues early when context is fresh
+   - Integrate review gates at phase boundaries
+   - Use specialist agents continuously, not just at end
+   - Catch issues early when context is fresh
 
 2. **Set realistic timelines based on actual velocity**
- - Track actual hours per task type
- - Adjust estimates based on empirical data
- - Conservative planning is safe but can delay delivery
+   - Track actual hours per task type
+   - Adjust estimates based on empirical data
+   - Conservative planning is safe but can delay delivery
 
 3. **Integrate documentation inline**
- - Don't defer all docs to separate PR
- - Update docs as code changes
- - Reduces context switching later
+   - Don't defer all docs to separate PR
+   - Update docs as code changes
+   - Reduces context switching later
 
 ### Technical
 1. **Use clippy pedantic from day 1**
- - Prevents accumulation of lint debt
- - Forces good patterns early
- - Easier to maintain than retrofit
+   - Prevents accumulation of lint debt
+   - Forces good patterns early
+   - Easier to maintain than retrofit
 
 2. **Const validation over runtime checks**
- - Use `NonZeroUsize`, `NonZero*` for compile-time guarantees
- - Avoid `unwrap`/`expect` in library code
- - Type system > runtime assertions
+   - Use `NonZeroUsize`, `NonZero*` for compile-time guarantees
+   - Avoid `unwrap`/`expect` in library code
+   - Type system > runtime assertions
 
 3. **Full module paths in rustdoc**
- - Always use `super::module::Type` or `crate::module::Type`
- - Prevents broken links in cross-module references
- - CI with `-D warnings` catches issues
+   - Always use `super::module::Type` or `crate::module::Type`
+   - Prevents broken links in cross-module references
+   - CI with `-D warnings` catches issues
 
 ## Final Notes
 

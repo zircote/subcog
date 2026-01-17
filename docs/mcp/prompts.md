@@ -18,13 +18,13 @@ Guided memory capture with namespace selection.
 
 ```json
 {
- "method": "prompts/get",
- "params": {
- "name": "subcog_capture",
- "arguments": {
- "content": "Decided to use PostgreSQL for primary storage"
- }
- }
+  "method": "prompts/get",
+  "params": {
+    "name": "subcog_capture",
+    "arguments": {
+      "content": "Decided to use PostgreSQL for primary storage"
+    }
+  }
 }
 ```
 
@@ -49,13 +49,13 @@ Guided memory search with filter suggestions.
 
 ```json
 {
- "method": "prompts/get",
- "params": {
- "name": "subcog_recall",
- "arguments": {
- "query": "database storage"
- }
- }
+  "method": "prompts/get",
+  "params": {
+    "name": "subcog_recall",
+    "arguments": {
+      "query": "database storage"
+    }
+  }
 }
 ```
 
@@ -88,7 +88,7 @@ Interactive memory browser with faceted discovery.
 
 ### subcog_list (DEPRECATED)
 
-> **️ Deprecated**: Use `subcog_recall` without a query parameter instead. The `subcog_recall` tool now supports listing all memories when query is omitted.
+> **⚠️ Deprecated**: Use `subcog_recall` without a query parameter instead. The `subcog_recall` tool now supports listing all memories when query is omitted.
 
 Formatted memory listing for export.
 
@@ -199,11 +199,11 @@ Generate a well-structured decision record.
 {expanded decision}
 
 ### Consequences
-- Positive:...
-- Negative:...
+- Positive: ...
+- Negative: ...
 
 ### Alternatives Considered
--...
+- ...
 ```
 
 ---
@@ -247,15 +247,15 @@ Capture rich context from a conversation.
 
 ```json
 {
- "jsonrpc": "2.0",
- "id": 1,
- "method": "prompts/get",
- "params": {
- "name": "subcog_capture",
- "arguments": {
- "content": "Use RRF for hybrid search fusion"
- }
- }
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "prompts/get",
+  "params": {
+    "name": "subcog_capture",
+    "arguments": {
+      "content": "Use RRF for hybrid search fusion"
+    }
+  }
 }
 ```
 
@@ -263,9 +263,9 @@ Capture rich context from a conversation.
 
 ```json
 {
- "jsonrpc": "2.0",
- "id": 1,
- "method": "prompts/list"
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "prompts/list"
 }
 ```
 
@@ -273,22 +273,22 @@ Capture rich context from a conversation.
 
 ```json
 {
- "prompts": [
- {
- "name": "subcog_capture",
- "description": "Guided memory capture",
- "arguments": [
- {"name": "content", "required": true}
- ]
- },
- {
- "name": "subcog_recall",
- "description": "Guided memory search",
- "arguments": [
- {"name": "query", "required": true}
- ]
- }
- ]
+  "prompts": [
+    {
+      "name": "subcog_capture",
+      "description": "Guided memory capture",
+      "arguments": [
+        {"name": "content", "required": true}
+      ]
+    },
+    {
+      "name": "subcog_recall",
+      "description": "Guided memory search",
+      "arguments": [
+        {"name": "query", "required": true}
+      ]
+    }
+  ]
 }
 ```
 
@@ -306,13 +306,13 @@ Capture rich context from a conversation.
 **Example - Prompt for guidance:**
 ```
 "I want to capture something about our database choice"
--> Use subcog_capture prompt for namespace suggestion
+→ Use subcog_capture prompt for namespace suggestion
 ```
 
 **Example - Tool for direct action:**
 ```
 "Capture this to decisions: Use PostgreSQL"
--> Use subcog_capture tool directly
+→ Use subcog_capture tool directly
 ```
 
 ---

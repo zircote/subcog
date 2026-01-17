@@ -46,9 +46,9 @@ The current storage architecture has a **critical capture bug** and design misma
 ```
 Current Architecture (broken):
 ┌─────────────────────────────────────────────────────────────┐
-│ org/ -> configured, shared (works but unused) │
-│ project/ -> git notes per repo (BROKEN - overwrites) │
-│ user/ -> ~/.config/subcog/ (works) │
+│  org/     → configured, shared (works but unused)           │
+│  project/ → git notes per repo (BROKEN - overwrites)        │
+│  user/    → ~/.config/subcog/ (works)                       │
 └─────────────────────────────────────────────────────────────┘
 ```
 

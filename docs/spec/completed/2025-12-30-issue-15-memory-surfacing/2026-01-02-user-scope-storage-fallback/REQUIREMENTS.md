@@ -25,8 +25,8 @@ When subcog operates outside a git repository, `ServiceContainer::from_current_d
 ### Desired Behavior
 
 1. User runs subcog capture/recall in any directory
-2. If in a git repo -> use project scope (git notes + `.subcog/index.db`)
-3. If NOT in a git repo -> fall back to user scope (`~/.local/share/subcog/memories.db`)
+2. If in a git repo → use project scope (git notes + `.subcog/index.db`)
+3. If NOT in a git repo → fall back to user scope (`~/.local/share/subcog/memories.db`)
 4. Operations succeed with appropriate storage backend
 
 ## Functional Requirements

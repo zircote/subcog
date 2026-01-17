@@ -20,7 +20,7 @@ Detects and blocks content containing secrets.
 
 ```yaml
 features:
- secrets_filter: true
+  secrets_filter: true
 ```
 
 **Detected patterns:**
@@ -42,7 +42,7 @@ Detects and redacts personally identifiable information.
 
 ```yaml
 features:
- pii_filter: true
+  pii_filter: true
 ```
 
 **Detected patterns:**
@@ -64,13 +64,13 @@ Enables storing and searching memories across multiple domains.
 
 ```yaml
 features:
- multi_domain: false
+  multi_domain: false
 ```
 
 **When enabled:**
 - Project, user, and org memories accessible
 - Cross-domain search with `subcog://_` URIs
-- Domain inheritance (org -> user -> project)
+- Domain inheritance (org → user → project)
 
 **When disabled:**
 - Only project-scoped memories
@@ -83,7 +83,7 @@ Enables org-scoped storage (shared PostgreSQL persistence).
 
 ```yaml
 features:
- org_scope_enabled: false
+  org_scope_enabled: false
 ```
 
 **When enabled:**
@@ -105,7 +105,7 @@ Enables SOC2/GDPR-compliant audit logging.
 
 ```yaml
 features:
- audit_log: false
+  audit_log: false
 ```
 
 **Logged events:**
@@ -117,12 +117,12 @@ features:
 **Log format:**
 ```json
 {
- "timestamp": "2024-01-15T10:30:00Z",
- "event": "memory_capture",
- "actor": "user@example.com",
- "resource": "subcog://project/decisions/abc123",
- "action": "create",
- "result": "success"
+  "timestamp": "2024-01-15T10:30:00Z",
+  "event": "memory_capture",
+  "actor": "user@example.com",
+  "resource": "subcog://project/decisions/abc123",
+  "action": "create",
+  "result": "success"
 }
 ```
 
@@ -134,7 +134,7 @@ Master toggle for all LLM-powered functionality.
 
 ```yaml
 features:
- llm_features: true
+  llm_features: true
 ```
 
 **Enables:**
@@ -155,7 +155,7 @@ Automatically captures important context from hooks.
 
 ```yaml
 features:
- auto_capture: false
+  auto_capture: false
 ```
 
 **Behavior:**
@@ -173,7 +173,7 @@ Enables LLM-powered memory consolidation.
 
 ```yaml
 features:
- consolidation: false
+  consolidation: false
 ```
 
 **Behavior:**
@@ -191,13 +191,13 @@ The search intent system detects user intent from prompts and injects relevant m
 
 ```toml
 [search_intent]
-enabled = true # Enable search intent detection
-use_llm = true # Use LLM for enhanced classification
-llm_timeout_ms = 200 # LLM classification timeout
-min_confidence = 0.5 # Minimum confidence to inject memories
-base_count = 5 # Memories for low-confidence matches
-max_count = 15 # Memories for high-confidence matches
-max_tokens = 4000 # Token budget for injected context
+enabled = true          # Enable search intent detection
+use_llm = true          # Use LLM for enhanced classification
+llm_timeout_ms = 200    # LLM classification timeout
+min_confidence = 0.5    # Minimum confidence to inject memories
+base_count = 5          # Memories for low-confidence matches
+max_count = 15          # Memories for high-confidence matches
+max_tokens = 4000       # Token budget for injected context
 ```
 
 **Environment Variables:**
@@ -272,13 +272,13 @@ The search intent system detects user intent from prompts and injects relevant m
 
 ```toml
 [search_intent]
-enabled = true # Enable search intent detection
-use_llm = true # Use LLM for enhanced classification
-llm_timeout_ms = 200 # LLM classification timeout
-min_confidence = 0.5 # Minimum confidence to inject memories
-base_count = 5 # Memories for low-confidence matches
-max_count = 15 # Memories for high-confidence matches
-max_tokens = 4000 # Token budget for injected context
+enabled = true          # Enable search intent detection
+use_llm = true          # Use LLM for enhanced classification
+llm_timeout_ms = 200    # LLM classification timeout
+min_confidence = 0.5    # Minimum confidence to inject memories
+base_count = 5          # Memories for low-confidence matches
+max_count = 15          # Memories for high-confidence matches
+max_tokens = 4000       # Token budget for injected context
 ```
 
 **Environment Variables:**
@@ -349,14 +349,14 @@ config = 1.2
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ LLM Provider │
-│ │ │
-│ llm_features │
-│ / | \ │
-│ auto_capture │ consolidation │
-│ │ │
-│ search_intent │
-│ (enhanced mode) │
+│                    LLM Provider                          │
+│                         │                                │
+│                    llm_features                          │
+│                    /    |    \                           │
+│            auto_capture │  consolidation                 │
+│                         │                                │
+│                search_intent                             │
+│                (enhanced mode)                           │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -366,52 +366,52 @@ config = 1.2
 
 ```yaml
 features:
- secrets_filter: true
- pii_filter: false
- multi_domain: false
- audit_log: false
- llm_features: true
- auto_capture: true
- consolidation: false
+  secrets_filter: true
+  pii_filter: false
+  multi_domain: false
+  audit_log: false
+  llm_features: true
+  auto_capture: true
+  consolidation: false
 ```
 
 ### Team Development
 
 ```yaml
 features:
- secrets_filter: true
- pii_filter: true
- multi_domain: true
- audit_log: false
- llm_features: true
- auto_capture: false
- consolidation: true
+  secrets_filter: true
+  pii_filter: true
+  multi_domain: true
+  audit_log: false
+  llm_features: true
+  auto_capture: false
+  consolidation: true
 ```
 
 ### Enterprise/Compliance
 
 ```yaml
 features:
- secrets_filter: true
- pii_filter: true
- multi_domain: true
- audit_log: true
- llm_features: true
- auto_capture: false
- consolidation: true
+  secrets_filter: true
+  pii_filter: true
+  multi_domain: true
+  audit_log: true
+  llm_features: true
+  auto_capture: false
+  consolidation: true
 ```
 
 ### Minimal/Offline
 
 ```yaml
 features:
- secrets_filter: true
- pii_filter: true
- multi_domain: false
- audit_log: false
- llm_features: false
- auto_capture: false
- consolidation: false
+  secrets_filter: true
+  pii_filter: true
+  multi_domain: false
+  audit_log: false
+  llm_features: false
+  auto_capture: false
+  consolidation: false
 ```
 
 ## Checking Feature Status
@@ -425,13 +425,13 @@ Shows feature status in output:
 ```
 Features
 ────────
- Secrets filter
- PII filter
- Multi-domain (disabled)
- Audit log (disabled)
- LLM features
- Auto-capture
- Consolidation (disabled)
+  ✓ Secrets filter
+  ✓ PII filter
+  ✗ Multi-domain (disabled)
+  ✗ Audit log (disabled)
+  ✓ LLM features
+  ✓ Auto-capture
+  ✗ Consolidation (disabled)
 ```
 
 ## See Also

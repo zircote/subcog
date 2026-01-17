@@ -143,8 +143,8 @@ Entities may be project-specific or global. Options:
 ### Decision
 
 Entity scope follows the domain of the memory that mentioned it:
-- Project memories -> project-scoped entities
-- User/org memories -> global entities
+- Project memories → project-scoped entities
+- User/org memories → global entities
 
 ### Rationale
 

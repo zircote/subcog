@@ -85,9 +85,9 @@ Accepted
 The current architecture has three storage tiers with complex routing:
 
 ```
-org/ -> Shared PostgreSQL (configured, rarely used)
-project/ -> Git notes per repo (BROKEN)
-user/ -> ~/.config/subcog/ (works)
+org/     → Shared PostgreSQL (configured, rarely used)
+project/ → Git notes per repo (BROKEN)
+user/    → ~/.config/subcog/ (works)
 ```
 
 This creates several problems:
@@ -106,10 +106,10 @@ This creates several problems:
 Facet fields added to Memory struct:
 ```rust
 pub struct Memory {
- //... existing fields...
- pub project_id: Option<String>, // Normalized git remote URL
- pub branch: Option<String>, // Current branch name
- pub file_path: Option<String>, // Relative path from repo root
+    // ... existing fields ...
+    pub project_id: Option<String>,  // Normalized git remote URL
+    pub branch: Option<String>,       // Current branch name
+    pub file_path: Option<String>,    // Relative path from repo root
 }
 ```
 
@@ -239,8 +239,8 @@ The original architecture included an org-scope tier for shared PostgreSQL stora
 ```rust
 // config/features.rs
 pub struct FeatureFlags {
- pub org_scope_enabled: bool, // Default: false
- //...
+    pub org_scope_enabled: bool,  // Default: false
+    // ...
 }
 ```
 
@@ -288,12 +288,12 @@ Options for cleanup:
 ```rust
 // During recall, after fetching results:
 for memory in &mut results {
- if let Some(branch) = &memory.branch {
- if!branch_exists(branch) && memory.status!= MemoryStatus::Tombstoned {
- self.tombstone_memory(&memory.id)?;
- memory.status = MemoryStatus::Tombstoned;
- }
- }
+    if let Some(branch) = &memory.branch {
+        if !branch_exists(branch) && memory.status != MemoryStatus::Tombstoned {
+            self.tombstone_memory(&memory.id)?;
+            memory.status = MemoryStatus::Tombstoned;
+        }
+    }
 }
 ```
 
@@ -341,8 +341,8 @@ When memories become stale (branch deleted, manual cleanup), we need to remove t
 
 ```rust
 pub enum MemoryStatus {
- Active,
- Tombstoned,
+    Active,
+    Tombstoned,
 }
 ```
 

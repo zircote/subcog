@@ -14,16 +14,16 @@ Subcog is a **mature, feature-rich memory system** that exceeds many competitors
 
 | Category | Status |
 |----------|--------|
-| Core CRUD Operations | Full parity |
-| Search & Retrieval | Exceeds (hybrid search) |
-| Graph Memory | Full implementation |
-| Entity Extraction | Auto-extraction enabled |
-| Context Templates | Full implementation |
-| Memory Expiration | TTL support |
-| Multimodal Support | Critical gap |
-| Webhooks | Missing |
-| Security & Compliance | Industry-leading |
-| Observability | Industry-leading |
+| Core CRUD Operations | ✅ Full parity |
+| Search & Retrieval | ✅ Exceeds (hybrid search) |
+| Graph Memory | ✅ Full implementation |
+| Entity Extraction | ✅ Auto-extraction enabled |
+| Context Templates | ✅ Full implementation |
+| Memory Expiration | ✅ TTL support |
+| Multimodal Support | ❌ Critical gap |
+| Webhooks | ❌ Missing |
+| Security & Compliance | ✅ Industry-leading |
+| Observability | ✅ Industry-leading |
 
 ---
 
@@ -44,27 +44,27 @@ Subcog is a **mature, feature-rich memory system** that exceeds many competitors
 
 | Feature Category | Subcog | Mem0 | Zep | LangMem |
 |-----------------|--------|------|-----|---------|
-| **Core CRUD** | Full | Full | Full | Full |
-| **Semantic Search** | Hybrid | Advanced | Graph RAG | Basic |
-| **Graph Memory** | Temporal KG | Native | Temporal KG | None |
-| **Multimodal** | Missing | Images/Docs | None | None |
-| **Memory Expiration** | TTL | TTL | None | None |
-| **Webhooks** | Missing | Native | Native | None |
-| **Custom Categories** | ️ Namespaces | Dynamic | Ontologies | None |
-| **Entity Extraction** | Auto | Auto | Auto | Auto |
-| **Context Templates** | Full | ️ Partial | Full | None |
-| **Batch Operations** | Full | Full | Full | None |
-| **MCP Integration** | Native | Native | Native | None |
-| **GDPR Compliance** | Full | Full | ️ Partial | None |
-| **Local/Offline** | Full | Cloud | Cloud | InMemory |
-| **CLI Tools** | Rich | ️ Basic | zepctl | None |
-| **Observability** | Full OTLP | ️ Basic | ️ Audit | None |
+| **Core CRUD** | ✅ Full | ✅ Full | ✅ Full | ✅ Full |
+| **Semantic Search** | ✅ Hybrid | ✅ Advanced | ✅ Graph RAG | ✅ Basic |
+| **Graph Memory** | ✅ Temporal KG | ✅ Native | ✅ Temporal KG | ❌ None |
+| **Multimodal** | ❌ Missing | ✅ Images/Docs | ❌ None | ❌ None |
+| **Memory Expiration** | ✅ TTL | ✅ TTL | ❌ None | ❌ None |
+| **Webhooks** | ❌ Missing | ✅ Native | ✅ Native | ❌ None |
+| **Custom Categories** | ⚠️ Namespaces | ✅ Dynamic | ✅ Ontologies | ❌ None |
+| **Entity Extraction** | ✅ Auto | ✅ Auto | ✅ Auto | ✅ Auto |
+| **Context Templates** | ✅ Full | ⚠️ Partial | ✅ Full | ❌ None |
+| **Batch Operations** | ✅ Full | ✅ Full | ✅ Full | ❌ None |
+| **MCP Integration** | ✅ Native | ✅ Native | ✅ Native | ❌ None |
+| **GDPR Compliance** | ✅ Full | ✅ Full | ⚠️ Partial | ❌ None |
+| **Local/Offline** | ✅ Full | ❌ Cloud | ❌ Cloud | ✅ InMemory |
+| **CLI Tools** | ✅ Rich | ⚠️ Basic | ✅ zepctl | ❌ None |
+| **Observability** | ✅ Full OTLP | ⚠️ Basic | ⚠️ Audit | ❌ None |
 
 ---
 
 ## Gap Analysis
 
-### Critical Gaps (High Priority)
+### 🔴 Critical Gaps (High Priority)
 
 <!-- #### 1. Graph Memory / Knowledge Graphs
 
@@ -432,14 +432,14 @@ Areas where Subcog **already leads** or **equals** industry standards:
 
 ## Implementation Roadmap
 
-### Completed (Q1 2026)
+### ✅ Completed (Q1 2026)
 
 | Feature | Status | Completed |
 |---------|--------|-----------|
-| Memory Expiration/TTL | Done | Jan 2026 |
-| Entity Extraction | Done | Jan 2026 |
-| Knowledge Graphs | Done | Jan 2026 |
-| Context Templates | Done | Jan 2026 |
+| Memory Expiration/TTL | ✅ Done | Jan 2026 |
+| Entity Extraction | ✅ Done | Jan 2026 |
+| Knowledge Graphs | ✅ Done | Jan 2026 |
+| Context Templates | ✅ Done | Jan 2026 |
 
 **Outcome:** Major competitive gaps closed. Subcog now has feature parity with Mem0/Zep on core graph and entity capabilities.
 
@@ -447,8 +447,8 @@ Areas where Subcog **already leads** or **equals** industry standards:
 
 | Feature | Effort | Priority | Target |
 |---------|--------|----------|--------|
-| Webhooks | 2 weeks | Critical | Feb 2026 |
-| Multimodal Support | 2-3 weeks | Critical | Mar 2026 |
+| Webhooks | 2 weeks | 🔴 Critical | Feb 2026 |
+| Multimodal Support | 2-3 weeks | 🔴 Critical | Mar 2026 |
 
 **Phase 1 Outcome:** Address remaining critical gaps for enterprise integrations and modern AI agents.
 

@@ -22,11 +22,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **6 SearchIntentType variants**: HowTo, Location, Explanation, Comparison, Troubleshoot, General
 - **Hybrid detection**: Keyword (<10ms) + optional LLM (<200ms) with timeout fallback
-- **Namespace weighting**: Intent-specific memory prioritization (HowTo -> Patterns 1.5x)
+- **Namespace weighting**: Intent-specific memory prioritization (HowTo → Patterns 1.5x)
 - **3 new MCP resources**:
- - `subcog://search/{query}` - Query-based memory search
- - `subcog://topics` - List all indexed topics
- - `subcog://topics/{topic}` - Memories for specific topic
+  - `subcog://search/{query}` - Query-based memory search
+  - `subcog://topics` - List all indexed topics
+  - `subcog://topics/{topic}` - Memories for specific topic
 - **6 new MCP prompts**: intent_search, query_suggest, discover, generate_decision, generate_tutorial, context_capture
 - **5 hook response format fixes**: SessionStart, UserPromptSubmit, Stop, PostToolUse, PreCompact (Issue #24)
 
@@ -42,8 +42,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Additional Work
 
 - **Issue #24 fix**: All 5 hooks brought into compliance with Claude Code specification
- - Response format changed from `{continue, context, metadata}` to `{hookSpecificOutput: {hookEventName, additionalContext}}`
- - Metadata embedded as XML comments for debugging
+  - Response format changed from `{continue, context, metadata}` to `{hookSpecificOutput: {hookEventName, additionalContext}}`
+  - Metadata embedded as XML comments for debugging
 - **PR review feedback**: Fixed duplicate topic filtering bug in `extract_topics()` (HashSet wasn't being mutated)
 - **35 benchmark tests**: Added comprehensive performance benchmarks beyond original plan
 - **11 graceful degradation tests**: Added integration tests for LLM fallback, timeout, and component unavailability
@@ -77,25 +77,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Initial specification created from GitHub Issue #15
 - Requirements document (REQUIREMENTS.md) with 9 P0, 6 P1, and 4 P2 requirements
 - Technical architecture (ARCHITECTURE.md) with 5 major components:
- - SearchIntentDetector for keyword and LLM-based intent detection
- - SearchContextBuilder for adaptive memory injection
- - TopicIndexService for topic-based memory lookup
- - Enhanced ResourceHandler for new MCP resources
- - Enhanced PromptRegistry for new MCP prompts
+  - SearchIntentDetector for keyword and LLM-based intent detection
+  - SearchContextBuilder for adaptive memory injection
+  - TopicIndexService for topic-based memory lookup
+  - Enhanced ResourceHandler for new MCP resources
+  - Enhanced PromptRegistry for new MCP prompts
 - Implementation plan (IMPLEMENTATION_PLAN.md) with 6 phases and 66 tasks:
- - Phase 1: Foundation - Search Intent Detection (11 tasks)
- - Phase 2: Adaptive Memory Injection (12 tasks)
- - Phase 3: MCP Resources - Query & Topic (16 tasks)
- - Phase 4: Enhanced MCP Prompts (10 tasks)
- - Phase 5: LLM Intent Classification (12 tasks)
- - Phase 6: Hook Guidance & Polish (16 tasks)
+  - Phase 1: Foundation - Search Intent Detection (11 tasks)
+  - Phase 2: Adaptive Memory Injection (12 tasks)
+  - Phase 3: MCP Resources - Query & Topic (16 tasks)
+  - Phase 4: Enhanced MCP Prompts (10 tasks)
+  - Phase 5: LLM Intent Classification (12 tasks)
+  - Phase 6: Hook Guidance & Polish (16 tasks)
 - 6 Architecture Decision Records (DECISIONS.md):
- - ADR-001: Hybrid Detection Strategy
- - ADR-002: Namespace Weighting Over Query Rewriting
- - ADR-003: In-Memory Topic Index
- - ADR-004: 200ms LLM Timeout
- - ADR-005: Token Budget for Injected Memories
- - ADR-006: Confidence Threshold for Injection
+  - ADR-001: Hybrid Detection Strategy
+  - ADR-002: Namespace Weighting Over Query Rewriting
+  - ADR-003: In-Memory Topic Index
+  - ADR-004: 200ms LLM Timeout
+  - ADR-005: Token Budget for Injected Memories
+  - ADR-006: Confidence Threshold for Injection
 
 ### Context
 

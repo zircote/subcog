@@ -16,83 +16,83 @@ This document describes the technical architecture for proactive memory surfacin
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ Claude Code │
-│ ┌─────────────────┐ │
-│ │ User Prompt │ │
-│ └────────┬────────┘ │
-│ │ │
-│ ▼ │
-│ ┌─────────────────┐ ┌──────────────────────────────────────────────┐ │
-│ │ UserPromptSubmit│────▶│ Hook Handler │ │
-│ │ Hook │ │ ┌────────────────────────────────────────┐ │ │
-│ └─────────────────┘ │ │ Search Intent Detection │ │ │
-│ │ │ ┌────────────┐ ┌─────────────────┐ │ │ │
-│ │ │ │ Keyword │ │ LLM Classifier │ │ │ │
-│ │ │ │ Detector │ │ (with timeout) │ │ │ │
-│ │ │ └─────┬──────┘ └────────┬────────┘ │ │ │
-│ │ │ │ │ │ │ │
-│ │ │ └─────────┬─────────┘ │ │ │
-│ │ │ ▼ │ │ │
-│ │ │ ┌───────────────┐ │ │ │
-│ │ │ │ SearchIntent │ │ │ │
-│ │ │ │ (type,topics, │ │ │ │
-│ │ │ │ confidence) │ │ │ │
-│ │ │ └───────┬───────┘ │ │ │
-│ │ └─────────────────┼──────────────────────┘ │ │
-│ │ ▼ │ │
-│ │ ┌────────────────────────────────────────┐ │ │
-│ │ │ Adaptive Memory Injection │ │ │
-│ │ │ ┌─────────────┐ ┌─────────────────┐ │ │ │
-│ │ │ │ Namespace │ │ SearchContext │ │ │ │
-│ │ │ │ Weighting │ │ Builder │ │ │ │
-│ │ │ └──────┬──────┘ └────────┬────────┘ │ │ │
-│ │ │ │ │ │ │ │
-│ │ │ └─────────┬─────────┘ │ │ │
-│ │ │ ▼ │ │ │
-│ │ │ ┌──────────────┐ │ │ │
-│ │ │ │RecallService │ │ │ │
-│ │ │ │(with weights)│ │ │ │
-│ │ │ └──────┬───────┘ │ │ │
-│ │ └─────────────────┼──────────────────────┘ │ │
-│ │ ▼ │ │
-│ │ ┌────────────────────────────────────────┐ │ │
-│ │ │ Hook Response │ │ │
-│ │ │ { continue: true, │ │ │
-│ │ │ context: "...", │ │ │
-│ │ │ metadata: { memory_context: {...} } │ │ │
-│ │ │ } │ │ │
-│ │ └────────────────────────────────────────┘ │ │
-│ └──────────────────────────────────────────────┘ │
+│                              Claude Code                                     │
+│  ┌─────────────────┐                                                        │
+│  │   User Prompt   │                                                        │
+│  └────────┬────────┘                                                        │
+│           │                                                                  │
+│           ▼                                                                  │
+│  ┌─────────────────┐     ┌──────────────────────────────────────────────┐   │
+│  │  UserPromptSubmit│────▶│              Hook Handler                    │   │
+│  │      Hook        │     │  ┌────────────────────────────────────────┐ │   │
+│  └─────────────────┘     │  │        Search Intent Detection         │ │   │
+│                          │  │  ┌────────────┐  ┌─────────────────┐   │ │   │
+│                          │  │  │  Keyword   │  │  LLM Classifier │   │ │   │
+│                          │  │  │  Detector  │  │  (with timeout) │   │ │   │
+│                          │  │  └─────┬──────┘  └────────┬────────┘   │ │   │
+│                          │  │        │                   │           │ │   │
+│                          │  │        └─────────┬─────────┘           │ │   │
+│                          │  │                  ▼                     │ │   │
+│                          │  │         ┌───────────────┐              │ │   │
+│                          │  │         │ SearchIntent  │              │ │   │
+│                          │  │         │ (type,topics, │              │ │   │
+│                          │  │         │  confidence)  │              │ │   │
+│                          │  │         └───────┬───────┘              │ │   │
+│                          │  └─────────────────┼──────────────────────┘ │   │
+│                          │                    ▼                        │   │
+│                          │  ┌────────────────────────────────────────┐ │   │
+│                          │  │      Adaptive Memory Injection         │ │   │
+│                          │  │  ┌─────────────┐  ┌─────────────────┐  │ │   │
+│                          │  │  │  Namespace  │  │ SearchContext   │  │ │   │
+│                          │  │  │  Weighting  │  │    Builder      │  │ │   │
+│                          │  │  └──────┬──────┘  └────────┬────────┘  │ │   │
+│                          │  │         │                   │          │ │   │
+│                          │  │         └─────────┬─────────┘          │ │   │
+│                          │  │                   ▼                    │ │   │
+│                          │  │          ┌──────────────┐              │ │   │
+│                          │  │          │RecallService │              │ │   │
+│                          │  │          │(with weights)│              │ │   │
+│                          │  │          └──────┬───────┘              │ │   │
+│                          │  └─────────────────┼──────────────────────┘ │   │
+│                          │                    ▼                        │   │
+│                          │  ┌────────────────────────────────────────┐ │   │
+│                          │  │           Hook Response                 │ │   │
+│                          │  │  { continue: true,                     │ │   │
+│                          │  │    context: "...",                     │ │   │
+│                          │  │    metadata: { memory_context: {...} } │ │   │
+│                          │  │  }                                     │ │   │
+│                          │  └────────────────────────────────────────┘ │   │
+│                          └──────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ MCP Server │
-│ ┌──────────────────────────────────────────────────────────────────────┐ │
-│ │ Resource Handler │ │
-│ │ ┌──────────────────┐ ┌──────────────────┐ ┌────────────────────┐ │ │
-│ │ │ subcog://search/ │ │ subcog://topics │ │ subcog://topics/ │ │ │
-│ │ │ {query} │ │ (list) │ │ {topic} │ │ │
-│ │ └────────┬─────────┘ └────────┬─────────┘ └─────────┬──────────┘ │ │
-│ │ │ │ │ │ │
-│ │ ▼ ▼ ▼ │ │
-│ │ ┌─────────────────────────────────────────────────────────────────┐ │ │
-│ │ │ TopicIndexService │ │ │
-│ │ │ ┌────────────────┐ ┌────────────────────────────────────────┐ │ │ │
-│ │ │ │ Topic Index │ │ Methods: │ │ │ │
-│ │ │ │ HashMap<Topic, │ │ - build_index() │ │ │ │
-│ │ │ │ Vec<MemoryId>>│ │ - get_topic_memories(topic) │ │ │ │
-│ │ │ └────────────────┘ │ - list_topics() │ │ │ │
-│ │ │ └────────────────────────────────────────┘ │ │ │
-│ │ └─────────────────────────────────────────────────────────────────┘ │ │
-│ └──────────────────────────────────────────────────────────────────────┘ │
-│ │
-│ ┌──────────────────────────────────────────────────────────────────────┐ │
-│ │ Prompt Registry │ │
-│ │ ┌────────────────────┐ ┌────────────────────┐ ┌────────────────┐ │ │
-│ │ │ search_with_context│ │ research_topic │ │ recall_context │ │ │
-│ │ │ (query, scope) │ │ (topic, depth) │ │(topic, intent) │ │ │
-│ │ └────────────────────┘ └────────────────────┘ └────────────────┘ │ │
-│ └──────────────────────────────────────────────────────────────────────┘ │
+│                              MCP Server                                      │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │                        Resource Handler                               │   │
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌────────────────────┐  │   │
+│  │  │ subcog://search/ │  │ subcog://topics  │  │ subcog://topics/   │  │   │
+│  │  │     {query}      │  │     (list)       │  │     {topic}        │  │   │
+│  │  └────────┬─────────┘  └────────┬─────────┘  └─────────┬──────────┘  │   │
+│  │           │                      │                      │            │   │
+│  │           ▼                      ▼                      ▼            │   │
+│  │  ┌─────────────────────────────────────────────────────────────────┐ │   │
+│  │  │                    TopicIndexService                            │ │   │
+│  │  │  ┌────────────────┐  ┌────────────────────────────────────────┐ │ │   │
+│  │  │  │  Topic Index   │  │ Methods:                               │ │ │   │
+│  │  │  │ HashMap<Topic, │  │  - build_index()                       │ │ │   │
+│  │  │  │  Vec<MemoryId>>│  │  - get_topic_memories(topic)           │ │ │   │
+│  │  │  └────────────────┘  │  - list_topics()                       │ │ │   │
+│  │  │                      └────────────────────────────────────────┘ │ │   │
+│  │  └─────────────────────────────────────────────────────────────────┘ │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │                        Prompt Registry                                │   │
+│  │  ┌────────────────────┐  ┌────────────────────┐  ┌────────────────┐  │   │
+│  │  │ search_with_context│  │   research_topic   │  │ recall_context │  │   │
+│  │  │  (query, scope)    │  │  (topic, depth)    │  │(topic, intent) │  │   │
+│  │  └────────────────────┘  └────────────────────┘  └────────────────┘  │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -101,7 +101,7 @@ This document describes the technical architecture for proactive memory surfacin
 1. **Hybrid Detection**: Combines fast keyword matching with optional LLM classification for best accuracy/latency tradeoff
 2. **Namespace Weighting**: Intent-specific namespace boosts improve recall relevance without changing the underlying ranking algorithm
 3. **Topic Pre-indexing**: Topics are indexed at server startup for fast lookup, refreshed on memory capture
-4. **Graceful Degradation**: Each component has a fallback path (LLM -> keyword, vector -> text, injection -> skip)
+4. **Graceful Degradation**: Each component has a fallback path (LLM → keyword, vector → text, injection → skip)
 
 ## Component Design
 
@@ -119,26 +119,26 @@ This document describes the technical architecture for proactive memory surfacin
 **Interfaces**:
 ```rust
 pub struct SearchIntent {
- pub keywords: Vec<String>,
- pub topics: Vec<String>,
- pub confidence: f32,
- pub intent_type: SearchIntentType,
- pub source: DetectionSource, // Keyword, Llm, Hybrid
+    pub keywords: Vec<String>,
+    pub topics: Vec<String>,
+    pub confidence: f32,
+    pub intent_type: SearchIntentType,
+    pub source: DetectionSource,  // Keyword, Llm, Hybrid
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchIntentType {
- HowTo, // "how do I...", "how to..."
- Location, // "where is...", "find..."
- Explanation, // "what is...", "explain..."
- Comparison, // "difference between...", "vs"
- Troubleshoot, // "why is...", "error...", "fix..."
- General, // Other search-like queries
+    HowTo,          // "how do I...", "how to..."
+    Location,       // "where is...", "find..."
+    Explanation,    // "what is...", "explain..."
+    Comparison,     // "difference between...", "vs"
+    Troubleshoot,   // "why is...", "error...", "fix..."
+    General,        // Other search-like queries
 }
 
 impl SearchIntentDetector {
- pub fn detect(&self, prompt: &str) -> Option<SearchIntent>;
- pub async fn detect_with_llm(&self, prompt: &str) -> Option<SearchIntent>;
+    pub fn detect(&self, prompt: &str) -> Option<SearchIntent>;
+    pub async fn detect_with_llm(&self, prompt: &str) -> Option<SearchIntent>;
 }
 ```
 
@@ -162,23 +162,23 @@ impl SearchIntentDetector {
 **Interfaces**:
 ```rust
 pub struct AdaptiveContextConfig {
- pub base_count: usize, // 5
- pub max_count: usize, // 15
- pub max_tokens: usize, // 4000
- pub confidence_thresholds: ConfidenceThresholds,
+    pub base_count: usize,      // 5
+    pub max_count: usize,       // 15
+    pub max_tokens: usize,      // 4000
+    pub confidence_thresholds: ConfidenceThresholds,
 }
 
 pub struct ConfidenceThresholds {
- pub low: f32, // 0.3
- pub medium: f32, // 0.5
- pub high: f32, // 0.8
+    pub low: f32,     // 0.3
+    pub medium: f32,  // 0.5
+    pub high: f32,    // 0.8
 }
 
 impl SearchContextBuilder {
- pub fn new(config: AdaptiveContextConfig, recall: RecallService) -> Self;
- pub fn memories_for_intent(&self, intent: &SearchIntent) -> usize;
- pub fn namespace_weights_for_intent(&self, intent_type: SearchIntentType) -> HashMap<Namespace, f32>;
- pub async fn build_context(&self, intent: &SearchIntent) -> Result<MemoryContext>;
+    pub fn new(config: AdaptiveContextConfig, recall: RecallService) -> Self;
+    pub fn memories_for_intent(&self, intent: &SearchIntent) -> usize;
+    pub fn namespace_weights_for_intent(&self, intent_type: SearchIntentType) -> HashMap<Namespace, f32>;
+    pub async fn build_context(&self, intent: &SearchIntent) -> Result<MemoryContext>;
 }
 ```
 
@@ -199,23 +199,23 @@ impl SearchContextBuilder {
 **Interfaces**:
 ```rust
 pub struct TopicInfo {
- pub name: String,
- pub memory_count: usize,
- pub namespaces: Vec<Namespace>,
+    pub name: String,
+    pub memory_count: usize,
+    pub namespaces: Vec<Namespace>,
 }
 
 pub struct TopicIndexService {
- topics: Arc<RwLock<HashMap<String, Vec<MemoryId>>>>,
- last_refresh: Arc<RwLock<Instant>>,
+    topics: Arc<RwLock<HashMap<String, Vec<MemoryId>>>>,
+    last_refresh: Arc<RwLock<Instant>>,
 }
 
 impl TopicIndexService {
- pub fn new() -> Self;
- pub fn build_index(&self, memories: &[Memory]) -> Result<()>;
- pub fn add_memory(&self, memory: &Memory) -> Result<()>;
- pub fn get_topic_memories(&self, topic: &str) -> Vec<MemoryId>;
- pub fn list_topics(&self) -> Vec<TopicInfo>;
- pub fn search_topics(&self, query: &str) -> Vec<TopicInfo>;
+    pub fn new() -> Self;
+    pub fn build_index(&self, memories: &[Memory]) -> Result<()>;
+    pub fn add_memory(&self, memory: &Memory) -> Result<()>;
+    pub fn get_topic_memories(&self, topic: &str) -> Vec<MemoryId>;
+    pub fn list_topics(&self) -> Vec<TopicInfo>;
+    pub fn search_topics(&self, query: &str) -> Vec<TopicInfo>;
 }
 ```
 
@@ -236,16 +236,16 @@ impl TopicIndexService {
 ```rust
 // New URN patterns in ParsedUrn enum
 pub enum ParsedUrn {
- //... existing variants...
- SearchQuery { query: String },
- TopicList,
- TopicDetail { topic: String },
+    // ... existing variants ...
+    SearchQuery { query: String },
+    TopicList,
+    TopicDetail { topic: String },
 }
 
 impl ResourceHandler {
- pub fn handle_search_resource(&self, query: &str) -> Result<String>;
- pub fn handle_topics_list_resource(&self) -> Result<String>;
- pub fn handle_topic_resource(&self, topic: &str) -> Result<String>;
+    pub fn handle_search_resource(&self, query: &str) -> Result<String>;
+    pub fn handle_topics_list_resource(&self) -> Result<String>;
+    pub fn handle_topic_resource(&self, topic: &str) -> Result<String>;
 }
 ```
 
@@ -269,7 +269,7 @@ pub fn search_with_context_prompt() -> PromptInfo;
 pub fn research_topic_prompt() -> PromptInfo;
 
 // Enhanced existing prompt
-pub fn recall_context_prompt() -> PromptInfo; // Now with intent arg
+pub fn recall_context_prompt() -> PromptInfo;  // Now with intent arg
 ```
 
 **Dependencies**: RecallService, TopicIndexService
@@ -283,65 +283,65 @@ pub fn recall_context_prompt() -> PromptInfo; // Now with intent arg
 ```rust
 // Search Intent Detection
 pub struct SearchIntent {
- pub keywords: Vec<String>,
- pub topics: Vec<String>,
- pub confidence: f32,
- pub intent_type: SearchIntentType,
- pub source: DetectionSource,
+    pub keywords: Vec<String>,
+    pub topics: Vec<String>,
+    pub confidence: f32,
+    pub intent_type: SearchIntentType,
+    pub source: DetectionSource,
 }
 
 pub enum SearchIntentType {
- HowTo,
- Location,
- Explanation,
- Comparison,
- Troubleshoot,
- General,
+    HowTo,
+    Location,
+    Explanation,
+    Comparison,
+    Troubleshoot,
+    General,
 }
 
 pub enum DetectionSource {
- Keyword,
- Llm,
- Hybrid,
+    Keyword,
+    Llm,
+    Hybrid,
 }
 
 // Memory Context for Hook Response
 pub struct MemoryContext {
- pub search_intent_detected: bool,
- pub intent_type: Option<String>,
- pub topics: Vec<String>,
- pub injected_memories: Vec<InjectedMemory>,
- pub reminder: Option<String>,
- pub suggested_resources: Vec<String>,
+    pub search_intent_detected: bool,
+    pub intent_type: Option<String>,
+    pub topics: Vec<String>,
+    pub injected_memories: Vec<InjectedMemory>,
+    pub reminder: Option<String>,
+    pub suggested_resources: Vec<String>,
 }
 
 pub struct InjectedMemory {
- pub id: String,
- pub namespace: String,
- pub content_preview: String, // Truncated to ~200 chars
- pub score: f32,
+    pub id: String,
+    pub namespace: String,
+    pub content_preview: String,  // Truncated to ~200 chars
+    pub score: f32,
 }
 
 // Topic Index
 pub struct TopicInfo {
- pub name: String,
- pub memory_count: usize,
- pub namespaces: Vec<Namespace>,
+    pub name: String,
+    pub memory_count: usize,
+    pub namespaces: Vec<Namespace>,
 }
 
 // Configuration
 pub struct SearchIntentConfig {
- pub enabled: bool,
- pub use_llm: bool,
- pub llm_timeout_ms: u64,
- pub min_confidence: f32,
- pub context: AdaptiveContextConfig,
+    pub enabled: bool,
+    pub use_llm: bool,
+    pub llm_timeout_ms: u64,
+    pub min_confidence: f32,
+    pub context: AdaptiveContextConfig,
 }
 
 pub struct AdaptiveContextConfig {
- pub base_count: usize,
- pub max_count: usize,
- pub max_tokens: usize,
+    pub base_count: usize,
+    pub max_count: usize,
+    pub max_tokens: usize,
 }
 ```
 
@@ -349,42 +349,42 @@ pub struct AdaptiveContextConfig {
 
 ```
 User Prompt
- │
- ▼
+    │
+    ▼
 ┌───────────────────────┐
-│ UserPromptHandler │
-│ (existing) │
-│ - detect_signals() │ ──▶ CaptureSignals (existing)
-│ + detect_search() │ ──▶ SearchIntent (new)
+│  UserPromptHandler    │
+│  (existing)           │
+│  - detect_signals()   │  ──▶  CaptureSignals (existing)
+│  + detect_search()    │  ──▶  SearchIntent (new)
 └───────────┬───────────┘
- │
- ▼
+            │
+            ▼
 ┌───────────────────────┐
-│ SearchContextBuilder │
-│ - memories_for_intent│
-│ - namespace_weights │
-│ - build_context() │
+│  SearchContextBuilder │
+│  - memories_for_intent│
+│  - namespace_weights  │
+│  - build_context()    │
 └───────────┬───────────┘
- │
- ▼
+            │
+            ▼
 ┌───────────────────────┐
-│ RecallService │
-│ (with weight override)│
-│ - search(query, │
-│ mode, filter, │
-│ weights, limit) │
+│  RecallService        │
+│  (with weight override)│
+│  - search(query,      │
+│    mode, filter,      │
+│    weights, limit)    │
 └───────────┬───────────┘
- │
- ▼
+            │
+            ▼
 ┌───────────────────────┐
-│ MemoryContext │
-│ - injected_memories │
-│ - suggested_resources│
-│ - reminder text │
+│  MemoryContext        │
+│  - injected_memories  │
+│  - suggested_resources│
+│  - reminder text      │
 └───────────┬───────────┘
- │
- ▼
- Hook Response JSON
+            │
+            ▼
+   Hook Response JSON
 ```
 
 ### Storage Strategy
@@ -406,22 +406,22 @@ User Prompt
 **Response**:
 ```json
 {
- "query": "authentication",
- "mode": "hybrid",
- "memories": [
- {
- "id": "mem_abc123",
- "urn": "subcog://memory/mem_abc123",
- "namespace": "decisions",
- "content": "Use JWT tokens for API authentication...",
- "score": 0.85,
- "created_at": "2025-12-28T10:00:00Z",
- "tags": ["auth", "jwt", "security"]
- }
- ],
- "topics": ["auth", "security"],
- "total_count": 3,
- "execution_time_ms": 45
+  "query": "authentication",
+  "mode": "hybrid",
+  "memories": [
+    {
+      "id": "mem_abc123",
+      "urn": "subcog://memory/mem_abc123",
+      "namespace": "decisions",
+      "content": "Use JWT tokens for API authentication...",
+      "score": 0.85,
+      "created_at": "2025-12-28T10:00:00Z",
+      "tags": ["auth", "jwt", "security"]
+    }
+  ],
+  "topics": ["auth", "security"],
+  "total_count": 3,
+  "execution_time_ms": 45
 }
 ```
 
@@ -434,20 +434,20 @@ User Prompt
 **Response**:
 ```json
 {
- "topics": [
- {
- "name": "authentication",
- "memory_count": 5,
- "namespaces": ["decisions", "patterns"]
- },
- {
- "name": "database",
- "memory_count": 8,
- "namespaces": ["decisions", "learnings", "tech-debt"]
- }
- ],
- "total_topics": 15,
- "last_indexed": "2025-12-30T10:00:00Z"
+  "topics": [
+    {
+      "name": "authentication",
+      "memory_count": 5,
+      "namespaces": ["decisions", "patterns"]
+    },
+    {
+      "name": "database",
+      "memory_count": 8,
+      "namespaces": ["decisions", "learnings", "tech-debt"]
+    }
+  ],
+  "total_topics": 15,
+  "last_indexed": "2025-12-30T10:00:00Z"
 }
 ```
 
@@ -460,18 +460,18 @@ User Prompt
 **Response**:
 ```json
 {
- "topic": "authentication",
- "memories": [
- {
- "id": "mem_abc123",
- "urn": "subcog://memory/mem_abc123",
- "namespace": "decisions",
- "content": "Use JWT tokens for API authentication...",
- "created_at": "2025-12-28T10:00:00Z"
- }
- ],
- "related_topics": ["security", "jwt", "oauth"],
- "total_count": 5
+  "topic": "authentication",
+  "memories": [
+    {
+      "id": "mem_abc123",
+      "urn": "subcog://memory/mem_abc123",
+      "namespace": "decisions",
+      "content": "Use JWT tokens for API authentication...",
+      "created_at": "2025-12-28T10:00:00Z"
+    }
+  ],
+  "related_topics": ["security", "jwt", "oauth"],
+  "total_count": 5
 }
 ```
 
@@ -534,29 +534,29 @@ Now search the codebase, keeping these memories in mind...
 **UserPromptSubmit Response** (when search intent detected):
 ```json
 {
- "continue": true,
- "context": "Consider these related memories:\n-...",
- "metadata": {
- "signals": [...], // existing capture signals
- "memory_context": {
- "search_intent_detected": true,
- "intent_type": "howto",
- "topics": ["authentication", "jwt"],
- "injected_memories": [
- {
- "id": "mem_abc123",
- "namespace": "patterns",
- "content_preview": "For authentication, use JWT tokens with...",
- "score": 0.85
- }
- ],
- "reminder": "These memories may be relevant to the user's question.",
- "suggested_resources": [
- "subcog://search/authentication",
- "subcog://topics/security"
- ]
- }
- }
+  "continue": true,
+  "context": "Consider these related memories:\n- ...",
+  "metadata": {
+    "signals": [...],  // existing capture signals
+    "memory_context": {
+      "search_intent_detected": true,
+      "intent_type": "howto",
+      "topics": ["authentication", "jwt"],
+      "injected_memories": [
+        {
+          "id": "mem_abc123",
+          "namespace": "patterns",
+          "content_preview": "For authentication, use JWT tokens with...",
+          "score": 0.85
+        }
+      ],
+      "reminder": "These memories may be relevant to the user's question.",
+      "suggested_resources": [
+        "subcog://search/authentication",
+        "subcog://topics/security"
+      ]
+    }
+  }
 }
 ```
 
@@ -656,17 +656,17 @@ Now search the codebase, keeping these memories in mind...
 
 ```
 Full Functionality
- │
- ▼ (LLM timeout/error)
+       │
+       ▼ (LLM timeout/error)
 Keyword Detection Only
- │
- ▼ (embedding error)
+       │
+       ▼ (embedding error)
 Text Search Only
- │
- ▼ (index error)
+       │
+       ▼ (index error)
 Skip Memory Injection
- │
- ▼ (handler error)
+       │
+       ▼ (handler error)
 Pass-through (continue: true)
 ```
 
@@ -700,10 +700,10 @@ Pass-through (continue: true)
 
 | Flow | Test Cases |
 |------|-----------|
-| UserPromptSubmit -> RecallService | Intent detected, memories injected |
-| Resource read -> TopicIndexService | Topics listed, topic details returned |
+| UserPromptSubmit → RecallService | Intent detected, memories injected |
+| Resource read → TopicIndexService | Topics listed, topic details returned |
 | Prompt execution | Content generated with memories |
-| LLM timeout -> fallback | Graceful degradation verified |
+| LLM timeout → fallback | Graceful degradation verified |
 
 ### End-to-End Testing
 

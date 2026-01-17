@@ -55,7 +55,7 @@ completed: 2025-12-30T23:50:00Z
 2. **Hook response formats** - Claude Code spec requires `hookSpecificOutput.additionalContext`, not `continue + context` format
 3. **HashSet mutation** - Must declare `mut` AND call `.insert()` for deduplication to work (caught in PR review)
 4. **Criterion benchmarking** - Criterion provides excellent baseline for tracking performance targets over time
-5. **Graceful degradation testing** - Testing fallback paths (LLM timeout -> keyword, no RecallService -> skip injection) is critical
+5. **Graceful degradation testing** - Testing fallback paths (LLM timeout → keyword, no RecallService → skip injection) is critical
 
 ### Process Learnings
 
@@ -88,7 +88,7 @@ This project successfully transformed subcog from reactive to proactive memory s
 
 - **6 SearchIntentType variants** - HowTo, Location, Explanation, Comparison, Troubleshoot, General
 - **Hybrid detection** - Keyword (<10ms) + optional LLM (<200ms) with timeout fallback
-- **Namespace weighting** - Intent-specific memory prioritization (HowTo -> Patterns 1.5x)
+- **Namespace weighting** - Intent-specific memory prioritization (HowTo → Patterns 1.5x)
 - **3 new MCP resources** - `subcog://search/{query}`, `subcog://topics`, `subcog://topics/{topic}`
 - **6 new MCP prompts** - intent_search, query_suggest, discover, generate_decision, generate_tutorial, context_capture
 - **5 hook response format fixes** - SessionStart, UserPromptSubmit, Stop, PostToolUse, PreCompact

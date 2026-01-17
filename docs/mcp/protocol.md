@@ -18,8 +18,8 @@ subcog serve
 
 **Message Flow:**
 ```
-[Client] -> stdin -> [Subcog Server] -> stdout -> [Client]
- -> stderr -> [Logs]
+[Client] → stdin → [Subcog Server] → stdout → [Client]
+                                   → stderr → [Logs]
 ```
 
 ### HTTP
@@ -40,16 +40,16 @@ subcog serve --transport http --port 8080
 
 ```json
 {
- "jsonrpc": "2.0",
- "id": 1,
- "method": "tools/call",
- "params": {
- "name": "subcog_capture",
- "arguments": {
- "namespace": "decisions",
- "content": "Use PostgreSQL"
- }
- }
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "subcog_capture",
+    "arguments": {
+      "namespace": "decisions",
+      "content": "Use PostgreSQL"
+    }
+  }
 }
 ```
 
@@ -57,16 +57,16 @@ subcog serve --transport http --port 8080
 
 ```json
 {
- "jsonrpc": "2.0",
- "id": 1,
- "result": {
- "content": [
- {
- "type": "text",
- "text": "{\"id\": \"dc58d23a...\", \"urn\": \"subcog://...\"}"
- }
- ]
- }
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"id\": \"dc58d23a...\", \"urn\": \"subcog://...\"}"
+      }
+    ]
+  }
 }
 ```
 
@@ -74,12 +74,12 @@ subcog serve --transport http --port 8080
 
 ```json
 {
- "jsonrpc": "2.0",
- "id": 1,
- "error": {
- "code": -32602,
- "message": "Invalid namespace: unknown"
- }
+  "jsonrpc": "2.0",
+  "id": 1,
+  "error": {
+    "code": -32602,
+    "message": "Invalid namespace: unknown"
+  }
 }
 ```
 
@@ -92,39 +92,39 @@ Initialize the connection and negotiate capabilities.
 **Request:**
 ```json
 {
- "jsonrpc": "2.0",
- "id": 1,
- "method": "initialize",
- "params": {
- "protocolVersion": "2024-11-05",
- "capabilities": {
- "roots": {"listChanged": true}
- },
- "clientInfo": {
- "name": "claude-code",
- "version": "1.0.0"
- }
- }
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2024-11-05",
+    "capabilities": {
+      "roots": {"listChanged": true}
+    },
+    "clientInfo": {
+      "name": "claude-code",
+      "version": "1.0.0"
+    }
+  }
 }
 ```
 
 **Response:**
 ```json
 {
- "jsonrpc": "2.0",
- "id": 1,
- "result": {
- "protocolVersion": "2024-11-05",
- "capabilities": {
- "tools": {"listChanged": false},
- "resources": {"subscribe": false, "listChanged": false},
- "prompts": {"listChanged": false}
- },
- "serverInfo": {
- "name": "subcog",
- "version": "0.1.0"
- }
- }
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "protocolVersion": "2024-11-05",
+    "capabilities": {
+      "tools": {"listChanged": false},
+      "resources": {"subscribe": false, "listChanged": false},
+      "prompts": {"listChanged": false}
+    },
+    "serverInfo": {
+      "name": "subcog",
+      "version": "0.1.0"
+    }
+  }
 }
 ```
 
@@ -135,35 +135,35 @@ List available tools.
 **Request:**
 ```json
 {
- "jsonrpc": "2.0",
- "id": 2,
- "method": "tools/list"
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/list"
 }
 ```
 
 **Response:**
 ```json
 {
- "jsonrpc": "2.0",
- "id": 2,
- "result": {
- "tools": [
- {
- "name": "subcog_capture",
- "description": "Capture a memory to persistent storage",
- "inputSchema": {
- "type": "object",
- "properties": {
- "content": {"type": "string"},
- "namespace": {"type": "string", "enum": ["decisions", "patterns",...]},
- "tags": {"type": "array", "items": {"type": "string"}},
- "source": {"type": "string"}
- },
- "required": ["content", "namespace"]
- }
- }
- ]
- }
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "tools": [
+      {
+        "name": "subcog_capture",
+        "description": "Capture a memory to persistent storage",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "content": {"type": "string"},
+            "namespace": {"type": "string", "enum": ["decisions", "patterns", ...]},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "source": {"type": "string"}
+          },
+          "required": ["content", "namespace"]
+        }
+      }
+    ]
+  }
 }
 ```
 
@@ -174,32 +174,32 @@ Execute a tool.
 **Request:**
 ```json
 {
- "jsonrpc": "2.0",
- "id": 3,
- "method": "tools/call",
- "params": {
- "name": "subcog_capture",
- "arguments": {
- "namespace": "decisions",
- "content": "Use PostgreSQL for storage"
- }
- }
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+    "name": "subcog_capture",
+    "arguments": {
+      "namespace": "decisions",
+      "content": "Use PostgreSQL for storage"
+    }
+  }
 }
 ```
 
 **Response:**
 ```json
 {
- "jsonrpc": "2.0",
- "id": 3,
- "result": {
- "content": [
- {
- "type": "text",
- "text": "{\"id\": \"dc58d23a...\", \"urn\": \"subcog://project/decisions/dc58d23a...\"}"
- }
- ]
- }
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"id\": \"dc58d23a...\", \"urn\": \"subcog://project/decisions/dc58d23a...\"}"
+      }
+    ]
+  }
 }
 ```
 
@@ -210,33 +210,33 @@ List available resources.
 **Request:**
 ```json
 {
- "jsonrpc": "2.0",
- "id": 4,
- "method": "resources/list"
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "resources/list"
 }
 ```
 
 **Response:**
 ```json
 {
- "jsonrpc": "2.0",
- "id": 4,
- "result": {
- "resources": [
- {
- "uri": "subcog://help",
- "name": "Help Documentation",
- "description": "Subcog help and documentation",
- "mimeType": "text/markdown"
- },
- {
- "uri": "subcog://project",
- "name": "Project Memories",
- "description": "List project-scoped memories",
- "mimeType": "application/json"
- }
- ]
- }
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": {
+    "resources": [
+      {
+        "uri": "subcog://help",
+        "name": "Help Documentation",
+        "description": "Subcog help and documentation",
+        "mimeType": "text/markdown"
+      },
+      {
+        "uri": "subcog://project",
+        "name": "Project Memories",
+        "description": "List project-scoped memories",
+        "mimeType": "application/json"
+      }
+    ]
+  }
 }
 ```
 
@@ -247,29 +247,29 @@ Read a resource.
 **Request:**
 ```json
 {
- "jsonrpc": "2.0",
- "id": 5,
- "method": "resources/read",
- "params": {
- "uri": "subcog://project/decisions"
- }
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "resources/read",
+  "params": {
+    "uri": "subcog://project/decisions"
+  }
 }
 ```
 
 **Response:**
 ```json
 {
- "jsonrpc": "2.0",
- "id": 5,
- "result": {
- "contents": [
- {
- "uri": "subcog://project/decisions",
- "mimeType": "application/json",
- "text": "{\"count\": 5, \"memories\": [...]}"
- }
- ]
- }
+  "jsonrpc": "2.0",
+  "id": 5,
+  "result": {
+    "contents": [
+      {
+        "uri": "subcog://project/decisions",
+        "mimeType": "application/json",
+        "text": "{\"count\": 5, \"memories\": [...]}"
+      }
+    ]
+  }
 }
 ```
 
@@ -280,32 +280,32 @@ List available prompts.
 **Request:**
 ```json
 {
- "jsonrpc": "2.0",
- "id": 6,
- "method": "prompts/list"
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "prompts/list"
 }
 ```
 
 **Response:**
 ```json
 {
- "jsonrpc": "2.0",
- "id": 6,
- "result": {
- "prompts": [
- {
- "name": "subcog_capture",
- "description": "Guided memory capture",
- "arguments": [
- {
- "name": "content",
- "description": "Content to capture",
- "required": true
- }
- ]
- }
- ]
- }
+  "jsonrpc": "2.0",
+  "id": 6,
+  "result": {
+    "prompts": [
+      {
+        "name": "subcog_capture",
+        "description": "Guided memory capture",
+        "arguments": [
+          {
+            "name": "content",
+            "description": "Content to capture",
+            "required": true
+          }
+        ]
+      }
+    ]
+  }
 }
 ```
 
@@ -316,35 +316,35 @@ Get a prompt with arguments.
 **Request:**
 ```json
 {
- "jsonrpc": "2.0",
- "id": 7,
- "method": "prompts/get",
- "params": {
- "name": "subcog_capture",
- "arguments": {
- "content": "Important decision"
- }
- }
+  "jsonrpc": "2.0",
+  "id": 7,
+  "method": "prompts/get",
+  "params": {
+    "name": "subcog_capture",
+    "arguments": {
+      "content": "Important decision"
+    }
+  }
 }
 ```
 
 **Response:**
 ```json
 {
- "jsonrpc": "2.0",
- "id": 7,
- "result": {
- "description": "Guided memory capture",
- "messages": [
- {
- "role": "user",
- "content": {
- "type": "text",
- "text": "Capture this memory:\n\nContent: Important decision\n\nSuggested namespace: decisions..."
- }
- }
- ]
- }
+  "jsonrpc": "2.0",
+  "id": 7,
+  "result": {
+    "description": "Guided memory capture",
+    "messages": [
+      {
+        "role": "user",
+        "content": {
+          "type": "text",
+          "text": "Capture this memory:\n\nContent: Important decision\n\nSuggested namespace: decisions..."
+        }
+      }
+    ]
+  }
 }
 ```
 
@@ -382,8 +382,8 @@ Sent when tools list changes.
 
 ```json
 {
- "jsonrpc": "2.0",
- "method": "notifications/tools/list_changed"
+  "jsonrpc": "2.0",
+  "method": "notifications/tools/list_changed"
 }
 ```
 
@@ -393,8 +393,8 @@ Sent when resources list changes.
 
 ```json
 {
- "jsonrpc": "2.0",
- "method": "notifications/resources/list_changed"
+  "jsonrpc": "2.0",
+  "method": "notifications/resources/list_changed"
 }
 ```
 
@@ -405,18 +405,18 @@ During initialization, capabilities are negotiated:
 **Client Capabilities:**
 ```json
 {
- "roots": {"listChanged": true},
- "sampling": {}
+  "roots": {"listChanged": true},
+  "sampling": {}
 }
 ```
 
 **Server Capabilities:**
 ```json
 {
- "tools": {"listChanged": false},
- "resources": {"subscribe": false, "listChanged": false},
- "prompts": {"listChanged": false},
- "logging": {}
+  "tools": {"listChanged": false},
+  "resources": {"subscribe": false, "listChanged": false},
+  "prompts": {"listChanged": false},
+  "logging": {}
 }
 ```
 
@@ -427,21 +427,21 @@ Subcog can request LLM completions via MCP sampling:
 **Request:**
 ```json
 {
- "jsonrpc": "2.0",
- "id": 10,
- "method": "sampling/createMessage",
- "params": {
- "messages": [
- {
- "role": "user",
- "content": {
- "type": "text",
- "text": "Suggest tags for: Use PostgreSQL for storage"
- }
- }
- ],
- "maxTokens": 100
- }
+  "jsonrpc": "2.0",
+  "id": 10,
+  "method": "sampling/createMessage",
+  "params": {
+    "messages": [
+      {
+        "role": "user",
+        "content": {
+          "type": "text",
+          "text": "Suggest tags for: Use PostgreSQL for storage"
+        }
+      }
+    ],
+    "maxTokens": 100
+  }
 }
 ```
 
@@ -456,13 +456,13 @@ Log messages are sent as notifications:
 
 ```json
 {
- "jsonrpc": "2.0",
- "method": "notifications/message",
- "params": {
- "level": "info",
- "logger": "subcog",
- "data": "Captured memory dc58d23a..."
- }
+  "jsonrpc": "2.0",
+  "method": "notifications/message",
+  "params": {
+    "level": "info",
+    "logger": "subcog",
+    "data": "Captured memory dc58d23a..."
+  }
 }
 ```
 

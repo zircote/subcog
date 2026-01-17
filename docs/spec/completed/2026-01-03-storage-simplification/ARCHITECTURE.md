@@ -16,53 +16,53 @@ This architecture document describes the simplified storage model for subcog, co
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ CURRENT ARCHITECTURE │
+│                           CURRENT ARCHITECTURE                               │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ │
-│ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ │
-│ │ org/ │ │ project/ │ │ user/ │ │
-│ │ (unused) │ │ (BROKEN) │ │ (works) │ │
-│ └─────────────┘ └─────────────┘ └─────────────┘ │
-│ │ │ │ │
-│ ▼ ▼ ▼ │
-│ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ │
-│ │ PostgreSQL │ │ Git Notes │ │ SQLite │ │
-│ │ (config) │ │ (overwrites)│ │ (works) │ │
-│ └─────────────┘ └─────────────┘ └─────────────┘ │
-│ │
+│                                                                              │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                      │
+│  │  org/       │    │  project/   │    │  user/      │                      │
+│  │  (unused)   │    │  (BROKEN)   │    │  (works)    │                      │
+│  └─────────────┘    └─────────────┘    └─────────────┘                      │
+│         │                  │                  │                              │
+│         ▼                  ▼                  ▼                              │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                      │
+│  │ PostgreSQL  │    │ Git Notes   │    │  SQLite     │                      │
+│  │ (config)    │    │ (overwrites)│    │  (works)    │                      │
+│  └─────────────┘    └─────────────┘    └─────────────┘                      │
+│                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ PROPOSED ARCHITECTURE │
+│                           PROPOSED ARCHITECTURE                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ │
-│ ┌─────────────────────────────────────┐ │
-│ │ User-Level Storage │ │
-│ │ ~/.local/share/subcog/ (Linux) │ │
-│ │ ~/Library/App.../subcog/ (macOS) │ │
-│ └─────────────────────────────────────┘ │
-│ │ │
-│ ┌─────────────────────────┼─────────────────────────┐ │
-│ ▼ ▼ ▼ │
-│ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ │
-│ │ memories.db │ │ index.db │ │ vectors.idx │ │
-│ │ (persist) │ │ (FTS5) │ │ (usearch) │ │
-│ └─────────────┘ └─────────────┘ └─────────────┘ │
-│ │ │ │ │
-│ └─────────────────────────┼─────────────────────────┘ │
-│ ▼ │
-│ ┌─────────────────────────────────────┐ │
-│ │ Faceted Queries │ │
-│ │ WHERE project_id =? AND branch =?│ │
-│ │ AND file_path LIKE? │ │
-│ └─────────────────────────────────────┘ │
-│ │
-│ ┌──────────────────────────────────────────────────────────────────────┐ │
-│ │ Org-Scope (Feature-Gated) │ │
-│ │ Future: PostgreSQL with shared org database │ │
-│ └──────────────────────────────────────────────────────────────────────┘ │
-│ │
+│                                                                              │
+│                    ┌─────────────────────────────────────┐                   │
+│                    │        User-Level Storage           │                   │
+│                    │   ~/.local/share/subcog/ (Linux)    │                   │
+│                    │   ~/Library/App.../subcog/ (macOS)  │                   │
+│                    └─────────────────────────────────────┘                   │
+│                                     │                                        │
+│           ┌─────────────────────────┼─────────────────────────┐              │
+│           ▼                         ▼                         ▼              │
+│    ┌─────────────┐          ┌─────────────┐          ┌─────────────┐         │
+│    │  memories.db │          │  index.db   │          │ vectors.idx │         │
+│    │  (persist)   │          │  (FTS5)     │          │  (usearch)  │         │
+│    └─────────────┘          └─────────────┘          └─────────────┘         │
+│           │                         │                         │              │
+│           └─────────────────────────┼─────────────────────────┘              │
+│                                     ▼                                        │
+│                    ┌─────────────────────────────────────┐                   │
+│                    │         Faceted Queries             │                   │
+│                    │   WHERE project_id = ? AND branch = ?│                   │
+│                    │         AND file_path LIKE ?        │                   │
+│                    └─────────────────────────────────────┘                   │
+│                                                                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │                     Org-Scope (Feature-Gated)                         │   │
+│  │  Future: PostgreSQL with shared org database                          │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -93,25 +93,25 @@ This architecture document describes the simplified storage model for subcog, co
 **Interfaces**:
 ```rust
 pub struct GitContext {
- /// Git remote URL (e.g., "github.com/zircote/subcog")
- pub project_id: Option<String>,
- /// Current branch name (e.g., "main", "feature/auth")
- pub branch: Option<String>,
- /// Path relative to repo root (e.g., "src/services")
- pub file_path: Option<String>,
- /// Whether we're in a git repository
- pub is_git_repo: bool,
+    /// Git remote URL (e.g., "github.com/zircote/subcog")
+    pub project_id: Option<String>,
+    /// Current branch name (e.g., "main", "feature/auth")
+    pub branch: Option<String>,
+    /// Path relative to repo root (e.g., "src/services")
+    pub file_path: Option<String>,
+    /// Whether we're in a git repository
+    pub is_git_repo: bool,
 }
 
 impl GitContext {
- /// Detect context from current working directory
- pub fn from_cwd() -> Self {... }
+    /// Detect context from current working directory
+    pub fn from_cwd() -> Self { ... }
 
- /// Detect context from a specific path
- pub fn from_path(path: &Path) -> Self {... }
+    /// Detect context from a specific path
+    pub fn from_path(path: &Path) -> Self { ... }
 
- /// Parse and sanitize git remote URL
- fn parse_remote_url(url: &str) -> Option<String> {... }
+    /// Parse and sanitize git remote URL
+    fn parse_remote_url(url: &str) -> Option<String> { ... }
 }
 ```
 
@@ -119,7 +119,7 @@ impl GitContext {
 
 **Detection Logic**:
 ```
-1. Repository::discover(path) - find.git upward
+1. Repository::discover(path) - find .git upward
 2. Get remote "origin" URL, sanitize credentials
 3. Parse URL to extract "owner/repo" format
 4. Get current branch from HEAD
@@ -136,27 +136,27 @@ impl GitContext {
 **Changes**:
 ```rust
 pub struct Memory {
- // Existing fields
- pub id: MemoryId,
- pub content: String,
- pub namespace: Namespace,
- pub domain: Domain,
- pub status: MemoryStatus,
- pub created_at: u64,
- pub updated_at: u64,
- pub embedding: Option<Vec<f32>>,
- pub tags: Vec<String>,
- pub source: Option<String>,
+    // Existing fields
+    pub id: MemoryId,
+    pub content: String,
+    pub namespace: Namespace,
+    pub domain: Domain,
+    pub status: MemoryStatus,
+    pub created_at: u64,
+    pub updated_at: u64,
+    pub embedding: Option<Vec<f32>>,
+    pub tags: Vec<String>,
+    pub source: Option<String>,
 
- // NEW: Facet fields
- /// Git remote identifier (e.g., "github.com/zircote/subcog")
- pub project_id: Option<String>,
- /// Git branch name at capture time
- pub branch: Option<String>,
- /// File path relative to repository root
- pub file_path: Option<String>,
- /// When the memory was tombstoned (soft delete)
- pub tombstoned_at: Option<u64>,
+    // NEW: Facet fields
+    /// Git remote identifier (e.g., "github.com/zircote/subcog")
+    pub project_id: Option<String>,
+    /// Git branch name at capture time
+    pub branch: Option<String>,
+    /// File path relative to repository root
+    pub file_path: Option<String>,
+    /// When the memory was tombstoned (soft delete)
+    pub tombstoned_at: Option<u64>,
 }
 ```
 
@@ -168,12 +168,12 @@ pub struct Memory {
 **Changes**:
 ```rust
 pub enum MemoryStatus {
- Active,
- Archived,
- Superseded,
- Pending,
- Deleted,
- Tombstoned, // NEW: Soft-deleted, hidden by default
+    Active,
+    Archived,
+    Superseded,
+    Pending,
+    Deleted,
+    Tombstoned,  // NEW: Soft-deleted, hidden by default
 }
 ```
 
@@ -199,7 +199,7 @@ CREATE INDEX IF NOT EXISTS idx_memories_project_branch ON memories(project_id, b
 -- Partial index for active memories (exclude tombstoned)
 CREATE INDEX IF NOT EXISTS idx_memories_active
 ON memories(namespace, status)
-WHERE status!= 'tombstoned';
+WHERE status != 'tombstoned';
 ```
 
 ### Component 5: PostgreSQL Schema (Extended)
@@ -224,7 +224,7 @@ CREATE INDEX IF NOT EXISTS idx_{table}_project_branch ON {table} (project_id, br
 -- Partial index for active memories
 CREATE INDEX IF NOT EXISTS idx_{table}_active
 ON {table} (namespace, status)
-WHERE status!= 'tombstoned';
+WHERE status != 'tombstoned';
 ```
 
 ### Component 6: SearchFilter (Extended)
@@ -235,22 +235,22 @@ WHERE status!= 'tombstoned';
 **Changes**:
 ```rust
 pub struct SearchFilter {
- // Existing fields
- pub namespaces: Option<Vec<Namespace>>,
- pub statuses: Option<Vec<MemoryStatus>>,
- pub tags: Option<Vec<String>>,
- pub since: Option<u64>,
- pub until: Option<u64>,
+    // Existing fields
+    pub namespaces: Option<Vec<Namespace>>,
+    pub statuses: Option<Vec<MemoryStatus>>,
+    pub tags: Option<Vec<String>>,
+    pub since: Option<u64>,
+    pub until: Option<u64>,
 
- // NEW: Facet filters
- /// Filter by project ID (exact match)
- pub project_id: Option<String>,
- /// Filter by branch name (exact match)
- pub branch: Option<String>,
- /// Filter by file path (prefix match or glob pattern)
- pub file_path_pattern: Option<String>,
- /// Include tombstoned memories (default: false)
- pub include_tombstoned: bool,
+    // NEW: Facet filters
+    /// Filter by project ID (exact match)
+    pub project_id: Option<String>,
+    /// Filter by branch name (exact match)
+    pub branch: Option<String>,
+    /// Filter by file path (prefix match or glob pattern)
+    pub file_path_pattern: Option<String>,
+    /// Include tombstoned memories (default: false)
+    pub include_tombstoned: bool,
 }
 ```
 
@@ -265,39 +265,39 @@ pub struct SearchFilter {
 ```rust
 // REMOVE THIS BLOCK:
 if let Some(ref repo_path) = self.config.repo_path {
- let notes = NotesManager::new(repo_path);
- let note_oid = notes.add_to_head(&note_content)?;
- //...
+    let notes = NotesManager::new(repo_path);
+    let note_oid = notes.add_to_head(&note_content)?;
+    // ...
 }
 ```
 
 2. **Add context detection**:
 ```rust
 pub fn capture(&self, mut request: CaptureRequest) -> Result<CaptureResult> {
- // Auto-detect facets if not provided
- if request.project_id.is_none() {
- let context = GitContext::from_cwd();
- request.project_id = context.project_id;
- request.branch = context.branch;
- request.file_path = context.file_path;
- }
+    // Auto-detect facets if not provided
+    if request.project_id.is_none() {
+        let context = GitContext::from_cwd();
+        request.project_id = context.project_id;
+        request.branch = context.branch;
+        request.file_path = context.file_path;
+    }
 
- // Generate ID (UUID, no longer git SHA)
- let memory_id = MemoryId::new(uuid::Uuid::new_v4()...);
+    // Generate ID (UUID, no longer git SHA)
+    let memory_id = MemoryId::new(uuid::Uuid::new_v4()...);
 
- // Create memory with facets
- let memory = Memory {
- id: memory_id,
- project_id: request.project_id,
- branch: request.branch,
- file_path: request.file_path,
- //... other fields
- };
+    // Create memory with facets
+    let memory = Memory {
+        id: memory_id,
+        project_id: request.project_id,
+        branch: request.branch,
+        file_path: request.file_path,
+        // ... other fields
+    };
 
- // Store via configured backend (SQLite/PostgreSQL)
- self.persistence.store(&memory)?;
- self.index.index(&memory)?;
- //...
+    // Store via configured backend (SQLite/PostgreSQL)
+    self.persistence.store(&memory)?;
+    self.index.index(&memory)?;
+    // ...
 }
 ```
 
@@ -311,37 +311,37 @@ pub fn capture(&self, mut request: CaptureRequest) -> Result<CaptureResult> {
 1. **Add facet filtering to queries**:
 ```rust
 pub fn search(&self, query: &str, filter: &SearchFilter, limit: usize) -> Result<SearchResult> {
- // Build WHERE clause with facets
- let mut conditions = vec![];
+    // Build WHERE clause with facets
+    let mut conditions = vec![];
 
- if let Some(ref project) = filter.project_id {
- conditions.push(format!("project_id = '{}'", project));
- }
- if let Some(ref branch) = filter.branch {
- conditions.push(format!("branch = '{}'", branch));
- }
- if let Some(ref path_pattern) = filter.file_path_pattern {
- conditions.push(format!("file_path LIKE '{}'", path_pattern));
- }
- if!filter.include_tombstoned {
- conditions.push("status!= 'tombstoned'".to_string());
- }
+    if let Some(ref project) = filter.project_id {
+        conditions.push(format!("project_id = '{}'", project));
+    }
+    if let Some(ref branch) = filter.branch {
+        conditions.push(format!("branch = '{}'", branch));
+    }
+    if let Some(ref path_pattern) = filter.file_path_pattern {
+        conditions.push(format!("file_path LIKE '{}'", path_pattern));
+    }
+    if !filter.include_tombstoned {
+        conditions.push("status != 'tombstoned'".to_string());
+    }
 
- // Execute search with conditions
- //...
+    // Execute search with conditions
+    // ...
 }
 ```
 
 2. **Add lazy GC check**:
 ```rust
 pub fn search(&self, query: &str, filter: &SearchFilter, limit: usize) -> Result<SearchResult> {
- // Opportunistic GC for current project
- if let Some(ref project) = filter.project_id {
- self.gc_stale_branches(project)?;
- }
+    // Opportunistic GC for current project
+    if let Some(ref project) = filter.project_id {
+        self.gc_stale_branches(project)?;
+    }
 
- // Normal search
- //...
+    // Normal search
+    // ...
 }
 ```
 
@@ -353,35 +353,35 @@ pub fn search(&self, query: &str, filter: &SearchFilter, limit: usize) -> Result
 **Implementation**:
 ```rust
 pub struct BranchGarbageCollector {
- index: Arc<dyn IndexBackend>,
+    index: Arc<dyn IndexBackend>,
 }
 
 impl BranchGarbageCollector {
- /// Garbage collect memories for deleted branches in a project
- pub fn gc_stale_branches(&self, project_id: &str) -> Result<usize> {
- // Get current branches from git
- let current_branches = self.get_current_branches()?;
+    /// Garbage collect memories for deleted branches in a project
+    pub fn gc_stale_branches(&self, project_id: &str) -> Result<usize> {
+        // Get current branches from git
+        let current_branches = self.get_current_branches()?;
 
- // Get distinct branches from memories for this project
- let memory_branches = self.index.get_distinct_branches(project_id)?;
+        // Get distinct branches from memories for this project
+        let memory_branches = self.index.get_distinct_branches(project_id)?;
 
- // Tombstone memories for branches that no longer exist
- let mut tombstoned = 0;
- for branch in memory_branches {
- if!current_branches.contains(&branch) {
- tombstoned += self.tombstone_branch(project_id, &branch)?;
- }
- }
+        // Tombstone memories for branches that no longer exist
+        let mut tombstoned = 0;
+        for branch in memory_branches {
+            if !current_branches.contains(&branch) {
+                tombstoned += self.tombstone_branch(project_id, &branch)?;
+            }
+        }
 
- Ok(tombstoned)
- }
+        Ok(tombstoned)
+    }
 
- fn tombstone_branch(&self, project_id: &str, branch: &str) -> Result<usize> {
- self.index.update_status(
- &format!("project_id = '{}' AND branch = '{}'", project_id, branch),
- MemoryStatus::Tombstoned,
- )
- }
+    fn tombstone_branch(&self, project_id: &str, branch: &str) -> Result<usize> {
+        self.index.update_status(
+            &format!("project_id = '{}' AND branch = '{}'", project_id, branch),
+            MemoryStatus::Tombstoned,
+        )
+    }
 }
 ```
 
@@ -395,31 +395,31 @@ impl BranchGarbageCollector {
 1. **Remove `repo_path` requirement**:
 ```rust
 pub struct ServiceContainer {
- capture: CaptureService,
- sync: SyncService,
- index_manager: Mutex<DomainIndexManager>,
- // REMOVED: repo_path: Option<PathBuf>,
- embedder: Option<Arc<dyn Embedder>>,
- vector: Option<Arc<dyn VectorBackend + Send + Sync>>,
- gc: Option<BranchGarbageCollector>, // NEW
+    capture: CaptureService,
+    sync: SyncService,
+    index_manager: Mutex<DomainIndexManager>,
+    // REMOVED: repo_path: Option<PathBuf>,
+    embedder: Option<Arc<dyn Embedder>>,
+    vector: Option<Arc<dyn VectorBackend + Send + Sync>>,
+    gc: Option<BranchGarbageCollector>,  // NEW
 }
 ```
 
 2. **Simplify factory methods**:
 ```rust
 impl ServiceContainer {
- /// Create container for user-scope storage (default)
- pub fn for_user() -> Result<Self> {
- let paths = PathManager::for_user();
- let backends = BackendFactory::create_all(&paths);
- //...
- }
+    /// Create container for user-scope storage (default)
+    pub fn for_user() -> Result<Self> {
+        let paths = PathManager::for_user();
+        let backends = BackendFactory::create_all(&paths);
+        // ...
+    }
 
- /// Create container with PostgreSQL for org-scope (feature-gated)
- #[cfg(feature = "org-scope")]
- pub fn for_org(config: OrgConfig) -> Result<Self> {
- //...
- }
+    /// Create container with PostgreSQL for org-scope (feature-gated)
+    #[cfg(feature = "org-scope")]
+    pub fn for_org(config: OrgConfig) -> Result<Self> {
+        // ...
+    }
 }
 ```
 
@@ -431,53 +431,53 @@ impl ServiceContainer {
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│ Memory │
+│                         Memory                              │
 ├────────────────────────────────────────────────────────────┤
-│ id: MemoryId (UUID) │
-│ content: String │
-│ namespace: Namespace │
-│ status: MemoryStatus │
-│ created_at: u64 │
-│ updated_at: u64 │
-│ embedding: Option<Vec<f32>> │
-│ tags: Vec<String> │
-│ source: Option<String> │
+│  id: MemoryId (UUID)                                       │
+│  content: String                                           │
+│  namespace: Namespace                                      │
+│  status: MemoryStatus                                      │
+│  created_at: u64                                           │
+│  updated_at: u64                                           │
+│  embedding: Option<Vec<f32>>                               │
+│  tags: Vec<String>                                         │
+│  source: Option<String>                                    │
 ├────────────────────────────────────────────────────────────┤
-│ FACETS │
-│ project_id: Option<String> // "github.com/zircote/subcog"│
-│ branch: Option<String> // "main", "feature/auth" │
-│ file_path: Option<String> // "src/services" │
-│ tombstoned_at: Option<u64> // Soft delete timestamp │
+│  FACETS                                                    │
+│  project_id: Option<String>  // "github.com/zircote/subcog"│
+│  branch: Option<String>      // "main", "feature/auth"     │
+│  file_path: Option<String>   // "src/services"             │
+│  tombstoned_at: Option<u64>  // Soft delete timestamp      │
 └────────────────────────────────────────────────────────────┘
 ```
 
 ### Data Flow
 
 ```
-┌─────────────┐ ┌─────────────────┐ ┌──────────────────┐
-│ CLI/MCP │────▶│ ContextDetector │────▶│ CaptureService │
-│ Request │ │ (auto-detect) │ │ (store+index) │
-└─────────────┘ └─────────────────┘ └──────────────────┘
- │
- ┌────────────────────────────────┤
- ▼ ▼
- ┌─────────────┐ ┌─────────────┐
- │ SQLite/PG │ │ usearch/ │
- │ Persistence │ │ pgvector │
- └─────────────┘ └─────────────┘
+┌─────────────┐     ┌─────────────────┐     ┌──────────────────┐
+│  CLI/MCP    │────▶│ ContextDetector │────▶│  CaptureService  │
+│  Request    │     │  (auto-detect)  │     │  (store+index)   │
+└─────────────┘     └─────────────────┘     └──────────────────┘
+                                                     │
+                    ┌────────────────────────────────┤
+                    ▼                                ▼
+            ┌─────────────┐                  ┌─────────────┐
+            │  SQLite/PG  │                  │  usearch/   │
+            │ Persistence │                  │  pgvector   │
+            └─────────────┘                  └─────────────┘
 
 
-┌─────────────┐ ┌─────────────────┐ ┌──────────────────┐
-│ CLI/MCP │────▶│ SearchFilter │────▶│ RecallService │
-│ Query │ │ (facets) │ │ (search+rank) │
-└─────────────┘ └─────────────────┘ └──────────────────┘
- │
- ┌─────────────────────────┤
- ▼ ▼
- ┌─────────────────┐ ┌─────────────┐
- │ Branch GC │ │ FTS5/ │
- │ (opportunistic)│ │ websearch │
- └─────────────────┘ └─────────────┘
+┌─────────────┐     ┌─────────────────┐     ┌──────────────────┐
+│  CLI/MCP    │────▶│  SearchFilter   │────▶│  RecallService   │
+│  Query      │     │  (facets)       │     │  (search+rank)   │
+└─────────────┘     └─────────────────┘     └──────────────────┘
+                                                     │
+                           ┌─────────────────────────┤
+                           ▼                         ▼
+                   ┌─────────────────┐       ┌─────────────┐
+                   │  Branch GC      │       │  FTS5/      │
+                   │  (opportunistic)│       │  websearch  │
+                   └─────────────────┘       └─────────────┘
 ```
 
 ### Storage Strategy
@@ -503,7 +503,7 @@ impl ServiceContainer {
 ```bash
 # Capture with auto-detected facets
 subcog capture --namespace decisions "Use PostgreSQL"
-# -> project_id, branch, file_path auto-filled from cwd
+# → project_id, branch, file_path auto-filled from cwd
 
 # Capture with explicit facets
 subcog capture --namespace decisions --project "my-project" "Use PostgreSQL"
@@ -521,10 +521,10 @@ subcog recall "PostgreSQL" --project "github.com/zircote/subcog" --branch "main"
 subcog recall "PostgreSQL" --include-tombstoned
 
 # Garbage collection
-subcog gc # GC stale branches in current project
+subcog gc                     # GC stale branches in current project
 subcog gc --branch "feature-x" # GC specific branch
-subcog gc --dry-run # Show what would be tombstoned
-subcog gc --purge --older-than=30d # Permanently delete old tombstones
+subcog gc --dry-run           # Show what would be tombstoned
+subcog gc --purge --older-than=30d  # Permanently delete old tombstones
 ```
 
 ### MCP Tool Interface
@@ -532,40 +532,40 @@ subcog gc --purge --older-than=30d # Permanently delete old tombstones
 **subcog_capture** (modified):
 ```json
 {
- "name": "subcog_capture",
- "description": "Capture a memory with optional facets",
- "inputSchema": {
- "type": "object",
- "properties": {
- "content": { "type": "string" },
- "namespace": { "type": "string" },
- "tags": { "type": "array", "items": { "type": "string" } },
- "project_id": { "type": "string", "description": "Optional: override detected project" },
- "branch": { "type": "string", "description": "Optional: override detected branch" },
- "file_path": { "type": "string", "description": "Optional: override detected path" }
- },
- "required": ["content", "namespace"]
- }
+  "name": "subcog_capture",
+  "description": "Capture a memory with optional facets",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "content": { "type": "string" },
+      "namespace": { "type": "string" },
+      "tags": { "type": "array", "items": { "type": "string" } },
+      "project_id": { "type": "string", "description": "Optional: override detected project" },
+      "branch": { "type": "string", "description": "Optional: override detected branch" },
+      "file_path": { "type": "string", "description": "Optional: override detected path" }
+    },
+    "required": ["content", "namespace"]
+  }
 }
 ```
 
 **subcog_recall** (modified):
 ```json
 {
- "name": "subcog_recall",
- "description": "Search memories with facet filters",
- "inputSchema": {
- "type": "object",
- "properties": {
- "query": { "type": "string" },
- "limit": { "type": "integer", "default": 10 },
- "project_id": { "type": "string" },
- "branch": { "type": "string" },
- "file_path_pattern": { "type": "string" },
- "include_tombstoned": { "type": "boolean", "default": false }
- },
- "required": ["query"]
- }
+  "name": "subcog_recall",
+  "description": "Search memories with facet filters",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "query": { "type": "string" },
+      "limit": { "type": "integer", "default": 10 },
+      "project_id": { "type": "string" },
+      "branch": { "type": "string" },
+      "file_path_pattern": { "type": "string" },
+      "include_tombstoned": { "type": "boolean", "default": false }
+    },
+    "required": ["query"]
+  }
 }
 ```
 
@@ -595,16 +595,16 @@ Git remote URLs may contain credentials that must be sanitized:
 
 ```rust
 fn parse_remote_url(url: &str) -> Option<String> {
- // Remove credentials from URLs like:
- // https://user:token@github.com/owner/repo.git
- // git@github.com:owner/repo.git
+    // Remove credentials from URLs like:
+    // https://user:token@github.com/owner/repo.git
+    // git@github.com:owner/repo.git
 
- let sanitized = url
-.replace(regex!(r"https?://[^@]+@"), "https://")
-.replace(regex!(r"\.git$"), "");
+    let sanitized = url
+        .replace(regex!(r"https?://[^@]+@"), "https://")
+        .replace(regex!(r"\.git$"), "");
 
- // Extract owner/repo
- //...
+    // Extract owner/repo
+    // ...
 }
 ```
 
@@ -612,20 +612,20 @@ fn parse_remote_url(url: &str) -> Option<String> {
 
 ```rust
 fn create_user_storage() -> Result<PathBuf> {
- let path = directories::ProjectDirs::from("io", "subcog", "subcog")
-.ok_or(Error::NoHomeDirectory)?
-.data_dir()
-.to_path_buf();
+    let path = directories::ProjectDirs::from("io", "subcog", "subcog")
+        .ok_or(Error::NoHomeDirectory)?
+        .data_dir()
+        .to_path_buf();
 
- std::fs::create_dir_all(&path)?;
+    std::fs::create_dir_all(&path)?;
 
- #[cfg(unix)]
- {
- use std::os::unix::fs::PermissionsExt;
- std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))?;
- }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))?;
+    }
 
- Ok(path)
+    Ok(path)
 }
 ```
 
@@ -682,8 +682,8 @@ fn create_user_storage() -> Result<PathBuf> {
 
 | Flow | Test |
 |------|------|
-| CLI capture -> recall | Full roundtrip |
-| MCP capture -> recall | Full roundtrip via protocol |
+| CLI capture → recall | Full roundtrip |
+| MCP capture → recall | Full roundtrip via protocol |
 | Hook integration | Session start/stop flow |
 
 ## Deployment Considerations

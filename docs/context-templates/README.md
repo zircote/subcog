@@ -52,14 +52,14 @@ Use `{{#each collection}}...{{/each}}` to iterate over lists:
 ```markdown
 {{#each memories}}
 - **{{memory.namespace}}**: {{memory.content}}
- Score: {{memory.score}}
+  Score: {{memory.score}}
 {{/each}}
 ```
 
 The item prefix is derived from the collection name:
-- `memories` -> `memory`
-- `items` -> `item`
-- `entries` -> `entry`
+- `memories` → `memory`
+- `items` → `item`
+- `entries` → `entry`
 
 ### Custom Collections
 
@@ -85,11 +85,11 @@ Converts markdown structure to JSON:
 
 ```json
 {
- "sections": [
- {"level": 1, "title": "Search Results", "content": "..."},
- {"level": 2, "title": "Decisions", "content": "..."}
- ],
- "raw": "# Search Results\n\n..."
+  "sections": [
+    {"level": 1, "title": "Search Results", "content": "..."},
+    {"level": 2, "title": "Decisions", "content": "..."}
+  ],
+  "raw": "# Search Results\n\n..."
 }
 ```
 
@@ -100,10 +100,10 @@ Converts markdown structure to XML:
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <context>
- <section level="1" title="Search Results">
- <item>First memory content</item>
- <item>Second memory content</item>
- </section>
+  <section level="1" title="Search Results">
+    <item>First memory content</item>
+    <item>Second memory content</item>
+  </section>
 </context>
 ```
 
@@ -121,16 +121,16 @@ Save or update a context template. Version auto-increments on each save.
 
 ```yaml
 subcog_templates:
- action: save
- name: search-results # Required: kebab-case name
- content: | # Required: template content
- # {{title}}
- {{#each memories}}
- - {{memory.content}}
- {{/each}}
- description: Format search results
- tags: [search, formatting]
- domain: project # project, user, or org
+  action: save
+  name: search-results          # Required: kebab-case name
+  content: |                    # Required: template content
+    # {{title}}
+    {{#each memories}}
+    - {{memory.content}}
+    {{/each}}
+  description: Format search results
+  tags: [search, formatting]
+  domain: project               # project, user, or org
 ```
 
 #### action: list
@@ -139,10 +139,10 @@ List templates with optional filtering.
 
 ```yaml
 subcog_templates:
- action: list
- domain: user # Optional: filter by domain
- tags: [formatting] # Optional: filter by tags
- limit: 20 # Optional: max results (default 20)
+  action: list
+  domain: user                  # Optional: filter by domain
+  tags: [formatting]            # Optional: filter by tags
+  limit: 20                     # Optional: max results (default 20)
 ```
 
 #### action: get
@@ -151,9 +151,9 @@ Fetch a template by name.
 
 ```yaml
 subcog_templates:
- action: get
- name: search-results # Required: template name
- domain: user # Optional: domain scope
+  action: get
+  name: search-results          # Required: template name
+  domain: user                  # Optional: domain scope
 ```
 
 #### action: render
@@ -162,13 +162,13 @@ Render a template with memories and variables.
 
 ```yaml
 subcog_templates:
- action: render
- name: search-results # Required: template name
- query: "authentication" # Optional: search query for memories
- limit: 10 # Optional: max memories (default 10)
- format: json # Optional: override output format
- variables: # Optional: custom variables
- title: "Auth Patterns"
+  action: render
+  name: search-results          # Required: template name
+  query: "authentication"       # Optional: search query for memories
+  limit: 10                     # Optional: max memories (default 10)
+  format: json                  # Optional: override output format
+  variables:                    # Optional: custom variables
+    title: "Auth Patterns"
 ```
 
 #### action: delete
@@ -177,24 +177,24 @@ Delete a template.
 
 ```yaml
 subcog_templates:
- action: delete
- name: search-results # Required: template name
- domain: project # Required: domain scope
+  action: delete
+  name: search-results          # Required: template name
+  domain: project               # Required: domain scope
 ```
 
 ---
 
 ### Legacy Tools (Deprecated)
 
-> **️ Deprecated**: Use `subcog_templates` with the appropriate `action` parameter instead.
+> **⚠️ Deprecated**: Use `subcog_templates` with the appropriate `action` parameter instead.
 
 The following legacy tools remain available for backward compatibility:
 
-- `context_template_save` -> Use `subcog_templates` with `action: save`
-- `context_template_list` -> Use `subcog_templates` with `action: list`
-- `context_template_get` -> Use `subcog_templates` with `action: get`
-- `context_template_render` -> Use `subcog_templates` with `action: render`
-- `context_template_delete` -> Use `subcog_templates` with `action: delete`
+- `context_template_save` → Use `subcog_templates` with `action: save`
+- `context_template_list` → Use `subcog_templates` with `action: list`
+- `context_template_get` → Use `subcog_templates` with `action: get`
+- `context_template_render` → Use `subcog_templates` with `action: render`
+- `context_template_delete` → Use `subcog_templates` with `action: delete`
 
 ## Configuration
 
@@ -203,13 +203,13 @@ Configure context templates in `~/.config/subcog/config.toml`:
 ```toml
 [context_templates]
 enabled = true
-default_format = "markdown" # markdown, json, xml
+default_format = "markdown"  # markdown, json, xml
 
 # Per-hook template overrides (optional)
 [context_templates.hooks.session_start]
 template = "session-context"
-version = 1 # Optional: use specific version
-format = "markdown" # Optional: override format
+version = 1                  # Optional: use specific version
+format = "markdown"          # Optional: override format
 
 [context_templates.hooks.user_prompt_submit]
 template = "prompt-context"
@@ -229,7 +229,7 @@ Templates are scoped by domain:
 | `user` | User-wide | Personal templates across projects |
 | `org` | Organization | Shared team templates |
 
-Resolution order: project -> user -> org
+Resolution order: project → user → org
 
 ## Versioning
 
@@ -246,60 +246,60 @@ Templates use auto-increment versioning:
 
 ```yaml
 subcog_templates:
- action: save
- name: search-results
- content: |
- # {{title}}
+  action: save
+  name: search-results
+  content: |
+    # {{title}}
 
- Found **{{total_count}}** memories matching your query.
+    Found **{{total_count}}** memories matching your query.
 
- {{#each memories}}
- ## {{memory.namespace}}
+    {{#each memories}}
+    ## {{memory.namespace}}
 
- {{memory.content}}
+    {{memory.content}}
 
- _Relevance: {{memory.score}} | Created: {{memory.created_at}}_
+    _Relevance: {{memory.score}} | Created: {{memory.created_at}}_
 
- ---
- {{/each}}
- tags: [search, display]
- domain: user
+    ---
+    {{/each}}
+  tags: [search, display]
+  domain: user
 ```
 
 ### Session Context Builder
 
 ```yaml
 subcog_templates:
- action: save
- name: session-context
- content: |
- # Project Context
+  action: save
+  name: session-context
+  content: |
+    # Project Context
 
- ## Recent Decisions
- {{#each memories}}
- - **{{memory.namespace}}**: {{memory.content}}
- {{/each}}
+    ## Recent Decisions
+    {{#each memories}}
+    - **{{memory.namespace}}**: {{memory.content}}
+    {{/each}}
 
- ## Statistics
- - Total memories: {{total_count}}
- tags: [hooks, session]
- domain: project
+    ## Statistics
+    - Total memories: {{total_count}}
+  tags: [hooks, session]
+  domain: project
 ```
 
 ### XML API Response
 
 ```yaml
 subcog_templates:
- action: save
- name: api-response
- content: |
- # API Response
+  action: save
+  name: api-response
+  content: |
+    # API Response
 
- {{#each memories}}
- - {{memory.content}}
- {{/each}}
- tags: [api, integration]
- domain: user
+    {{#each memories}}
+    - {{memory.content}}
+    {{/each}}
+  tags: [api, integration]
+  domain: user
 ```
 
 ## Best Practices

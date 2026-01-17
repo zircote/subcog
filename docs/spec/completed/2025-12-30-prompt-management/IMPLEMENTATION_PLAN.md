@@ -32,43 +32,43 @@ This plan implements user prompt management across 7 phases, corresponding to Gi
 ### Tasks
 
 - [ ] **P1-T1**: Add `Namespace::Prompts` variant to `src/models/domain.rs`
- - Add to enum with doc comment
- - Implement `as_str()` mapping
- - Update `Namespace::parse()` to handle "prompts"
- - Update namespace list in help content
+  - Add to enum with doc comment
+  - Implement `as_str()` mapping
+  - Update `Namespace::parse()` to handle "prompts"
+  - Update namespace list in help content
 
 - [ ] **P1-T2**: Create `src/models/prompt.rs`
- - Define `PromptTemplate` struct
- - Define `PromptVariable` struct
- - Define `ExtractedVariable` struct
- - Define `ValidationResult` and `ValidationIssue` structs
- - Implement `Default` traits
- - Add serde derive macros
+  - Define `PromptTemplate` struct
+  - Define `PromptVariable` struct
+  - Define `ExtractedVariable` struct
+  - Define `ValidationResult` and `ValidationIssue` structs
+  - Implement `Default` traits
+  - Add serde derive macros
 
 - [ ] **P1-T3**: Implement variable extraction
- - Create `extract_variables(content: &str) -> Vec<ExtractedVariable>`
- - Regex pattern: `\{\{(\w+)\}\}`
- - Return variables in order of first appearance
- - Deduplicate variable names
+  - Create `extract_variables(content: &str) -> Vec<ExtractedVariable>`
+  - Regex pattern: `\{\{(\w+)\}\}`
+  - Return variables in order of first appearance
+  - Deduplicate variable names
 
 - [ ] **P1-T4**: Implement variable substitution
- - Create `substitute_variables(content, values, variables) -> Result<String>`
- - Check required variables have values or defaults
- - Apply defaults for missing optional variables
- - Replace all `{{var}}` patterns
- - Error on missing required variables
+  - Create `substitute_variables(content, values, variables) -> Result<String>`
+  - Check required variables have values or defaults
+  - Apply defaults for missing optional variables
+  - Replace all `{{var}}` patterns
+  - Error on missing required variables
 
 - [ ] **P1-T5**: Export models from `src/models/mod.rs`
- - Add `mod prompt;`
- - Add `pub use prompt::*;`
+  - Add `mod prompt;`
+  - Add `pub use prompt::*;`
 
 - [ ] **P1-T6**: Add unit tests
- - Test variable extraction (valid patterns)
- - Test variable extraction (edge cases: escaped, nested)
- - Test variable substitution (complete values)
- - Test variable substitution (with defaults)
- - Test variable substitution (missing required)
- - Test model serialization roundtrip
+  - Test variable extraction (valid patterns)
+  - Test variable extraction (edge cases: escaped, nested)
+  - Test variable substitution (complete values)
+  - Test variable substitution (with defaults)
+  - Test variable substitution (missing required)
+  - Test model serialization roundtrip
 
 ### Deliverables
 
@@ -96,56 +96,56 @@ This plan implements user prompt management across 7 phases, corresponding to Gi
 ### Tasks
 
 - [ ] **P2-T1**: Create `src/services/prompt_parser.rs`
- - Define `PromptParser` trait
- - Define `PromptFormat` enum
- - Create `PromptFileParser` struct
+  - Define `PromptParser` trait
+  - Define `PromptFormat` enum
+  - Create `PromptFileParser` struct
 
 - [ ] **P2-T2**: Implement `MarkdownParser`
- - Detect `---` frontmatter delimiters
- - Parse YAML frontmatter
- - Extract body after frontmatter
- - Handle missing frontmatter (content only)
+  - Detect `---` frontmatter delimiters
+  - Parse YAML frontmatter
+  - Extract body after frontmatter
+  - Handle missing frontmatter (content only)
 
 - [ ] **P2-T3**: Implement `YamlParser`
- - Parse full YAML structure
- - Map fields to `PromptTemplate`
- - Validate required fields
+  - Parse full YAML structure
+  - Map fields to `PromptTemplate`
+  - Validate required fields
 
 - [ ] **P2-T4**: Implement `JsonParser`
- - Parse full JSON structure
- - Map fields to `PromptTemplate`
- - Validate required fields
+  - Parse full JSON structure
+  - Map fields to `PromptTemplate`
+  - Validate required fields
 
 - [ ] **P2-T5**: Implement `PlainTextParser`
- - Content becomes prompt content
- - Auto-detect variables from content
- - Generate default name from first line
+  - Content becomes prompt content
+  - Auto-detect variables from content
+  - Generate default name from first line
 
 - [ ] **P2-T6**: Implement format detection
- - `detect_format(path: &Path) -> PromptFormat`
- - Map extensions: `.md`, `.yaml`, `.yml`, `.json`, `.txt`
- - Default to PlainText for unknown
+  - `detect_format(path: &Path) -> PromptFormat`
+  - Map extensions: `.md`, `.yaml`, `.yml`, `.json`, `.txt`
+  - Default to PlainText for unknown
 
 - [ ] **P2-T7**: Implement file loading
- - `parse_file(path: &Path) -> Result<PromptTemplate>`
- - Read file content
- - Handle file not found, permission errors
- - Validate UTF-8 encoding
+  - `parse_file(path: &Path) -> Result<PromptTemplate>`
+  - Read file content
+  - Handle file not found, permission errors
+  - Validate UTF-8 encoding
 
 - [ ] **P2-T8**: Implement stdin loading
- - `parse_stdin() -> Result<String>`
- - Read until EOF
+  - `parse_stdin() -> Result<String>`
+  - Read until EOF
 
 - [ ] **P2-T9**: Export from `src/services/mod.rs`
 
 - [ ] **P2-T10**: Add unit tests
- - Test markdown with frontmatter
- - Test markdown without frontmatter
- - Test YAML parsing
- - Test JSON parsing
- - Test plain text parsing
- - Test format detection
- - Test error cases
+  - Test markdown with frontmatter
+  - Test markdown without frontmatter
+  - Test YAML parsing
+  - Test JSON parsing
+  - Test plain text parsing
+  - Test format detection
+  - Test error cases
 
 ### Deliverables
 
@@ -173,60 +173,60 @@ This plan implements user prompt management across 7 phases, corresponding to Gi
 ### Tasks
 
 - [ ] **P3-T1**: Create `src/services/prompt.rs`
- - Define `PromptService` struct
- - Add `CaptureService` and `RecallService` dependencies
+  - Define `PromptService` struct
+  - Add `CaptureService` and `RecallService` dependencies
 
 - [ ] **P3-T2**: Implement `save()`
- - Serialize `PromptTemplate` to JSON
- - Create memory with namespace=prompts
- - Store via `CaptureService`
- - Return URN
+  - Serialize `PromptTemplate` to JSON
+  - Create memory with namespace=prompts
+  - Store via `CaptureService`
+  - Return URN
 
 - [ ] **P3-T3**: Implement `get()`
- - Search by exact name first (indexed)
- - Fall back to recall search
- - Implement domain hierarchy: project -> user -> org
- - Deserialize `PromptTemplate` from content
+  - Search by exact name first (indexed)
+  - Fall back to recall search
+  - Implement domain hierarchy: project → user → org
+  - Deserialize `PromptTemplate` from content
 
 - [ ] **P3-T4**: Implement `list()`
- - Query with `PromptFilter`
- - Filter by domain, tags, name pattern
- - Return all matches sorted by domain priority
+  - Query with `PromptFilter`
+  - Filter by domain, tags, name pattern
+  - Return all matches sorted by domain priority
 
 - [ ] **P3-T5**: Implement `delete()`
- - Require explicit domain
- - Delete from specified domain only
- - Return success boolean
+  - Require explicit domain
+  - Delete from specified domain only
+  - Return success boolean
 
 - [ ] **P3-T6**: Implement `search()`
- - Semantic search via `RecallService`
- - Filter to namespace=prompts
- - Deserialize results
+  - Semantic search via `RecallService`
+  - Filter to namespace=prompts
+  - Deserialize results
 
 - [ ] **P3-T7**: Implement `increment_usage()`
- - Load prompt
- - Increment usage_count
- - Save back
+  - Load prompt
+  - Increment usage_count
+  - Save back
 
 - [ ] **P3-T8**: Define `PromptFilter` struct
- - domain: Option<DomainScope>
- - tags: Vec<String>
- - name_pattern: Option<String>
- - limit: Option<usize>
+  - domain: Option<DomainScope>
+  - tags: Vec<String>
+  - name_pattern: Option<String>
+  - limit: Option<usize>
 
 - [ ] **P3-T9**: Add SQLite index for prompt names
- - Index on JSON-extracted name field
- - Filter to prompts namespace
- - Update index on save
+  - Index on JSON-extracted name field
+  - Filter to prompts namespace
+  - Update index on save
 
 - [ ] **P3-T10**: Export from `src/services/mod.rs`
 
 - [ ] **P3-T11**: Add integration tests
- - Save -> get roundtrip
- - Save -> list
- - Domain hierarchy search
- - Search by name pattern
- - Delete and verify
+  - Save → get roundtrip
+  - Save → list
+  - Domain hierarchy search
+  - Search by name pattern
+  - Delete and verify
 
 ### Deliverables
 
@@ -238,7 +238,7 @@ This plan implements user prompt management across 7 phases, corresponding to Gi
 ### Acceptance Criteria
 
 - [x] Can save prompt and retrieve by name
-- [x] Domain hierarchy search works (project -> user -> org)
+- [x] Domain hierarchy search works (project → user → org)
 - [x] Semantic search finds relevant prompts
 - [x] Exact name lookup is fast (indexed)
 - [x] Usage count increments on run
@@ -255,59 +255,59 @@ This plan implements user prompt management across 7 phases, corresponding to Gi
 ### Tasks
 
 - [ ] **P4-T1**: Add tool schemas to `src/mcp/tools.rs`
- - `prompt.save` schema
- - `prompt.list` schema
- - `prompt.get` schema
- - `prompt.run` schema
- - `prompt.delete` schema
+  - `prompt.save` schema
+  - `prompt.list` schema
+  - `prompt.get` schema
+  - `prompt.run` schema
+  - `prompt.delete` schema
 
 - [ ] **P4-T2**: Implement `prompt.save` handler
- - Parse input parameters
- - Handle `content` OR `file_path`
- - Call `PromptFileParser` for file input
- - Call `PromptService.save()`
- - Return success with URN
+  - Parse input parameters
+  - Handle `content` OR `file_path`
+  - Call `PromptFileParser` for file input
+  - Call `PromptService.save()`
+  - Return success with URN
 
 - [ ] **P4-T3**: Implement `prompt.list` handler
- - Parse filter parameters
- - Call `PromptService.list()`
- - Format results
+  - Parse filter parameters
+  - Call `PromptService.list()`
+  - Format results
 
 - [ ] **P4-T4**: Implement `prompt.get` handler
- - Parse name and domain
- - Call `PromptService.get()`
- - Return template or not found
+  - Parse name and domain
+  - Call `PromptService.get()`
+  - Return template or not found
 
 - [ ] **P4-T5**: Implement `prompt.run` handler
- - Get prompt by name
- - Extract missing variables
- - For each missing variable:
- - Call `sampling/createMessage`
- - Collect response
- - Substitute variables
- - Return populated content
- - Increment usage count
+  - Get prompt by name
+  - Extract missing variables
+  - For each missing variable:
+    - Call `sampling/createMessage`
+    - Collect response
+  - Substitute variables
+  - Return populated content
+  - Increment usage count
 
 - [ ] **P4-T6**: Implement `prompt.delete` handler
- - Parse name and domain
- - Call `PromptService.delete()`
- - Return success boolean
+  - Parse name and domain
+  - Call `PromptService.delete()`
+  - Return success boolean
 
 - [ ] **P4-T7**: Wire up tools in `src/mcp/server.rs`
- - Register tool schemas
- - Route `call_tool` to handlers
+  - Register tool schemas
+  - Route `call_tool` to handlers
 
 - [ ] **P4-T8**: Extend `PromptRegistry` for user prompts
- - Inject `PromptService` dependency
- - Merge built-in + user prompts in `list_prompts()`
- - Support `prompts/get` for user prompts
+  - Inject `PromptService` dependency
+  - Merge built-in + user prompts in `list_prompts()`
+  - Support `prompts/get` for user prompts
 
 - [ ] **P4-T9**: Add integration tests
- - Tool schema validation
- - Save via MCP
- - List includes user prompts
- - Run with elicitation mock
- - Delete via MCP
+  - Tool schema validation
+  - Save via MCP
+  - List includes user prompts
+  - Run with elicitation mock
+  - Delete via MCP
 
 ### Deliverables
 
@@ -336,56 +336,56 @@ This plan implements user prompt management across 7 phases, corresponding to Gi
 ### Tasks
 
 - [ ] **P5-T1**: Create `src/cli/prompt.rs`
- - Define `PromptCommand` enum with subcommands
- - Implement clap derive macros
+  - Define `PromptCommand` enum with subcommands
+  - Implement clap derive macros
 
 - [ ] **P5-T2**: Implement `save` subcommand
- - `--name` (required)
- - `--description`
- - `--tags`
- - `--domain`
- - `--from-file`
- - `--from-stdin`
- - `[CONTENT]` positional
+  - `--name` (required)
+  - `--description`
+  - `--tags`
+  - `--domain`
+  - `--from-file`
+  - `--from-stdin`
+  - `[CONTENT]` positional
 
 - [ ] **P5-T3**: Implement `list` subcommand
- - `--domain`
- - `--tags`
- - `--format <table|json>`
- - Pretty table output
+  - `--domain`
+  - `--tags`
+  - `--format <table|json>`
+  - Pretty table output
 
 - [ ] **P5-T4**: Implement `get` subcommand
- - `<NAME>` positional
- - `--domain`
- - `--format <template|json>`
+  - `<NAME>` positional
+  - `--domain`
+  - `--format <template|json>`
 
 - [ ] **P5-T5**: Implement `run` subcommand
- - `<NAME>` positional
- - `--var <KEY=VALUE>` repeatable
- - `--domain`
- - Interactive prompts with dialoguer
+  - `<NAME>` positional
+  - `--var <KEY=VALUE>` repeatable
+  - `--domain`
+  - Interactive prompts with dialoguer
 
 - [ ] **P5-T6**: Implement `delete` subcommand
- - `<NAME>` positional
- - `--domain` (required)
- - `--force`
- - Confirmation prompt
+  - `<NAME>` positional
+  - `--domain` (required)
+  - `--force`
+  - Confirmation prompt
 
 - [ ] **P5-T7**: Implement `export` subcommand
- - `<NAME>` positional
- - `--output`
- - `--format <markdown|yaml|json>`
- - Write to file
+  - `<NAME>` positional
+  - `--output`
+  - `--format <markdown|yaml|json>`
+  - Write to file
 
 - [ ] **P5-T8**: Wire up in `src/main.rs`
- - Add to subcommand enum
- - Route to handler
+  - Add to subcommand enum
+  - Route to handler
 
 - [ ] **P5-T9**: Add functional tests
- - CLI save with --from-file
- - CLI save with --from-stdin
- - CLI run with --var
- - CLI export
+  - CLI save with --from-file
+  - CLI save with --from-stdin
+  - CLI run with --var
+  - CLI export
 
 ### Deliverables
 
@@ -414,46 +414,46 @@ This plan implements user prompt management across 7 phases, corresponding to Gi
 ### Tasks
 
 - [ ] **P6-T1**: Create `src/help/content/prompts.md`
- - Quick reference for formats
- - Variable syntax rules
- - Frontmatter field documentation
- - Variable definition fields
- - Best practices
- - Complete examples
+  - Quick reference for formats
+  - Variable syntax rules
+  - Frontmatter field documentation
+  - Variable definition fields
+  - Best practices
+  - Complete examples
 
 - [ ] **P6-T2**: Add `Prompts` to `HelpCategory` enum
- - Update `src/help/content.rs`
- - Add category description
+  - Update `src/help/content.rs`
+  - Add category description
 
 - [ ] **P6-T3**: Update `HelpIndexService`
- - Index prompts help content at startup
- - Generate stable IDs
+  - Index prompts help content at startup
+  - Generate stable IDs
 
 - [ ] **P6-T4**: Add `subcog://help/prompts` resource
- - Handle in `read_resource()`
- - Return prompts.md content
- - Set mime type to text/markdown
+  - Handle in `read_resource()`
+  - Return prompts.md content
+  - Set mime type to text/markdown
 
 - [ ] **P6-T5**: Create format validation function
- - `validate_prompt(content: &str) -> ValidationResult`
- - Check for unclosed braces
- - Check for invalid variable names
- - Validate YAML frontmatter if present
- - Return issues with positions
+  - `validate_prompt(content: &str) -> ValidationResult`
+  - Check for unclosed braces
+  - Check for invalid variable names
+  - Validate YAML frontmatter if present
+  - Return issues with positions
 
 - [ ] **P6-T6**: Update `PostToolUse` hook
- - Detect `prompt.save` tool calls
- - Extract content from tool input
- - Call `validate_prompt()`
- - Inject guidance if issues found
- - Reference `subcog://help/prompts`
+  - Detect `prompt.save` tool calls
+  - Extract content from tool input
+  - Call `validate_prompt()`
+  - Inject guidance if issues found
+  - Reference `subcog://help/prompts`
 
 - [ ] **P6-T7**: Add unit tests
- - Validation: valid content
- - Validation: unclosed braces
- - Validation: invalid variable names
- - Validation: invalid YAML
- - Hook: guidance injected
+  - Validation: valid content
+  - Validation: unclosed braces
+  - Validation: invalid variable names
+  - Validation: invalid YAML
+  - Hook: guidance injected
 
 ### Deliverables
 
@@ -484,47 +484,47 @@ This plan implements user prompt management across 7 phases, corresponding to Gi
 ### Tasks
 
 - [ ] **P7-T1**: Add comprehensive prompt validation
- - Valid variable names (alphanumeric + underscore)
- - No unclosed braces
- - Valid YAML frontmatter
- - Unique variable names
- - Reserved names check
- - Name format (kebab-case)
+  - Valid variable names (alphanumeric + underscore)
+  - No unclosed braces
+  - Valid YAML frontmatter
+  - Unique variable names
+  - Reserved names check
+  - Name format (kebab-case)
 
 - [ ] **P7-T2**: Implement usage count tracking
- - Increment on `prompt.run`
- - Store in prompt metadata
- - Sort by popularity in list
+  - Increment on `prompt.run`
+  - Store in prompt metadata
+  - Sort by popularity in list
 
 - [ ] **P7-T3**: Verify domain hierarchy search
- - Search order: project -> user -> org
- - First match wins for get()
- - All matches for list()
+  - Search order: project → user → org
+  - First match wins for get()
+  - All matches for list()
 
 - [ ] **P7-T4**: Add performance optimization
- - LRU cache for frequently used prompts
- - Lazy load prompt content
- - Cache variable extraction results
+  - LRU cache for frequently used prompts
+  - Lazy load prompt content
+  - Cache variable extraction results
 
 - [ ] **P7-T5**: Improve error messages
- - Clear, actionable text
- - Include fix suggestions
- - Show relevant examples
+  - Clear, actionable text
+  - Include fix suggestions
+  - Show relevant examples
 
 - [ ] **P7-T6**: Update documentation
- - Update CLAUDE.md with prompt commands
- - Add CLI examples
- - Document MCP tools
+  - Update CLAUDE.md with prompt commands
+  - Add CLI examples
+  - Document MCP tools
 
 - [ ] **P7-T7**: Write comprehensive tests
- - Unit tests for all functions
- - Integration tests for roundtrips
- - Functional tests for CLI
- - Edge case tests
+  - Unit tests for all functions
+  - Integration tests for roundtrips
+  - Functional tests for CLI
+  - Edge case tests
 
 - [ ] **P7-T8**: Performance testing
- - Measure save/get/list times
- - Verify <100ms for common operations
+  - Measure save/get/list times
+  - Verify <100ms for common operations
 
 ### Deliverables
 

@@ -17,7 +17,7 @@ Default scope for most memories.
 ### Identification
 
 Project domain is derived from:
-1. Git remote URL: `origin` -> `zircote/subcog`
+1. Git remote URL: `origin` → `zircote/subcog`
 2. Directory name if no remote
 
 ### Storage
@@ -85,7 +85,7 @@ Organization-level memories shared across repositories.
 ### Identification
 
 Derived from:
-1. Git remote URL organization: `zircote/subcog` -> `zircote`
+1. Git remote URL organization: `zircote/subcog` → `zircote`
 2. Configured organization name
 
 ### Storage
@@ -128,8 +128,8 @@ Use `_` wildcard for cross-domain queries:
 ### MCP Resources
 
 ```
-subcog://_ # All memories, all domains
-subcog://_/decisions # All decisions, all domains
+subcog://_                    # All memories, all domains
+subcog://_/decisions          # All decisions, all domains
 ```
 
 ### CLI
@@ -149,7 +149,7 @@ Enable multi-domain support:
 
 ```yaml
 features:
- multi_domain: true
+  multi_domain: true
 ```
 
 When disabled:
@@ -182,7 +182,7 @@ id: abc123
 namespace: decisions
 domain: project
 references:
- - subcog://zircote/patterns/def456
+  - subcog://zircote/patterns/def456
 ---
 Follows organization pattern for error handling
 ```

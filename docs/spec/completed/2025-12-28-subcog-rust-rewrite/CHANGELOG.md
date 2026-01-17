@@ -69,15 +69,15 @@ Specification generated from research in `docs/research/2025-12-28-rust-rewrite/
 
 ### Added
 - **MCP_AND_HOOKS.md**: Detailed documentation of MCP server lifecycle (long-lived process) and Claude Code hooks integration (short-lived processes)
- - Covers stdio JSON-RPC transport, shared storage layer, concurrency model
- - All 5 hook specifications with JSON contracts and timing requirements
- - Configuration examples for Claude Code `settings.json`
+  - Covers stdio JSON-RPC transport, shared storage layer, concurrency model
+  - All 5 hook specifications with JSON contracts and timing requirements
+  - Configuration examples for Claude Code `settings.json`
 - **CONSOLIDATION_AND_ENRICHMENT.md**: Memory consolidation pipeline and enrichment process
- - Six-stage pipeline: Cluster -> Summarize -> Tier -> Supersede -> Edge -> Persist
- - Memory tiering system (HOT, WARM, COLD, ARCHIVED)
- - Retention score calculation formula and components
- - Enrichment flow to hooks and SessionStart context building
- - XML output format specification for `additionalContext`
+  - Six-stage pipeline: Cluster → Summarize → Tier → Supersede → Edge → Persist
+  - Memory tiering system (HOT, WARM, COLD, ARCHIVED)
+  - Retention score calculation formula and components
+  - Enrichment flow to hooks and SessionStart context building
+  - XML output format specification for `additionalContext`
 
 ### Planned
 - Approval workflow completion
@@ -124,5 +124,5 @@ Example:
 ```markdown
 ### Changed
 - **REQUIREMENTS.md**: Updated FR-C06 summary limit from 100 to 150 characters
- - Rationale: User feedback indicated 100 chars too restrictive
+  - Rationale: User feedback indicated 100 chars too restrictive
 ```

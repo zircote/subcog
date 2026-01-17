@@ -66,11 +66,11 @@ This document tracks implementation progress against the spec plan.
 - Completed all 7 tasks (1.1-1.7)
 - All implementation changes in `src/mcp/server.rs`
 - Key changes:
- 1. Added `is_notification()` const fn to `JsonRpcRequest` (line 1033)
- 2. `handle_request()` returns empty string for notifications (line 664-682)
- 3. `run_stdio()` skips writeln when response empty (line 441-452)
- 4. HTTP transport returns 204 No Content for notifications (line 1258-1282)
- 5. `format_error()` always includes `id` field (line 979-992)
+  1. Added `is_notification()` const fn to `JsonRpcRequest` (line 1033)
+  2. `handle_request()` returns empty string for notifications (line 664-682)
+  3. `run_stdio()` skips writeln when response empty (line 441-452)
+  4. HTTP transport returns 204 No Content for notifications (line 1258-1282)
+  5. `format_error()` always includes `id` field (line 979-992)
 - Added 12 new unit tests for Issue #46 compliance
 - All 1019+ tests passing
 - `make ci` passes (fmt, clippy, test, doc, bench)
@@ -80,11 +80,11 @@ This document tracks implementation progress against the spec plan.
 Tested with stdio pipe to verify JSON-RPC 2.0 compliance:
 
 ```
-# Initialize request (id: 1) -> Response with id: 1 
-# notifications/initialized (no id) -> NO RESPONSE (fixed!)
-# ping request (id: 2) -> Response with id: 2 
-# unknown method (id: 99) -> Error with id: 99 
-# parse error -> Error with id: null (fixed!)
+# Initialize request (id: 1) → Response with id: 1 ✅
+# notifications/initialized (no id) → NO RESPONSE ✅ (fixed!)
+# ping request (id: 2) → Response with id: 2 ✅
+# unknown method (id: 99) → Error with id: 99 ✅
+# parse error → Error with id: null ✅ (fixed!)
 ```
 
 All acceptance criteria met. Ready for PR creation.

@@ -173,9 +173,9 @@ Use pre-trained models; no fine-tuning infrastructure.
 | BM25 full-text search | Keyword-based fallback |
 | Hybrid search | RRF fusion of vector + BM25 |
 | Git notes persistence | Authoritative storage |
-| Index synchronization | git notes <-> search index |
+| Index synchronization | git notes ↔ search index |
 | Multi-domain memories | Project + user scope |
-| Progressive hydration | SUMMARY -> FULL -> FILES |
+| Progressive hydration | SUMMARY → FULL → FILES |
 | Basic metrics and logging | Counters, timers |
 | MCP tools | capture, recall, status, sync |
 
@@ -256,7 +256,7 @@ Use pre-trained models; no fine-tuning infrastructure.
 | FR-R04 | Filter by namespace, domain, spec, tags | P0 |
 | FR-R05 | Configurable result limit (default 10) | P0 |
 | FR-R06 | Return MemoryResult with distance score and URN | P0 |
-| FR-R07 | Progressive hydration (summary -> full -> files) | P1 |
+| FR-R07 | Progressive hydration (summary → full → files) | P1 |
 | FR-R08 | Temporal filtering (date range) | P1 |
 | FR-R09 | Entity-based boosting | P2 |
 | FR-R10 | LLM query expansion (opt-in) | P2 |
@@ -450,23 +450,23 @@ Capture a new memory to git-backed storage.
 **Input Schema:**
 ```json
 {
- "namespace": "decisions|learnings|blockers|progress|reviews|patterns|...",
- "summary": "One-line summary (≤100 chars)",
- "content": "Full markdown content (≤100KB)",
- "domain": "project|user",
- "tags": ["tag1", "tag2"],
- "spec": "optional-spec-reference"
+  "namespace": "decisions|learnings|blockers|progress|reviews|patterns|...",
+  "summary": "One-line summary (≤100 chars)",
+  "content": "Full markdown content (≤100KB)",
+  "domain": "project|user",
+  "tags": ["tag1", "tag2"],
+  "spec": "optional-spec-reference"
 }
 ```
 
 **Response:**
 ```json
 {
- "success": true,
- "memory_id": "decisions:abc1234:0",
- "uri": "subcog://project:my-app/decisions/abc1234:0",
- "indexed": true,
- "warning": null
+  "success": true,
+  "memory_id": "decisions:abc1234:0",
+  "uri": "subcog://project:my-app/decisions/abc1234:0",
+  "indexed": true,
+  "warning": null
 }
 ```
 
@@ -477,30 +477,30 @@ Search and retrieve relevant memories.
 **Input Schema:**
 ```json
 {
- "query": "Search query in natural language",
- "limit": 10,
- "namespace": "optional-filter",
- "domain": "all|project|user",
- "mode": "hybrid|vector|bm25",
- "min_similarity": 0.0
+  "query": "Search query in natural language",
+  "limit": 10,
+  "namespace": "optional-filter",
+  "domain": "all|project|user",
+  "mode": "hybrid|vector|bm25",
+  "min_similarity": 0.0
 }
 ```
 
 **Response:**
 ```json
 {
- "results": [
- {
- "uri": "subcog://project:my-app/decisions/abc1234:0",
- "namespace": "decisions",
- "summary": "Use PostgreSQL for data layer",
- "distance": 0.15,
- "domain": "project",
- "timestamp": "2025-01-15T10:30:00Z"
- }
- ],
- "total": 1,
- "resource_template": "subcog://{domain}/{namespace}/{id}"
+  "results": [
+    {
+      "uri": "subcog://project:my-app/decisions/abc1234:0",
+      "namespace": "decisions",
+      "summary": "Use PostgreSQL for data layer",
+      "distance": 0.15,
+      "domain": "project",
+      "timestamp": "2025-01-15T10:30:00Z"
+    }
+  ],
+  "total": 1,
+  "resource_template": "subcog://{domain}/{namespace}/{id}"
 }
 ```
 

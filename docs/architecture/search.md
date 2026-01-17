@@ -12,41 +12,41 @@ Combines two search methods for best results:
 
 ```
 Query
- │
- ▼
+    │
+    ▼
 ┌─────────────────────────────────────────────────────────┐
-│ Query Processing │
-│ ┌─────────────────────────────────────────────────────┐│
-│ │ Query Text -> Embedding -> 384-dim vector ││
-│ │ ││
-│ │ Query Text -> Tokenization -> Keywords ││
-│ └─────────────────────────────────────────────────────┘│
+│                     Query Processing                     │
+│  ┌─────────────────────────────────────────────────────┐│
+│  │  Query Text → Embedding → 384-dim vector            ││
+│  │                                                      ││
+│  │  Query Text → Tokenization → Keywords               ││
+│  └─────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────┘
- │
- ┌───────────┴───────────┐
- ▼ ▼
-┌───────────────┐ ┌───────────────┐
-│ Vector Search │ │ Text Search │
-│ (usearch) │ │ (SQLite FTS5) │
-│ │ │ │
-│ HNSW ANN │ │ BM25 ranking │
-│ Cosine sim │ │ Token match │
-└───────┬───────┘ └───────┬───────┘
- │ │
- │ Vector Results │ Text Results
- │ (id, distance) │ (id, score)
- │ │
- └───────────┬───────────┘
- ▼
- ┌───────────────────────┐
- │ RRF Fusion │
- │ (k=60 constant) │
- │ │
- │ score = Σ 1/(k+rank) │
- └───────────┬───────────┘
- │
- ▼
- Fused Rankings
+                    │
+        ┌───────────┴───────────┐
+        ▼                       ▼
+┌───────────────┐       ┌───────────────┐
+│ Vector Search │       │  Text Search  │
+│   (usearch)   │       │ (SQLite FTS5) │
+│               │       │               │
+│ HNSW ANN      │       │ BM25 ranking  │
+│ Cosine sim    │       │ Token match   │
+└───────┬───────┘       └───────┬───────┘
+        │                       │
+        │   Vector Results      │   Text Results
+        │   (id, distance)      │   (id, score)
+        │                       │
+        └───────────┬───────────┘
+                    ▼
+        ┌───────────────────────┐
+        │    RRF Fusion         │
+        │  (k=60 constant)      │
+        │                       │
+        │ score = Σ 1/(k+rank)  │
+        └───────────┬───────────┘
+                    │
+                    ▼
+            Fused Rankings
 ```
 
 ## Embedding Generation
@@ -62,28 +62,28 @@ Query
 
 ```rust
 pub struct Embedder {
- model: FastEmbed,
- cache: LruCache<String, Vec<f32>>,
+    model: FastEmbed,
+    cache: LruCache<String, Vec<f32>>,
 }
 
 impl Embedder {
- pub fn embed(&self, text: &str) -> Result<Vec<f32>> {
- // Check cache
- if let Some(cached) = self.cache.get(text) {
- return Ok(cached.clone());
- }
+    pub fn embed(&self, text: &str) -> Result<Vec<f32>> {
+        // Check cache
+        if let Some(cached) = self.cache.get(text) {
+            return Ok(cached.clone());
+        }
 
- // Generate embedding
- let embedding = self.model.embed(vec![text])?
-.into_iter()
-.next()
-.ok_or(Error::EmbeddingFailed)?;
+        // Generate embedding
+        let embedding = self.model.embed(vec![text])?
+            .into_iter()
+            .next()
+            .ok_or(Error::EmbeddingFailed)?;
 
- // Cache result
- self.cache.put(text.to_string(), embedding.clone());
+        // Cache result
+        self.cache.put(text.to_string(), embedding.clone());
 
- Ok(embedding)
- }
+        Ok(embedding)
+    }
 }
 ```
 
@@ -103,25 +103,25 @@ usearch implementation of Hierarchical Navigable Small World graphs.
 
 ```rust
 pub struct UsearchBackend {
- index: Index,
- id_map: HashMap<u64, MemoryId>,
+    index: Index,
+    id_map: HashMap<u64, MemoryId>,
 }
 
 impl VectorBackend for UsearchBackend {
- async fn search(
- &self,
- vector: &[f32],
- limit: usize
- ) -> Result<Vec<VectorResult>> {
- let results = self.index.search(vector, limit)?;
+    async fn search(
+        &self,
+        vector: &[f32],
+        limit: usize
+    ) -> Result<Vec<VectorResult>> {
+        let results = self.index.search(vector, limit)?;
 
- results.iter().map(|r| {
- VectorResult {
- id: self.id_map.get(&r.key).cloned()?,
- distance: r.distance,
- }
- }).collect()
- }
+        results.iter().map(|r| {
+            VectorResult {
+                id: self.id_map.get(&r.key).cloned()?,
+                distance: r.distance,
+            }
+        }).collect()
+    }
 }
 ```
 
@@ -142,19 +142,19 @@ SQLite FTS5 with BM25 ranking.
 
 ```sql
 CREATE VIRTUAL TABLE memories_fts USING fts5(
- id,
- content,
- tags,
- content='memories',
- content_rowid='rowid'
+    id,
+    content,
+    tags,
+    content='memories',
+    content_rowid='rowid'
 );
 
 -- Search query
 SELECT id, bm25(memories_fts) AS score
 FROM memories_fts
-WHERE memories_fts MATCH?
+WHERE memories_fts MATCH ?
 ORDER BY score
-LIMIT?;
+LIMIT ?;
 ```
 
 ### Tokenization
@@ -171,31 +171,31 @@ Reciprocal Rank Fusion combines rankings from different sources.
 
 ```rust
 fn rrf_fusion(
- vector_results: Vec<VectorResult>,
- text_results: Vec<TextResult>,
- k: u32,
+    vector_results: Vec<VectorResult>,
+    text_results: Vec<TextResult>,
+    k: u32,
 ) -> Vec<FusedResult> {
- let mut scores: HashMap<MemoryId, f32> = HashMap::new();
+    let mut scores: HashMap<MemoryId, f32> = HashMap::new();
 
- // Add vector scores
- for (rank, result) in vector_results.iter().enumerate() {
- let score = 1.0 / (k as f32 + rank as f32 + 1.0);
- *scores.entry(result.id.clone()).or_default() += score;
- }
+    // Add vector scores
+    for (rank, result) in vector_results.iter().enumerate() {
+        let score = 1.0 / (k as f32 + rank as f32 + 1.0);
+        *scores.entry(result.id.clone()).or_default() += score;
+    }
 
- // Add text scores
- for (rank, result) in text_results.iter().enumerate() {
- let score = 1.0 / (k as f32 + rank as f32 + 1.0);
- *scores.entry(result.id.clone()).or_default() += score;
- }
+    // Add text scores
+    for (rank, result) in text_results.iter().enumerate() {
+        let score = 1.0 / (k as f32 + rank as f32 + 1.0);
+        *scores.entry(result.id.clone()).or_default() += score;
+    }
 
- // Sort by combined score
- let mut results: Vec<_> = scores.into_iter().collect();
- results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    // Sort by combined score
+    let mut results: Vec<_> = scores.into_iter().collect();
+    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
- results.into_iter().map(|(id, score)| {
- FusedResult { id, score }
- }).collect()
+    results.into_iter().map(|(id, score)| {
+        FusedResult { id, score }
+    }).collect()
 }
 ```
 
@@ -213,11 +213,11 @@ The constant k=60 is a well-established default that:
 Best for general search:
 ```rust
 SearchMode::Hybrid => {
- let (vector, text) = tokio::join!(
- self.vector_search(query),
- self.text_search(query)
- );
- rrf_fusion(vector?, text?, 60)
+    let (vector, text) = tokio::join!(
+        self.vector_search(query),
+        self.text_search(query)
+    );
+    rrf_fusion(vector?, text?, 60)
 }
 ```
 
@@ -226,8 +226,8 @@ SearchMode::Hybrid => {
 Best for conceptual/semantic search:
 ```rust
 SearchMode::Vector => {
- let embedding = self.embedder.embed(&query.text)?;
- self.vector.search(&embedding, query.limit).await
+    let embedding = self.embedder.embed(&query.text)?;
+    self.vector.search(&embedding, query.limit).await
 }
 ```
 
@@ -236,7 +236,7 @@ SearchMode::Vector => {
 Best for exact term matching:
 ```rust
 SearchMode::Text => {
- self.index.search(&IndexQuery::from(query)).await
+    self.index.search(&IndexQuery::from(query)).await
 }
 ```
 
@@ -246,15 +246,15 @@ For search intent, namespaces are weighted:
 
 ```rust
 fn apply_namespace_weights(
- results: &mut [SearchResult],
- weights: &HashMap<Namespace, f32>,
+    results: &mut [SearchResult],
+    weights: &HashMap<Namespace, f32>,
 ) {
- for result in results {
- if let Some(&weight) = weights.get(&result.namespace) {
- result.score *= weight;
- }
- }
- results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+    for result in results {
+        if let Some(&weight) = weights.get(&result.namespace) {
+            result.score *= weight;
+        }
+    }
+    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
 }
 ```
 

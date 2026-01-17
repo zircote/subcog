@@ -20,11 +20,11 @@ All notable changes to this specification will be documented in this file.
 - All 1019+ tests passing, `make ci` clean
 
 ### Verification Results
-- Initialize request (id: 1) -> Response with id: 1 
-- notifications/initialized -> NO RESPONSE (fixed!)
-- ping request (id: 2) -> Response with id: 2 
-- unknown method (id: 99) -> Error with id: 99 (fixed!)
-- parse error -> Error with id: null (fixed!)
+- Initialize request (id: 1) → Response with id: 1 ✅
+- notifications/initialized → NO RESPONSE ✅ (fixed!)
+- ping request (id: 2) → Response with id: 2 ✅
+- unknown method (id: 99) → Error with id: 99 ✅ (fixed!)
+- parse error → Error with id: null ✅ (fixed!)
 
 ## [Unreleased]
 

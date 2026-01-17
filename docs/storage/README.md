@@ -6,28 +6,28 @@ Subcog uses a three-layer storage architecture to provide flexible, performant, 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Application Layer │
-│ (Services, MCP, CLI) │
+│                      Application Layer                      │
+│                   (Services, MCP, CLI)                      │
 └─────────────────────────────────────────────────────────────┘
- │
- ▼
+                              │
+                              ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ CompositeStorage<P, I, V> │
-│ │
-│ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ │
-│ │ Persistence │ │ Index │ │ Vector │ │
-│ │ Layer │ │ Layer │ │ Layer │ │
-│ │ (Source │ │ (Searchable │ │ (Embeddings)│ │
-│ │ of Truth) │ │ Cache) │ │ │ │
-│ └──────┬──────┘ └──────┬──────┘ └──────┬──────┘ │
+│                    CompositeStorage<P, I, V>                │
+│                                                             │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
+│  │ Persistence │  │    Index    │  │   Vector    │          │
+│  │   Layer     │  │    Layer    │  │    Layer    │          │
+│  │  (Source    │  │ (Searchable │  │ (Embeddings)│          │
+│  │   of Truth) │  │    Cache)   │  │             │          │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘          │
 └─────────┼────────────────┼────────────────┼─────────────────┘
- │ │ │
- ▼ ▼ ▼
-┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-│ SQLite │ │ SQLite │ │ usearch │
-│ PostgreSQL │ │ PostgreSQL │ │ pgvector │
-│ Filesystem │ │ Redis │ │ Redis │
-└─────────────┘ └─────────────┘ └─────────────┘
+          │                │                │
+          ▼                ▼                ▼
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│   SQLite    │    │   SQLite    │    │   usearch   │
+│ PostgreSQL  │    │  PostgreSQL │    │  pgvector   │
+│ Filesystem  │    │    Redis    │    │    Redis    │
+└─────────────┘    └─────────────┘    └─────────────┘
 ```
 
 ## Layers
@@ -65,9 +65,9 @@ Subcog uses a three-layer storage architecture to provide flexible, performant, 
 
 ```yaml
 storage:
- persistence: sqlite
- index: sqlite
- vector: usearch
+  persistence: sqlite
+  index: sqlite
+  vector: usearch
 ```
 
 This configuration:
@@ -81,9 +81,9 @@ This configuration:
 
 ```yaml
 storage:
- persistence: sqlite
- index: sqlite
- vector: usearch
+  persistence: sqlite
+  index: sqlite
+  vector: usearch
 ```
 
 **Pros:** No external dependencies, works offline, ACID transactions
@@ -93,9 +93,9 @@ storage:
 
 ```yaml
 storage:
- persistence: postgresql
- index: postgresql
- vector: pgvector
+  persistence: postgresql
+  index: postgresql
+  vector: pgvector
 ```
 
 **Pros:** Single database, ACID transactions, scalable
@@ -105,9 +105,9 @@ storage:
 
 ```yaml
 storage:
- persistence: postgresql
- index: redis
- vector: redis
+  persistence: postgresql
+  index: redis
+  vector: redis
 ```
 
 **Pros:** Horizontally scalable, real-time
@@ -167,20 +167,20 @@ subcog gc --purge --older-than 30d
 ### Capture
 
 ```
-Content -> Security Check -> Embedding -> Persistence -> Index -> Vector
- │ │ │
- ▼ ▼ ▼
- SQLite SQLite usearch
+Content → Security Check → Embedding → Persistence → Index → Vector
+                                           │            │        │
+                                           ▼            ▼        ▼
+                                        SQLite      SQLite    usearch
 ```
 
 ### Search
 
 ```
-Query -> Embedding -> Vector Search ──┐
- │
-Query -> Index Search ───────────────┼──-> RRF Fusion -> Results
- │
-Filter -> Metadata Filter ───────────┘
+Query → Embedding → Vector Search ──┐
+                                    │
+Query → Index Search ───────────────┼──→ RRF Fusion → Results
+                                    │
+Filter → Metadata Filter ───────────┘
 ```
 
 ### Rebuild
@@ -194,7 +194,7 @@ subcog reindex
 Rebuilds from persistence layer:
 
 ```
-Persistence -> Read All -> Re-embed -> Index -> Vector
+Persistence → Read All → Re-embed → Index → Vector
 ```
 
 ## Best Practices

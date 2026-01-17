@@ -92,7 +92,7 @@ Use **lazy loading** via `OnceLock<TextEmbedding>` singleton.
 static MODEL: OnceLock<TextEmbedding> = OnceLock::new();
 
 fn get_model() -> Result<&'static TextEmbedding> {
- MODEL.get_or_try_init(|| TextEmbedding::try_new(...))
+    MODEL.get_or_try_init(|| TextEmbedding::try_new(...))
 }
 ```
 
@@ -208,11 +208,11 @@ Use **linear normalization** based on maximum score in result set.
 
 ```rust
 fn normalize(results: &[SearchHit]) -> Vec<SearchResult> {
- let max = results.iter().map(|r| r.score).fold(0.0, f32::max);
- results.iter().map(|r| SearchResult {
- score: if max > 0.0 { r.score / max } else { 0.0 },
- raw_score: r.score,
- }).collect()
+    let max = results.iter().map(|r| r.score).fold(0.0, f32::max);
+    results.iter().map(|r| SearchResult {
+        score: if max > 0.0 { r.score / max } else { 0.0 },
+        raw_score: r.score,
+    }).collect()
 }
 ```
 
@@ -276,18 +276,18 @@ Degradation matrix:
 
 | Embedder | Vector | Index | Behavior |
 |----------|--------|-------|----------|
-| | | | Full hybrid search |
-| | | | Vector-only + warning |
-| | | | Text-only (BM25) + warning |
-| | | | Text-only (BM25) + warning |
-| | | | Error: no search available |
+| ✓ | ✓ | ✓ | Full hybrid search |
+| ✓ | ✓ | ✗ | Vector-only + warning |
+| ✓ | ✗ | ✓ | Text-only (BM25) + warning |
+| ✗ | ✗ | ✓ | Text-only (BM25) + warning |
+| ✗ | ✗ | ✗ | Error: no search available |
 
 For capture:
 ```
-1. Embedding fails -> Capture to Git Notes without embedding + warning
-2. Index fails -> Continue, log warning
-3. Vector fails -> Continue, log warning
-4. Git Notes fails -> Error (authoritative store must succeed)
+1. Embedding fails → Capture to Git Notes without embedding + warning
+2. Index fails → Continue, log warning
+3. Vector fails → Continue, log warning
+4. Git Notes fails → Error (authoritative store must succeed)
 ```
 
 ### Consequences
@@ -438,15 +438,15 @@ Use **backward compatible** with **manual migration** tool.
 ```rust
 // Memory struct supports optional embedding
 pub struct Memory {
- pub embedding: Option<Vec<f32>>, // None for old memories
- //...
+    pub embedding: Option<Vec<f32>>,  // None for old memories
+    // ...
 }
 
 // Search handles missing embeddings
 fn search(&self, query: &str) -> Vec<SearchResult> {
- let text_results = self.text_search(query); // Always works
- let vector_results = self.vector_search(query); // Only for embedded
- self.fuse(text_results, vector_results)
+    let text_results = self.text_search(query);  // Always works
+    let vector_results = self.vector_search(query);  // Only for embedded
+    self.fuse(text_results, vector_results)
 }
 ```
 

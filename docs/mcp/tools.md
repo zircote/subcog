@@ -62,13 +62,13 @@ Capture a memory to persistent storage.
 
 ```json
 {
- "name": "subcog_capture",
- "arguments": {
- "namespace": "decisions",
- "content": "Use PostgreSQL for primary storage because of JSONB support",
- "tags": ["database", "architecture"],
- "source": "ARCHITECTURE.md"
- }
+  "name": "subcog_capture",
+  "arguments": {
+    "namespace": "decisions",
+    "content": "Use PostgreSQL for primary storage because of JSONB support",
+    "tags": ["database", "architecture"],
+    "source": "ARCHITECTURE.md"
+  }
 }
 ```
 
@@ -76,8 +76,8 @@ Capture a memory to persistent storage.
 
 ```json
 {
- "id": "dc58d23a35876f5a59426e81aaa81d796efa7fc1",
- "urn": "subcog://project/decisions/dc58d23a35876f5a59426e81aaa81d796efa7fc1"
+  "id": "dc58d23a35876f5a59426e81aaa81d796efa7fc1",
+  "urn": "subcog://project/decisions/dc58d23a35876f5a59426e81aaa81d796efa7fc1"
 }
 ```
 
@@ -107,14 +107,14 @@ Search for relevant memories using semantic and text search, or list all memorie
 
 ```json
 {
- "name": "subcog_recall",
- "arguments": {
- "query": "database storage decision",
- "filter": "ns:decisions since:7d",
- "mode": "hybrid",
- "detail": "medium",
- "limit": 5
- }
+  "name": "subcog_recall",
+  "arguments": {
+    "query": "database storage decision",
+    "filter": "ns:decisions since:7d",
+    "mode": "hybrid",
+    "detail": "medium",
+    "limit": 5
+  }
 }
 ```
 
@@ -122,17 +122,17 @@ Search for relevant memories using semantic and text search, or list all memorie
 
 ```json
 {
- "results": [
- {
- "id": "dc58d23a35876f5a59426e81aaa81d796efa7fc1",
- "namespace": "decisions",
- "tags": ["database", "architecture"],
- "content": "Use PostgreSQL for primary storage...",
- "score": 0.85,
- "uri": "subcog://memory/dc58d23a..."
- }
- ],
- "total": 1
+  "results": [
+    {
+      "id": "dc58d23a35876f5a59426e81aaa81d796efa7fc1",
+      "namespace": "decisions",
+      "tags": ["database", "architecture"],
+      "content": "Use PostgreSQL for primary storage...",
+      "score": 0.85,
+      "uri": "subcog://memory/dc58d23a..."
+    }
+  ],
+  "total": 1
 }
 ```
 
@@ -164,8 +164,8 @@ Get memory system status and statistics.
 
 ```json
 {
- "name": "subcog_status",
- "arguments": {}
+  "name": "subcog_status",
+  "arguments": {}
 }
 ```
 
@@ -173,29 +173,29 @@ Get memory system status and statistics.
 
 ```json
 {
- "repository": {
- "path": "/path/to/project",
- "project_id": "github.com/zircote/subcog",
- "branch": "main"
- },
- "storage": {
- "persistence": "sqlite",
- "index": "sqlite",
- "vector": "usearch"
- },
- "statistics": {
- "total_count": 42,
- "namespace_counts": {
- "decisions": 12,
- "patterns": 8,
- "learnings": 15
- },
- "recent_topics": ["database", "api", "auth"],
- "top_tags": [
- {"tag": "rust", "count": 15},
- {"tag": "database", "count": 8}
- ]
- }
+  "repository": {
+    "path": "/path/to/project",
+    "project_id": "github.com/zircote/subcog",
+    "branch": "main"
+  },
+  "storage": {
+    "persistence": "sqlite",
+    "index": "sqlite",
+    "vector": "usearch"
+  },
+  "statistics": {
+    "total_count": 42,
+    "namespace_counts": {
+      "decisions": 12,
+      "patterns": 8,
+      "learnings": 15
+    },
+    "recent_topics": ["database", "api", "auth"],
+    "top_tags": [
+      {"tag": "rust", "count": 15},
+      {"tag": "database", "count": 8}
+    ]
+  }
 }
 ```
 
@@ -218,10 +218,10 @@ Garbage collect memories from deleted branches.
 
 ```json
 {
- "name": "subcog_gc",
- "arguments": {
- "dry_run": true
- }
+  "name": "subcog_gc",
+  "arguments": {
+    "dry_run": true
+  }
 }
 ```
 
@@ -229,10 +229,10 @@ Garbage collect memories from deleted branches.
 
 ```json
 {
- "stale_branches": ["feature/old-auth", "bugfix/issue-42"],
- "memories_affected": 17,
- "dry_run": true,
- "status": "preview"
+  "stale_branches": ["feature/old-auth", "bugfix/issue-42"],
+  "memories_affected": 17,
+  "dry_run": true,
+  "status": "preview"
 }
 ```
 
@@ -248,8 +248,8 @@ List available memory namespaces.
 
 ```json
 {
- "name": "subcog_namespaces",
- "arguments": {}
+  "name": "subcog_namespaces",
+  "arguments": {}
 }
 ```
 
@@ -257,18 +257,18 @@ List available memory namespaces.
 
 ```json
 {
- "namespaces": [
- {
- "name": "decisions",
- "description": "Architectural and design decisions",
- "signal_words": ["decided", "chose", "going with"]
- },
- {
- "name": "patterns",
- "description": "Discovered patterns and conventions",
- "signal_words": ["always", "never", "convention"]
- }
- ]
+  "namespaces": [
+    {
+      "name": "decisions",
+      "description": "Architectural and design decisions",
+      "signal_words": ["decided", "chose", "going with"]
+    },
+    {
+      "name": "patterns",
+      "description": "Discovered patterns and conventions",
+      "signal_words": ["always", "never", "convention"]
+    }
+  ]
 }
 ```
 
@@ -291,12 +291,12 @@ Consolidate related memories using LLM to merge and summarize.
 
 ```json
 {
- "name": "subcog_consolidate",
- "arguments": {
- "namespace": "decisions",
- "strategy": "merge",
- "dry_run": true
- }
+  "name": "subcog_consolidate",
+  "arguments": {
+    "namespace": "decisions",
+    "strategy": "merge",
+    "dry_run": true
+  }
 }
 ```
 
@@ -304,15 +304,15 @@ Consolidate related memories using LLM to merge and summarize.
 
 ```json
 {
- "groups_found": 3,
- "candidate_merges": [
- {
- "memories": ["dc58d23a", "1314b968"],
- "similarity": 0.92,
- "proposed_content": "Merged: Use PostgreSQL..."
- }
- ],
- "dry_run": true
+  "groups_found": 3,
+  "candidate_merges": [
+    {
+      "memories": ["dc58d23a", "1314b968"],
+      "similarity": 0.92,
+      "proposed_content": "Merged: Use PostgreSQL..."
+    }
+  ],
+  "dry_run": true
 }
 ```
 
@@ -335,13 +335,13 @@ Enrich a memory with better structure, tags, and context using LLM.
 
 ```json
 {
- "name": "subcog_enrich",
- "arguments": {
- "memory_id": "dc58d23a35876f5a59426e81aaa81d796efa7fc1",
- "enrich_tags": true,
- "enrich_structure": true,
- "add_context": true
- }
+  "name": "subcog_enrich",
+  "arguments": {
+    "memory_id": "dc58d23a35876f5a59426e81aaa81d796efa7fc1",
+    "enrich_tags": true,
+    "enrich_structure": true,
+    "add_context": true
+  }
 }
 ```
 
@@ -349,12 +349,12 @@ Enrich a memory with better structure, tags, and context using LLM.
 
 ```json
 {
- "memory_id": "dc58d23a...",
- "changes": {
- "tags_added": ["postgresql", "jsonb", "persistence"],
- "structure_improved": true,
- "context_added": "This decision impacts the storage layer..."
- }
+  "memory_id": "dc58d23a...",
+  "changes": {
+    "tags_added": ["postgresql", "jsonb", "persistence"],
+    "structure_improved": true,
+    "context_added": "This decision impacts the storage layer..."
+  }
 }
 ```
 
@@ -362,7 +362,7 @@ Enrich a memory with better structure, tags, and context using LLM.
 
 ### subcog_sync (DEPRECATED)
 
-> **️ Deprecated**: SQLite is now the authoritative storage layer. This tool is a no-op and will be removed in a future version.
+> **⚠️ Deprecated**: SQLite is now the authoritative storage layer. This tool is a no-op and will be removed in a future version.
 
 Sync memories with git remote.
 
@@ -376,10 +376,10 @@ Sync memories with git remote.
 
 ```json
 {
- "name": "subcog_sync",
- "arguments": {
- "direction": "full"
- }
+  "name": "subcog_sync",
+  "arguments": {
+    "direction": "full"
+  }
 }
 ```
 
@@ -387,8 +387,8 @@ Sync memories with git remote.
 
 ```json
 {
- "message": "subcog_sync is deprecated. SQLite is now the authoritative storage layer.",
- "status": "deprecated"
+  "message": "subcog_sync is deprecated. SQLite is now the authoritative storage layer.",
+  "status": "deprecated"
 }
 ```
 
@@ -408,8 +408,8 @@ Rebuild the search index from the persistence layer.
 
 ```json
 {
- "name": "subcog_reindex",
- "arguments": {}
+  "name": "subcog_reindex",
+  "arguments": {}
 }
 ```
 
@@ -417,9 +417,9 @@ Rebuild the search index from the persistence layer.
 
 ```json
 {
- "indexed": 42,
- "duration_ms": 1250,
- "status": "success"
+  "indexed": 42,
+  "duration_ms": 1250,
+  "status": "success"
 }
 ```
 
@@ -462,7 +462,7 @@ Unified prompt template management with action-based dispatch.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `name` | string | Yes | Prompt name to retrieve |
-| `domain` | string | No | Domain to search (cascades: project -> user -> org) |
+| `domain` | string | No | Domain to search (cascades: project → user → org) |
 
 #### action: run
 
@@ -483,15 +483,15 @@ Unified prompt template management with action-based dispatch.
 
 ```json
 {
- "name": "subcog_prompts",
- "arguments": {
- "action": "save",
- "name": "code-review",
- "description": "Comprehensive code review",
- "content": "Review {{file}} for:\n- {{issue_type}} issues\n- Best practices",
- "domain": "project",
- "tags": ["review", "quality"]
- }
+  "name": "subcog_prompts",
+  "arguments": {
+    "action": "save",
+    "name": "code-review",
+    "description": "Comprehensive code review",
+    "content": "Review {{file}} for:\n- {{issue_type}} issues\n- Best practices",
+    "domain": "project",
+    "tags": ["review", "quality"]
+  }
 }
 ```
 
@@ -499,15 +499,15 @@ Unified prompt template management with action-based dispatch.
 
 ```json
 {
- "name": "subcog_prompts",
- "arguments": {
- "action": "run",
- "name": "code-review",
- "variables": {
- "file": "src/main.rs",
- "issue_type": "security"
- }
- }
+  "name": "subcog_prompts",
+  "arguments": {
+    "action": "run",
+    "name": "code-review",
+    "variables": {
+      "file": "src/main.rs",
+      "issue_type": "security"
+    }
+  }
 }
 ```
 
@@ -549,14 +549,14 @@ Unified context template management for formatting memories in hooks and respons
 
 ```json
 {
- "name": "subcog_templates",
- "arguments": {
- "action": "save",
- "name": "search-results",
- "content": "# {{title}}\n\n{{#each memories}}\n- **{{memory.namespace}}**: {{memory.content}}\n{{/each}}",
- "description": "Format search results for display",
- "domain": "user"
- }
+  "name": "subcog_templates",
+  "arguments": {
+    "action": "save",
+    "name": "search-results",
+    "content": "# {{title}}\n\n{{#each memories}}\n- **{{memory.namespace}}**: {{memory.content}}\n{{/each}}",
+    "description": "Format search results for display",
+    "domain": "user"
+  }
 }
 ```
 
@@ -564,14 +564,14 @@ Unified context template management for formatting memories in hooks and respons
 
 ```json
 {
- "name": "subcog_templates",
- "arguments": {
- "action": "render",
- "name": "search-results",
- "query": "authentication patterns",
- "limit": 10,
- "variables": { "title": "Auth Patterns" }
- }
+  "name": "subcog_templates",
+  "arguments": {
+    "action": "render",
+    "name": "search-results",
+    "query": "authentication patterns",
+    "limit": 10,
+    "variables": { "title": "Auth Patterns" }
+  }
 }
 ```
 
@@ -623,12 +623,12 @@ No additional parameters. Returns graph statistics.
 
 ```json
 {
- "name": "subcog_graph",
- "arguments": {
- "operation": "neighbors",
- "entity_id": "entity_postgres",
- "depth": 2
- }
+  "name": "subcog_graph",
+  "arguments": {
+    "operation": "neighbors",
+    "entity_id": "entity_postgres",
+    "depth": 2
+  }
 }
 ```
 
@@ -636,13 +636,13 @@ No additional parameters. Returns graph statistics.
 
 ```json
 {
- "name": "subcog_graph",
- "arguments": {
- "operation": "visualize",
- "format": "mermaid",
- "entity_types": ["Person", "Technology"],
- "depth": 2
- }
+  "name": "subcog_graph",
+  "arguments": {
+    "operation": "visualize",
+    "format": "mermaid",
+    "entity_types": ["Person", "Technology"],
+    "depth": 2
+  }
 }
 ```
 
@@ -695,13 +695,13 @@ Unified entity management with CRUD, extraction, and merge operations.
 
 ```json
 {
- "name": "subcog_entities",
- "arguments": {
- "action": "extract",
- "content": "Alice from Anthropic uses Rust to build the Claude API.",
- "store": true,
- "min_confidence": 0.7
- }
+  "name": "subcog_entities",
+  "arguments": {
+    "action": "extract",
+    "content": "Alice from Anthropic uses Rust to build the Claude API.",
+    "store": true,
+    "min_confidence": 0.7
+  }
 }
 ```
 
@@ -740,13 +740,13 @@ Unified relationship management with CRUD and inference operations.
 
 ```json
 {
- "name": "subcog_relationships",
- "arguments": {
- "action": "infer",
- "entity_ids": ["entity_alice", "entity_postgres"],
- "store": true,
- "min_confidence": 0.7
- }
+  "name": "subcog_relationships",
+  "arguments": {
+    "action": "infer",
+    "entity_ids": ["entity_alice", "entity_postgres"],
+    "store": true,
+    "min_confidence": 0.7
+  }
 }
 ```
 
@@ -754,7 +754,7 @@ Unified relationship management with CRUD and inference operations.
 
 ## Legacy Prompt Tools (Deprecated)
 
-> **️ Deprecated**: Use `subcog_prompts` with the appropriate `action` parameter instead. Legacy tools remain available for backward compatibility.
+> **⚠️ Deprecated**: Use `subcog_prompts` with the appropriate `action` parameter instead. Legacy tools remain available for backward compatibility.
 
 ### prompt_save, prompt_list, prompt_get, prompt_run, prompt_delete
 

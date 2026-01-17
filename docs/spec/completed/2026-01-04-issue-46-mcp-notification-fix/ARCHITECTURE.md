@@ -15,25 +15,25 @@ The fix modifies the MCP server's message processing pipeline to detect and prop
 ### Architecture Diagram
 
 ```
- ┌─────────────────────────────────────────────────────────┐
- │ MCP Server │
- │ │
- stdin ──────────► │ ┌──────────┐ ┌─────────────────┐ ┌────────────┐ │
- │ │ Parse │───►│ Notification │───►│ Dispatch │ │
- │ │ JSON │ │ Detection (NEW) │ │ Method │ │
- │ └──────────┘ └─────────────────┘ └────────────┘ │
- │ │ │ │
- │ │ is_notification? │ │
- │ ▼ ▼ │
- │ ┌──────────┐ ┌──────────┐ │
- │ │ Skip │ │ Format │ │
- │ │ Response │ │ Response │ │
- │ └──────────┘ └──────────┘ │
- │ │ │ │
- │ ▼ ▼ │
- stdout ◄───────── │ (nothing) response │
- │ │
- └─────────────────────────────────────────────────────────┘
+                    ┌─────────────────────────────────────────────────────────┐
+                    │                    MCP Server                            │
+                    │                                                          │
+  stdin ──────────► │  ┌──────────┐    ┌─────────────────┐    ┌────────────┐ │
+                    │  │  Parse   │───►│ Notification    │───►│  Dispatch  │ │
+                    │  │  JSON    │    │ Detection (NEW) │    │  Method    │ │
+                    │  └──────────┘    └─────────────────┘    └────────────┘ │
+                    │                         │                      │        │
+                    │                         │ is_notification?     │        │
+                    │                         ▼                      ▼        │
+                    │                   ┌──────────┐          ┌──────────┐   │
+                    │                   │  Skip    │          │  Format  │   │
+                    │                   │ Response │          │ Response │   │
+                    │                   └──────────┘          └──────────┘   │
+                    │                         │                      │        │
+                    │                         ▼                      ▼        │
+  stdout ◄───────── │                    (nothing)              response      │
+                    │                                                          │
+                    └─────────────────────────────────────────────────────────┘
 ```
 
 ### Key Design Decisions
@@ -54,11 +54,11 @@ The fix modifies the MCP server's message processing pipeline to detect and prop
 
 ```rust
 impl McpServer {
- /// Returns true if the request is a notification (no id field).
- /// Per JSON-RPC 2.0: "A Notification is a Request object without an 'id' member."
- fn is_notification(request: &JsonRpcRequest) -> bool {
- request.id.is_none()
- }
+    /// Returns true if the request is a notification (no id field).
+    /// Per JSON-RPC 2.0: "A Notification is a Request object without an 'id' member."
+    fn is_notification(request: &JsonRpcRequest) -> bool {
+        request.id.is_none()
+    }
 }
 ```
 
@@ -83,17 +83,17 @@ self.format_response(req.id, result)
 ```rust
 // Check if notification before processing
 if Self::is_notification(&req) {
- // Log at debug level for observability
- tracing::debug!(method = %req.method, "Received notification, no response");
+    // Log at debug level for observability
+    tracing::debug!(method = %req.method, "Received notification, no response");
 
- // Increment notification metric
- metrics::increment_counter!(
- "mcp_notifications_total",
- "method" => req.method.clone()
- );
+    // Increment notification metric
+    metrics::increment_counter!(
+        "mcp_notifications_total",
+        "method" => req.method.clone()
+    );
 
- // Return empty string - caller checks and skips output
- return String::new();
+    // Return empty string - caller checks and skips output
+    return String::new();
 }
 
 // Normal request processing continues...
@@ -110,8 +110,8 @@ writeln!(stdout, "{response}")?;
 
 // New: Skip write if empty (notification)
 let response = self.process_request(&request_str);
-if!response.is_empty() {
- writeln!(stdout, "{response}")?;
+if !response.is_empty() {
+    writeln!(stdout, "{response}")?;
 }
 ```
 
@@ -131,9 +131,9 @@ if!response.is_empty() {
 ```rust
 #[derive(Debug, Serialize)]
 struct JsonRpcErrorResponse {
- jsonrpc: String,
- id: Value, // Always present, can be null
- error: JsonRpcError,
+    jsonrpc: String,
+    id: Value,  // Always present, can be null
+    error: JsonRpcError,
 }
 ```
 
@@ -141,17 +141,17 @@ struct JsonRpcErrorResponse {
 
 ```rust
 fn format_error(&self, id: Option<Value>, code: i32, message: &str) -> String {
- let response = JsonRpcResponse {
- jsonrpc: "2.0".to_string(),
- id: Some(id.unwrap_or(Value::Null)), // Always Some, may contain null
- result: None,
- error: Some(JsonRpcError {
- code,
- message: message.to_string(),
- data: None,
- }),
- };
- serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string())
+    let response = JsonRpcResponse {
+        jsonrpc: "2.0".to_string(),
+        id: Some(id.unwrap_or(Value::Null)),  // Always Some, may contain null
+        result: None,
+        error: Some(JsonRpcError {
+            code,
+            message: message.to_string(),
+            data: None,
+        }),
+    };
+    serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string())
 }
 ```
 
@@ -163,12 +163,12 @@ fn format_error(&self, id: Option<Value>, code: i32, message: &str) -> String {
 
 ```
 1. stdin: {"jsonrpc":"2.0","method":"notifications/initialized"}
-2. Parse: JsonRpcRequest { id: None, method: "notifications/initialized",... }
-3. is_notification() -> true
+2. Parse: JsonRpcRequest { id: None, method: "notifications/initialized", ... }
+3. is_notification() → true
 4. Log: debug!("Received notification, no response")
 5. Metric: mcp_notifications_total{method="notifications/initialized"} += 1
 6. Return: "" (empty string)
-7. Caller: if!response.is_empty() {... } -> skipped
+7. Caller: if !response.is_empty() { ... } → skipped
 8. stdout: (nothing)
 ```
 
@@ -176,12 +176,12 @@ fn format_error(&self, id: Option<Value>, code: i32, message: &str) -> String {
 
 ```
 1. stdin: {"jsonrpc":"2.0","id":1,"method":"initialize","params":{...}}
-2. Parse: JsonRpcRequest { id: Some(1), method: "initialize",... }
-3. is_notification() -> false
+2. Parse: JsonRpcRequest { id: Some(1), method: "initialize", ... }
+3. is_notification() → false
 4. Dispatch: handle_initialize(params)
-5. Format: JsonRpcResponse { id: Some(1), result: {...},... }
+5. Format: JsonRpcResponse { id: Some(1), result: {...}, ... }
 6. Return: "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{...}}"
-7. Caller: if!response.is_empty() {... } -> writes response
+7. Caller: if !response.is_empty() { ... } → writes response
 8. stdout: {"jsonrpc":"2.0","id":1,"result":{...}}
 ```
 
@@ -201,46 +201,46 @@ fn format_error(&self, id: Option<Value>, code: i32, message: &str) -> String {
 ```rust
 #[cfg(test)]
 mod tests {
- use super::*;
+    use super::*;
 
- #[test]
- fn test_is_notification_with_id() {
- let req = JsonRpcRequest {
- _jsonrpc: "2.0".to_string(),
- id: Some(Value::Number(1.into())),
- method: "initialize".to_string(),
- params: None,
- };
- assert!(!McpServer::is_notification(&req));
- }
+    #[test]
+    fn test_is_notification_with_id() {
+        let req = JsonRpcRequest {
+            _jsonrpc: "2.0".to_string(),
+            id: Some(Value::Number(1.into())),
+            method: "initialize".to_string(),
+            params: None,
+        };
+        assert!(!McpServer::is_notification(&req));
+    }
 
- #[test]
- fn test_is_notification_without_id() {
- let req = JsonRpcRequest {
- _jsonrpc: "2.0".to_string(),
- id: None,
- method: "notifications/initialized".to_string(),
- params: None,
- };
- assert!(McpServer::is_notification(&req));
- }
+    #[test]
+    fn test_is_notification_without_id() {
+        let req = JsonRpcRequest {
+            _jsonrpc: "2.0".to_string(),
+            id: None,
+            method: "notifications/initialized".to_string(),
+            params: None,
+        };
+        assert!(McpServer::is_notification(&req));
+    }
 
- #[test]
- fn test_notification_returns_empty_response() {
- let mut server = McpServer::new();
- let notification = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
- let response = server.process_request(notification);
- assert!(response.is_empty());
- }
+    #[test]
+    fn test_notification_returns_empty_response() {
+        let mut server = McpServer::new();
+        let notification = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
+        let response = server.process_request(notification);
+        assert!(response.is_empty());
+    }
 
- #[test]
- fn test_error_response_includes_id_null() {
- let server = McpServer::new();
- let error_response = server.format_error(None, -32700, "Parse error");
- let parsed: Value = serde_json::from_str(&error_response).unwrap();
- assert!(parsed.get("id").is_some());
- assert!(parsed["id"].is_null());
- }
+    #[test]
+    fn test_error_response_includes_id_null() {
+        let server = McpServer::new();
+        let error_response = server.format_error(None, -32700, "Parse error");
+        let parsed: Value = serde_json::from_str(&error_response).unwrap();
+        assert!(parsed.get("id").is_some());
+        assert!(parsed["id"].is_null());
+    }
 }
 ```
 
@@ -249,20 +249,20 @@ mod tests {
 ```rust
 #[test]
 fn test_notification_no_output() {
- // Spawn subcog serve, send notification, verify no response
- let output = Command::new("target/debug/subcog")
-.arg("serve")
-.stdin(Stdio::piped())
-.stdout(Stdio::piped())
-.spawn()
-.expect("Failed to start server");
+    // Spawn subcog serve, send notification, verify no response
+    let output = Command::new("target/debug/subcog")
+        .arg("serve")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Failed to start server");
 
- // Send initialize (request) + notifications/initialized (notification)
- let input = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}
+    // Send initialize (request) + notifications/initialized (notification)
+    let input = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}
 {"jsonrpc":"2.0","method":"notifications/initialized"}"#;
 
- // Write input, read output
- // Expect exactly 1 response (for initialize), not 2
+    // Write input, read output
+    // Expect exactly 1 response (for initialize), not 2
 }
 ```
 

@@ -54,13 +54,13 @@ The `FastEmbedEmbedder` generates pseudo-embeddings using hash-based word tokeni
 
 ```rust
 fn pseudo_embed(&self, text: &str) -> Vec<f32> {
- let mut embedding = vec![0.0f32; self.dimensions];
- for (i, word) in text.split_whitespace().enumerate() {
- let mut hasher = DefaultHasher::new();
- word.hash(&mut hasher);
- let hash = hasher.finish();
- // Distributes hash across dimensions - NOT SEMANTIC
- }
+    let mut embedding = vec![0.0f32; self.dimensions];
+    for (i, word) in text.split_whitespace().enumerate() {
+        let mut hasher = DefaultHasher::new();
+        word.hash(&mut hasher);
+        let hash = hasher.finish();
+        // Distributes hash across dimensions - NOT SEMANTIC
+    }
 }
 ```
 
@@ -72,8 +72,8 @@ fn pseudo_embed(&self, text: &str) -> Vec<f32> {
 
 ```rust
 const fn vector_search(&self, _query: &str, _filter: &SearchFilter, _limit: usize)
- -> Result<Vec<SearchHit>> {
- Ok(Vec::new()) // ALWAYS RETURNS EMPTY
+    -> Result<Vec<SearchHit>> {
+    Ok(Vec::new())  // ALWAYS RETURNS EMPTY
 }
 ```
 
@@ -85,8 +85,8 @@ const fn vector_search(&self, _query: &str, _filter: &SearchFilter, _limit: usiz
 
 ```rust
 let memory = Memory {
- embedding: None, // HARDCODED TO NONE
- //...
+    embedding: None,  // HARDCODED TO NONE
+    // ...
 };
 // Missing: index.index(&memory)?;
 // Missing: vector.upsert(&memory)?;
@@ -100,9 +100,9 @@ let memory = Memory {
 
 ```rust
 pub struct RecallService {
- index: Option<SqliteBackend>,
- // Missing: embedder: Option<Arc<dyn Embedder>>,
- // Missing: vector: Option<Arc<dyn VectorBackend>>,
+    index: Option<SqliteBackend>,
+    // Missing: embedder: Option<Arc<dyn Embedder>>,
+    // Missing: vector: Option<Arc<dyn VectorBackend>>,
 }
 ```
 
@@ -206,7 +206,7 @@ pub struct RecallService {
 |----|-------------|------|-----------------|
 | TR-001 | Unit tests for FastEmbedEmbedder | Unit | 100% |
 | TR-002 | Unit tests for vector_search() | Unit | 100% |
-| TR-003 | Integration test: capture -> recall round-trip | Integration | Core flow |
+| TR-003 | Integration test: capture → recall round-trip | Integration | Core flow |
 | TR-004 | Integration test: semantic similarity | Integration | Similar text finds similar |
 | TR-005 | Property test: score range 0.0-1.0 | Property | All inputs |
 | TR-006 | Performance benchmark: embedding latency | Benchmark | <50ms p99 |

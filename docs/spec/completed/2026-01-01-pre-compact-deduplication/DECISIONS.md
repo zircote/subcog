@@ -17,7 +17,7 @@ The deduplication service needs to perform three checks: exact match, semantic s
 
 ### Decision
 
-Evaluate in order: **Exact Match -> Semantic Similarity -> Recent Capture**, with short-circuit on first match.
+Evaluate in order: **Exact Match → Semantic Similarity → Recent Capture**, with short-circuit on first match.
 
 ### Consequences
 

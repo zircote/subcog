@@ -104,7 +104,7 @@ Memories are categorized into 14 namespaces:
 | `testing` | Test strategies and edge cases | "test", "edge case", "coverage" |
 | `performance` | Performance insights and benchmarks | "latency", "throughput", "optimization" |
 | `help` | Help and usage information | "how to", "usage", "example" |
-| `prompts` | Prompt templates (reserved) |. |
+| `prompts` | Prompt templates (reserved) | — |
 
 ## Domain Scopes
 
@@ -132,12 +132,12 @@ Add to your Claude Code configuration:
 
 ```json
 {
- "mcpServers": {
- "subcog": {
- "command": "subcog",
- "args": ["serve"]
- }
- }
+  "mcpServers": {
+    "subcog": {
+      "command": "subcog",
+      "args": ["serve"]
+    }
+  }
 }
 ```
 

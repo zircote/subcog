@@ -69,44 +69,44 @@ Subcog Memory System
 
 Repository
 ──────────
- Path: /Users/user/project
- Project: github.com/zircote/subcog
- Branch: main
+  Path: /Users/user/project
+  Project: github.com/zircote/subcog
+  Branch: main
 
 Storage
 ───────
- Persistence: SQLite (~/.local/share/subcog/subcog.db)
- Index: SQLite + FTS5 (~/.local/share/subcog/subcog.db)
- Vector: usearch HNSW (~/.local/share/subcog/vectors.usearch)
+  Persistence: SQLite (~/.local/share/subcog/subcog.db)
+  Index: SQLite + FTS5 (~/.local/share/subcog/subcog.db)
+  Vector: usearch HNSW (~/.local/share/subcog/vectors.usearch)
 
 Statistics
 ──────────
- Total memories: 42
+  Total memories: 42
 
- By namespace:
- decisions ████████████ 12
- patterns ████████ 8
- learnings ███████████████ 15
- context ███████ 7
+  By namespace:
+    decisions    ████████████ 12
+    patterns     ████████     8
+    learnings    ███████████████ 15
+    context      ███████      7
 
- By project:
- github.com/zircote/subcog ████████████████ 35
- github.com/zircote/other ███████ 7
+  By project:
+    github.com/zircote/subcog  ████████████████ 35
+    github.com/zircote/other   ███████ 7
 
- Recent activity (7d): 8 captures
+  Recent activity (7d): 8 captures
 
- Top tags:
- rust (15), database (8), api (6), security (4)
+  Top tags:
+    rust (15), database (8), api (6), security (4)
 
 Features
 ────────
- Secrets filter
- PII filter
- Multi-domain
- Audit log (disabled)
- LLM features
- Auto-capture (disabled)
- Consolidation (disabled)
+  ✓ Secrets filter
+  ✓ PII filter
+  ✓ Multi-domain
+  ✗ Audit log (disabled)
+  ✓ LLM features
+  ✗ Auto-capture (disabled)
+  ✗ Consolidation (disabled)
 ```
 
 ### JSON Output
@@ -118,56 +118,56 @@ subcog status --json
 Output:
 ```json
 {
- "repository": {
- "path": "/Users/user/project",
- "project_id": "github.com/zircote/subcog",
- "branch": "main"
- },
- "storage": {
- "persistence": {
- "type": "sqlite",
- "path": "~/.local/share/subcog/subcog.db"
- },
- "index": {
- "type": "sqlite",
- "path": "~/.local/share/subcog/subcog.db",
- "fts5": true
- },
- "vector": {
- "type": "usearch",
- "path": "~/.local/share/subcog/vectors.usearch",
- "dimensions": 384
- }
- },
- "statistics": {
- "total": 42,
- "by_namespace": {
- "decisions": 12,
- "patterns": 8,
- "learnings": 15,
- "context": 7
- },
- "by_project": {
- "github.com/zircote/subcog": 35,
- "github.com/zircote/other": 7
- },
- "recent_7d": 8,
- "top_tags": [
- {"tag": "rust", "count": 15},
- {"tag": "database", "count": 8},
- {"tag": "api", "count": 6},
- {"tag": "security", "count": 4}
- ]
- },
- "features": {
- "secrets_filter": true,
- "pii_filter": true,
- "multi_domain": true,
- "audit_log": false,
- "llm_features": true,
- "auto_capture": false,
- "consolidation": false
- }
+  "repository": {
+    "path": "/Users/user/project",
+    "project_id": "github.com/zircote/subcog",
+    "branch": "main"
+  },
+  "storage": {
+    "persistence": {
+      "type": "sqlite",
+      "path": "~/.local/share/subcog/subcog.db"
+    },
+    "index": {
+      "type": "sqlite",
+      "path": "~/.local/share/subcog/subcog.db",
+      "fts5": true
+    },
+    "vector": {
+      "type": "usearch",
+      "path": "~/.local/share/subcog/vectors.usearch",
+      "dimensions": 384
+    }
+  },
+  "statistics": {
+    "total": 42,
+    "by_namespace": {
+      "decisions": 12,
+      "patterns": 8,
+      "learnings": 15,
+      "context": 7
+    },
+    "by_project": {
+      "github.com/zircote/subcog": 35,
+      "github.com/zircote/other": 7
+    },
+    "recent_7d": 8,
+    "top_tags": [
+      {"tag": "rust", "count": 15},
+      {"tag": "database", "count": 8},
+      {"tag": "api", "count": 6},
+      {"tag": "security", "count": 4}
+    ]
+  },
+  "features": {
+    "secrets_filter": true,
+    "pii_filter": true,
+    "multi_domain": true,
+    "audit_log": false,
+    "llm_features": true,
+    "auto_capture": false,
+    "consolidation": false
+  }
 }
 ```
 

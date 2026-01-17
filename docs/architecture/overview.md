@@ -52,27 +52,27 @@ Dependency injection container:
 ```rust
 pub struct ServiceContainer<P, I, V>
 where
- P: PersistenceBackend,
- I: IndexBackend,
- V: VectorBackend,
+    P: PersistenceBackend,
+    I: IndexBackend,
+    V: VectorBackend,
 {
- capture: CaptureService<P, I, V>,
- recall: RecallService<I, V>,
- prompt: PromptService<P>,
- sync: SyncService<P>,
- gc: GarbageCollector<I>,
- consolidation: ConsolidationService<P, I, V>,
- context: ContextBuilderService<I, V>,
+    capture: CaptureService<P, I, V>,
+    recall: RecallService<I, V>,
+    prompt: PromptService<P>,
+    sync: SyncService<P>,
+    gc: GarbageCollector<I>,
+    consolidation: ConsolidationService<P, I, V>,
+    context: ContextBuilderService<I, V>,
 }
 ```
 
 **Current Implementation:**
 ```rust
 pub struct ServiceContainer {
- capture: CaptureService,
- sync: SyncService,
- index_manager: Mutex<DomainIndexManager>,
- repo_path: Option<PathBuf>,
+    capture: CaptureService,
+    sync: SyncService,
+    index_manager: Mutex<DomainIndexManager>,
+    repo_path: Option<PathBuf>,
 }
 ```
 
@@ -87,7 +87,7 @@ pub struct ServiceContainer {
 | `GarbageCollector` | Branch-based memory cleanup |
 | `ConsolidationService` | LLM-powered memory merging |
 | `ContextBuilderService` | Adaptive context building |
-| `TopicIndexService` | Topic -> memory mapping |
+| `TopicIndexService` | Topic → memory mapping |
 
 ### 3. Storage Layer
 
@@ -100,13 +100,13 @@ Generic storage facade:
 ```rust
 pub struct CompositeStorage<P, I, V>
 where
- P: PersistenceBackend,
- I: IndexBackend,
- V: VectorBackend,
+    P: PersistenceBackend,
+    I: IndexBackend,
+    V: VectorBackend,
 {
- persistence: P,
- index: I,
- vector: V,
+    persistence: P,
+    index: I,
+    vector: V,
 }
 ```
 
@@ -116,34 +116,34 @@ where
 ```rust
 #[async_trait]
 pub trait PersistenceBackend: Send + Sync {
- async fn store(&self, memory: &Memory) -> Result<MemoryId>;
- async fn retrieve(&self, id: &MemoryId) -> Result<Option<Memory>>;
- async fn delete(&self, id: &MemoryId) -> Result<bool>;
- async fn list(&self, filter: &PersistenceFilter) -> Result<Vec<Memory>>;
+    async fn store(&self, memory: &Memory) -> Result<MemoryId>;
+    async fn retrieve(&self, id: &MemoryId) -> Result<Option<Memory>>;
+    async fn delete(&self, id: &MemoryId) -> Result<bool>;
+    async fn list(&self, filter: &PersistenceFilter) -> Result<Vec<Memory>>;
 }
 ```
 
 **Current Implementation - Sync:**
 ```rust
 pub trait PersistenceBackend {
- fn store(&mut self, memory: &Memory) -> Result<()>;
- fn get(&self, id: &MemoryId) -> Result<Option<Memory>>;
- fn delete(&mut self, id: &MemoryId) -> Result<bool>;
- fn list(&self, filter: Option<&SearchFilter>) -> Result<Vec<Memory>>;
+    fn store(&mut self, memory: &Memory) -> Result<()>;
+    fn get(&self, id: &MemoryId) -> Result<Option<Memory>>;
+    fn delete(&mut self, id: &MemoryId) -> Result<bool>;
+    fn list(&self, filter: Option<&SearchFilter>) -> Result<Vec<Memory>>;
 }
 
 pub trait IndexBackend {
- fn index(&mut self, memory: &Memory) -> Result<()>;
- fn search(&self, filter: &SearchFilter) -> Result<Vec<MemoryResult>>;
- fn reindex(&mut self, memories: &[Memory]) -> Result<()>;
- fn get_distinct_branches(&self) -> Result<Vec<String>>;
- fn update_status(&mut self, id: &MemoryId, status: MemoryStatus) -> Result<()>;
+    fn index(&mut self, memory: &Memory) -> Result<()>;
+    fn search(&self, filter: &SearchFilter) -> Result<Vec<MemoryResult>>;
+    fn reindex(&mut self, memories: &[Memory]) -> Result<()>;
+    fn get_distinct_branches(&self) -> Result<Vec<String>>;
+    fn update_status(&mut self, id: &MemoryId, status: MemoryStatus) -> Result<()>;
 }
 
 pub trait VectorBackend {
- fn upsert(&mut self, id: &MemoryId, embedding: &[f32]) -> Result<()>;
- fn search(&self, embedding: &[f32], limit: usize) -> Result<Vec<(MemoryId, f32)>>;
- fn rebuild(&mut self, items: &[(MemoryId, Vec<f32>)]) -> Result<()>;
+    fn upsert(&mut self, id: &MemoryId, embedding: &[f32]) -> Result<()>;
+    fn search(&self, embedding: &[f32], limit: usize) -> Result<Vec<(MemoryId, f32)>>;
+    fn rebuild(&mut self, items: &[(MemoryId, Vec<f32>)]) -> Result<()>;
 }
 ```
 
@@ -154,114 +154,114 @@ pub trait VectorBackend {
 **Current Implementation:**
 ```
 User Input
- │
- ▼
+    │
+    ▼
 ┌─────────────────┐
-│ Security Check │ ─── Block if secrets detected
-│ (secrets) │
+│ Security Check  │ ─── Block if secrets detected
+│   (secrets)     │
 └────────┬────────┘
- │
- ▼
+         │
+         ▼
 ┌─────────────────┐
-│ Context Detect │ ─── Auto-detect project/branch from git
-│ (GitContext) │
+│ Context Detect  │ ─── Auto-detect project/branch from git
+│  (GitContext)   │
 └────────┬────────┘
- │
- ▼
+         │
+         ▼
 ┌─────────────────┐
-│ Create Memory │ ─── Generate MemoryId, add metadata + facets
-│ Object │
+│ Create Memory   │ ─── Generate MemoryId, add metadata + facets
+│    Object       │
 └────────┬────────┘
- │
- ▼
+         │
+         ▼
 ┌─────────────────┐
-│ SQLite │ ─── Store to ~/.local/share/subcog/subcog.db
-│ Store │
+│     SQLite      │ ─── Store to ~/.local/share/subcog/subcog.db
+│     Store       │
 └────────┬────────┘
- │
- ▼
- Return URN
+         │
+         ▼
+    Return URN
 ```
 
 ### Search Flow
 
 ```
 Query
- │
- ├────────────────────────┬────────────────────┐
- ▼ ▼ ▼
-┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-│ Embedding │ │ BM25 Text │ │ Filter │
-│ Search │ │ Search │ │ (ns, tag, │
-│ │ │ │ │ project, │
-│ │ │ │ │ branch) │
-└──────┬──────┘ └──────┬──────┘ └──────┬──────┘
- │ │ │
- ▼ ▼ ▼
- Vector Results Text Results Filtered IDs
- │ │ │
- └────────────────────┴────────────────────┘
- │
- ▼
- ┌─────────────────┐
- │ RRF Fusion │
- │ (k=60 constant) │
- └────────┬────────┘
- │
- ▼
- Ranked Results
+    │
+    ├────────────────────────┬────────────────────┐
+    ▼                        ▼                    ▼
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│  Embedding  │      │  BM25 Text  │      │   Filter    │
+│   Search    │      │   Search    │      │  (ns, tag,  │
+│             │      │             │      │  project,   │
+│             │      │             │      │  branch)    │
+└──────┬──────┘      └──────┬──────┘      └──────┬──────┘
+       │                    │                    │
+       ▼                    ▼                    ▼
+   Vector Results      Text Results        Filtered IDs
+       │                    │                    │
+       └────────────────────┴────────────────────┘
+                            │
+                            ▼
+                    ┌─────────────────┐
+                    │   RRF Fusion    │
+                    │ (k=60 constant) │
+                    └────────┬────────┘
+                             │
+                             ▼
+                    Ranked Results
 ```
 
 ### Garbage Collection Flow
 
 ```
 subcog gc
- │
- ▼
+    │
+    ▼
 ┌─────────────────┐
-│ Get Distinct │ ─── Query unique branches from index
-│ Branches │
+│ Get Distinct    │ ─── Query unique branches from index
+│   Branches      │
 └────────┬────────┘
- │
- ▼
+         │
+         ▼
 ┌─────────────────┐
-│ Check Branch │ ─── Verify each branch exists in git
-│ Existence │
+│ Check Branch    │ ─── Verify each branch exists in git
+│   Existence     │
 └────────┬────────┘
- │
- ▼
+         │
+         ▼
 ┌─────────────────┐
 │ Tombstone Stale │ ─── Mark memories from deleted branches
-│ Memories │
+│   Memories      │
 └────────┬────────┘
- │
- ▼
- Report Results
+         │
+         ▼
+    Report Results
 ```
 
 ### Hook Flow
 
 ```
 Claude Code Event
- │
- ▼
+        │
+        ▼
 ┌─────────────────────┐
-│ Hook Handler │
-│ (event dispatch) │
+│    Hook Handler     │
+│  (event dispatch)   │
 └──────────┬──────────┘
- │
- ┌──────┴──────┬──────────────┬──────────────┐
- ▼ ▼ ▼ ▼
-Session UserPrompt PostTool Stop
-Start Submit Use │
-│ │ │ │
-▼ ▼ ▼ ▼
-Context Intent Related Sync +
-Injection Detection Memories Summary
- │
- ▼
- Memory
- Surfacing
+           │
+    ┌──────┴──────┬──────────────┬──────────────┐
+    ▼             ▼              ▼              ▼
+Session      UserPrompt      PostTool        Stop
+Start        Submit          Use             │
+│            │               │               │
+▼            ▼               ▼               ▼
+Context      Intent          Related         Sync +
+Injection    Detection       Memories        Summary
+             │
+             ▼
+         Memory
+         Surfacing
 ```
 
 ## Configuration
@@ -269,8 +269,8 @@ Injection Detection Memories Summary
 ### Config Loading
 
 ```
-Command Line -> Environment -> Project -> User -> System -> Defaults
- (highest) (lowest)
+Command Line → Environment → Project → User → System → Defaults
+    (highest)                                        (lowest)
 ```
 
 ### Feature Flags
@@ -287,20 +287,20 @@ Tier-based feature organization:
 ```rust
 #[derive(Error, Debug)]
 pub enum MemoryError {
- #[error("Capture failed: {0}")]
- Capture(#[source] CaptureError),
+    #[error("Capture failed: {0}")]
+    Capture(#[source] CaptureError),
 
- #[error("Memory not found: {0}")]
- NotFound(String),
+    #[error("Memory not found: {0}")]
+    NotFound(String),
 
- #[error("Content blocked: security")]
- ContentBlocked,
+    #[error("Content blocked: security")]
+    ContentBlocked,
 
- #[error("Storage error: {0}")]
- Storage(#[source] StorageError),
+    #[error("Storage error: {0}")]
+    Storage(#[source] StorageError),
 
- #[error("LLM error: {0}")]
- Llm(#[source] LlmError),
+    #[error("LLM error: {0}")]
+    Llm(#[source] LlmError),
 }
 ```
 
