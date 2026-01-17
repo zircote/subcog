@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-01-17
+
+### Fixed
+
+- **Plugin**: Added missing `mcpServers` field in plugin.json to properly register MCP server with Claude Code plugin system
+
 ## [0.9.0] - 2026-01-17
 
 ### Added
