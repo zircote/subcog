@@ -8,38 +8,38 @@ The Graph Memory feature follows a **Pragmatic Balance** approach: clean archite
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      MCP Tools Layer                         │
-│  subcog_entities, subcog_relationships, subcog_graph_query   │
-│  subcog_extract_entities, subcog_entity_merge                │
-│  subcog_relationship_infer, subcog_graph_visualize           │
+│ MCP Tools Layer │
+│ subcog_entities, subcog_relationships, subcog_graph_query │
+│ subcog_extract_entities, subcog_entity_merge │
+│ subcog_relationship_infer, subcog_graph_visualize │
 └────────────────────────┬────────────────────────────────────┘
-                         │
+ │
 ┌────────────────────────▼────────────────────────────────────┐
-│                   Service Layer                              │
-│  ┌──────────────────┐  ┌─────────────────┐  ┌────────────┐ │
-│  │ GraphService     │  │ EntityExtractor │  │ GraphRAG   │ │
-│  │ - query()        │  │ - extract()     │  │ - search() │ │
-│  │ - traverse()     │  │ - infer()       │  │ - expand() │ │
-│  │ - merge()        │  │                 │  │            │ │
-│  └──────────────────┘  └─────────────────┘  └────────────┘ │
+│ Service Layer │
+│ ┌──────────────────┐ ┌─────────────────┐ ┌────────────┐ │
+│ │ GraphService │ │ EntityExtractor │ │ GraphRAG │ │
+│ │ - query() │ │ - extract() │ │ - search() │ │
+│ │ - traverse() │ │ - infer() │ │ - expand() │ │
+│ │ - merge() │ │ │ │ │ │
+│ └──────────────────┘ └─────────────────┘ └────────────┘ │
 └────────────────────────┬────────────────────────────────────┘
-                         │
+ │
 ┌────────────────────────▼────────────────────────────────────┐
-│                  Storage Trait Layer                         │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │            GraphBackend Trait                          │ │
-│  │  - store_entity(), get_entity(), search_entities()    │ │
-│  │  - store_relationship(), query_relationships()         │ │
-│  │  - traverse(), query_graph()                          │ │
-│  └────────────────────────────────────────────────────────┘ │
+│ Storage Trait Layer │
+│ ┌────────────────────────────────────────────────────────┐ │
+│ │ GraphBackend Trait │ │
+│ │ - store_entity(), get_entity(), search_entities() │ │
+│ │ - store_relationship(), query_relationships() │ │
+│ │ - traverse(), query_graph() │ │
+│ └────────────────────────────────────────────────────────┘ │
 └────────────────────────┬────────────────────────────────────┘
-                         │
+ │
 ┌────────────────────────▼────────────────────────────────────┐
-│              Backend Implementations                         │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌───────────┐ │
-│  │ SqliteGraphBack  │  │ Neo4jGraphBack   │  │ InMemory  │ │
-│  │ (primary)        │  │ (future)         │  │ (testing) │ │
-│  └──────────────────┘  └──────────────────┘  └───────────┘ │
+│ Backend Implementations │
+│ ┌──────────────────┐ ┌──────────────────┐ ┌───────────┐ │
+│ │ SqliteGraphBack │ │ Neo4jGraphBack │ │ InMemory │ │
+│ │ (primary) │ │ (future) │ │ (testing) │ │
+│ └──────────────────┘ └──────────────────┘ └───────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -47,21 +47,21 @@ The Graph Memory feature follows a **Pragmatic Balance** approach: clean archite
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    ServiceContainer                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │ Capture      │──│ Recall       │  │ Graph (NEW)      │  │
-│  │ Service      │  │ Service      │──│ Service          │  │
-│  └──────────────┘  └──────────────┘  └──────────────────┘  │
-│         │                 │                   │             │
-│  ┌──────▼─────────────────▼───────────────────▼──────────┐ │
-│  │           Existing Storage Layers                      │ │
-│  │  Persistence (SQLite) │ Index (FTS5) │ Vector (usearch)│ │
-│  └───────────────────────────────────────────────────────┘ │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │           NEW: Graph Storage Layer                    │  │
-│  │  GraphBackend (separate tables: graph_entities, etc.) │  │
-│  └──────────────────────────────────────────────────────┘  │
+│ ServiceContainer │
+│ ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐ │
+│ │ Capture │──│ Recall │ │ Graph (NEW) │ │
+│ │ Service │ │ Service │──│ Service │ │
+│ └──────────────┘ └──────────────┘ └──────────────────┘ │
+│ │ │ │ │
+│ ┌──────▼─────────────────▼───────────────────▼──────────┐ │
+│ │ Existing Storage Layers │ │
+│ │ Persistence (SQLite) │ Index (FTS5) │ Vector (usearch)│ │
+│ └───────────────────────────────────────────────────────┘ │
+│ │
+│ ┌──────────────────────────────────────────────────────┐ │
+│ │ NEW: Graph Storage Layer │ │
+│ │ GraphBackend (separate tables: graph_entities, etc.) │ │
+│ └──────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -72,37 +72,37 @@ The Graph Memory feature follows a **Pragmatic Balance** approach: clean archite
 ```
 src/
 ├── models/
-│   ├── mod.rs                    # Add graph exports
-│   ├── graph.rs                  # NEW: Entity, Relationship, GraphQuery
-│   └── temporal.rs               # NEW: ValidTimeRange, TransactionTime
+│ ├── mod.rs # Add graph exports
+│ ├── graph.rs # NEW: Entity, Relationship, GraphQuery
+│ └── temporal.rs # NEW: ValidTimeRange, TransactionTime
 │
 ├── storage/
-│   ├── mod.rs                    # Add GraphBackend export
-│   ├── traits/
-│   │   ├── mod.rs               # Add graph trait export
-│   │   └── graph.rs             # NEW: GraphBackend trait
-│   └── graph/
-│       ├── mod.rs               # NEW: Graph backend module
-│       ├── sqlite.rs            # NEW: SqliteGraphBackend
-│       └── memory.rs            # NEW: InMemoryGraphBackend (testing)
+│ ├── mod.rs # Add GraphBackend export
+│ ├── traits/
+│ │ ├── mod.rs # Add graph trait export
+│ │ └── graph.rs # NEW: GraphBackend trait
+│ └── graph/
+│ ├── mod.rs # NEW: Graph backend module
+│ ├── sqlite.rs # NEW: SqliteGraphBackend
+│ └── memory.rs # NEW: InMemoryGraphBackend (testing)
 │
 ├── services/
-│   ├── mod.rs                   # Add graph service exports
-│   ├── graph.rs                 # NEW: GraphService
-│   ├── entity_extraction.rs     # NEW: EntityExtractorService
-│   └── graph_rag.rs             # NEW: GraphRAGService
+│ ├── mod.rs # Add graph service exports
+│ ├── graph.rs # NEW: GraphService
+│ ├── entity_extraction.rs # NEW: EntityExtractorService
+│ └── graph_rag.rs # NEW: GraphRAGService
 │
 ├── mcp/
-│   └── tools/
-│       ├── handlers/
-│       │   └── graph.rs         # NEW: Graph MCP tool handlers
-│       └── definitions.rs       # Add graph tool definitions
+│ └── tools/
+│ ├── handlers/
+│ │ └── graph.rs # NEW: Graph MCP tool handlers
+│ └── definitions.rs # Add graph tool definitions
 │
 ├── llm/
-│   └── system_prompt.rs         # Add ENTITY_EXTRACTION_PROMPT
+│ └── system_prompt.rs # Add ENTITY_EXTRACTION_PROMPT
 │
 └── cli/
-    └── graph.rs                 # NEW: Graph CLI commands
+ └── graph.rs # NEW: Graph CLI commands
 ```
 
 ## 3. Data Model
@@ -115,27 +115,27 @@ pub struct EntityId(String);
 
 /// Entity type classification.
 pub enum EntityType {
-    Person,
-    Organization,
-    Concept,
-    Technology,
-    File,
+ Person,
+ Organization,
+ Concept,
+ Technology,
+ File,
 }
 
 /// An entity in the knowledge graph.
 pub struct Entity {
-    pub id: EntityId,
-    pub entity_type: EntityType,
-    pub canonical_name: String,
-    pub aliases: Vec<String>,
-    pub description: Option<String>,
-    pub domain: Domain,
-    pub project_id: Option<String>,
-    pub properties: HashMap<String, String>,
-    pub source_memory_ids: Vec<MemoryId>,
-    pub valid_time: ValidTimeRange,
-    pub transaction_time: TransactionTime,
-    pub confidence: f32,
+ pub id: EntityId,
+ pub entity_type: EntityType,
+ pub canonical_name: String,
+ pub aliases: Vec<String>,
+ pub description: Option<String>,
+ pub domain: Domain,
+ pub project_id: Option<String>,
+ pub properties: HashMap<String, String>,
+ pub source_memory_ids: Vec<MemoryId>,
+ pub valid_time: ValidTimeRange,
+ pub transaction_time: TransactionTime,
+ pub confidence: f32,
 }
 ```
 
@@ -144,27 +144,27 @@ pub struct Entity {
 ```rust
 /// Relationship type between entities.
 pub enum RelationshipType {
-    WorksAt,
-    Created,
-    Uses,
-    Implements,
-    PartOf,
-    RelatesTo,
-    MentionedIn,
-    Supersedes,
-    ConflictsWith,
+ WorksAt,
+ Created,
+ Uses,
+ Implements,
+ PartOf,
+ RelatesTo,
+ MentionedIn,
+ Supersedes,
+ ConflictsWith,
 }
 
 /// A directed relationship between two entities.
 pub struct Relationship {
-    pub from_entity: EntityId,
-    pub to_entity: EntityId,
-    pub relationship_type: RelationshipType,
-    pub properties: HashMap<String, String>,
-    pub source_memory_ids: Vec<MemoryId>,
-    pub valid_time: ValidTimeRange,
-    pub transaction_time: TransactionTime,
-    pub confidence: f32,
+ pub from_entity: EntityId,
+ pub to_entity: EntityId,
+ pub relationship_type: RelationshipType,
+ pub properties: HashMap<String, String>,
+ pub source_memory_ids: Vec<MemoryId>,
+ pub valid_time: ValidTimeRange,
+ pub transaction_time: TransactionTime,
+ pub confidence: f32,
 }
 ```
 
@@ -173,13 +173,13 @@ pub struct Relationship {
 ```rust
 /// Valid time: when the fact was true in the real world.
 pub struct ValidTimeRange {
-    pub start: DateTime<Utc>,
-    pub end: Option<DateTime<Utc>>,  // None = ongoing
+ pub start: DateTime<Utc>,
+ pub end: Option<DateTime<Utc>>, // None = ongoing
 }
 
 /// Transaction time: when the fact was recorded.
 pub struct TransactionTime {
-    pub created_at: DateTime<Utc>,
+ pub created_at: DateTime<Utc>,
 }
 ```
 
@@ -189,20 +189,20 @@ pub struct TransactionTime {
 
 ```sql
 CREATE TABLE IF NOT EXISTS graph_entities (
-    id TEXT PRIMARY KEY,
-    entity_type TEXT NOT NULL,
-    canonical_name TEXT NOT NULL,
-    aliases TEXT,                           -- JSON array
-    description TEXT,
-    domain TEXT NOT NULL,
-    project_id TEXT,
-    properties TEXT,                        -- JSON object
-    source_memory_ids TEXT NOT NULL,        -- JSON array
-    valid_time_start INTEGER NOT NULL,      -- Unix timestamp
-    valid_time_end INTEGER,                 -- NULL = ongoing
-    transaction_time INTEGER NOT NULL,
-    confidence REAL NOT NULL DEFAULT 1.0
-        CHECK(confidence >= 0.0 AND confidence <= 1.0)
+ id TEXT PRIMARY KEY,
+ entity_type TEXT NOT NULL,
+ canonical_name TEXT NOT NULL,
+ aliases TEXT, -- JSON array
+ description TEXT,
+ domain TEXT NOT NULL,
+ project_id TEXT,
+ properties TEXT, -- JSON object
+ source_memory_ids TEXT NOT NULL, -- JSON array
+ valid_time_start INTEGER NOT NULL, -- Unix timestamp
+ valid_time_end INTEGER, -- NULL = ongoing
+ transaction_time INTEGER NOT NULL,
+ confidence REAL NOT NULL DEFAULT 1.0
+ CHECK(confidence >= 0.0 AND confidence <= 1.0)
 );
 
 -- Indexes
@@ -211,14 +211,14 @@ CREATE INDEX idx_graph_entities_name ON graph_entities(canonical_name);
 CREATE INDEX idx_graph_entities_domain ON graph_entities(domain, project_id);
 CREATE INDEX idx_graph_entities_confidence ON graph_entities(confidence);
 CREATE INDEX idx_graph_entities_valid_time
-    ON graph_entities(valid_time_start, valid_time_end);
+ ON graph_entities(valid_time_start, valid_time_end);
 
 -- FTS5 for name search
 CREATE VIRTUAL TABLE IF NOT EXISTS graph_entities_fts USING fts5(
-    id,
-    canonical_name,
-    aliases,
-    description
+ id,
+ canonical_name,
+ aliases,
+ description
 );
 ```
 
@@ -226,19 +226,19 @@ CREATE VIRTUAL TABLE IF NOT EXISTS graph_entities_fts USING fts5(
 
 ```sql
 CREATE TABLE IF NOT EXISTS graph_relationships (
-    from_entity TEXT NOT NULL,
-    to_entity TEXT NOT NULL,
-    relationship_type TEXT NOT NULL,
-    properties TEXT,                        -- JSON object
-    source_memory_ids TEXT NOT NULL,        -- JSON array
-    valid_time_start INTEGER NOT NULL,
-    valid_time_end INTEGER,
-    transaction_time INTEGER NOT NULL,
-    confidence REAL NOT NULL DEFAULT 1.0
-        CHECK(confidence >= 0.0 AND confidence <= 1.0),
-    PRIMARY KEY (from_entity, to_entity, relationship_type, valid_time_start),
-    FOREIGN KEY (from_entity) REFERENCES graph_entities(id) ON DELETE CASCADE,
-    FOREIGN KEY (to_entity) REFERENCES graph_entities(id) ON DELETE CASCADE
+ from_entity TEXT NOT NULL,
+ to_entity TEXT NOT NULL,
+ relationship_type TEXT NOT NULL,
+ properties TEXT, -- JSON object
+ source_memory_ids TEXT NOT NULL, -- JSON array
+ valid_time_start INTEGER NOT NULL,
+ valid_time_end INTEGER,
+ transaction_time INTEGER NOT NULL,
+ confidence REAL NOT NULL DEFAULT 1.0
+ CHECK(confidence >= 0.0 AND confidence <= 1.0),
+ PRIMARY KEY (from_entity, to_entity, relationship_type, valid_time_start),
+ FOREIGN KEY (from_entity) REFERENCES graph_entities(id) ON DELETE CASCADE,
+ FOREIGN KEY (to_entity) REFERENCES graph_entities(id) ON DELETE CASCADE
 );
 
 -- Indexes
@@ -246,24 +246,24 @@ CREATE INDEX idx_graph_rel_from ON graph_relationships(from_entity, relationship
 CREATE INDEX idx_graph_rel_to ON graph_relationships(to_entity, relationship_type);
 CREATE INDEX idx_graph_rel_confidence ON graph_relationships(confidence);
 CREATE INDEX idx_graph_rel_valid_time
-    ON graph_relationships(valid_time_start, valid_time_end);
+ ON graph_relationships(valid_time_start, valid_time_end);
 ```
 
 ### graph_entity_mentions Table
 
 ```sql
 CREATE TABLE IF NOT EXISTS graph_entity_mentions (
-    entity_id TEXT NOT NULL,
-    memory_id TEXT NOT NULL,
-    mention_text TEXT,
-    context TEXT,
-    confidence REAL NOT NULL DEFAULT 1.0,
-    first_mentioned_at INTEGER NOT NULL,
-    last_mentioned_at INTEGER NOT NULL,
-    mention_count INTEGER NOT NULL DEFAULT 1,
-    PRIMARY KEY (entity_id, memory_id),
-    FOREIGN KEY (entity_id) REFERENCES graph_entities(id) ON DELETE CASCADE,
-    FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+ entity_id TEXT NOT NULL,
+ memory_id TEXT NOT NULL,
+ mention_text TEXT,
+ context TEXT,
+ confidence REAL NOT NULL DEFAULT 1.0,
+ first_mentioned_at INTEGER NOT NULL,
+ last_mentioned_at INTEGER NOT NULL,
+ mention_count INTEGER NOT NULL DEFAULT 1,
+ PRIMARY KEY (entity_id, memory_id),
+ FOREIGN KEY (entity_id) REFERENCES graph_entities(id) ON DELETE CASCADE,
+ FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_graph_mentions_entity ON graph_entity_mentions(entity_id);
@@ -275,55 +275,55 @@ CREATE INDEX idx_graph_mentions_memory ON graph_entity_mentions(memory_id);
 ```rust
 /// Trait for graph storage backends.
 pub trait GraphBackend: Send + Sync {
-    // Entity Operations
-    fn store_entity(&self, entity: &Entity) -> Result<()>;
-    fn get_entity(&self, id: &EntityId) -> Result<Option<Entity>>;
-    fn search_entities(
-        &self,
-        filter: &EntityFilter,
-        limit: usize,
-    ) -> Result<Vec<Entity>>;
-    fn find_by_name(&self, name: &str, fuzzy: bool) -> Result<Vec<Entity>>;
-    fn delete_entity(&self, id: &EntityId) -> Result<bool>;
+ // Entity Operations
+ fn store_entity(&self, entity: &Entity) -> Result<()>;
+ fn get_entity(&self, id: &EntityId) -> Result<Option<Entity>>;
+ fn search_entities(
+ &self,
+ filter: &EntityFilter,
+ limit: usize,
+ ) -> Result<Vec<Entity>>;
+ fn find_by_name(&self, name: &str, fuzzy: bool) -> Result<Vec<Entity>>;
+ fn delete_entity(&self, id: &EntityId) -> Result<bool>;
 
-    // Relationship Operations
-    fn store_relationship(&self, relationship: &Relationship) -> Result<()>;
-    fn query_relationships(
-        &self,
-        from_entity: &EntityId,
-        relationship_type: Option<RelationshipType>,
-    ) -> Result<Vec<Relationship>>;
-    fn query_incoming(
-        &self,
-        to_entity: &EntityId,
-        relationship_type: Option<RelationshipType>,
-    ) -> Result<Vec<Relationship>>;
-    fn delete_relationship(
-        &self,
-        from: &EntityId,
-        to: &EntityId,
-        rel_type: RelationshipType,
-    ) -> Result<bool>;
+ // Relationship Operations
+ fn store_relationship(&self, relationship: &Relationship) -> Result<()>;
+ fn query_relationships(
+ &self,
+ from_entity: &EntityId,
+ relationship_type: Option<RelationshipType>,
+ ) -> Result<Vec<Relationship>>;
+ fn query_incoming(
+ &self,
+ to_entity: &EntityId,
+ relationship_type: Option<RelationshipType>,
+ ) -> Result<Vec<Relationship>>;
+ fn delete_relationship(
+ &self,
+ from: &EntityId,
+ to: &EntityId,
+ rel_type: RelationshipType,
+ ) -> Result<bool>;
 
-    // Graph Traversal
-    fn traverse(
-        &self,
-        start: &EntityId,
-        max_depth: usize,
-        filter: Option<RelationshipType>,
-    ) -> Result<GraphQueryResult>;
+ // Graph Traversal
+ fn traverse(
+ &self,
+ start: &EntityId,
+ max_depth: usize,
+ filter: Option<RelationshipType>,
+ ) -> Result<GraphQueryResult>;
 
-    fn shortest_path(
-        &self,
-        from: &EntityId,
-        to: &EntityId,
-        max_depth: usize,
-    ) -> Result<Option<Vec<EntityId>>>;
+ fn shortest_path(
+ &self,
+ from: &EntityId,
+ to: &EntityId,
+ max_depth: usize,
+ ) -> Result<Option<Vec<EntityId>>>;
 
-    // Mention Operations
-    fn store_mention(&self, mention: &EntityMention) -> Result<()>;
-    fn get_mentions_for_entity(&self, id: &EntityId) -> Result<Vec<EntityMention>>;
-    fn get_entities_for_memory(&self, id: &MemoryId) -> Result<Vec<Entity>>;
+ // Mention Operations
+ fn store_mention(&self, mention: &EntityMention) -> Result<()>;
+ fn get_mentions_for_entity(&self, id: &EntityId) -> Result<Vec<EntityMention>>;
+ fn get_entities_for_memory(&self, id: &MemoryId) -> Result<Vec<Entity>>;
 }
 ```
 
@@ -333,23 +333,23 @@ pub trait GraphBackend: Send + Sync {
 
 ```rust
 pub struct GraphService {
-    backend: Arc<dyn GraphBackend>,
+ backend: Arc<dyn GraphBackend>,
 }
 
 impl GraphService {
-    pub fn new(backend: Arc<dyn GraphBackend>) -> Self;
+ pub fn new(backend: Arc<dyn GraphBackend>) -> Self;
 
-    // CRUD operations delegate to backend
-    pub fn store_entity(&self, entity: Entity) -> Result<()>;
-    pub fn get_entity(&self, id: &EntityId) -> Result<Option<Entity>>;
-    pub fn search_entities(&self, filter: &EntityFilter) -> Result<Vec<Entity>>;
+ // CRUD operations delegate to backend
+ pub fn store_entity(&self, entity: Entity) -> Result<()>;
+ pub fn get_entity(&self, id: &EntityId) -> Result<Option<Entity>>;
+ pub fn search_entities(&self, filter: &EntityFilter) -> Result<Vec<Entity>>;
 
-    // Graph operations
-    pub fn traverse(&self, start: &EntityId, depth: usize) -> Result<GraphQueryResult>;
-    pub fn merge_entities(&self, ids: &[EntityId], canonical: &str) -> Result<Entity>;
+ // Graph operations
+ pub fn traverse(&self, start: &EntityId, depth: usize) -> Result<GraphQueryResult>;
+ pub fn merge_entities(&self, ids: &[EntityId], canonical: &str) -> Result<Entity>;
 
-    // Visualization
-    pub fn visualize(&self, start: &EntityId, format: VisFormat) -> Result<String>;
+ // Visualization
+ pub fn visualize(&self, start: &EntityId, format: VisFormat) -> Result<String>;
 }
 ```
 
@@ -357,31 +357,31 @@ impl GraphService {
 
 ```rust
 pub struct EntityExtractorService {
-    llm: Option<Arc<dyn LlmProvider>>,
-    graph: Arc<GraphService>,
+ llm: Option<Arc<dyn LlmProvider>>,
+ graph: Arc<GraphService>,
 }
 
 impl EntityExtractorService {
-    pub fn new(
-        llm: Option<Arc<dyn LlmProvider>>,
-        graph: Arc<GraphService>,
-    ) -> Self;
+ pub fn new(
+ llm: Option<Arc<dyn LlmProvider>>,
+ graph: Arc<GraphService>,
+ ) -> Self;
 
-    /// Extract entities from a single memory.
-    pub fn extract_from_memory(&self, memory: &Memory) -> Result<ExtractionResult>;
+ /// Extract entities from a single memory.
+ pub fn extract_from_memory(&self, memory: &Memory) -> Result<ExtractionResult>;
 
-    /// Batch extract from multiple memories.
-    pub fn extract_batch(
-        &self,
-        memories: &[Memory],
-        progress: Option<ProgressCallback>,
-    ) -> Result<BatchExtractionResult>;
+ /// Batch extract from multiple memories.
+ pub fn extract_batch(
+ &self,
+ memories: &[Memory],
+ progress: Option<ProgressCallback>,
+ ) -> Result<BatchExtractionResult>;
 
-    /// Infer relationships between entities.
-    pub fn infer_relationships(
-        &self,
-        entities: &[Entity],
-    ) -> Result<Vec<Relationship>>;
+ /// Infer relationships between entities.
+ pub fn infer_relationships(
+ &self,
+ entities: &[Entity],
+ ) -> Result<Vec<Relationship>>;
 }
 ```
 
@@ -389,19 +389,19 @@ impl EntityExtractorService {
 
 ```rust
 pub struct GraphRAGService {
-    recall: Arc<RecallService>,
-    graph: Arc<GraphService>,
-    config: GraphRAGConfig,
+ recall: Arc<RecallService>,
+ graph: Arc<GraphService>,
+ config: GraphRAGConfig,
 }
 
 impl GraphRAGService {
-    /// Hybrid search with graph expansion.
-    pub fn search_with_expansion(
-        &self,
-        query: &str,
-        filter: &SearchFilter,
-        expansion_config: ExpansionConfig,
-    ) -> Result<SearchResults>;
+ /// Hybrid search with graph expansion.
+ pub fn search_with_expansion(
+ &self,
+ query: &str,
+ filter: &SearchFilter,
+ expansion_config: ExpansionConfig,
+ ) -> Result<SearchResults>;
 }
 ```
 
@@ -436,23 +436,23 @@ Extract entities and relationships from the following memory content.
 
 <output_format>
 {
-  "entities": [
-    {
-      "type": "technology",
-      "name": "PostgreSQL",
-      "aliases": ["Postgres", "pg"],
-      "description": "Relational database",
-      "confidence": 0.95
-    }
-  ],
-  "relationships": [
-    {
-      "from": "AuthService",
-      "to": "PostgreSQL",
-      "type": "uses",
-      "confidence": 0.9
-    }
-  ]
+ "entities": [
+ {
+ "type": "technology",
+ "name": "PostgreSQL",
+ "aliases": ["Postgres", "pg"],
+ "description": "Relational database",
+ "confidence": 0.95
+ }
+ ],
+ "relationships": [
+ {
+ "from": "AuthService",
+ "to": "PostgreSQL",
+ "type": "uses",
+ "confidence": 0.9
+ }
+ ]
 }
 </output_format>
 "#;
@@ -464,26 +464,26 @@ Extract entities and relationships from the following memory content.
 
 ```
 Memory Capture
-    │
-    ▼
+ │
+ ▼
 CaptureService.capture()
-    │
-    ▼ (if SUBCOG_GRAPH_AUTO_EXTRACT=true)
+ │
+ ▼ (if SUBCOG_GRAPH_AUTO_EXTRACT=true)
 EntityExtractorService.extract_from_memory()
-    │
-    ▼
+ │
+ ▼
 LLM.complete_with_system(ENTITY_EXTRACTION_PROMPT)
-    │
-    ▼
-Parse JSON → Vec<ExtractedEntity>, Vec<ExtractedRelationship>
-    │
-    ▼
+ │
+ ▼
+Parse JSON -> Vec<ExtractedEntity>, Vec<ExtractedRelationship>
+ │
+ ▼
 GraphService.store_entity() for each entity
-    │
-    ▼
+ │
+ ▼
 GraphService.store_relationship() for each relationship
-    │
-    ▼
+ │
+ ▼
 GraphBackend.store_mention() (link to memory)
 ```
 
@@ -491,30 +491,30 @@ GraphBackend.store_mention() (link to memory)
 
 ```
 User Query: "How do we handle auth?"
-    │
-    ▼
+ │
+ ▼
 GraphRAGService.search_with_expansion()
-    │
-    ├──▶ RecallService.search() → 10 memories (semantic)
-    │
-    └──▶ EntityExtractorService.extract_from_query("auth")
-             │
-             ▼
-         ["AuthService", "JWT", "OAuth"]
-             │
-             ▼
-         GraphService.traverse(depth=2)
-             │
-             ▼
-         Related entities + their source_memory_ids
-             │
-             ▼
-         5 additional memories via graph
-    │
-    ▼
+ │
+ ├──▶ RecallService.search() -> 10 memories (semantic)
+ │
+ └──▶ EntityExtractorService.extract_from_query("auth")
+ │
+ ▼
+ ["AuthService", "JWT", "OAuth"]
+ │
+ ▼
+ GraphService.traverse(depth=2)
+ │
+ ▼
+ Related entities + their source_memory_ids
+ │
+ ▼
+ 5 additional memories via graph
+ │
+ ▼
 Merge + Re-rank (boost graph-based by config.expansion_boost)
-    │
-    ▼
+ │
+ ▼
 Return 15 memories with provenance
 ```
 
@@ -524,31 +524,31 @@ Return 15 memories with provenance
 
 ```rust
 pub struct GraphConfig {
-    /// Enable graph features
-    pub enabled: bool,
-    /// Auto-extract on capture
-    pub auto_extract: bool,
-    /// Minimum extraction confidence
-    pub extract_confidence: f32,
-    /// Maximum traversal depth
-    pub max_depth: usize,
-    /// Enable Graph RAG expansion
-    pub expansion_enabled: bool,
-    /// Boost factor for graph results
-    pub expansion_boost: f32,
+ /// Enable graph features
+ pub enabled: bool,
+ /// Auto-extract on capture
+ pub auto_extract: bool,
+ /// Minimum extraction confidence
+ pub extract_confidence: f32,
+ /// Maximum traversal depth
+ pub max_depth: usize,
+ /// Enable Graph RAG expansion
+ pub expansion_enabled: bool,
+ /// Boost factor for graph results
+ pub expansion_boost: f32,
 }
 
 impl Default for GraphConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            auto_extract: false,
-            extract_confidence: 0.7,
-            max_depth: 3,
-            expansion_enabled: true,
-            expansion_boost: 1.2,
-        }
-    }
+ fn default() -> Self {
+ Self {
+ enabled: true,
+ auto_extract: false,
+ extract_confidence: 0.7,
+ max_depth: 3,
+ expansion_enabled: true,
+ expansion_boost: 1.2,
+ }
+ }
 }
 ```
 
@@ -589,7 +589,7 @@ graph_relationships_count{relationship_type}
 ```rust
 #[tracing::instrument(skip(self), fields(entity_id = %id))]
 pub fn get_entity(&self, id: &EntityId) -> Result<Option<Entity>> {
-    // ...
+ //...
 }
 ```
 
@@ -619,14 +619,14 @@ The `GraphBackend` trait enables clean migration:
 
 ```rust
 pub struct Neo4jGraphBackend {
-    graph: neo4rs::Graph,
+ graph: neo4rs::Graph,
 }
 
 impl GraphBackend for Neo4jGraphBackend {
-    fn store_entity(&self, entity: &Entity) -> Result<()> {
-        // MERGE (e:Person {id: $id}) SET e += $properties
-    }
-    // ...
+ fn store_entity(&self, entity: &Entity) -> Result<()> {
+ // MERGE (e:Person {id: $id}) SET e += $properties
+ }
+ //...
 }
 ```
 

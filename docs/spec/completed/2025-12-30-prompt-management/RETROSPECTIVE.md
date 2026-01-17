@@ -20,23 +20,23 @@ satisfaction: very_satisfied
 
 ## What Went Well
 
-✅ **Comprehensive Implementation**
+ **Comprehensive Implementation**
 - Delivered all 7 phases as planned with only 1 skipped task (SQLite index optimization deemed unnecessary)
 - 460 tests passing (exceeded target by 15%)
 - All performance targets exceeded by 60-90%
 
-✅ **Strong Architecture**
-- Clean separation: Models → Services → CLI/MCP
+ **Strong Architecture**
+- Clean separation: Models -> Services -> CLI/MCP
 - Reusable components: PromptParser, PromptService
 - Multiple storage backend support prepared (currently git notes)
 
-✅ **Developer Experience**
+ **Developer Experience**
 - Clear variable syntax `{{variable}}`
 - Multiple input formats (YAML, JSON, Markdown, plain text)
-- Domain hierarchy search (Project → User → Org)
+- Domain hierarchy search (Project -> User -> Org)
 - Interactive mode for missing variables
 
-✅ **Quality Controls**
+ **Quality Controls**
 - Comprehensive validation (reserved names, braces, duplicates)
 - Post-tool-use hook for real-time feedback
 - Usage tracking for analytics
@@ -44,16 +44,16 @@ satisfaction: very_satisfied
 
 ## What Could Be Improved
 
-⚠️ **Storage Backend Selection**
+️ **Storage Backend Selection**
 - Currently hardcoded to git notes
 - Need runtime configuration for backend selection
 - PostgreSQL/Redis backends exist but not wired up
 
-⚠️ **Import/Export Features**
+️ **Import/Export Features**
 - `subcog prompt import` and `subcog prompt share` not yet implemented
 - Would benefit from bulk operations
 
-⚠️ **MCP Sampling Integration**
+️ **MCP Sampling Integration**
 - Originally planned MCP sampling not implemented
 - Could add `prompt.sample` tool for interactive prompting
 
@@ -61,22 +61,22 @@ satisfaction: very_satisfied
 
 ### Added
 - **PostgreSQL migration system** - Originally scoped for later, implemented early
-  - Shared `MigrationRunner` module
-  - Auto-migrations for persistence, index, vector, and prompt storage
-  - 13 total migrations across 4 backends
+ - Shared `MigrationRunner` module
+ - Auto-migrations for persistence, index, vector, and prompt storage
+ - 13 total migrations across 4 backends
 - **Multi-backend storage** - Extended beyond git notes to 6 backends:
-  - Filesystem (XDG paths, JSON)
-  - SQLite (FTS5 search)
-  - Git Notes (YAML, ref namespacing)
-  - PostgreSQL (JSONB, auto-migrations)
-  - Redis (hash storage, feature-gated)
+ - Filesystem (XDG paths, JSON)
+ - SQLite (FTS5 search)
+ - Git Notes (YAML, ref namespacing)
+ - PostgreSQL (JSONB, auto-migrations)
+ - Redis (hash storage, feature-gated)
 - **Enhanced validation** - Added system prefix protection, reserved names beyond original spec
 
 ### Removed
 - **SQLite index optimization** (P3-T9) - Linear search sufficient for <1000 prompts
 
 ### Modified
-- **Domain hierarchy** - Refined from User → Org → Project to Project → User → Org for better precedence
+- **Domain hierarchy** - Refined from User -> Org -> Project to Project -> User -> Org for better precedence
 
 ## Key Learnings
 

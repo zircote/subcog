@@ -149,8 +149,8 @@ Make the MCP server fully compliant with JSON-RPC 2.0 notification handling.
 
 ## Open Questions
 
-- [x] Are there other MCP notification types we should handle? → `notifications/initialized` is the primary one; others can be added later
-- [x] Should we validate known notification types? → No, just suppress response for all messages without `id`
+- [x] Are there other MCP notification types we should handle? -> `notifications/initialized` is the primary one; others can be added later
+- [x] Should we validate known notification types? -> No, just suppress response for all messages without `id`
 
 ## Appendix
 

@@ -84,21 +84,21 @@ subcog prompt save greet --content "Hello {{name}}!"
 
 # With description
 subcog prompt save code-review \
-  --content "Review {{file}} for {{issue_type}} issues" \
-  --description "Code review template"
+ --content "Review {{file}} for {{issue_type}} issues" \
+ --description "Code review template"
 
 # From file
 subcog prompt save security-audit --file prompts/security.md
 
 # With tags
 subcog prompt save api-design \
-  --content "Design API for {{feature}}" \
-  --tags "api,design"
+ --content "Design API for {{feature}}" \
+ --tags "api,design"
 
 # To user domain
 subcog prompt save my-template \
-  --content "{{content}}" \
-  --domain user
+ --content "{{content}}" \
+ --domain user
 ```
 
 ---
@@ -140,11 +140,11 @@ subcog prompt list --format json
 
 Output:
 ```
-NAME            DOMAIN    TAGS              DESCRIPTION
-code-review     project   [review,code]     Code review template
-security-audit  project   [security]        Security audit checklist
-my-template     user      []                Personal template
-api-design      org       [api,design]      API design template
+NAME DOMAIN TAGS DESCRIPTION
+code-review project [review,code] Code review template
+security-audit project [security] Security audit checklist
+my-template user [] Personal template
+api-design org [api,design] API design template
 ```
 
 ---
@@ -168,7 +168,7 @@ subcog prompt get <NAME> [OPTIONS]
 
 ### Domain Cascade
 
-If domain not specified, searches: Project → User → Org
+If domain not specified, searches: Project -> User -> Org
 
 ### Examples
 
@@ -188,19 +188,19 @@ Output:
 name: code-review
 description: Code review template
 content: |
-  Review {{file}} for {{issue_type}} issues.
+ Review {{file}} for {{issue_type}} issues.
 
-  Check:
-  - Security vulnerabilities
-  - Performance issues
-  - Code style
+ Check:
+ - Security vulnerabilities
+ - Performance issues
+ - Code style
 variables:
-  - name: file
-    description: File to review
-    required: true
-  - name: issue_type
-    description: Type of issues
-    default: general
+ - name: file
+ description: File to review
+ required: true
+ - name: issue_type
+ description: Type of issues
+ default: general
 tags: [review, code]
 domain: project
 ```
@@ -230,14 +230,14 @@ subcog prompt run <NAME> [OPTIONS]
 ```bash
 # Run with variables
 subcog prompt run code-review \
-  --var file=src/main.rs \
-  --var issue_type=security
+ --var file=src/main.rs \
+ --var issue_type=security
 
 # Multiple variables
 subcog prompt run api-design \
-  -v feature=authentication \
-  -v method=OAuth2 \
-  -v version=v2
+ -v feature=authentication \
+ -v method=OAuth2 \
+ -v version=v2
 
 # Output to file
 subcog prompt run template --var x=1 -o output.md

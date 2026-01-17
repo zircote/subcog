@@ -162,9 +162,9 @@ Implement the documented deduplication logic that checks for existing similar me
 
 ## Open Questions
 
-- [x] Should exact match use SHA256 hash or full content comparison? → **SHA256 for performance**
-- [x] Should semantic search be namespace-scoped? → **Yes, search within same namespace**
-- [x] How to handle embeddings for very short content (<50 chars)? → **Skip semantic check, use exact match only**
+- [x] Should exact match use SHA256 hash or full content comparison? -> **SHA256 for performance**
+- [x] Should semantic search be namespace-scoped? -> **Yes, search within same namespace**
+- [x] How to handle embeddings for very short content (<50 chars)? -> **Skip semantic check, use exact match only**
 
 ## Appendix
 

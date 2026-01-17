@@ -16,49 +16,49 @@ This architecture introduces a `DeduplicationService` that integrates with `PreC
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                         PreCompactHandler                                │
-│  ┌──────────────┐    ┌───────────────────┐    ┌───────────────────────┐  │
-│  │ analyze_     │───▶│ deduplicate_      │───▶│ capture_              │  │
-│  │ content()    │    │ candidates()      │    │ candidates()          │  │
-│  └──────────────┘    └─────────┬─────────┘    └───────────────────────┘  │
-│                                │                                         │
+│ PreCompactHandler │
+│ ┌──────────────┐ ┌───────────────────┐ ┌───────────────────────┐ │
+│ │ analyze_ │───▶│ deduplicate_ │───▶│ capture_ │ │
+│ │ content() │ │ candidates() │ │ candidates() │ │
+│ └──────────────┘ └─────────┬─────────┘ └───────────────────────┘ │
+│ │ │
 └────────────────────────────────┼─────────────────────────────────────────┘
-                                 │
-                                 ▼
+ │
+ ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                       DeduplicationService                               │
-│  ┌───────────────────────────────────────────────────────────────────┐   │
-│  │                    check_duplicate()                              │   │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐   │   │
-│  │  │ ExactMatch   │  │ Semantic     │  │ RecentCapture          │   │   │
-│  │  │ Checker      │  │ Checker      │  │ Checker                │   │   │
-│  │  │              │  │              │  │                        │   │   │
-│  │  │ SHA256 hash  │  │ Embedding    │  │ LRU Cache with TTL     │   │   │
-│  │  │ comparison   │  │ similarity   │  │ (5 min window)         │   │   │
-│  │  └──────┬───────┘  └──────┬───────┘  └────────────┬───────────┘   │   │
-│  │         │                 │                       │               │   │
-│  │         ▼                 ▼                       ▼               │   │
-│  │  ┌─────────────────────────────────────────────────────────────┐  │   │
-│  │  │              DuplicateCheckResult                           │  │   │
-│  │  │  is_duplicate: bool                                         │  │   │
-│  │  │  reason: ExactMatch | SemanticSimilar | RecentCapture       │  │   │
-│  │  │  similarity_score: Option<f32>                              │  │   │
-│  │  │  matched_memory_id: Option<MemoryId>                        │  │   │
-│  │  └─────────────────────────────────────────────────────────────┘  │   │
-│  └───────────────────────────────────────────────────────────────────┘   │
-│                                                                          │
-│  Dependencies:                                                           │
-│  ┌────────────────┐  ┌────────────────┐  ┌────────────────────────────┐  │
-│  │ RecallService  │  │ FastEmbed      │  │ RecentCaptureCache         │  │
-│  │ (search)       │  │ Embedder       │  │ (in-memory LRU)            │  │
-│  └────────────────┘  └────────────────┘  └────────────────────────────┘  │
+│ DeduplicationService │
+│ ┌───────────────────────────────────────────────────────────────────┐ │
+│ │ check_duplicate() │ │
+│ │ ┌──────────────┐ ┌──────────────┐ ┌────────────────────────┐ │ │
+│ │ │ ExactMatch │ │ Semantic │ │ RecentCapture │ │ │
+│ │ │ Checker │ │ Checker │ │ Checker │ │ │
+│ │ │ │ │ │ │ │ │ │
+│ │ │ SHA256 hash │ │ Embedding │ │ LRU Cache with TTL │ │ │
+│ │ │ comparison │ │ similarity │ │ (5 min window) │ │ │
+│ │ └──────┬───────┘ └──────┬───────┘ └────────────┬───────────┘ │ │
+│ │ │ │ │ │ │
+│ │ ▼ ▼ ▼ │ │
+│ │ ┌─────────────────────────────────────────────────────────────┐ │ │
+│ │ │ DuplicateCheckResult │ │ │
+│ │ │ is_duplicate: bool │ │ │
+│ │ │ reason: ExactMatch | SemanticSimilar | RecentCapture │ │ │
+│ │ │ similarity_score: Option<f32> │ │ │
+│ │ │ matched_memory_id: Option<MemoryId> │ │ │
+│ │ └─────────────────────────────────────────────────────────────┘ │ │
+│ └───────────────────────────────────────────────────────────────────┘ │
+│ │
+│ Dependencies: │
+│ ┌────────────────┐ ┌────────────────┐ ┌────────────────────────────┐ │
+│ │ RecallService │ │ FastEmbed │ │ RecentCaptureCache │ │
+│ │ (search) │ │ Embedder │ │ (in-memory LRU) │ │
+│ └────────────────┘ └────────────────┘ └────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Design Decisions
 
 1. **Separate DeduplicationService**: Encapsulates all dedup logic, injectable into PreCompactHandler
-2. **Short-circuit evaluation**: Exit early on first duplicate match (exact → semantic → recent)
+2. **Short-circuit evaluation**: Exit early on first duplicate match (exact -> semantic -> recent)
 3. **Namespace-scoped search**: Only compare within same namespace to avoid cross-category false positives
 4. **Configurable thresholds**: Per-namespace similarity thresholds via environment variables
 
@@ -68,21 +68,21 @@ This architecture introduces a `DeduplicationService` that integrates with `PreC
 
 - **Purpose**: Orchestrates the three-tier deduplication check
 - **Responsibilities**:
-  - Check if content is a duplicate using exact, semantic, or recent capture detection
-  - Provide detailed results for observability
-  - Handle graceful degradation when backends unavailable
+ - Check if content is a duplicate using exact, semantic, or recent capture detection
+ - Provide detailed results for observability
+ - Handle graceful degradation when backends unavailable
 - **Interfaces**:
-  ```rust
-  pub trait Deduplicator: Send + Sync {
-      fn check_duplicate(
-          &self,
-          content: &str,
-          namespace: Namespace,
-      ) -> Result<DuplicateCheckResult>;
+ ```rust
+ pub trait Deduplicator: Send + Sync {
+ fn check_duplicate(
+ &self,
+ content: &str,
+ namespace: Namespace,
+ ) -> Result<DuplicateCheckResult>;
 
-      fn record_capture(&self, content_hash: &str, memory_id: &MemoryId);
-  }
-  ```
+ fn record_capture(&self, content_hash: &str, memory_id: &MemoryId);
+ }
+ ```
 - **Dependencies**: RecallService, Embedder, RecentCaptureCache
 - **Technology**: Rust, SHA256 from `sha2` crate
 
@@ -90,91 +90,91 @@ This architecture introduces a `DeduplicationService` that integrates with `PreC
 
 - **Purpose**: Fast hash-based exact duplicate detection
 - **Responsibilities**:
-  - Generate SHA256 hash of normalized content
-  - Query index for memories with matching hash
+ - Generate SHA256 hash of normalized content
+ - Query index for memories with matching hash
 - **Interfaces**:
-  ```rust
-  impl ExactMatchChecker {
-      pub fn new(recall: Arc<RecallService>) -> Self;
-      pub fn check(&self, content: &str, namespace: Namespace) -> Result<Option<MemoryId>>;
-  }
-  ```
+ ```rust
+ impl ExactMatchChecker {
+ pub fn new(recall: Arc<RecallService>) -> Self;
+ pub fn check(&self, content: &str, namespace: Namespace) -> Result<Option<MemoryId>>;
+ }
+ ```
 - **Implementation Notes**:
-  - Normalize content: trim, lowercase, collapse whitespace
-  - Store hash as tag: `hash:sha256:<first-16-chars-of-hash>`
-  - Search using tag filter for O(1) lookup
+ - Normalize content: trim, lowercase, collapse whitespace
+ - Store hash as tag: `hash:sha256:<first-16-chars-of-hash>`
+ - Search using tag filter for O(1) lookup
 
 ### Component 3: SemanticSimilarityChecker
 
 - **Purpose**: Embedding-based similarity detection for paraphrased content
 - **Responsibilities**:
-  - Generate embedding for candidate content
-  - Search vector store for similar memories
-  - Apply namespace-specific similarity threshold
+ - Generate embedding for candidate content
+ - Search vector store for similar memories
+ - Apply namespace-specific similarity threshold
 - **Interfaces**:
-  ```rust
-  impl SemanticSimilarityChecker {
-      pub fn new(
-          recall: Arc<RecallService>,
-          embedder: Arc<dyn Embedder>,
-          thresholds: HashMap<Namespace, f32>,
-      ) -> Self;
+ ```rust
+ impl SemanticSimilarityChecker {
+ pub fn new(
+ recall: Arc<RecallService>,
+ embedder: Arc<dyn Embedder>,
+ thresholds: HashMap<Namespace, f32>,
+ ) -> Self;
 
-      pub fn check(
-          &self,
-          content: &str,
-          namespace: Namespace,
-      ) -> Result<Option<(MemoryId, f32)>>;
-  }
-  ```
+ pub fn check(
+ &self,
+ content: &str,
+ namespace: Namespace,
+ ) -> Result<Option<(MemoryId, f32)>>;
+ }
+ ```
 - **Threshold Configuration**:
-  ```
-  SUBCOG_DEDUP_THRESHOLD_DECISIONS=0.92
-  SUBCOG_DEDUP_THRESHOLD_PATTERNS=0.90
-  SUBCOG_DEDUP_THRESHOLD_LEARNINGS=0.88
-  SUBCOG_DEDUP_THRESHOLD_DEFAULT=0.90
-  ```
+ ```
+ SUBCOG_DEDUP_THRESHOLD_DECISIONS=0.92
+ SUBCOG_DEDUP_THRESHOLD_PATTERNS=0.90
+ SUBCOG_DEDUP_THRESHOLD_LEARNINGS=0.88
+ SUBCOG_DEDUP_THRESHOLD_DEFAULT=0.90
+ ```
 
 ### Component 4: RecentCaptureChecker
 
 - **Purpose**: Time-based deduplication for rapid repeated captures
 - **Responsibilities**:
-  - Track recently captured content hashes with timestamps
-  - Evict entries older than TTL (5 minutes default)
-  - Check if content was captured within window
+ - Track recently captured content hashes with timestamps
+ - Evict entries older than TTL (5 minutes default)
+ - Check if content was captured within window
 - **Interfaces**:
-  ```rust
-  impl RecentCaptureChecker {
-      pub fn new(ttl: Duration, capacity: usize) -> Self;
-      pub fn check(&self, content_hash: &str) -> Option<(MemoryId, Instant)>;
-      pub fn record(&self, content_hash: &str, memory_id: &MemoryId);
-  }
-  ```
+ ```rust
+ impl RecentCaptureChecker {
+ pub fn new(ttl: Duration, capacity: usize) -> Self;
+ pub fn check(&self, content_hash: &str) -> Option<(MemoryId, Instant)>;
+ pub fn record(&self, content_hash: &str, memory_id: &MemoryId);
+ }
+ ```
 - **Implementation**: LRU cache with TTL using `lru` crate with time-based eviction
 
 ### Component 5: DuplicateCheckResult
 
 - **Purpose**: Structured result of deduplication check
 - **Definition**:
-  ```rust
-  #[derive(Debug, Clone)]
-  pub struct DuplicateCheckResult {
-      pub is_duplicate: bool,
-      pub reason: Option<DuplicateReason>,
-      pub similarity_score: Option<f32>,
-      pub matched_memory_id: Option<MemoryId>,
-      /// Full URN of matched memory: subcog://{domain}/{namespace}/{id}
-      pub matched_urn: Option<String>,
-      pub check_duration_ms: u64,
-  }
+ ```rust
+ #[derive(Debug, Clone)]
+ pub struct DuplicateCheckResult {
+ pub is_duplicate: bool,
+ pub reason: Option<DuplicateReason>,
+ pub similarity_score: Option<f32>,
+ pub matched_memory_id: Option<MemoryId>,
+ /// Full URN of matched memory: subcog://{domain}/{namespace}/{id}
+ pub matched_urn: Option<String>,
+ pub check_duration_ms: u64,
+ }
 
-  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-  pub enum DuplicateReason {
-      ExactMatch,
-      SemanticSimilar,
-      RecentCapture,
-  }
-  ```
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ pub enum DuplicateReason {
+ ExactMatch,
+ SemanticSimilar,
+ RecentCapture,
+ }
+ ```
 
 - **URN Requirement**: The `matched_urn` field MUST be populated when `is_duplicate == true`. All external outputs (logs, metrics labels, hook responses) MUST reference memories by URN, not bare ID.
 
@@ -183,31 +183,31 @@ This architecture introduces a `DeduplicationService` that integrates with `PreC
 ### Data Flow
 
 ```
-┌─────────────┐     ┌───────────────────┐     ┌─────────────────────┐
-│ Candidate   │────▶│ Content Hash      │────▶│ Exact Match Check   │
-│ Content     │     │ (SHA256)          │     │ (tag search)        │
-└─────────────┘     └───────────────────┘     └──────────┬──────────┘
-                                                         │
-                                                         │ Not found
-                                                         ▼
-                    ┌───────────────────┐     ┌─────────────────────┐
-                    │ Content Embedding │────▶│ Semantic Check      │
-                    │ (FastEmbed 384d)  │     │ (vector search)     │
-                    └───────────────────┘     └──────────┬──────────┘
-                                                         │
-                                                         │ Below threshold
-                                                         ▼
-                    ┌───────────────────┐     ┌─────────────────────┐
-                    │ Content Hash      │────▶│ Recent Capture      │
-                    │ (same as step 1)  │     │ (LRU cache lookup)  │
-                    └───────────────────┘     └──────────┬──────────┘
-                                                         │
-                                                         │ Not in cache
-                                                         ▼
-                                              ┌─────────────────────┐
-                                              │ Proceed with        │
-                                              │ Capture             │
-                                              └─────────────────────┘
+┌─────────────┐ ┌───────────────────┐ ┌─────────────────────┐
+│ Candidate │────▶│ Content Hash │────▶│ Exact Match Check │
+│ Content │ │ (SHA256) │ │ (tag search) │
+└─────────────┘ └───────────────────┘ └──────────┬──────────┘
+ │
+ │ Not found
+ ▼
+ ┌───────────────────┐ ┌─────────────────────┐
+ │ Content Embedding │────▶│ Semantic Check │
+ │ (FastEmbed 384d) │ │ (vector search) │
+ └───────────────────┘ └──────────┬──────────┘
+ │
+ │ Below threshold
+ ▼
+ ┌───────────────────┐ ┌─────────────────────┐
+ │ Content Hash │────▶│ Recent Capture │
+ │ (same as step 1) │ │ (LRU cache lookup) │
+ └───────────────────┘ └──────────┬──────────┘
+ │
+ │ Not in cache
+ ▼
+ ┌─────────────────────┐
+ │ Proceed with │
+ │ Capture │
+ └─────────────────────┘
 ```
 
 ### Storage Strategy
@@ -231,30 +231,30 @@ SELECT * FROM memories_fts WHERE tags MATCH '"hash:sha256:a1b2c3d4e5f6"'
 
 ```rust
 impl DeduplicationService {
-    /// Creates a new deduplication service with all checkers.
-    pub fn new(
-        recall: Arc<RecallService>,
-        embedder: Arc<dyn Embedder>,
-        config: DeduplicationConfig,
-    ) -> Self;
+ /// Creates a new deduplication service with all checkers.
+ pub fn new(
+ recall: Arc<RecallService>,
+ embedder: Arc<dyn Embedder>,
+ config: DeduplicationConfig,
+ ) -> Self;
 
-    /// Creates a service with only exact match and recent capture (no embeddings).
-    pub fn without_embeddings(
-        recall: Arc<RecallService>,
-        config: DeduplicationConfig,
-    ) -> Self;
+ /// Creates a service with only exact match and recent capture (no embeddings).
+ pub fn without_embeddings(
+ recall: Arc<RecallService>,
+ config: DeduplicationConfig,
+ ) -> Self;
 
-    /// Checks if content is a duplicate.
-    ///
-    /// Returns early on first match. Check order: exact → semantic → recent.
-    pub fn check_duplicate(
-        &self,
-        content: &str,
-        namespace: Namespace,
-    ) -> Result<DuplicateCheckResult>;
+ /// Checks if content is a duplicate.
+ ///
+ /// Returns early on first match. Check order: exact -> semantic -> recent.
+ pub fn check_duplicate(
+ &self,
+ content: &str,
+ namespace: Namespace,
+ ) -> Result<DuplicateCheckResult>;
 
-    /// Records a successful capture for recent-capture tracking.
-    pub fn record_capture(&self, content: &str, memory_id: &MemoryId);
+ /// Records a successful capture for recent-capture tracking.
+ pub fn record_capture(&self, content: &str, memory_id: &MemoryId);
 }
 ```
 
@@ -263,36 +263,36 @@ impl DeduplicationService {
 ```rust
 #[derive(Debug, Clone)]
 pub struct DeduplicationConfig {
-    /// Enable/disable entire deduplication.
-    pub enabled: bool,
+ /// Enable/disable entire deduplication.
+ pub enabled: bool,
 
-    /// Per-namespace similarity thresholds.
-    pub similarity_thresholds: HashMap<Namespace, f32>,
+ /// Per-namespace similarity thresholds.
+ pub similarity_thresholds: HashMap<Namespace, f32>,
 
-    /// Default threshold when namespace not configured.
-    pub default_threshold: f32,
+ /// Default threshold when namespace not configured.
+ pub default_threshold: f32,
 
-    /// Recent capture time window.
-    pub recent_window: Duration,
+ /// Recent capture time window.
+ pub recent_window: Duration,
 
-    /// Recent capture cache capacity.
-    pub cache_capacity: usize,
+ /// Recent capture cache capacity.
+ pub cache_capacity: usize,
 
-    /// Minimum content length for semantic check.
-    pub min_semantic_length: usize,
+ /// Minimum content length for semantic check.
+ pub min_semantic_length: usize,
 }
 
 impl Default for DeduplicationConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            similarity_thresholds: HashMap::new(),
-            default_threshold: 0.90,
-            recent_window: Duration::from_secs(300), // 5 minutes
-            cache_capacity: 1000,
-            min_semantic_length: 50,
-        }
-    }
+ fn default() -> Self {
+ Self {
+ enabled: true,
+ similarity_thresholds: HashMap::new(),
+ default_threshold: 0.90,
+ recent_window: Duration::from_secs(300), // 5 minutes
+ cache_capacity: 1000,
+ min_semantic_length: 50,
+ }
+ }
 }
 ```
 
@@ -314,34 +314,34 @@ impl Default for DeduplicationConfig {
 
 ```rust
 impl PreCompactHandler {
-    pub fn with_deduplication(mut self, dedup: DeduplicationService) -> Self {
-        self.dedup = Some(dedup);
-        self
-    }
+ pub fn with_deduplication(mut self, dedup: DeduplicationService) -> Self {
+ self.dedup = Some(dedup);
+ self
+ }
 
-    fn deduplicate_candidates(&self, candidates: Vec<CaptureCandidate>) -> Vec<CaptureCandidate> {
-        let Some(dedup) = &self.dedup else {
-            // Fall back to existing prefix-based dedup
-            return Self::legacy_deduplicate(candidates);
-        };
+ fn deduplicate_candidates(&self, candidates: Vec<CaptureCandidate>) -> Vec<CaptureCandidate> {
+ let Some(dedup) = &self.dedup else {
+ // Fall back to existing prefix-based dedup
+ return Self::legacy_deduplicate(candidates);
+ };
 
-        candidates
-            .into_iter()
-            .filter_map(|c| {
-                match dedup.check_duplicate(&c.content, c.namespace) {
-                    Ok(result) if result.is_duplicate => {
-                        self.record_skip(&c, &result);
-                        None
-                    }
-                    Ok(_) => Some(c),
-                    Err(e) => {
-                        tracing::warn!("Dedup check failed, proceeding: {}", e);
-                        Some(c) // Fail open
-                    }
-                }
-            })
-            .collect()
-    }
+ candidates
+.into_iter()
+.filter_map(|c| {
+ match dedup.check_duplicate(&c.content, c.namespace) {
+ Ok(result) if result.is_duplicate => {
+ self.record_skip(&c, &result);
+ None
+ }
+ Ok(_) => Some(c),
+ Err(e) => {
+ tracing::warn!("Dedup check failed, proceeding: {}", e);
+ Some(c) // Fail open
+ }
+ }
+ })
+.collect()
+ }
 }
 ```
 
@@ -349,10 +349,10 @@ impl PreCompactHandler {
 
 ```json
 {
-  "hookSpecificOutput": {
-    "hookEventName": "PreCompact",
-    "additionalContext": "Auto-captured 2 memories before compaction:\n\n1. **decisions**: Use PostgreSQL\n   URN: subcog://global/decisions/abc123\n\nSkipped 3 duplicates:\n- Exact match: \"Use PostgreSQL for...\" (matches subcog://global/decisions/abc123)\n- Semantic 94%: \"We chose Postgres...\" (similar to subcog://global/decisions/abc123)\n- Recent capture: \"PostgreSQL decision...\" (captured 2 min ago, subcog://global/decisions/def456)"
-  }
+ "hookSpecificOutput": {
+ "hookEventName": "PreCompact",
+ "additionalContext": "Auto-captured 2 memories before compaction:\n\n1. **decisions**: Use PostgreSQL\n URN: subcog://global/decisions/abc123\n\nSkipped 3 duplicates:\n- Exact match: \"Use PostgreSQL for...\" (matches subcog://global/decisions/abc123)\n- Semantic 94%: \"We chose Postgres...\" (similar to subcog://global/decisions/abc123)\n- Recent capture: \"PostgreSQL decision...\" (captured 2 min ago, subcog://global/decisions/def456)"
+ }
 }
 ```
 
@@ -420,7 +420,7 @@ dedup_skipped_total{namespace, reason=exact|semantic|recent}
 
 // Histograms
 dedup_check_duration_ms{check_type=exact|semantic|recent|total}
-dedup_similarity_score{namespace}  // For semantic matches
+dedup_similarity_score{namespace} // For semantic matches
 
 // Gauges
 dedup_cache_size
@@ -447,25 +447,25 @@ dedup_cache_hit_rate
 use proptest::prelude::*;
 
 proptest! {
-    #[test]
-    fn identical_content_always_duplicates(content in ".{50,500}") {
-        let dedup = DeduplicationService::new(...);
-        dedup.record_capture(&content, &MemoryId::new("test"));
+ #[test]
+ fn identical_content_always_duplicates(content in ".{50,500}") {
+ let dedup = DeduplicationService::new(...);
+ dedup.record_capture(&content, &MemoryId::new("test"));
 
-        let result = dedup.check_duplicate(&content, Namespace::Decisions)?;
-        prop_assert!(result.is_duplicate);
-    }
+ let result = dedup.check_duplicate(&content, Namespace::Decisions)?;
+ prop_assert!(result.is_duplicate);
+ }
 
-    #[test]
-    fn slightly_different_content_not_exact_match(
-        base in ".{100,300}",
-        suffix in ".{10,50}"
-    ) {
-        let modified = format!("{} {}", base, suffix);
-        // Should not be exact match (but may be semantic match)
-        let result = dedup.check_duplicate(&modified, Namespace::Decisions)?;
-        prop_assert!(result.reason != Some(DuplicateReason::ExactMatch));
-    }
+ #[test]
+ fn slightly_different_content_not_exact_match(
+ base in ".{100,300}",
+ suffix in ".{10,50}"
+ ) {
+ let modified = format!("{} {}", base, suffix);
+ // Should not be exact match (but may be semantic match)
+ let result = dedup.check_duplicate(&modified, Namespace::Decisions)?;
+ prop_assert!(result.reason!= Some(DuplicateReason::ExactMatch));
+ }
 }
 ```
 
@@ -474,23 +474,23 @@ proptest! {
 ```rust
 #[bench]
 fn bench_dedup_check_cold(b: &mut Bencher) {
-    let dedup = setup_dedup_service();
-    let content = "We decided to use PostgreSQL for the primary database.";
+ let dedup = setup_dedup_service();
+ let content = "We decided to use PostgreSQL for the primary database.";
 
-    b.iter(|| {
-        dedup.check_duplicate(content, Namespace::Decisions)
-    });
+ b.iter(|| {
+ dedup.check_duplicate(content, Namespace::Decisions)
+ });
 }
 
 #[bench]
 fn bench_dedup_check_hot_cache(b: &mut Bencher) {
-    let dedup = setup_dedup_service();
-    let content = "We decided to use PostgreSQL for the primary database.";
-    dedup.record_capture(content, &MemoryId::new("test"));
+ let dedup = setup_dedup_service();
+ let content = "We decided to use PostgreSQL for the primary database.";
+ dedup.record_capture(content, &MemoryId::new("test"));
 
-    b.iter(|| {
-        dedup.check_duplicate(content, Namespace::Decisions)
-    });
+ b.iter(|| {
+ dedup.check_duplicate(content, Namespace::Decisions)
+ });
 }
 ```
 
@@ -501,8 +501,8 @@ fn bench_dedup_check_hot_cache(b: &mut Bencher) {
 ```rust
 // In config/features.rs
 pub struct FeatureFlags {
-    pub deduplication_enabled: bool,
-    // ... other flags
+ pub deduplication_enabled: bool,
+ //... other flags
 }
 ```
 

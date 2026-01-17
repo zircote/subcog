@@ -16,37 +16,37 @@ Subcog is a persistent memory system for AI coding assistants, built with a modu
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                    Access Layer                              │
-│  ┌─────────┐  ┌──────────┐  ┌──────────────────────────────┐ │
-│  │   CLI   │  │   MCP    │  │      Claude Code Hooks       │ │
-│  │         │  │  Server  │  │ (session, prompt, tool, stop)│ │
-│  └────┬────┘  └────┬─────┘  └──────────────┬───────────────┘ │
+│ Access Layer │
+│ ┌─────────┐ ┌──────────┐ ┌──────────────────────────────┐ │
+│ │ CLI │ │ MCP │ │ Claude Code Hooks │ │
+│ │ │ │ Server │ │ (session, prompt, tool, stop)│ │
+│ └────┬────┘ └────┬─────┘ └──────────────┬───────────────┘ │
 └───────┼────────────┼────────────────────────┼────────────────┘
-        │            │                        │
-        ▼            ▼                        ▼
+ │ │ │
+ ▼ ▼ ▼
 ┌──────────────────────────────────────────────────────────────┐
-│                    Service Layer                             │
-│  ┌───────────┐ ┌────────────┐ ┌────────────┐ ┌───────────┐   │
-│  │  Capture  │ │   Recall   │ │   Prompt   │ │   Sync    │   │
-│  │  Service  │ │  Service   │ │  Service   │ │  Service  │   │
-│  └─────┬─────┘ └─────┬──────┘ └─────┬──────┘ └─────┬─────┘   │
-│        │             │              │              │         │
-│  ┌─────┴─────────────┴──────────────┴──────────────┴──────┐  │
-│  │              ServiceContainer (DI)                     │  │
-│  └────────────────────────────────────────────────────────┘  │
+│ Service Layer │
+│ ┌───────────┐ ┌────────────┐ ┌────────────┐ ┌───────────┐ │
+│ │ Capture │ │ Recall │ │ Prompt │ │ Sync │ │
+│ │ Service │ │ Service │ │ Service │ │ Service │ │
+│ └─────┬─────┘ └─────┬──────┘ └─────┬──────┘ └─────┬─────┘ │
+│ │ │ │ │ │
+│ ┌─────┴─────────────┴──────────────┴──────────────┴──────┐ │
+│ │ ServiceContainer (DI) │ │
+│ └────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
+ │
+ ▼
 ┌──────────────────────────────────────────────────────────────┐
-│                    Storage Layer                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐           │
-│  │ Persistence │  │    Index    │  │   Vector    │           │
-│  │   (Truth)   │  │  (Search)   │  │(Embeddings) │           │
-│  ├─────────────┤  ├─────────────┤  ├─────────────┤           │
-│  │ • SQLite    │  │ • SQLite    │  │ • usearch   │           │
-│  │ • PostgreSQL│  │ • PostgreSQL│  │ • pgvector  │           │
-│  │ • Filesystem│  │ • Redis     │  │ • Redis     │           │
-│  └─────────────┘  └─────────────┘  └─────────────┘           │
+│ Storage Layer │
+│ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ │
+│ │ Persistence │ │ Index │ │ Vector │ │
+│ │ (Truth) │ │ (Search) │ │(Embeddings) │ │
+│ ├─────────────┤ ├─────────────┤ ├─────────────┤ │
+│ │ - SQLite │ │ - SQLite │ │ - usearch │ │
+│ │ - PostgreSQL│ │ - PostgreSQL│ │ - pgvector │ │
+│ │ - Filesystem│ │ - Redis │ │ - Redis │ │
+│ └─────────────┘ └─────────────┘ └─────────────┘ │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -69,23 +69,23 @@ CompositeStorage<P: PersistenceBackend, I: IndexBackend, V: VectorBackend>
 ### 3. Progressive Disclosure
 
 Token-efficient responses:
-- List endpoints → Minimal data
-- Fetch endpoints → Full content
-- Search → Configurable detail level
+- List endpoints -> Minimal data
+- Fetch endpoints -> Full content
+- Search -> Configurable detail level
 
 ### 4. Graceful Degradation
 
 System continues when components fail:
-- LLM unavailable → Keyword search
-- Embeddings down → Text search
-- Index corrupted → Rebuild from persistence
+- LLM unavailable -> Keyword search
+- Embeddings down -> Text search
+- Index corrupted -> Rebuild from persistence
 
 ### 5. Domain Scoping
 
 Multi-level organization:
-- Project → Repository-specific
-- User → Personal global
-- Org → Team-wide
+- Project -> Repository-specific
+- User -> Personal global
+- Org -> Team-wide
 
 ## Performance Targets
 
@@ -115,17 +115,17 @@ Multi-level organization:
 
 ```
 src/
-├── models/          # Data structures
-├── storage/         # Three-layer storage
-├── services/        # Business logic
-├── mcp/             # MCP server
-├── hooks/           # Claude Code hooks
-├── cli/             # CLI commands
-├── embedding/       # Embedding generation
-├── llm/             # LLM provider abstraction
-├── security/        # Security features
-├── config/          # Configuration
-└── observability/   # Metrics, tracing, logging
+├── models/ # Data structures
+├── storage/ # Three-layer storage
+├── services/ # Business logic
+├── mcp/ # MCP server
+├── hooks/ # Claude Code hooks
+├── cli/ # CLI commands
+├── embedding/ # Embedding generation
+├── llm/ # LLM provider abstraction
+├── security/ # Security features
+├── config/ # Configuration
+└── observability/ # Metrics, tracing, logging
 ```
 
 ## See Also

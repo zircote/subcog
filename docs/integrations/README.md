@@ -65,14 +65,14 @@ Claude Code provides 5 lifecycle hooks that Subcog uses:
 
 The core strategy is to encode hook behaviors as explicit instructions:
 
-### SessionStart → Manual Status Check
+### SessionStart -> Manual Status Check
 
 ```
 At the start of each session, call subcog_status to check the memory system.
 If working on a known project, call subcog_recall with relevant project terms.
 ```
 
-### UserPromptSubmit → Capture Signal Detection
+### UserPromptSubmit -> Capture Signal Detection
 
 ```
 IMMEDIATELY capture when you detect these signals:
@@ -83,7 +83,7 @@ IMMEDIATELY capture when you detect these signals:
 - Tech Debt: "TODO", "FIXME", "temporary", "refactor"
 ```
 
-### UserPromptSubmit → Search Intent Detection
+### UserPromptSubmit -> Search Intent Detection
 
 ```
 Search memory BEFORE acting when you detect:
@@ -101,7 +101,7 @@ that MCP tool, not a shell command, unless the user explicitly says "shell" or
 "run in terminal".
 ```
 
-### PostToolUse → Related Memory Lookup
+### PostToolUse -> Related Memory Lookup
 
 ```
 After using file/code tools, consider recalling related memories:
@@ -110,7 +110,7 @@ After using file/code tools, consider recalling related memories:
 - After Bash: recall by command or tool name
 ```
 
-### Stop → Session End Checklist
+### Stop -> Session End Checklist
 
 ```
 Before ending a session, review and capture:
@@ -183,13 +183,13 @@ Add to `opencode.json` in your project root or global config:
 
 ```json
 {
-  "mcp": {
-    "subcog": {
-      "type": "local",
-      "command": ["subcog", "serve"],
-      "enabled": true
-    }
-  }
+ "mcp": {
+ "subcog": {
+ "type": "local",
+ "command": ["subcog", "serve"],
+ "enabled": true
+ }
+ }
 }
 ```
 
@@ -215,9 +215,9 @@ Add to `opencode.json`:
 
 ```json
 {
-  "instructions": [
-    ".opencode/agent/subcog-memory.md"
-  ]
+ "instructions": [
+ ".opencode/agent/subcog-memory.md"
+ ]
 }
 ```
 
@@ -321,7 +321,7 @@ RECALL before acting on:
 
 ### Legacy Prompt Tools (Deprecated)
 
-> **⚠️ Deprecated**: Use `subcog_prompts` with the appropriate `action` parameter instead.
+> **️ Deprecated**: Use `subcog_prompts` with the appropriate `action` parameter instead.
 
 | Tool | Replacement |
 |------|-------------|
@@ -351,11 +351,11 @@ RECALL before acting on:
 GitHub-style filters for `subcog_recall`:
 
 ```
-ns:decisions           # Filter by namespace
-tag:rust               # Include tag
--tag:deprecated        # Exclude tag
-since:7d               # Recent (days)
-source:src/*           # By source path
+ns:decisions # Filter by namespace
+tag:rust # Include tag
+-tag:deprecated # Exclude tag
+since:7d # Recent (days)
+source:src/* # By source path
 ```
 
 Example: `ns:patterns tag:error-handling -tag:deprecated since:30d`
@@ -412,12 +412,12 @@ Expected: LLM calls `subcog_sync` with direction "push"
 
 | Feature | Claude Code | Prompt-Based |
 |---------|-------------|--------------|
-| Automatic context injection | ✅ SessionStart hook | ❌ Manual status check |
-| Capture signal detection | ✅ <50ms server-side | ⚠️ LLM pattern matching |
-| Deduplication | ✅ 3-tier server-side | ❌ Not available |
-| Pre-compaction capture | ✅ PreCompact hook | ❌ No signal available |
-| Timing enforcement | ✅ Deadline-aware | ❌ Not possible |
-| Related memory surfacing | ✅ PostToolUse hook | ⚠️ Manual guidance |
+| Automatic context injection | SessionStart hook | Manual status check |
+| Capture signal detection | <50ms server-side | ️ LLM pattern matching |
+| Deduplication | 3-tier server-side | Not available |
+| Pre-compaction capture | PreCompact hook | No signal available |
+| Timing enforcement | Deadline-aware | Not possible |
+| Related memory surfacing | PostToolUse hook | ️ Manual guidance |
 
 ### Mitigation Strategies
 

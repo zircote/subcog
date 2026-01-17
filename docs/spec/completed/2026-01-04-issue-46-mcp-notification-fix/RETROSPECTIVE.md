@@ -89,11 +89,11 @@ outcome: success
 
 **Verification Results**:
 ```
-✅ Initialize request (id: 1) → Response with id: 1
-✅ notifications/initialized → NO RESPONSE (fixed!)
-✅ ping request (id: 2) → Response with id: 2
-✅ unknown method (id: 99) → Error with id: 99 (fixed!)
-✅ parse error → Error with id: null (fixed!)
+ Initialize request (id: 1) -> Response with id: 1
+ notifications/initialized -> NO RESPONSE (fixed!)
+ ping request (id: 2) -> Response with id: 2
+ unknown method (id: 99) -> Error with id: 99 (fixed!)
+ parse error -> Error with id: null (fixed!)
 ```
 
 ## Final Notes

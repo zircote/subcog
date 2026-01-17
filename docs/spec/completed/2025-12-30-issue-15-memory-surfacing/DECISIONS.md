@@ -81,10 +81,10 @@ Use **namespace weight multipliers** applied after retrieval:
 ### Alternatives Considered
 
 1. **Query rewriting**: Add namespace terms to query (e.g., "auth patterns")
-   - Rejected: Changes semantics of search, harder to predict results
+ - Rejected: Changes semantics of search, harder to predict results
 
 2. **Filtered search per namespace**: Run separate searches per weighted namespace
-   - Rejected: Multiple queries = higher latency
+ - Rejected: Multiple queries = higher latency
 
 ---
 
@@ -96,7 +96,7 @@ Use **namespace weight multipliers** applied after retrieval:
 
 ### Context
 
-To support topic-based memory surfacing (`subcog://topics/{topic}`), we need to maintain a topic → memory mapping. Options:
+To support topic-based memory surfacing (`subcog://topics/{topic}`), we need to maintain a topic -> memory mapping. Options:
 1. Build index on every request
 2. Store index in SQLite alongside memories
 3. Maintain in-memory HashMap, rebuild on startup
@@ -128,10 +128,10 @@ topics: Arc<RwLock<HashMap<String, Vec<MemoryId>>>>
 ### Alternatives Considered
 
 1. **On-demand building**: Build index on first topic request
-   - Rejected: Unpredictable first-request latency
+ - Rejected: Unpredictable first-request latency
 
 2. **SQLite persistence**: Store topic index in database
-   - Rejected: Overkill for volatile derived data
+ - Rejected: Overkill for volatile derived data
 
 ---
 
@@ -169,10 +169,10 @@ Use a **200ms timeout** for LLM classification with automatic fallback to keywor
 ### Alternatives Considered
 
 1. **500ms timeout**: More LLM results, but too slow for UX
-   - Rejected: Total hook latency would exceed 200ms target
+ - Rejected: Total hook latency would exceed 200ms target
 
 2. **No timeout, async**: Return immediately, inject LLM results on next message
-   - Rejected: Complex state management, confusing UX
+ - Rejected: Complex state management, confusing UX
 
 ---
 
@@ -243,7 +243,7 @@ Use a **configurable confidence threshold** (default 0.5):
 ### Alternatives Considered
 
 1. **Always inject on any detection**: Simple, but noisy
-   - Rejected: Low-confidence detections add noise
+ - Rejected: Low-confidence detections add noise
 
 2. **User-configurable per session**: Too complex for MVP
-   - Deferred: Consider for future enhancement
+ - Deferred: Consider for future enhancement

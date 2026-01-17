@@ -97,9 +97,9 @@ This plan implements two features in four phases:
 **Description**: Tests for variable extraction with exclusions
 
 **Test Cases**:
-- [x] Variable only outside code block → extracted
-- [x] Variable only inside code block → NOT extracted
-- [x] Variables both inside and outside → only outside extracted
+- [x] Variable only outside code block -> extracted
+- [x] Variable only inside code block -> NOT extracted
+- [x] Variables both inside and outside -> only outside extracted
 - [x] Multiple code blocks with variables
 - [x] Variable at exact boundary of code block
 
@@ -328,26 +328,26 @@ This plan implements two features in four phases:
 
 ```
 Phase 1 (Bug Fix):
-  1.1 ──┬──▶ 1.2 ──▶ 1.3
-        │
-        └──▶ 1.4
-              │
-              └──▶ 1.5
+ 1.1 ──┬──▶ 1.2 ──▶ 1.3
+ │
+ └──▶ 1.4
+ │
+ └──▶ 1.5
 
 Phase 2 (Enrichment):
-  2.1 ──┬──▶ 2.3 ──▶ 2.4
-        │      │
-  2.2 ──┘      └──▶ 2.5 ──▶ 2.6
+ 2.1 ──┬──▶ 2.3 ──▶ 2.4
+ │ │
+ 2.2 ──┘ └──▶ 2.5 ──▶ 2.6
 
 Phase 3 (Integration):
-  3.1 ──┬──▶ 3.2
-        │
-        └──▶ 3.3
-              │
-              └──▶ 3.4, 3.5
+ 3.1 ──┬──▶ 3.2
+ │
+ └──▶ 3.3
+ │
+ └──▶ 3.4, 3.5
 
 Phase 4 (Finalization):
-  All above ──▶ 4.1 ──▶ 4.2, 4.3, 4.4
+ All above ──▶ 4.1 ──▶ 4.2, 4.3, 4.4
 ```
 
 ## Risk Mitigation Tasks

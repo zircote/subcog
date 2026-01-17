@@ -42,108 +42,108 @@ This implementation plan breaks down the storage architecture simplification int
 
 ### Tasks
 
-#### Task 1.1: Create Context Detector Module ✅
+#### Task 1.1: Create Context Detector Module 
 
 - **Description**: Create `src/context/mod.rs` and `src/context/detector.rs` with `GitContext` struct and detection logic
 - **Dependencies**: None
 - **Files**:
-  - `src/context/mod.rs` (new)
-  - `src/context/detector.rs` (new)
-  - `src/lib.rs` (add `pub mod context`)
+ - `src/context/mod.rs` (new)
+ - `src/context/detector.rs` (new)
+ - `src/lib.rs` (add `pub mod context`)
 - **Acceptance Criteria**:
-  - [x] `GitContext::from_cwd()` returns correct project_id, branch, file_path
-  - [x] Handles non-git directories gracefully (all fields None)
-  - [x] Handles detached HEAD (branch = None)
-  - [x] Handles worktrees correctly
-  - [x] Git remote URL credentials are sanitized
-  - [x] Unit tests for all edge cases
+ - [x] `GitContext::from_cwd()` returns correct project_id, branch, file_path
+ - [x] Handles non-git directories gracefully (all fields None)
+ - [x] Handles detached HEAD (branch = None)
+ - [x] Handles worktrees correctly
+ - [x] Git remote URL credentials are sanitized
+ - [x] Unit tests for all edge cases
 
-#### Task 1.2: Extend Memory Struct with Facet Fields ✅
+#### Task 1.2: Extend Memory Struct with Facet Fields 
 
 - **Description**: Add `project_id`, `branch`, `file_path`, `tombstoned_at` fields to `Memory` struct
 - **Dependencies**: None
 - **Files**:
-  - `src/models/memory.rs`
+ - `src/models/memory.rs`
 - **Acceptance Criteria**:
-  - [x] Fields added with Option<String>/Option<u64> types
-  - [x] Default impl updated
-  - [x] Serialization/deserialization works
-  - [x] Existing tests pass
+ - [x] Fields added with Option<String>/Option<u64> types
+ - [x] Default impl updated
+ - [x] Serialization/deserialization works
+ - [x] Existing tests pass
 
-#### Task 1.3: Add Tombstoned Status to MemoryStatus ✅
+#### Task 1.3: Add Tombstoned Status to MemoryStatus 
 
 - **Description**: Add `MemoryStatus::Tombstoned` variant
 - **Dependencies**: None
 - **Files**:
-  - `src/models/domain.rs`
+ - `src/models/domain.rs`
 - **Acceptance Criteria**:
-  - [x] `Tombstoned` variant added
-  - [x] `as_str()` returns "tombstoned"
-  - [x] `FromStr` parses "tombstoned"
-  - [x] Existing tests pass
+ - [x] `Tombstoned` variant added
+ - [x] `as_str()` returns "tombstoned"
+ - [x] `FromStr` parses "tombstoned"
+ - [x] Existing tests pass
 
-#### Task 1.4: Extend SearchFilter with Facet Fields ✅
+#### Task 1.4: Extend SearchFilter with Facet Fields 
 
 - **Description**: Add `project_id`, `branch`, `file_path_pattern`, `include_tombstoned` to `SearchFilter`
 - **Dependencies**: None
 - **Files**:
-  - `src/models/search.rs`
+ - `src/models/search.rs`
 - **Acceptance Criteria**:
-  - [x] Fields added with appropriate types
-  - [x] Default impl sets `include_tombstoned = false`
-  - [x] Builder pattern updated
+ - [x] Fields added with appropriate types
+ - [x] Default impl sets `include_tombstoned = false`
+ - [x] Builder pattern updated
 
-#### Task 1.5: Create SQLite Schema Migration for Facets ✅
+#### Task 1.5: Create SQLite Schema Migration for Facets 
 
 - **Description**: Add migration to add facet columns and indexes to SQLite schema
 - **Dependencies**: Task 1.2
 - **Files**:
-  - `src/storage/migrations/mod.rs` (add migration)
-  - `src/storage/index/sqlite.rs` (update schema version)
+ - `src/storage/migrations/mod.rs` (add migration)
+ - `src/storage/index/sqlite.rs` (update schema version)
 - **Acceptance Criteria**:
-  - [x] Migration adds `project_id`, `branch`, `file_path`, `tombstoned_at` columns
-  - [x] Indexes created: `idx_memories_project`, `idx_memories_branch`, `idx_memories_path`, `idx_memories_project_branch`
-  - [x] Partial index for active memories
-  - [x] Migration is idempotent (can run multiple times)
-  - [x] Existing data preserved
+ - [x] Migration adds `project_id`, `branch`, `file_path`, `tombstoned_at` columns
+ - [x] Indexes created: `idx_memories_project`, `idx_memories_branch`, `idx_memories_path`, `idx_memories_project_branch`
+ - [x] Partial index for active memories
+ - [x] Migration is idempotent (can run multiple times)
+ - [x] Existing data preserved
 
-#### Task 1.6: Create PostgreSQL Schema Migration for Facets ✅
+#### Task 1.6: Create PostgreSQL Schema Migration for Facets 
 
 - **Description**: Add migration to add facet columns and indexes to PostgreSQL schema
 - **Dependencies**: Task 1.2
 - **Files**:
-  - `src/storage/persistence/postgresql.rs`
-  - `src/storage/index/postgresql.rs`
+ - `src/storage/persistence/postgresql.rs`
+ - `src/storage/index/postgresql.rs`
 - **Acceptance Criteria**:
-  - [x] Migration adds `project_id`, `branch`, `file_path`, `tombstoned_at` columns
-  - [x] Indexes created with appropriate types
-  - [x] Partial index for active memories
-  - [x] Migration is idempotent
+ - [x] Migration adds `project_id`, `branch`, `file_path`, `tombstoned_at` columns
+ - [x] Indexes created with appropriate types
+ - [x] Partial index for active memories
+ - [x] Migration is idempotent
 
-#### Task 1.7: Update SQLite Index Backend for Facets ✅
+#### Task 1.7: Update SQLite Index Backend for Facets 
 
 - **Description**: Update `SqliteIndexBackend` to read/write facet fields
 - **Dependencies**: Task 1.2, Task 1.5
 - **Files**:
-  - `src/storage/index/sqlite.rs`
+ - `src/storage/index/sqlite.rs`
 - **Acceptance Criteria**:
-  - [x] `index()` writes facet fields
-  - [x] `search()` reads facet fields
-  - [x] `build_filter_clause` handles facet filters
-  - [x] Tests for faceted queries
+ - [x] `index()` writes facet fields
+ - [x] `search()` reads facet fields
+ - [x] `build_filter_clause` handles facet filters
+ - [x] Tests for faceted queries
 
-#### Task 1.8: Update PostgreSQL Backend for Facets ✅
+#### Task 1.8: Update PostgreSQL Backend for Facets 
 
 - **Description**: Update PostgreSQL persistence and index backends to read/write facet fields
 - **Dependencies**: Task 1.2, Task 1.6
 - **Files**:
-  - `src/storage/persistence/postgresql.rs`
-  - `src/storage/index/postgresql.rs`
-  - `src/storage/index/redis.rs` (also updated for consistency)
+ - `src/storage/persistence/postgresql.rs`
+ - `src/storage/index/postgresql.rs`
+ - `src/storage/index/redis.rs` (also updated for consistency)
 - **Acceptance Criteria**:
-  - [x] Persistence layer stores facet fields
-  - [x] Index layer stores and queries facet fields
-  - [x] Tests pass
+ - [x] Persistence layer stores facet fields
+ - [x] Index layer stores and queries facet fields
+ - [x] Tests pass
 
 ### Phase 1 Deliverables
 
@@ -171,81 +171,81 @@ This implementation plan breaks down the storage architecture simplification int
 
 ### Tasks
 
-#### Task 2.1: Update CaptureRequest with Facet Fields ✅
+#### Task 2.1: Update CaptureRequest with Facet Fields 
 
 - **Description**: Add optional facet fields to `CaptureRequest` struct
 - **Dependencies**: Phase 1
 - **Files**:
-  - `src/models/capture.rs`
-  - `src/services/capture.rs` (test helper)
-  - `src/mcp/tools/handlers/core.rs`
-  - `src/hooks/pre_compact/orchestrator.rs`
-  - `src/commands/core.rs`
-  - `tests/capture_recall_integration.rs`
+ - `src/models/capture.rs`
+ - `src/services/capture.rs` (test helper)
+ - `src/mcp/tools/handlers/core.rs`
+ - `src/hooks/pre_compact/orchestrator.rs`
+ - `src/commands/core.rs`
+ - `tests/capture_recall_integration.rs`
 - **Acceptance Criteria**:
-  - [x] `project_id`, `branch`, `file_path` fields added
-  - [x] All fields optional (auto-detection as fallback)
-  - [x] Builder methods added
-  - [x] All call sites updated
+ - [x] `project_id`, `branch`, `file_path` fields added
+ - [x] All fields optional (auto-detection as fallback)
+ - [x] Builder methods added
+ - [x] All call sites updated
 
-#### Task 2.2: Integrate Context Detection in CaptureService ✅
+#### Task 2.2: Integrate Context Detection in CaptureService 
 
 - **Description**: Update `CaptureService::capture()` to auto-detect facets if not provided
 - **Dependencies**: Task 2.1
 - **Files**:
-  - `src/services/capture.rs`
+ - `src/services/capture.rs`
 - **Acceptance Criteria**:
-  - [x] Auto-detects facets from cwd if not provided in request
-  - [x] Explicit facets in request override detection
-  - [x] Graceful fallback if detection fails (null facets)
+ - [x] Auto-detects facets from cwd if not provided in request
+ - [x] Explicit facets in request override detection
+ - [x] Graceful fallback if detection fails (null facets)
 
-#### Task 2.3: Remove Git-Notes Code from CaptureService ✅
+#### Task 2.3: Remove Git-Notes Code from CaptureService 
 
 - **Description**: Remove the git-notes storage path from `capture()` method
 - **Dependencies**: Task 2.2
 - **Files**:
-  - `src/services/capture.rs` (lines 183-206)
+ - `src/services/capture.rs` (lines 183-206)
 - **Acceptance Criteria**:
-  - [x] Git-notes code block removed
-  - [x] Memory ID generated as UUID (not git SHA)
-  - [x] `NotesManager` import removed
-  - [x] No compile errors
+ - [x] Git-notes code block removed
+ - [x] Memory ID generated as UUID (not git SHA)
+ - [x] `NotesManager` import removed
+ - [x] No compile errors
 
-#### Task 2.4: Update ServiceContainer Factory Methods ✅
+#### Task 2.4: Update ServiceContainer Factory Methods 
 
 - **Description**: Simplify `ServiceContainer` to not require `repo_path`
 - **Dependencies**: Task 2.3
 - **Files**:
-  - `src/services/mod.rs`
+ - `src/services/mod.rs`
 - **Acceptance Criteria**:
-  - [x] `repo_path` field removed or made optional
-  - [x] `for_user()` is the primary factory method
-  - [x] `from_current_dir_or_user()` simplified
-  - [x] All dependent code updated
+ - [x] `repo_path` field removed or made optional
+ - [x] `for_user()` is the primary factory method
+ - [x] `from_current_dir_or_user()` simplified
+ - [x] All dependent code updated
 
-#### Task 2.5: Update MCP Capture Handler ✅
+#### Task 2.5: Update MCP Capture Handler 
 
 - **Description**: Update `execute_capture` to accept optional facet overrides
 - **Dependencies**: Task 2.1
 - **Files**:
-  - `src/mcp/tools/handlers/core.rs`
-  - `src/mcp/tools/schemas/` (if schema files exist)
+ - `src/mcp/tools/handlers/core.rs`
+ - `src/mcp/tools/schemas/` (if schema files exist)
 - **Acceptance Criteria**:
-  - [x] `CaptureArgs` has optional facet fields
-  - [x] Facets passed to `CaptureRequest`
-  - [x] Backward compatible (existing calls work)
+ - [x] `CaptureArgs` has optional facet fields
+ - [x] Facets passed to `CaptureRequest`
+ - [x] Backward compatible (existing calls work)
 
-#### Task 2.6: Update CLI Capture Command ✅
+#### Task 2.6: Update CLI Capture Command 
 
 - **Description**: Add `--project`, `--branch`, `--path` flags to capture CLI
 - **Dependencies**: Task 2.1
 - **Files**:
-  - `src/cli/capture.rs`
-  - `src/main.rs` (if args defined there)
+ - `src/cli/capture.rs`
+ - `src/main.rs` (if args defined there)
 - **Acceptance Criteria**:
-  - [x] New flags added with clap
-  - [x] Flags passed to CaptureRequest
-  - [x] Help text updated
+ - [x] New flags added with clap
+ - [x] Flags passed to CaptureRequest
+ - [x] Help text updated
 
 ### Phase 2 Deliverables
 
@@ -272,63 +272,63 @@ This implementation plan breaks down the storage architecture simplification int
 
 ### Tasks
 
-#### Task 3.1: Update RecallService for Facet Filtering ✅
+#### Task 3.1: Update RecallService for Facet Filtering 
 
 - **Description**: Update `search()` and `list_all()` to filter by facets
 - **Dependencies**: Phase 1 (SearchFilter changes)
 - **Files**:
-  - `src/services/recall.rs`
+ - `src/services/recall.rs`
 - **Acceptance Criteria**:
-  - [x] `search()` applies facet filters from SearchFilter
-  - [x] `list_all()` applies facet filters
-  - [x] Tombstoned memories excluded by default
-  - [x] `include_tombstoned` flag works
+ - [x] `search()` applies facet filters from SearchFilter
+ - [x] `list_all()` applies facet filters
+ - [x] Tombstoned memories excluded by default
+ - [x] `include_tombstoned` flag works
 
-#### Task 3.2: Update MCP Recall Handler ✅
+#### Task 3.2: Update MCP Recall Handler 
 
 - **Description**: Update `execute_recall` to accept facet filter parameters
 - **Dependencies**: Task 3.1
 - **Files**:
-  - `src/mcp/tools/handlers/core.rs`
+ - `src/mcp/tools/handlers/core.rs`
 - **Acceptance Criteria**:
-  - [x] `RecallArgs` has facet filter fields
-  - [x] Filters passed to RecallService
-  - [x] Backward compatible
+ - [x] `RecallArgs` has facet filter fields
+ - [x] Filters passed to RecallService
+ - [x] Backward compatible
 
-#### Task 3.3: Update CLI Recall Command ✅
+#### Task 3.3: Update CLI Recall Command 
 
 - **Description**: Add facet filter flags to recall CLI
 - **Dependencies**: Task 3.1
 - **Files**:
-  - `src/cli/recall.rs`
+ - `src/cli/recall.rs`
 - **Acceptance Criteria**:
-  - [x] `--project`, `--branch`, `--path` flags added
-  - [x] `--include-tombstoned` flag added
-  - [x] `--all-projects` flag added (clears project filter)
-  - [x] Help text updated
+ - [x] `--project`, `--branch`, `--path` flags added
+ - [x] `--include-tombstoned` flag added
+ - [x] `--all-projects` flag added (clears project filter)
+ - [x] Help text updated
 
-#### Task 3.4: Update URN Generation ✅
+#### Task 3.4: Update URN Generation 
 
 - **Description**: Update URN scheme to work with faceted model
 - **Dependencies**: None
 - **Files**:
-  - `src/services/capture.rs` (generate_urn)
-  - Any URN parsing code
+ - `src/services/capture.rs` (generate_urn)
+ - Any URN parsing code
 - **Acceptance Criteria**:
-  - [x] URN format: `subcog://{scope}/{namespace}/{id}`
-  - [x] Scope derived from facets or "user"
-  - [x] Backward compatible parsing
+ - [x] URN format: `subcog://{scope}/{namespace}/{id}`
+ - [x] Scope derived from facets or "user"
+ - [x] Backward compatible parsing
 
-#### Task 3.5: Add Tombstone Hint to Search Results ✅
+#### Task 3.5: Add Tombstone Hint to Search Results 
 
 - **Description**: When active results are sparse, check tombstones and hint
 - **Dependencies**: Task 3.1
 - **Files**:
-  - `src/services/recall.rs`
+ - `src/services/recall.rs`
 - **Acceptance Criteria**:
-  - [x] If active results < 3 and tombstones exist, add hint
-  - [x] Hint includes branch names and count
-  - [x] Hint visible in MCP response
+ - [x] If active results < 3 and tombstones exist, add hint
+ - [x] Hint includes branch names and count
+ - [x] Hint visible in MCP response
 
 ### Phase 3 Deliverables
 
@@ -356,85 +356,85 @@ This implementation plan breaks down the storage architecture simplification int
 
 ### Tasks
 
-#### Task 4.1: Create Branch Garbage Collector Module ✅
+#### Task 4.1: Create Branch Garbage Collector Module 
 
 - **Description**: Create `src/gc/mod.rs` and `src/gc/branch.rs` with `BranchGarbageCollector`
 - **Dependencies**: Phase 1
 - **Files**:
-  - `src/gc/mod.rs` (new)
-  - `src/gc/branch.rs` (new)
-  - `src/lib.rs` (add `pub mod gc`)
+ - `src/gc/mod.rs` (new)
+ - `src/gc/branch.rs` (new)
+ - `src/lib.rs` (add `pub mod gc`)
 - **Acceptance Criteria**:
-  - [x] `BranchGarbageCollector` struct
-  - [x] `gc_stale_branches(project_id)` method
-  - [x] Uses git2 to get current branches
-  - [x] Tombstones memories for deleted branches
-  - [x] Returns count of tombstoned memories
+ - [x] `BranchGarbageCollector` struct
+ - [x] `gc_stale_branches(project_id)` method
+ - [x] Uses git2 to get current branches
+ - [x] Tombstones memories for deleted branches
+ - [x] Returns count of tombstoned memories
 
-#### Task 4.2: Add get_distinct_branches to IndexBackend ✅
+#### Task 4.2: Add get_distinct_branches to IndexBackend 
 
 - **Description**: Add method to get unique branches for a project
 - **Dependencies**: Task 4.1
 - **Files**:
-  - `src/storage/traits/index.rs`
-  - `src/storage/index/sqlite.rs`
-  - `src/storage/index/postgresql.rs`
+ - `src/storage/traits/index.rs`
+ - `src/storage/index/sqlite.rs`
+ - `src/storage/index/postgresql.rs`
 - **Acceptance Criteria**:
-  - [x] Trait method added
-  - [x] SQLite implementation
-  - [x] PostgreSQL implementation
-  - [x] Tests
+ - [x] Trait method added
+ - [x] SQLite implementation
+ - [x] PostgreSQL implementation
+ - [x] Tests
 
-#### Task 4.3: Add update_status to IndexBackend ✅
+#### Task 4.3: Add update_status to IndexBackend 
 
 - **Description**: Add method to bulk update status by filter
 - **Dependencies**: Task 4.1
 - **Files**:
-  - `src/storage/traits/index.rs`
-  - `src/storage/index/sqlite.rs`
-  - `src/storage/index/postgresql.rs`
+ - `src/storage/traits/index.rs`
+ - `src/storage/index/sqlite.rs`
+ - `src/storage/index/postgresql.rs`
 - **Acceptance Criteria**:
-  - [x] Trait method added
-  - [x] SQLite implementation (updates status, sets tombstoned_at)
-  - [x] PostgreSQL implementation
-  - [x] Tests
+ - [x] Trait method added
+ - [x] SQLite implementation (updates status, sets tombstoned_at)
+ - [x] PostgreSQL implementation
+ - [x] Tests
 
-#### Task 4.4: Integrate Lazy GC in RecallService ✅
+#### Task 4.4: Integrate Lazy GC in RecallService 
 
 - **Description**: Add opportunistic GC check during recall
 - **Dependencies**: Task 4.1
 - **Files**:
-  - `src/services/recall.rs`
+ - `src/services/recall.rs`
 - **Acceptance Criteria**:
-  - [x] GC runs on each recall if project_id is set
-  - [x] GC overhead < 10ms (only checks if branches changed)
-  - [x] GC errors don't fail recall (log warning)
+ - [x] GC runs on each recall if project_id is set
+ - [x] GC overhead < 10ms (only checks if branches changed)
+ - [x] GC errors don't fail recall (log warning)
 
-#### Task 4.5: Create GC CLI Command ✅
+#### Task 4.5: Create GC CLI Command 
 
 - **Description**: Add `subcog gc` command with flags
 - **Dependencies**: Task 4.1
 - **Files**:
-  - `src/cli/gc.rs` (new)
-  - `src/cli/mod.rs` (add gc)
-  - `src/main.rs` (add subcommand)
+ - `src/cli/gc.rs` (new)
+ - `src/cli/mod.rs` (add gc)
+ - `src/main.rs` (add subcommand)
 - **Acceptance Criteria**:
-  - [x] `subcog gc` - GC current project
-  - [x] `subcog gc --branch=X` - GC specific branch
-  - [x] `subcog gc --dry-run` - Show what would be tombstoned
-  - [x] `subcog gc --purge --older-than=30d` - Permanent delete
+ - [x] `subcog gc` - GC current project
+ - [x] `subcog gc --branch=X` - GC specific branch
+ - [x] `subcog gc --dry-run` - Show what would be tombstoned
+ - [x] `subcog gc --purge --older-than=30d` - Permanent delete
 
-#### Task 4.6: Add GC MCP Tool (Optional) ✅
+#### Task 4.6: Add GC MCP Tool (Optional) 
 
 - **Description**: Add `subcog_gc` MCP tool for programmatic GC
 - **Dependencies**: Task 4.1
 - **Files**:
-  - `src/mcp/tools/handlers/core.rs`
-  - `src/mcp/tools/schemas/`
+ - `src/mcp/tools/handlers/core.rs`
+ - `src/mcp/tools/schemas/`
 - **Acceptance Criteria**:
-  - [x] `subcog_gc` tool registered
-  - [x] Accepts project_id, branch, dry_run parameters
-  - [x] Returns GC results
+ - [x] `subcog_gc` tool registered
+ - [x] Accepts project_id, branch, dry_run parameters
+ - [x] Returns GC results
 
 ### Phase 4 Deliverables
 
@@ -460,95 +460,95 @@ This implementation plan breaks down the storage architecture simplification int
 
 ### Tasks
 
-#### Task 5.1: Remove Git-Notes Module ✅
+#### Task 5.1: Remove Git-Notes Module 
 
 - **Description**: Delete git-notes files and remove from module tree
 - **Dependencies**: Phase 2 complete
 - **Files**:
-  - `src/git/notes.rs` (delete)
-  - `src/git/mod.rs` (remove notes module)
-  - `src/storage/persistence/git_notes.rs` (delete)
-  - `src/storage/prompt/git_notes.rs` (delete if exists)
+ - `src/git/notes.rs` (delete)
+ - `src/git/mod.rs` (remove notes module)
+ - `src/storage/persistence/git_notes.rs` (delete)
+ - `src/storage/prompt/git_notes.rs` (delete if exists)
 - **Acceptance Criteria**:
-  - [x] Files deleted
-  - [x] No dangling imports
-  - [x] `cargo build` succeeds
+ - [x] Files deleted
+ - [x] No dangling imports
+ - [x] `cargo build` succeeds
 
-#### Task 5.2: Evaluate git2 Dependency ✅
+#### Task 5.2: Evaluate git2 Dependency 
 
 - **Description**: Check if git2 is still needed after git-notes removal
 - **Dependencies**: Task 5.1
 - **Files**:
-  - `Cargo.toml`
-  - All files using git2
+ - `Cargo.toml`
+ - All files using git2
 - **Acceptance Criteria**:
-  - [x] Document remaining git2 usages
-  - [x] If only for context detection, consider lightweight alternative
-  - [x] If removable, remove from Cargo.toml
+ - [x] Document remaining git2 usages
+ - [x] If only for context detection, consider lightweight alternative
+ - [x] If removable, remove from Cargo.toml
 - **Notes**: git2 still required for: context detection (GitContext), branch GC (branch_exists), remote sync operations. Cannot be removed.
 
-#### Task 5.3: Update CLAUDE.md Documentation ✅
+#### Task 5.3: Update CLAUDE.md Documentation 
 
 - **Description**: Update CLAUDE.md with new query patterns and CLI flags
 - **Dependencies**: Phase 3
 - **Files**:
-  - `CLAUDE.md`
+ - `CLAUDE.md`
 - **Acceptance Criteria**:
-  - [x] New CLI flags documented
-  - [x] New MCP parameters documented
-  - [x] Example queries with facets
-  - [x] GC command documented
+ - [x] New CLI flags documented
+ - [x] New MCP parameters documented
+ - [x] Example queries with facets
+ - [x] GC command documented
 - **Notes**: Pre-existing documentation was already comprehensive.
 
-#### Task 5.4: Update README Documentation ✅
+#### Task 5.4: Update README Documentation 
 
 - **Description**: Update README with architecture changes
 - **Dependencies**: All phases
 - **Files**:
-  - `README.md`
+ - `README.md`
 - **Acceptance Criteria**:
-  - [x] Architecture section updated
-  - [x] CLI usage updated
-  - [x] Storage paths documented
+ - [x] Architecture section updated
+ - [x] CLI usage updated
+ - [x] Storage paths documented
 - **Notes**: Updated storage backends to list SQLite+usearch, PostgreSQL+pgvector, Filesystem. Added faceted storage and branch GC documentation. Fixed spec links.
 
-#### Task 5.5: Design Org-Scope (Feature-Gated) ✅
+#### Task 5.5: Design Org-Scope (Feature-Gated) 
 
 - **Description**: Document org-scope design in code, feature-gate implementation
 - **Dependencies**: None
 - **Files**:
-  - `src/config/mod.rs` (add OrgConfig struct)
-  - `src/services/mod.rs` (add for_org stub)
-  - `Cargo.toml` (add org-scope feature)
+ - `src/config/mod.rs` (add OrgConfig struct)
+ - `src/services/mod.rs` (add for_org stub)
+ - `Cargo.toml` (add org-scope feature)
 - **Acceptance Criteria**:
-  - [x] `OrgConfig` struct defined
-  - [x] `ServiceContainer::for_org()` behind feature gate
-  - [x] Feature documented in README
+ - [x] `OrgConfig` struct defined
+ - [x] `ServiceContainer::for_org()` behind feature gate
+ - [x] Feature documented in README
 - **Notes**: Org-scope already fully implemented with OrgConfig struct, OrgConfigBuilder, and ServiceContainer::for_org() behind `#[cfg(feature = "org-scope")]`.
 
-#### Task 5.6: Run Full Test Suite ✅
+#### Task 5.6: Run Full Test Suite 
 
 - **Description**: Ensure all tests pass and add missing coverage
 - **Dependencies**: All phases
 - **Files**:
-  - All test files
+ - All test files
 - **Acceptance Criteria**:
-  - [x] `cargo test` passes (949 tests)
-  - [x] Coverage > 90% for new code
-  - [x] Integration tests for faceted capture/recall
-  - [x] Integration tests for GC
+ - [x] `cargo test` passes (949 tests)
+ - [x] Coverage > 90% for new code
+ - [x] Integration tests for faceted capture/recall
+ - [x] Integration tests for GC
 
-#### Task 5.7: Run CI Checks ✅
+#### Task 5.7: Run CI Checks 
 
 - **Description**: Ensure all CI checks pass
 - **Dependencies**: All phases
 - **Files**:
-  - All source files
+ - All source files
 - **Acceptance Criteria**:
-  - [x] `cargo fmt -- --check` passes
-  - [x] `cargo clippy --all-targets --all-features` passes
-  - [x] `cargo doc --no-deps` passes
-  - [x] `cargo deny check` passes
+ - [x] `cargo fmt -- --check` passes
+ - [x] `cargo clippy --all-targets --all-features` passes
+ - [x] `cargo doc --no-deps` passes
+ - [x] `cargo deny check` passes
 - **Notes**: Fixed missing `Tombstoned` case in `build_memory_from_row()` and clippy redundant_closure_for_method_calls warning.
 
 ### Phase 5 Deliverables
@@ -631,7 +631,7 @@ Phase 5: Cleanup (depends on all)
 - [x] Integration tests for capture with facets
 - [x] Integration tests for recall with facet filters
 - [x] Integration tests for GC
-- [x] E2E test: capture → recall roundtrip
+- [x] E2E test: capture -> recall roundtrip
 - [x] E2E test: MCP protocol roundtrip
 - [x] Performance tests for capture latency
 - [x] Performance tests for recall latency

@@ -68,7 +68,7 @@ Prompts should be stored at three domain levels (org, user, project) for efficie
 
 **Acceptance Criteria:**
 - Prompts can be saved to project, user, or org domains
-- Search prioritizes: project → user → org
+- Search prioritizes: project -> user -> org
 - Can filter by domain in list/search
 
 ### US-6: AI Format Guidance
@@ -104,21 +104,21 @@ Prompts should be stored at three domain levels (org, user, project) for efficie
 ### FR-4: Prompt Model
 ```
 PromptTemplate:
-  - name: String (kebab-case, unique)
-  - description: String
-  - content: String (with {{variable}} placeholders)
-  - variables: Vec<PromptVariable>
-  - tags: Vec<String>
-  - author: Option<String>
-  - usage_count: u64
-  - created_at: DateTime
-  - updated_at: DateTime
+ - name: String (kebab-case, unique)
+ - description: String
+ - content: String (with {{variable}} placeholders)
+ - variables: Vec<PromptVariable>
+ - tags: Vec<String>
+ - author: Option<String>
+ - usage_count: u64
+ - created_at: DateTime
+ - updated_at: DateTime
 
 PromptVariable:
-  - name: String
-  - description: Option<String>
-  - default: Option<String>
-  - required: bool (default: true)
+ - name: String
+ - description: Option<String>
+ - default: Option<String>
+ - required: bool (default: true)
 ```
 
 ### FR-5: MCP Tools
@@ -204,7 +204,7 @@ The following are explicitly out of scope for the initial implementation:
 ## 6. Acceptance Criteria (End-to-End)
 
 - [ ] User can save prompts via CLI: `subcog prompt save --name "my-prompt" "content with {{vars}}"`
-- [ ] User can save prompts from file: `subcog prompt save --name "my-prompt" --from-file ./prompt.md`
+- [ ] User can save prompts from file: `subcog prompt save --name "my-prompt" --from-file./prompt.md`
 - [ ] User can save prompts from stdin: `cat prompt.md | subcog prompt save --name "my-prompt" --from-stdin`
 - [ ] Supported file formats: `.md`, `.txt`, `.yaml`, `.yml`, `.json`
 - [ ] User can save prompts via MCP: `prompt.save` tool with `content` or `file_path`
@@ -218,7 +218,7 @@ The following are explicitly out of scope for the initial implementation:
 - [ ] Help memory exists at `subcog://help/prompts` with format documentation
 - [ ] PostToolUse hook validates prompt format and injects guidance for malformed prompts
 - [ ] AI assistants receive format guidance when saving prompts via hooks
-- [ ] User can export prompts back to file: `subcog prompt export name --output ./file.md`
+- [ ] User can export prompts back to file: `subcog prompt export name --output./file.md`
 
 ## 7. Test Plan Summary
 
@@ -231,9 +231,9 @@ The following are explicitly out of scope for the initial implementation:
 - Format validation logic
 
 ### Integration Tests
-- Save → recall → run roundtrip
-- Save from file → recall roundtrip
-- Save from stdin → recall roundtrip
+- Save -> recall -> run roundtrip
+- Save from file -> recall roundtrip
+- Save from stdin -> recall roundtrip
 - Domain hierarchy search order
 - MCP prompts/list includes user prompts
 - CLI CRUD operations

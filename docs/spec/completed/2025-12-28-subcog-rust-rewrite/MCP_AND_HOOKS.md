@@ -12,40 +12,40 @@ The MCP server is a persistent process that runs for the duration of a Claude Co
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                     MCP SERVER LIFECYCLE                            │
+│ MCP SERVER LIFECYCLE │
 ├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  1. STARTUP                                                         │
-│     Claude Code/Desktop starts subcog as MCP server                 │
-│     $ subcog serve --transport stdio                                │
-│                                                                     │
-│  2. INITIALIZATION                                                  │
-│     - Load configuration from config.toml                           │
-│     - Initialize storage connections (SQLite, usearch)              │
-│     - Load embedding model (fastembed)                              │
-│     - Set up event bus                                              │
-│     - Register MCP tools, resources, prompts                        │
-│                                                                     │
-│  3. RUNNING                                                         │
-│     - Listen on stdin for JSON-RPC requests                         │
-│     - Write JSON-RPC responses to stdout                            │
-│     - Maintain state: connections, caches, subscriptions            │
-│     - Process tool calls from AI agent                              │
-│                                                                     │
-│  4. TOOL HANDLING                                                   │
-│     memory.capture → CaptureService.capture()                       │
-│     memory.recall  → RecallService.search()                         │
-│     memory.status  → StatusService.stats()                          │
-│     memory.sync    → SyncService.sync()                             │
-│     memory.consolidate → ConsolidationService.run()                 │
-│     memory.configure → ConfigService.get/set()                      │
-│                                                                     │
-│  5. SHUTDOWN                                                        │
-│     Server terminates when Claude Code/Desktop exits                │
-│     - Flush pending operations                                      │
-│     - Close storage connections                                     │
-│     - Clean up resources                                            │
-│                                                                     │
+│ │
+│ 1. STARTUP │
+│ Claude Code/Desktop starts subcog as MCP server │
+│ $ subcog serve --transport stdio │
+│ │
+│ 2. INITIALIZATION │
+│ - Load configuration from config.toml │
+│ - Initialize storage connections (SQLite, usearch) │
+│ - Load embedding model (fastembed) │
+│ - Set up event bus │
+│ - Register MCP tools, resources, prompts │
+│ │
+│ 3. RUNNING │
+│ - Listen on stdin for JSON-RPC requests │
+│ - Write JSON-RPC responses to stdout │
+│ - Maintain state: connections, caches, subscriptions │
+│ - Process tool calls from AI agent │
+│ │
+│ 4. TOOL HANDLING │
+│ memory.capture -> CaptureService.capture() │
+│ memory.recall -> RecallService.search() │
+│ memory.status -> StatusService.stats() │
+│ memory.sync -> SyncService.sync() │
+│ memory.consolidate -> ConsolidationService.run() │
+│ memory.configure -> ConfigService.get/set() │
+│ │
+│ 5. SHUTDOWN │
+│ Server terminates when Claude Code/Desktop exits │
+│ - Flush pending operations │
+│ - Close storage connections │
+│ - Clean up resources │
+│ │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -55,36 +55,36 @@ Hooks are ephemeral processes spawned by Claude Code at specific events.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                     HOOK LIFECYCLE (Per Invocation)                 │
+│ HOOK LIFECYCLE (Per Invocation) │
 ├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  1. SPAWN                                                           │
-│     Claude Code triggers hook at specific event                     │
-│     $ subcog hook session-start < input.json > output.json          │
-│                                                                     │
-│  2. INITIALIZATION (must be fast: <10ms)                            │
-│     - Load configuration (cached on disk)                           │
-│     - Open storage connections                                      │
-│     - Skip heavy initialization (no model loading)                  │
-│                                                                     │
-│  3. EXECUTION                                                       │
-│     - Read JSON from stdin                                          │
-│     - Perform operation (recall, signal detection, etc.)            │
-│     - Build additionalContext response                              │
-│                                                                     │
-│  4. RESPONSE                                                        │
-│     - Write JSON to stdout                                          │
-│     - Exit with code 0 (ALWAYS, even on error)                      │
-│                                                                     │
-│  5. CLEANUP                                                         │
-│     - Close connections                                             │
-│     - Process terminates                                            │
-│                                                                     │
-│  IMPORTANT: Each invocation is independent                          │
-│  - No shared memory between invocations                             │
-│  - Must re-initialize services each time                            │
-│  - State persists only via storage layer                            │
-│                                                                     │
+│ │
+│ 1. SPAWN │
+│ Claude Code triggers hook at specific event │
+│ $ subcog hook session-start < input.json > output.json │
+│ │
+│ 2. INITIALIZATION (must be fast: <10ms) │
+│ - Load configuration (cached on disk) │
+│ - Open storage connections │
+│ - Skip heavy initialization (no model loading) │
+│ │
+│ 3. EXECUTION │
+│ - Read JSON from stdin │
+│ - Perform operation (recall, signal detection, etc.) │
+│ - Build additionalContext response │
+│ │
+│ 4. RESPONSE │
+│ - Write JSON to stdout │
+│ - Exit with code 0 (ALWAYS, even on error) │
+│ │
+│ 5. CLEANUP │
+│ - Close connections │
+│ - Process terminates │
+│ │
+│ IMPORTANT: Each invocation is independent │
+│ - No shared memory between invocations │
+│ - Must re-initialize services each time │
+│ - State persists only via storage layer │
+│ │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -96,48 +96,48 @@ Hooks are ephemeral processes spawned by Claude Code at specific events.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                     CLAUDE CODE INTEGRATION                                 │
+│ CLAUDE CODE INTEGRATION │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────────┐                      ┌───────────────────────────────┐ │
-│  │   Claude Code   │                      │      MCP Configuration        │ │
-│  │    Process      │                      │  ~/.config/claude/mcp.json    │ │
-│  │                 │                      │                               │ │
-│  │  ┌───────────┐  │    JSON-RPC/stdio    │  {                            │ │
-│  │  │  Claude   │  │◄───────────────────► │    "memory": {                │ │
-│  │  │   LLM     │  │   (persistent conn)  │      "command": "subcog",     │ │
-│  │  └───────────┘  │                      │      "args": ["serve"]        │ │
-│  │       │         │                      │    }                          │ │
-│  │       │ Tool    │                      │  }                            │ │
-│  │       │ calls   │                      └───────────────────────────────┘ │
-│  │       ▼         │                                                        │
-│  │  ┌───────────┐  │                      ┌───────────────────────────────┐ │
-│  │  │   MCP     │  │   Long-lived proc    │    MCP Server Process         │ │
-│  │  │  Client   │──┼─────────────────────►│    (subcog serve)             │ │
-│  │  └───────────┘  │                      │    - Maintains state          │ │
-│  │       │         │                      │    - Handles tool calls       │ │
-│  │       │ Events  │                      │    - Event bus active         │ │
-│  │       ▼         │                      └───────────────────────────────┘ │
-│  │  ┌───────────┐  │                                                        │
-│  │  │   Hook    │  │                      ┌───────────────────────────────┐ │
-│  │  │ Dispatcher│  │   Short-lived procs  │      Hooks Configuration      │ │
-│  │  └───────────┘  │◄─────────────────────│  ~/.claude/hooks.json         │ │
-│  │       │         │   (spawn per event)  │                               │ │
-│  │       │         │                      │  [                            │ │
-│  │       ▼         │                      │    {                          │ │
-│  │  ┌───────────┐  │                      │      "event": "SessionStart", │ │
-│  │  │   Hook    │  │                      │      "command": ["subcog",    │ │
-│  │  │  Process  │──┼─────────────────────►│        "hook", "session-start"] │
-│  │  │ (subcog   │  │                      │    },                         │ │
-│  │  │  hook ...) │  │                      │    {                         │ │
-│  │  └───────────┘  │                      │      "event": "UserPromptSubmit",│
-│  │                 │                      │      "command": ["subcog",    │ │
-│  │                 │                      │        "hook", "user-prompt"] │ │
-│  │                 │                      │    },                         │ │
-│  │                 │                      │    ...                        │ │
-│  │                 │                      │  ]                            │ │
-│  └─────────────────┘                      └───────────────────────────────┘ │
-│                                                                             │
+│ │
+│ ┌─────────────────┐ ┌───────────────────────────────┐ │
+│ │ Claude Code │ │ MCP Configuration │ │
+│ │ Process │ │ ~/.config/claude/mcp.json │ │
+│ │ │ │ │ │
+│ │ ┌───────────┐ │ JSON-RPC/stdio │ { │ │
+│ │ │ Claude │ │◄───────────────────► │ "memory": { │ │
+│ │ │ LLM │ │ (persistent conn) │ "command": "subcog", │ │
+│ │ └───────────┘ │ │ "args": ["serve"] │ │
+│ │ │ │ │ } │ │
+│ │ │ Tool │ │ } │ │
+│ │ │ calls │ └───────────────────────────────┘ │
+│ │ ▼ │ │
+│ │ ┌───────────┐ │ ┌───────────────────────────────┐ │
+│ │ │ MCP │ │ Long-lived proc │ MCP Server Process │ │
+│ │ │ Client │──┼─────────────────────►│ (subcog serve) │ │
+│ │ └───────────┘ │ │ - Maintains state │ │
+│ │ │ │ │ - Handles tool calls │ │
+│ │ │ Events │ │ - Event bus active │ │
+│ │ ▼ │ └───────────────────────────────┘ │
+│ │ ┌───────────┐ │ │
+│ │ │ Hook │ │ ┌───────────────────────────────┐ │
+│ │ │ Dispatcher│ │ Short-lived procs │ Hooks Configuration │ │
+│ │ └───────────┘ │◄─────────────────────│ ~/.claude/hooks.json │ │
+│ │ │ │ (spawn per event) │ │ │
+│ │ │ │ │ [ │ │
+│ │ ▼ │ │ { │ │
+│ │ ┌───────────┐ │ │ "event": "SessionStart", │ │
+│ │ │ Hook │ │ │ "command": ["subcog", │ │
+│ │ │ Process │──┼─────────────────────►│ "hook", "session-start"] │
+│ │ │ (subcog │ │ │ }, │ │
+│ │ │ hook...) │ │ │ { │ │
+│ │ └───────────┘ │ │ "event": "UserPromptSubmit",│
+│ │ │ │ "command": ["subcog", │ │
+│ │ │ │ "hook", "user-prompt"] │ │
+│ │ │ │ }, │ │
+│ │ │ │... │ │
+│ │ │ │ ] │ │
+│ └─────────────────┘ └───────────────────────────────┘ │
+│ │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -164,35 +164,35 @@ Both MCP server and hooks access the same underlying storage through file-based 
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                     SHARED STORAGE LAYER                                    │
+│ SHARED STORAGE LAYER │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ~/.local/share/subcog/                                                     │
-│  ├── index.db           ← SQLite (FTS5)                                     │
-│  │                        - WAL mode for concurrent access                  │
-│  │                        - File locking for writes                         │
-│  │                        - Shared read access                              │
-│  │                                                                          │
-│  ├── vectors.usearch    ← usearch HNSW index                                │
-│  │                        - Memory-mapped for reads                         │
-│  │                        - Exclusive lock for writes                       │
-│  │                                                                          │
-│  ├── config.toml        ← Configuration (read-only after load)              │
-│  │                                                                          │
-│  └── audit/             ← Audit logs (append-only)                          │
-│                                                                             │
-│  Project Repository:                                                        │
-│  └── .git/refs/notes/mem/                                                   │
-│      ├── decisions      ← Git notes (git handles concurrency)               │
-│      ├── learnings                                                          │
-│      ├── blockers                                                           │
-│      └── ...                                                                │
-│                                                                             │
-│  User Repository (~/.local/share/subcog/user-memories):                     │
-│  └── .git/refs/notes/mem/                                                   │
-│      ├── patterns       ← Global user memories                              │
-│      └── ...                                                                │
-│                                                                             │
+│ │
+│ ~/.local/share/subcog/ │
+│ ├── index.db <- SQLite (FTS5) │
+│ │ - WAL mode for concurrent access │
+│ │ - File locking for writes │
+│ │ - Shared read access │
+│ │ │
+│ ├── vectors.usearch <- usearch HNSW index │
+│ │ - Memory-mapped for reads │
+│ │ - Exclusive lock for writes │
+│ │ │
+│ ├── config.toml <- Configuration (read-only after load) │
+│ │ │
+│ └── audit/ <- Audit logs (append-only) │
+│ │
+│ Project Repository: │
+│ └──.git/refs/notes/mem/ │
+│ ├── decisions <- Git notes (git handles concurrency) │
+│ ├── learnings │
+│ ├── blockers │
+│ └──... │
+│ │
+│ User Repository (~/.local/share/subcog/user-memories): │
+│ └──.git/refs/notes/mem/ │
+│ ├── patterns <- Global user memories │
+│ └──... │
+│ │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -201,16 +201,16 @@ Both MCP server and hooks access the same underlying storage through file-based 
 ```rust
 // MCP Server: Keeps connections open
 pub struct McpServerStorage {
-    sqlite: Arc<Mutex<Connection>>,      // Held for session
-    usearch: Arc<RwLock<usearch::Index>>, // Read-heavy, occasional writes
-    git: Arc<GitOps>,                     // Thread-safe git operations
+ sqlite: Arc<Mutex<Connection>>, // Held for session
+ usearch: Arc<RwLock<usearch::Index>>, // Read-heavy, occasional writes
+ git: Arc<GitOps>, // Thread-safe git operations
 }
 
 // Hook: Opens connections briefly
 pub struct HookStorage {
-    sqlite: Connection,    // Opened, used, closed
-    usearch: usearch::Index, // Opened read-only
-    git: GitOps,           // Quick operations
+ sqlite: Connection, // Opened, used, closed
+ usearch: usearch::Index, // Opened read-only
+ git: GitOps, // Quick operations
 }
 
 // SQLite concurrency via WAL mode
@@ -239,36 +239,36 @@ The event bus operates **only within** the MCP server process. Hooks do not part
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                     EVENT BUS (MCP SERVER INTERNAL)                         │
+│ EVENT BUS (MCP SERVER INTERNAL) │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                        tokio::broadcast::channel                    │    │
-│  │                                                                     │    │
-│  │  Publisher (Services)              Subscribers (Handlers)           │    │
-│  │  ┌─────────────────┐               ┌─────────────────────────────┐  │    │
-│  │  │ CaptureService  │──────────────►│ MetricsHandler              │  │    │
-│  │  │   .capture()    │               │  - Update counters          │  │    │
-│  │  └─────────────────┘               │  - Record latencies         │  │    │
-│  │          │                         └─────────────────────────────┘  │    │
-│  │          │ MemoryCaptured                                           │    │
-│  │          │                         ┌─────────────────────────────┐  │    │
-│  │          ├────────────────────────►│ McpSubscriptionHandler      │  │    │
-│  │          │                         │  - Notify MCP clients       │  │    │
-│  │          │                         │  - Resource change events   │  │    │
-│  │          │                         └─────────────────────────────┘  │    │
-│  │          │                                                          │    │
-│  │          │                         ┌─────────────────────────────┐  │    │
-│  │          └────────────────────────►│ ConsolidationTrigger        │  │    │
-│  │                                    │  - Count captures           │  │    │
-│  │                                    │  - Trigger if threshold     │  │    │
-│  │                                    └─────────────────────────────┘  │    │
-│  │                                                                     │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  NOTE: Hooks are separate processes - they don't receive these events       │
-│        They interact only via the shared storage layer                      │
-│                                                                             │
+│ │
+│ ┌─────────────────────────────────────────────────────────────────────┐ │
+│ │ tokio::broadcast::channel │ │
+│ │ │ │
+│ │ Publisher (Services) Subscribers (Handlers) │ │
+│ │ ┌─────────────────┐ ┌─────────────────────────────┐ │ │
+│ │ │ CaptureService │──────────────►│ MetricsHandler │ │ │
+│ │ │.capture() │ │ - Update counters │ │ │
+│ │ └─────────────────┘ │ - Record latencies │ │ │
+│ │ │ └─────────────────────────────┘ │ │
+│ │ │ MemoryCaptured │ │
+│ │ │ ┌─────────────────────────────┐ │ │
+│ │ ├────────────────────────►│ McpSubscriptionHandler │ │ │
+│ │ │ │ - Notify MCP clients │ │ │
+│ │ │ │ - Resource change events │ │ │
+│ │ │ └─────────────────────────────┘ │ │
+│ │ │ │ │
+│ │ │ ┌─────────────────────────────┐ │ │
+│ │ └────────────────────────►│ ConsolidationTrigger │ │ │
+│ │ │ - Count captures │ │ │
+│ │ │ - Trigger if threshold │ │ │
+│ │ └─────────────────────────────┘ │ │
+│ │ │ │
+│ └─────────────────────────────────────────────────────────────────────┘ │
+│ │
+│ NOTE: Hooks are separate processes - they don't receive these events │
+│ They interact only via the shared storage layer │
+│ │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -300,18 +300,18 @@ The event bus operates **only within** the MCP server process. Hooks do not part
 ```json
 // INPUT (stdin)
 {
-  "hook": "SessionStart",
-  "session_id": "sess_abc123",
-  "project_path": "/Users/dev/my-project",
-  "project_name": "my-project",
-  "git_branch": "feature/auth",
-  "timestamp": "2025-01-20T10:00:00Z"
+ "hook": "SessionStart",
+ "session_id": "sess_abc123",
+ "project_path": "/Users/dev/my-project",
+ "project_name": "my-project",
+ "git_branch": "feature/auth",
+ "timestamp": "2025-01-20T10:00:00Z"
 }
 
 // OUTPUT (stdout)
 {
-  "additionalContext": "<memory_context>...</memory_context>",
-  "suppressSystemPrompt": false
+ "additionalContext": "<memory_context>...</memory_context>",
+ "suppressSystemPrompt": false
 }
 ```
 
@@ -320,15 +320,15 @@ The event bus operates **only within** the MCP server process. Hooks do not part
 ```json
 // INPUT (stdin)
 {
-  "hook": "UserPromptSubmit",
-  "session_id": "sess_abc123",
-  "prompt": "Let's use PostgreSQL [decision] because of JSONB support"
+ "hook": "UserPromptSubmit",
+ "session_id": "sess_abc123",
+ "prompt": "Let's use PostgreSQL [decision] because of JSONB support"
 }
 
 // OUTPUT (stdout)
 {
-  "additionalContext": "<capture_detected>...</capture_detected>",
-  "suppressSystemPrompt": false
+ "additionalContext": "<capture_detected>...</capture_detected>",
+ "suppressSystemPrompt": false
 }
 ```
 
@@ -337,17 +337,17 @@ The event bus operates **only within** the MCP server process. Hooks do not part
 ```json
 // INPUT (stdin)
 {
-  "hook": "PostToolUse",
-  "session_id": "sess_abc123",
-  "tool_name": "Read",
-  "tool_input": { "file_path": "/src/auth.rs" },
-  "tool_output": "pub fn authenticate(...) { ... }"
+ "hook": "PostToolUse",
+ "session_id": "sess_abc123",
+ "tool_name": "Read",
+ "tool_input": { "file_path": "/src/auth.rs" },
+ "tool_output": "pub fn authenticate(...) {... }"
 }
 
 // OUTPUT (stdout)
 {
-  "additionalContext": "<related_memories>...</related_memories>",
-  "suppressSystemPrompt": false
+ "additionalContext": "<related_memories>...</related_memories>",
+ "suppressSystemPrompt": false
 }
 ```
 
@@ -356,17 +356,17 @@ The event bus operates **only within** the MCP server process. Hooks do not part
 ```json
 // INPUT (stdin)
 {
-  "hook": "PreCompact",
-  "session_id": "sess_abc123",
-  "conversation_summary": "User implemented authentication...",
-  "key_decisions": ["Use JWT", "Store in httpOnly cookies"],
-  "remaining_context_tokens": 5000
+ "hook": "PreCompact",
+ "session_id": "sess_abc123",
+ "conversation_summary": "User implemented authentication...",
+ "key_decisions": ["Use JWT", "Store in httpOnly cookies"],
+ "remaining_context_tokens": 5000
 }
 
 // OUTPUT (stdout)
 {
-  "additionalContext": "<auto_captured>...</auto_captured>",
-  "suppressSystemPrompt": false
+ "additionalContext": "<auto_captured>...</auto_captured>",
+ "suppressSystemPrompt": false
 }
 ```
 
@@ -375,18 +375,18 @@ The event bus operates **only within** the MCP server process. Hooks do not part
 ```json
 // INPUT (stdin)
 {
-  "hook": "Stop",
-  "session_id": "sess_abc123",
-  "reason": "user_initiated",
-  "duration_seconds": 1800,
-  "tool_calls": 45,
-  "tokens_used": 50000
+ "hook": "Stop",
+ "session_id": "sess_abc123",
+ "reason": "user_initiated",
+ "duration_seconds": 1800,
+ "tool_calls": 45,
+ "tokens_used": 50000
 }
 
 // OUTPUT (stdout)
 {
-  "additionalContext": "",
-  "suppressSystemPrompt": true
+ "additionalContext": "",
+ "suppressSystemPrompt": true
 }
 ```
 
@@ -396,25 +396,25 @@ Hooks must NEVER fail with non-zero exit or malformed JSON:
 
 ```rust
 fn main() {
-    let result = run_hook();
+ let result = run_hook();
 
-    match result {
-        Ok(output) => {
-            // Success: output valid JSON
-            println!("{}", serde_json::to_string(&output).unwrap());
-        }
-        Err(e) => {
-            // Error: still output valid JSON with empty context
-            eprintln!("Hook error: {}", e);  // Goes to stderr, not captured
-            println!("{}", serde_json::to_string(&HookOutput {
-                additional_context: format!("<!-- hook error: {} -->", e),
-                suppress_system_prompt: false,
-            }).unwrap());
-        }
-    }
+ match result {
+ Ok(output) => {
+ // Success: output valid JSON
+ println!("{}", serde_json::to_string(&output).unwrap());
+ }
+ Err(e) => {
+ // Error: still output valid JSON with empty context
+ eprintln!("Hook error: {}", e); // Goes to stderr, not captured
+ println!("{}", serde_json::to_string(&HookOutput {
+ additional_context: format!("<!-- hook error: {} -->", e),
+ suppress_system_prompt: false,
+ }).unwrap());
+ }
+ }
 
-    // ALWAYS exit 0
-    std::process::exit(0);
+ // ALWAYS exit 0
+ std::process::exit(0);
 }
 ```
 
@@ -428,41 +428,41 @@ Hooks can modify storage that the MCP server reads:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                     HOOK → MCP SERVER DATA FLOW                             │
+│ HOOK -> MCP SERVER DATA FLOW │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  SessionStart Hook:                                                         │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  1. git fetch origin refs/notes/mem/*                               │    │
-│  │     → Updates local git notes from remote                           │    │
-│  │                                                                     │    │
-│  │  2. Rebuild index if stale                                          │    │
-│  │     → Updates SQLite index                                          │    │
-│  │                                                                     │    │
-│  │  RESULT: MCP server's next memory.recall sees new data              │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  Stop Hook:                                                                 │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  1. Sync index with git notes                                       │    │
-│  │     → Ensures consistency                                           │    │
-│  │                                                                     │    │
-│  │  2. git push origin refs/notes/mem/*                                │    │
-│  │     → Pushes to remote for other machines                           │    │
-│  │                                                                     │    │
-│  │  RESULT: MCP server typically shutting down anyway                  │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  PreCompact Hook (with auto-capture):                                       │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  1. Analyze conversation for capture-worthy content                 │    │
-│  │                                                                     │    │
-│  │  2. Write new memories to git notes + index                         │    │
-│  │     → Creates new memories                                          │    │
-│  │                                                                     │    │
-│  │  RESULT: MCP server's next query sees new memories                  │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
+│ │
+│ SessionStart Hook: │
+│ ┌─────────────────────────────────────────────────────────────────────┐ │
+│ │ 1. git fetch origin refs/notes/mem/* │ │
+│ │ -> Updates local git notes from remote │ │
+│ │ │ │
+│ │ 2. Rebuild index if stale │ │
+│ │ -> Updates SQLite index │ │
+│ │ │ │
+│ │ RESULT: MCP server's next memory.recall sees new data │ │
+│ └─────────────────────────────────────────────────────────────────────┘ │
+│ │
+│ Stop Hook: │
+│ ┌─────────────────────────────────────────────────────────────────────┐ │
+│ │ 1. Sync index with git notes │ │
+│ │ -> Ensures consistency │ │
+│ │ │ │
+│ │ 2. git push origin refs/notes/mem/* │ │
+│ │ -> Pushes to remote for other machines │ │
+│ │ │ │
+│ │ RESULT: MCP server typically shutting down anyway │ │
+│ └─────────────────────────────────────────────────────────────────────┘ │
+│ │
+│ PreCompact Hook (with auto-capture): │
+│ ┌─────────────────────────────────────────────────────────────────────┐ │
+│ │ 1. Analyze conversation for capture-worthy content │ │
+│ │ │ │
+│ │ 2. Write new memories to git notes + index │ │
+│ │ -> Creates new memories │ │
+│ │ │ │
+│ │ RESULT: MCP server's next query sees new memories │ │
+│ └─────────────────────────────────────────────────────────────────────┘ │
+│ │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -472,25 +472,25 @@ Hooks can modify storage that the MCP server reads:
 Session Timeline:
 ─────────────────────────────────────────────────────────────────────────────►
 
-│ SessionStart │                    │ User Prompts │              │ Stop │
-│    Hook      │                    │    Hooks     │              │ Hook │
-│   (2000ms)   │                    │   (50ms ea)  │              │(5000ms)│
-      │                                    │                           │
-      ▼                                    ▼                           ▼
-┌──────────┐                        ┌──────────┐                ┌──────────┐
-│  Fetch   │                        │  Signal  │                │  Sync    │
-│  Remote  │                        │ Detection│                │  Push    │
-│  Rebuild │                        │          │                │          │
-│  Index   │                        │          │                │          │
-└──────────┘                        └──────────┘                └──────────┘
-      │                                                               │
-      │         MCP Server Running (handles tool calls)               │
-      ├───────────────────────────────────────────────────────────────┤
-      │                                                               │
-      │  memory.capture ─► writes to storage                          │
-      │  memory.recall  ─► reads from storage                         │
-      │  memory.sync    ─► syncs storage                              │
-      │                                                               │
+│ SessionStart │ │ User Prompts │ │ Stop │
+│ Hook │ │ Hooks │ │ Hook │
+│ (2000ms) │ │ (50ms ea) │ │(5000ms)│
+ │ │ │
+ ▼ ▼ ▼
+┌──────────┐ ┌──────────┐ ┌──────────┐
+│ Fetch │ │ Signal │ │ Sync │
+│ Remote │ │ Detection│ │ Push │
+│ Rebuild │ │ │ │ │
+│ Index │ │ │ │ │
+└──────────┘ └──────────┘ └──────────┘
+ │ │
+ │ MCP Server Running (handles tool calls) │
+ ├───────────────────────────────────────────────────────────────┤
+ │ │
+ │ memory.capture ─► writes to storage │
+ │ memory.recall ─► reads from storage │
+ │ memory.sync ─► syncs storage │
+ │ │
 ```
 
 ---
@@ -502,15 +502,15 @@ Session Timeline:
 ```json
 // ~/.config/claude/mcp.json
 {
-  "mcpServers": {
-    "memory": {
-      "command": "subcog",
-      "args": ["serve", "--transport", "stdio"],
-      "env": {
-        "SUBCOG_CONFIG": "~/.config/subcog/config.toml"
-      }
-    }
-  }
+ "mcpServers": {
+ "memory": {
+ "command": "subcog",
+ "args": ["serve", "--transport", "stdio"],
+ "env": {
+ "SUBCOG_CONFIG": "~/.config/subcog/config.toml"
+ }
+ }
+ }
 }
 ```
 
@@ -519,31 +519,31 @@ Session Timeline:
 ```json
 // ~/.claude/hooks.json
 [
-  {
-    "event": "SessionStart",
-    "command": ["subcog", "hook", "session-start"],
-    "timeout": 2000
-  },
-  {
-    "event": "UserPromptSubmit",
-    "command": ["subcog", "hook", "user-prompt"],
-    "timeout": 50
-  },
-  {
-    "event": "PostToolUse",
-    "command": ["subcog", "hook", "post-tool"],
-    "timeout": 100
-  },
-  {
-    "event": "PreCompact",
-    "command": ["subcog", "hook", "pre-compact"],
-    "timeout": 500
-  },
-  {
-    "event": "Stop",
-    "command": ["subcog", "hook", "stop"],
-    "timeout": 5000
-  }
+ {
+ "event": "SessionStart",
+ "command": ["subcog", "hook", "session-start"],
+ "timeout": 2000
+ },
+ {
+ "event": "UserPromptSubmit",
+ "command": ["subcog", "hook", "user-prompt"],
+ "timeout": 50
+ },
+ {
+ "event": "PostToolUse",
+ "command": ["subcog", "hook", "post-tool"],
+ "timeout": 100
+ },
+ {
+ "event": "PreCompact",
+ "command": ["subcog", "hook", "pre-compact"],
+ "timeout": 500
+ },
+ {
+ "event": "Stop",
+ "command": ["subcog", "hook", "stop"],
+ "timeout": 5000
+ }
 ]
 ```
 

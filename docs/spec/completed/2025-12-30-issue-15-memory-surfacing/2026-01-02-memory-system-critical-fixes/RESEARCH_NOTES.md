@@ -40,9 +40,9 @@ This document captures findings from the deep investigation into why Subcog's me
 
 ```rust
 pub trait Embedder: Send + Sync {
-    fn dimensions(&self) -> usize;
-    fn embed(&self, text: &str) -> Result<Vec<f32>>;
-    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>;
+ fn dimensions(&self) -> usize;
+ fn embed(&self, text: &str) -> Result<Vec<f32>>;
+ fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>;
 }
 ```
 
@@ -60,19 +60,19 @@ pub trait Embedder: Send + Sync {
 
 // Line 46-74: Hash-based pseudo-embedding
 fn pseudo_embed(&self, text: &str) -> Vec<f32> {
-    let mut embedding = vec![0.0f32; self.dimensions];
-    for (i, word) in text.split_whitespace().enumerate() {
-        let mut hasher = DefaultHasher::new();
-        word.hash(&mut hasher);
-        let hash = hasher.finish();
-        // Distributes hash across embedding dimensions
-        for j in 0..8 {
-            let idx = ((hash >> (j * 8)) as usize + i) % self.dimensions;
-            let value = ((hash >> (j * 4)) & 0xFF) as f32 / 255.0 - 0.5;
-            embedding[idx] += value;
-        }
-    }
-    // Normalizes to unit vector
+ let mut embedding = vec![0.0f32; self.dimensions];
+ for (i, word) in text.split_whitespace().enumerate() {
+ let mut hasher = DefaultHasher::new();
+ word.hash(&mut hasher);
+ let hash = hasher.finish();
+ // Distributes hash across embedding dimensions
+ for j in 0..8 {
+ let idx = ((hash >> (j * 8)) as usize + i) % self.dimensions;
+ let value = ((hash >> (j * 4)) & 0xFF) as f32 / 255.0 - 0.5;
+ embedding[idx] += value;
+ }
+ }
+ // Normalizes to unit vector
 }
 ```
 
@@ -88,14 +88,14 @@ fn pseudo_embed(&self, text: &str) -> Vec<f32> {
 
 ```rust
 pub struct FallbackEmbedder {
-    dimensions: usize,
+ dimensions: usize,
 }
 
 impl Embedder for FallbackEmbedder {
-    fn embed(&self, _text: &str) -> Result<Vec<f32>> {
-        // Returns zero vector
-        Ok(vec![0.0; self.dimensions])
-    }
+ fn embed(&self, _text: &str) -> Result<Vec<f32>> {
+ // Returns zero vector
+ Ok(vec![0.0; self.dimensions])
+ }
 }
 ```
 
@@ -111,11 +111,11 @@ impl Embedder for FallbackEmbedder {
 
 ```rust
 pub trait VectorBackend: Send + Sync {
-    fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()>;
-    fn remove(&self, id: &MemoryId) -> Result<()>;
-    fn search(&self, query: &[f32], limit: usize) -> Result<Vec<VectorHit>>;
-    fn count(&self) -> Result<usize>;
-    fn clear(&self) -> Result<()>;
+ fn upsert(&self, id: &MemoryId, embedding: &[f32]) -> Result<()>;
+ fn remove(&self, id: &MemoryId) -> Result<()>;
+ fn search(&self, query: &[f32], limit: usize) -> Result<Vec<VectorHit>>;
+ fn count(&self) -> Result<usize>;
+ fn clear(&self) -> Result<()>;
 }
 ```
 
@@ -131,9 +131,9 @@ Two implementations exist:
 ```rust
 #[cfg(feature = "usearch")]
 pub struct UsearchBackend {
-    index: usearch::Index,
-    id_map: DashMap<String, usize>,
-    reverse_map: DashMap<usize, String>,
+ index: usearch::Index,
+ id_map: DashMap<String, usize>,
+ reverse_map: DashMap<usize, String>,
 }
 ```
 
@@ -141,8 +141,8 @@ pub struct UsearchBackend {
 ```rust
 #[cfg(not(feature = "usearch"))]
 pub struct UsearchBackend {
-    vectors: DashMap<String, Vec<f32>>,
-    dimensions: usize,
+ vectors: DashMap<String, Vec<f32>>,
+ dimensions: usize,
 }
 ```
 
@@ -159,16 +159,16 @@ pub struct UsearchBackend {
 ```rust
 // Line 119-130: Memory created without embedding
 let memory = Memory {
-    id: MemoryId::new(),
-    namespace: request.namespace.clone(),
-    content: request.content.clone(),
-    embedding: None,  // HARDCODED TO NONE
-    tags: request.tags.clone(),
-    source: request.source.clone(),
-    created_at: Utc::now(),
-    updated_at: Utc::now(),
-    status: MemoryStatus::Active,
-    metadata: request.metadata.clone().unwrap_or_default(),
+ id: MemoryId::new(),
+ namespace: request.namespace.clone(),
+ content: request.content.clone(),
+ embedding: None, // HARDCODED TO NONE
+ tags: request.tags.clone(),
+ source: request.source.clone(),
+ created_at: Utc::now(),
+ updated_at: Utc::now(),
+ status: MemoryStatus::Active,
+ metadata: request.metadata.clone().unwrap_or_default(),
 };
 
 // After this: ONLY writes to Git Notes
@@ -186,10 +186,10 @@ let memory = Memory {
 
 ```rust
 pub struct CaptureService {
-    persistence: Arc<dyn PersistenceBackend>,
-    // MISSING: embedder
-    // MISSING: index
-    // MISSING: vector
+ persistence: Arc<dyn PersistenceBackend>,
+ // MISSING: embedder
+ // MISSING: index
+ // MISSING: vector
 }
 ```
 
@@ -205,9 +205,9 @@ pub struct CaptureService {
 
 ```rust
 pub struct RecallService {
-    index: Option<SqliteBackend>,
-    // MISSING: embedder: Option<Arc<dyn Embedder>>
-    // MISSING: vector: Option<Arc<dyn VectorBackend>>
+ index: Option<SqliteBackend>,
+ // MISSING: embedder: Option<Arc<dyn Embedder>>
+ // MISSING: vector: Option<Arc<dyn VectorBackend>>
 }
 ```
 
@@ -219,13 +219,13 @@ pub struct RecallService {
 
 ```rust
 const fn vector_search(
-    &self,
-    _query: &str,
-    _filter: &SearchFilter,
-    _limit: usize,
+ &self,
+ _query: &str,
+ _filter: &SearchFilter,
+ _limit: usize,
 ) -> Result<Vec<SearchHit>> {
-    // TODO: Implement vector search using embedder + vector backend
-    Ok(Vec::new())  // ALWAYS RETURNS EMPTY
+ // TODO: Implement vector search using embedder + vector backend
+ Ok(Vec::new()) // ALWAYS RETURNS EMPTY
 }
 ```
 
@@ -236,10 +236,10 @@ const fn vector_search(
 **Location**: `src/services/recall.rs:310-365`
 
 ```rust
-const K: f32 = 60.0;  // Standard RRF constant
+const K: f32 = 60.0; // Standard RRF constant
 
 fn rrf_score(rank: usize) -> f32 {
-    1.0 / (K + rank as f32)
+ 1.0 / (K + rank as f32)
 }
 ```
 
@@ -283,9 +283,9 @@ Missing tests:
 ### 6.3 Embedding Tests
 
 All 24 tests pass because they test the placeholder implementation:
-- Determinism (same input → same output) ✓
-- Normalization (unit vectors) ✓
-- Dimensions (384) ✓
+- Determinism (same input -> same output) 
+- Normalization (unit vectors) 
+- Dimensions (384) 
 
 **But**: No tests verify semantic similarity because placeholder can't provide it.
 
@@ -316,9 +316,9 @@ use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
 // Initialize (lazy recommended)
 let model = TextEmbedding::try_new(InitOptions {
-    model_name: EmbeddingModel::AllMiniLML6V2,
-    show_download_progress: false,
-    ..Default::default()
+ model_name: EmbeddingModel::AllMiniLML6V2,
+ show_download_progress: false,
+..Default::default()
 })?;
 
 // Embed single text
@@ -346,9 +346,9 @@ use std::sync::OnceLock;
 static MODEL: OnceLock<TextEmbedding> = OnceLock::new();
 
 fn get_model() -> &'static TextEmbedding {
-    MODEL.get_or_init(|| {
-        TextEmbedding::try_new(Default::default()).unwrap()
-    })
+ MODEL.get_or_init(|| {
+ TextEmbedding::try_new(Default::default()).unwrap()
+ })
 }
 ```
 
@@ -370,28 +370,28 @@ To verify embeddings work correctly, we need semantic similarity tests:
 
 ```rust
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    dot / (norm_a * norm_b)
+ let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+ let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+ let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+ dot / (norm_a * norm_b)
 }
 
 #[test]
 fn test_semantic_similarity() {
-    let embedder = FastEmbedEmbedder::new();
+ let embedder = FastEmbedEmbedder::new();
 
-    let db = embedder.embed("database storage").unwrap();
-    let pg = embedder.embed("PostgreSQL database").unwrap();
-    let cat = embedder.embed("cat dog pet").unwrap();
+ let db = embedder.embed("database storage").unwrap();
+ let pg = embedder.embed("PostgreSQL database").unwrap();
+ let cat = embedder.embed("cat dog pet").unwrap();
 
-    // Related concepts should be similar
-    assert!(cosine_similarity(&db, &pg) > 0.5);
+ // Related concepts should be similar
+ assert!(cosine_similarity(&db, &pg) > 0.5);
 
-    // Unrelated concepts should be dissimilar
-    assert!(cosine_similarity(&db, &cat) < 0.3);
+ // Unrelated concepts should be dissimilar
+ assert!(cosine_similarity(&db, &cat) < 0.3);
 
-    // Related > unrelated
-    assert!(cosine_similarity(&db, &pg) > cosine_similarity(&db, &cat));
+ // Related > unrelated
+ assert!(cosine_similarity(&db, &pg) > cosine_similarity(&db, &cat));
 }
 ```
 
@@ -402,27 +402,27 @@ fn test_semantic_similarity() {
 ### 9.1 Current State
 
 ```
-Capture → Git Notes (only)
-         ↓
-         Memory stored, but:
-         - Not indexed in SQLite FTS5
-         - Not upserted to usearch
-         ↓
-Recall → Searches Git Notes (slow, no vector)
+Capture -> Git Notes (only)
+ 
+ Memory stored, but:
+ - Not indexed in SQLite FTS5
+ - Not upserted to usearch
+ 
+Recall -> Searches Git Notes (slow, no vector)
 ```
 
 ### 9.2 Target State
 
 ```
-Capture → Generate embedding
-         → Git Notes (authoritative)
-         → SQLite FTS5 (text search)
-         → usearch (vector search)
-         ↓
-Recall → SQLite FTS5 (BM25 results)
-       → usearch (cosine results)
-       → RRF fusion
-       → Normalized scores
+Capture -> Generate embedding
+ -> Git Notes (authoritative)
+ -> SQLite FTS5 (text search)
+ -> usearch (vector search)
+ 
+Recall -> SQLite FTS5 (BM25 results)
+ -> usearch (cosine results)
+ -> RRF fusion
+ -> Normalized scores
 ```
 
 ---

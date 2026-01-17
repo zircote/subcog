@@ -36,11 +36,11 @@ Using the MCP tool:
 
 ```json
 {
-  "tool": "subcog_group_create",
-  "arguments": {
-    "name": "engineering",
-    "description": "Engineering team shared knowledge"
-  }
+ "tool": "subcog_group_create",
+ "arguments": {
+ "name": "engineering",
+ "description": "Engineering team shared knowledge"
+ }
 }
 ```
 
@@ -50,9 +50,9 @@ Groups use a three-tier permission model:
 
 | Role | Capture Memories | Recall Memories | Manage Members | Delete Group |
 |------|-----------------|-----------------|----------------|--------------|
-| **Admin** | ✅ | ✅ | ✅ | ✅ |
-| **Write** | ✅ | ✅ | ❌ | ❌ |
-| **Read** | ❌ | ✅ | ❌ | ❌ |
+| **Admin** | | | | |
+| **Write** | | | | |
+| **Read** | | | | |
 
 ### Permission Rules
 
@@ -78,15 +78,15 @@ Create a new group. You automatically become the admin.
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `name` | string | ✅ | Group name (must be unique within org) |
-| `description` | string | ❌ | Description of the group's purpose |
+| `name` | string | | Group name (must be unique within org) |
+| `description` | string | | Description of the group's purpose |
 
 **Example:**
 
 ```json
 {
-  "name": "research-team",
-  "description": "ML research collaboration space"
+ "name": "research-team",
+ "description": "ML research collaboration space"
 }
 ```
 
@@ -139,13 +139,13 @@ Get detailed information about a specific group.
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `group_id` | string | ✅ | The ID of the group to retrieve |
+| `group_id` | string | | The ID of the group to retrieve |
 
 **Example:**
 
 ```json
 {
-  "group_id": "abc123def456"
+ "group_id": "abc123def456"
 }
 ```
 
@@ -175,17 +175,17 @@ Add a new member to a group. Requires admin role.
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `group_id` | string | ✅ | The ID of the group |
-| `user_id` | string | ✅ | Email/ID of the user to add |
-| `role` | string | ❌ | Role: `read` (default), `write`, or `admin` |
+| `group_id` | string | | The ID of the group |
+| `user_id` | string | | Email/ID of the user to add |
+| `role` | string | | Role: `read` (default), `write`, or `admin` |
 
 **Example:**
 
 ```json
 {
-  "group_id": "abc123def456",
-  "user_id": "dave@example.com",
-  "role": "write"
+ "group_id": "abc123def456",
+ "user_id": "dave@example.com",
+ "role": "write"
 }
 ```
 
@@ -211,15 +211,15 @@ Remove a member from a group. Requires admin role.
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `group_id` | string | ✅ | The ID of the group |
-| `user_id` | string | ✅ | Email/ID of the user to remove |
+| `group_id` | string | | The ID of the group |
+| `user_id` | string | | Email/ID of the user to remove |
 
 **Example:**
 
 ```json
 {
-  "group_id": "abc123def456",
-  "user_id": "dave@example.com"
+ "group_id": "abc123def456",
+ "user_id": "dave@example.com"
 }
 ```
 
@@ -233,17 +233,17 @@ Change a member's role. Requires admin role.
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `group_id` | string | ✅ | The ID of the group |
-| `user_id` | string | ✅ | Email/ID of the user to update |
-| `role` | string | ✅ | New role: `read`, `write`, or `admin` |
+| `group_id` | string | | The ID of the group |
+| `user_id` | string | | Email/ID of the user to update |
+| `role` | string | | New role: `read`, `write`, or `admin` |
 
 **Example:**
 
 ```json
 {
-  "group_id": "abc123def456",
-  "user_id": "bob@example.com",
-  "role": "admin"
+ "group_id": "abc123def456",
+ "user_id": "bob@example.com",
+ "role": "admin"
 }
 ```
 
@@ -257,13 +257,13 @@ Delete a group. Requires admin role.
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `group_id` | string | ✅ | The ID of the group to delete |
+| `group_id` | string | | The ID of the group to delete |
 
 **Example:**
 
 ```json
 {
-  "group_id": "abc123def456"
+ "group_id": "abc123def456"
 }
 ```
 
@@ -277,12 +277,12 @@ Use the `group_id` parameter when capturing memories:
 
 ```json
 {
-  "tool": "subcog_capture",
-  "arguments": {
-    "content": "Decision: Use PostgreSQL for the analytics database",
-    "namespace": "decisions",
-    "group_id": "abc123def456"
-  }
+ "tool": "subcog_capture",
+ "arguments": {
+ "content": "Decision: Use PostgreSQL for the analytics database",
+ "namespace": "decisions",
+ "group_id": "abc123def456"
+ }
 }
 ```
 
@@ -292,11 +292,11 @@ Filter recalls by group:
 
 ```json
 {
-  "tool": "subcog_recall",
-  "arguments": {
-    "query": "database decisions",
-    "group_id": "abc123def456"
-  }
+ "tool": "subcog_recall",
+ "arguments": {
+ "query": "database decisions",
+ "group_id": "abc123def456"
+ }
 }
 ```
 
@@ -306,25 +306,25 @@ Filter recalls by group:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                       Organization                           │
-│  (SUBCOG_ORG_ID)                                            │
-│                                                              │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │   Group A   │  │   Group B   │  │   Group C   │         │
-│  │             │  │             │  │             │         │
-│  │ ┌─────────┐ │  │ ┌─────────┐ │  │ ┌─────────┐ │         │
-│  │ │ Members │ │  │ │ Members │ │  │ │ Members │ │         │
-│  │ │ ──────  │ │  │ │ ──────  │ │  │ │ ──────  │ │         │
-│  │ │ Alice A │ │  │ │ Bob   W │ │  │ │ Carol A │ │         │
-│  │ │ Bob   W │ │  │ │ Carol R │ │  │ │ Dave  W │ │         │
-│  │ │ Carol R │ │  │ └─────────┘ │  │ └─────────┘ │         │
-│  │ └─────────┘ │  │             │  │             │         │
-│  │             │  │ ┌─────────┐ │  │ ┌─────────┐ │         │
-│  │ ┌─────────┐ │  │ │Memories │ │  │ │Memories │ │         │
-│  │ │Memories │ │  │ │ • • •   │ │  │ │ • • •   │ │         │
-│  │ │ • • •   │ │  │ └─────────┘ │  │ └─────────┘ │         │
-│  │ └─────────┘ │  └─────────────┘  └─────────────┘         │
-│  └─────────────┘                                            │
+│ Organization │
+│ (SUBCOG_ORG_ID) │
+│ │
+│ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ │
+│ │ Group A │ │ Group B │ │ Group C │ │
+│ │ │ │ │ │ │ │
+│ │ ┌─────────┐ │ │ ┌─────────┐ │ │ ┌─────────┐ │ │
+│ │ │ Members │ │ │ │ Members │ │ │ │ Members │ │ │
+│ │ │ ────── │ │ │ │ ────── │ │ │ │ ────── │ │ │
+│ │ │ Alice A │ │ │ │ Bob W │ │ │ │ Carol A │ │ │
+│ │ │ Bob W │ │ │ │ Carol R │ │ │ │ Dave W │ │ │
+│ │ │ Carol R │ │ │ └─────────┘ │ │ └─────────┘ │ │
+│ │ └─────────┘ │ │ │ │ │ │
+│ │ │ │ ┌─────────┐ │ │ ┌─────────┐ │ │
+│ │ ┌─────────┐ │ │ │Memories │ │ │ │Memories │ │ │
+│ │ │Memories │ │ │ │ - - - │ │ │ │ - - - │ │ │
+│ │ │ - - - │ │ │ └─────────┘ │ │ └─────────┘ │ │
+│ │ └─────────┘ │ └─────────────┘ └─────────────┘ │
+│ └─────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 
 Legend: A=Admin, W=Write, R=Read
@@ -343,25 +343,25 @@ Groups are stored in a dedicated SQLite database:
 ```sql
 -- Groups table
 CREATE TABLE groups (
-    id TEXT PRIMARY KEY,
-    org_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    description TEXT DEFAULT '',
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    created_by TEXT NOT NULL,
-    UNIQUE(org_id, name)
+ id TEXT PRIMARY KEY,
+ org_id TEXT NOT NULL,
+ name TEXT NOT NULL,
+ description TEXT DEFAULT '',
+ created_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL,
+ created_by TEXT NOT NULL,
+ UNIQUE(org_id, name)
 );
 
 -- Group members table
 CREATE TABLE group_members (
-    id TEXT PRIMARY KEY,
-    group_id TEXT NOT NULL REFERENCES groups(id),
-    email TEXT NOT NULL,
-    role TEXT NOT NULL CHECK(role IN ('admin', 'write', 'read')),
-    joined_at INTEGER NOT NULL,
-    added_by TEXT NOT NULL,
-    UNIQUE(group_id, email)
+ id TEXT PRIMARY KEY,
+ group_id TEXT NOT NULL REFERENCES groups(id),
+ email TEXT NOT NULL,
+ role TEXT NOT NULL CHECK(role IN ('admin', 'write', 'read')),
+ joined_at INTEGER NOT NULL,
+ added_by TEXT NOT NULL,
+ UNIQUE(group_id, email)
 );
 ```
 
@@ -379,11 +379,11 @@ Groups support token-based invites with:
 ```rust
 // Create an invite (programmatic API)
 let (invite, token) = service.create_invite(
-    &group_id,
-    GroupRole::Write,
-    "admin@example.com",
-    Some(7 * 24 * 60 * 60),  // 7 days
-    Some(5),                  // 5 uses max
+ &group_id,
+ GroupRole::Write,
+ "admin@example.com",
+ Some(7 * 24 * 60 * 60), // 7 days
+ Some(5), // 5 uses max
 )?;
 
 // Share the token out-of-band

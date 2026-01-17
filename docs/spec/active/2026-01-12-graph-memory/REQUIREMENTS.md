@@ -173,15 +173,15 @@ Industry leaders (Mem0, Zep) implement temporal knowledge graphs as a core diffe
 
 | Type | Description | Example |
 |------|-------------|---------|
-| `works_at` | Person → Organization | Alice works_at Anthropic |
-| `created` | Entity → Entity | Alice created AuthService |
-| `uses` | Entity → Entity | AuthService uses PostgreSQL |
-| `implements` | Entity → Entity | auth.rs implements JWT |
-| `part_of` | Entity → Entity | AuthService part_of Backend |
-| `relates_to` | Entity → Entity | Caching relates_to Performance |
-| `mentioned_in` | Entity → Memory | PostgreSQL mentioned_in mem_123 |
-| `supersedes` | Entity → Entity | v2.0 supersedes v1.0 |
-| `conflicts_with` | Entity → Entity | Decision A conflicts_with Decision B |
+| `works_at` | Person -> Organization | Alice works_at Anthropic |
+| `created` | Entity -> Entity | Alice created AuthService |
+| `uses` | Entity -> Entity | AuthService uses PostgreSQL |
+| `implements` | Entity -> Entity | auth.rs implements JWT |
+| `part_of` | Entity -> Entity | AuthService part_of Backend |
+| `relates_to` | Entity -> Entity | Caching relates_to Performance |
+| `mentioned_in` | Entity -> Memory | PostgreSQL mentioned_in mem_123 |
+| `supersedes` | Entity -> Entity | v2.0 supersedes v1.0 |
+| `conflicts_with` | Entity -> Entity | Decision A conflicts_with Decision B |
 
 ## 7. MCP Tools Specification
 
@@ -284,7 +284,7 @@ auto_extract = false
 extract_confidence = 0.7
 max_traversal_depth = 3
 expansion_enabled = true
-expansion_boost = 1.2  # Boost factor for graph-based results
+expansion_boost = 1.2 # Boost factor for graph-based results
 
 [graph.extraction]
 batch_size = 10

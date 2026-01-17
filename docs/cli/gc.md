@@ -54,9 +54,9 @@ Project: github.com/zircote/subcog
 
 Stale branches detected: 3
 
-  feature/old-auth (12 memories)
-  bugfix/issue-42 (5 memories)
-  experiment/prototype (8 memories)
+ feature/old-auth (12 memories)
+ bugfix/issue-42 (5 memories)
+ experiment/prototype (8 memories)
 
 Total: 25 memories would be tombstoned
 
@@ -77,9 +77,9 @@ Garbage Collection
 Project: github.com/zircote/subcog
 
 Tombstoned 25 memories from 3 stale branches:
-  ✓ feature/old-auth (12 memories)
-  ✓ bugfix/issue-42 (5 memories)
-  ✓ experiment/prototype (8 memories)
+ feature/old-auth (12 memories)
+ bugfix/issue-42 (5 memories)
+ experiment/prototype (8 memories)
 
 Use --purge to permanently delete tombstoned memories.
 ```
@@ -101,10 +101,10 @@ Output:
 Purging tombstoned memories older than 30 days...
 
 Permanently deleted 15 memories:
-  decisions: 3
-  patterns: 2
-  learnings: 8
-  context: 2
+ decisions: 3
+ patterns: 2
+ learnings: 8
+ context: 2
 ```
 
 ### Purge All Tombstones
@@ -134,7 +134,7 @@ subcog recall "old decision" --include-tombstoned
 Or via MCP:
 ```json
 {
-  "filter": "include_tombstoned:true"
+ "filter": "include_tombstoned:true"
 }
 ```
 

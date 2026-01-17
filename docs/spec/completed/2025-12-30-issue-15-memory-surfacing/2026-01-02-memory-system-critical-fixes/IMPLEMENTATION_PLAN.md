@@ -32,44 +32,44 @@ This plan addresses 5 critical architectural gaps in 5 phases over approximately
 ### Tasks
 
 - [x] **1.1** Add fastembed dependency to Cargo.toml
-  - File: `Cargo.toml`
-  - Add: `fastembed = { version = "4", default-features = false, features = ["ort"] }`
-  - Verify: `cargo build` succeeds
+ - File: `Cargo.toml`
+ - Add: `fastembed = { version = "4", default-features = false, features = ["ort"] }`
+ - Verify: `cargo build` succeeds
 
 - [x] **1.2** Create thread-safe singleton for model loading
-  - File: `src/embedding/fastembed.rs`
-  - Add `OnceLock<TextEmbedding>` static
-  - Implement `get_model()` with lazy initialization
-  - Add tracing for model load time
+ - File: `src/embedding/fastembed.rs`
+ - Add `OnceLock<TextEmbedding>` static
+ - Implement `get_model()` with lazy initialization
+ - Add tracing for model load time
 
 - [x] **1.3** Implement real `embed()` method
-  - File: `src/embedding/fastembed.rs`
-  - Replace `pseudo_embed()` call with `TextEmbedding::embed()`
-  - Handle fastembed Result types
-  - Preserve existing error handling
+ - File: `src/embedding/fastembed.rs`
+ - Replace `pseudo_embed()` call with `TextEmbedding::embed()`
+ - Handle fastembed Result types
+ - Preserve existing error handling
 
 - [x] **1.4** Implement real `embed_batch()` method
-  - File: `src/embedding/fastembed.rs`
-  - Convert `&[&str]` to `Vec<String>` for fastembed
-  - Batch process for efficiency
+ - File: `src/embedding/fastembed.rs`
+ - Convert `&[&str]` to `Vec<String>` for fastembed
+ - Batch process for efficiency
 
 - [x] **1.5** Add embedding unit tests
-  - File: `src/embedding/fastembed.rs`
-  - Test: dimensions are 384
-  - Test: same text produces same embedding
-  - Test: different text produces different embedding
-  - Test: semantic similarity (related > unrelated)
+ - File: `src/embedding/fastembed.rs`
+ - Test: dimensions are 384
+ - Test: same text produces same embedding
+ - Test: different text produces different embedding
+ - Test: semantic similarity (related > unrelated)
 
 - [x] **1.6** Add embedding benchmark
-  - File: `benches/embedding.rs`
-  - Benchmark cold start (first embed)
-  - Benchmark warm embed (subsequent)
-  - Target: cold <2s, warm <50ms
+ - File: `benches/embedding.rs`
+ - Benchmark cold start (first embed)
+ - Benchmark warm embed (subsequent)
+ - Target: cold <2s, warm <50ms
 
 - [x] **1.7** Update CI to handle model download
-  - File: `.github/workflows/ci.yml`
-  - Cache `~/.cache/huggingface/` between runs
-  - Add timeout for model download
+ - File: `.github/workflows/ci.yml`
+ - Cache `~/.cache/huggingface/` between runs
+ - Add timeout for model download
 
 ### Acceptance Criteria
 
@@ -103,50 +103,50 @@ cargo run --release -- embed "PostgreSQL database"
 ### Tasks
 
 - [x] **2.1** Add embedder field to RecallService
-  - File: `src/services/recall.rs`
-  - Add field: `embedder: Option<Arc<dyn Embedder>>`
-  - Update constructor signature
+ - File: `src/services/recall.rs`
+ - Add field: `embedder: Option<Arc<dyn Embedder>>`
+ - Update constructor signature
 
 - [x] **2.2** Add vector backend field to RecallService
-  - File: `src/services/recall.rs`
-  - Add field: `vector: Option<Arc<dyn VectorBackend>>`
-  - Update constructor signature
+ - File: `src/services/recall.rs`
+ - Add field: `vector: Option<Arc<dyn VectorBackend>>`
+ - Update constructor signature
 
 - [x] **2.3** Implement real vector_search()
-  - File: `src/services/recall.rs`
-  - Remove `const fn` (needs runtime)
-  - Embed query using `self.embedder`
-  - Search using `self.vector.search()`
-  - Apply namespace filter to results
+ - File: `src/services/recall.rs`
+ - Remove `const fn` (needs runtime)
+ - Embed query using `self.embedder`
+ - Search using `self.vector.search()`
+ - Apply namespace filter to results
 
 - [x] **2.4** Update hybrid search to use vector results
-  - File: `src/services/recall.rs`
-  - Call `vector_search()` in `search()`
-  - Merge text and vector results in RRF
+ - File: `src/services/recall.rs`
+ - Call `vector_search()` in `search()`
+ - Merge text and vector results in RRF
 
 - [x] **2.5** Add graceful degradation
-  - File: `src/services/recall.rs`
-  - If embedder/vector unavailable, fall back to text-only
-  - Log warning when degraded
-  - Return partial results rather than error
+ - File: `src/services/recall.rs`
+ - If embedder/vector unavailable, fall back to text-only
+ - Log warning when degraded
+ - Return partial results rather than error
 
 - [x] **2.6** Update ServiceContainer
-  - File: `src/services/mod.rs`
-  - Inject embedder into RecallService
-  - Inject vector backend into RecallService
-  - Note: ServiceContainer now supports `with_embedder`/`with_vector` builders
+ - File: `src/services/mod.rs`
+ - Inject embedder into RecallService
+ - Inject vector backend into RecallService
+ - Note: ServiceContainer now supports `with_embedder`/`with_vector` builders
 
 - [x] **2.7** Add vector_search unit tests
-  - File: `src/services/recall.rs`
-  - Test: returns results when vector available
-  - Test: returns empty when vector unavailable (graceful)
-  - Test: filters by namespace correctly
+ - File: `src/services/recall.rs`
+ - Test: returns results when vector available
+ - Test: returns empty when vector unavailable (graceful)
+ - Test: filters by namespace correctly
 
 - [x] **2.8** Add integration test
-  - File: `tests/recall_integration.rs`
-  - Test: vector search finds semantically similar text
-  - Test: hybrid search combines text + vector
-  - Note: Integration tested via unit tests; full e2e in Phase 5
+ - File: `tests/recall_integration.rs`
+ - Test: vector search finds semantically similar text
+ - Test: hybrid search combines text + vector
+ - Note: Integration tested via unit tests; full e2e in Phase 5
 
 ### Acceptance Criteria
 
@@ -176,50 +176,50 @@ cargo run --release -- recall "database storage"
 ### Tasks
 
 - [x] **3.1** Add embedder field to CaptureService
-  - File: `src/services/capture.rs`
-  - Add field: `embedder: Arc<dyn Embedder>`
-  - Update constructor signature
+ - File: `src/services/capture.rs`
+ - Add field: `embedder: Arc<dyn Embedder>`
+ - Update constructor signature
 
 - [x] **3.2** Add index backend field to CaptureService
-  - File: `src/services/capture.rs`
-  - Add field: `index: Arc<dyn IndexBackend>`
-  - Update constructor signature
+ - File: `src/services/capture.rs`
+ - Add field: `index: Arc<dyn IndexBackend>`
+ - Update constructor signature
 
 - [x] **3.3** Add vector backend field to CaptureService
-  - File: `src/services/capture.rs`
-  - Add field: `vector: Arc<dyn VectorBackend>`
-  - Update constructor signature
+ - File: `src/services/capture.rs`
+ - Add field: `vector: Arc<dyn VectorBackend>`
+ - Update constructor signature
 
 - [x] **3.4** Generate embedding during capture
-  - File: `src/services/capture.rs`
-  - Call `embedder.embed(&content)` before creating Memory
-  - Store embedding in Memory struct
+ - File: `src/services/capture.rs`
+ - Call `embedder.embed(&content)` before creating Memory
+ - Store embedding in Memory struct
 
 - [x] **3.5** Index memory in SQLite
-  - File: `src/services/capture.rs`
-  - After persistence store, call `index.index(&memory)`
-  - Log warning on failure, don't fail capture
+ - File: `src/services/capture.rs`
+ - After persistence store, call `index.index(&memory)`
+ - Log warning on failure, don't fail capture
 
 - [x] **3.6** Upsert embedding to vector store
-  - File: `src/services/capture.rs`
-  - After persistence store, call `vector.upsert(&id, &embedding)`
-  - Log warning on failure, don't fail capture
+ - File: `src/services/capture.rs`
+ - After persistence store, call `vector.upsert(&id, &embedding)`
+ - Log warning on failure, don't fail capture
 
 - [x] **3.7** Update ServiceContainer
-  - File: `src/services/mod.rs`
-  - Inject all three backends into CaptureService
+ - File: `src/services/mod.rs`
+ - Inject all three backends into CaptureService
 
 - [x] **3.8** Add capture unit tests
-  - File: `src/services/capture.rs`
-  - Test: captured memory has embedding
-  - Test: index.index() called
-  - Test: vector.upsert() called
-  - Test: capture succeeds even if index/vector fail
+ - File: `src/services/capture.rs`
+ - Test: captured memory has embedding
+ - Test: index.index() called
+ - Test: vector.upsert() called
+ - Test: capture succeeds even if index/vector fail
 
 - [x] **3.9** Add capture-recall integration test
-  - File: `tests/capture_recall_integration.rs`
-  - Test: capture → recall roundtrip works
-  - Test: semantic search finds captured memory
+ - File: `tests/capture_recall_integration.rs`
+ - Test: capture -> recall roundtrip works
+ - Test: semantic search finds captured memory
 
 ### Acceptance Criteria
 
@@ -249,44 +249,44 @@ cargo run --release -- recall "New critical decision"
 ### Tasks
 
 - [x] **4.1** Add SearchResult struct with normalized and raw scores
-  - File: `src/models/search.rs`
-  - Add field: `score: f32` (normalized)
-  - Add field: `raw_score: f32` (original RRF)
+ - File: `src/models/search.rs`
+ - Add field: `score: f32` (normalized)
+ - Add field: `raw_score: f32` (original RRF)
 
 - [x] **4.2** Implement normalize_scores()
-  - File: `src/services/recall.rs`
-  - Find max score in result set
-  - Divide all scores by max
-  - Handle empty results (no division by zero)
+ - File: `src/services/recall.rs`
+ - Find max score in result set
+ - Divide all scores by max
+ - Handle empty results (no division by zero)
 
 - [x] **4.3** Apply normalization in search()
-  - File: `src/services/recall.rs`
-  - Call `normalize_scores()` after RRF fusion
-  - Return normalized scores to user
+ - File: `src/services/recall.rs`
+ - Call `normalize_scores()` after RRF fusion
+ - Return normalized scores to user
 
 - [x] **4.4** Add --raw flag to CLI
-  - File: `src/main.rs` (Recall command), `src/commands/core.rs`
-  - When --raw, display raw_score instead
-  - Useful for debugging
+ - File: `src/main.rs` (Recall command), `src/commands/core.rs`
+ - When --raw, display raw_score instead
+ - Useful for debugging
 
 - [x] **4.5** Update MCP tool to include both scores
-  - File: `src/mcp/tools/handlers/core.rs`, `src/mcp/tools/definitions.rs`
-  - Return both `score` and `raw_score` in results
-  - Document in tool description
+ - File: `src/mcp/tools/handlers/core.rs`, `src/mcp/tools/definitions.rs`
+ - Return both `score` and `raw_score` in results
+ - Document in tool description
 
 - [x] **4.6** Add score normalization tests
-  - File: `src/services/recall.rs`
-  - Test: max score normalizes to 1.0
-  - Test: all scores in 0.0-1.0 range
-  - Test: empty results handled
-  - Test: proportions preserved
-  - Added 8 unit tests
+ - File: `src/services/recall.rs`
+ - Test: max score normalizes to 1.0
+ - Test: all scores in 0.0-1.0 range
+ - Test: empty results handled
+ - Test: proportions preserved
+ - Added 8 unit tests
 
 - [x] **4.7** Add property tests
-  - File: `src/services/recall.rs`
-  - Property: normalized scores always in [0, 1]
-  - Property: score ordering preserved
-  - Added 4 property-based tests using proptest
+ - File: `src/services/recall.rs`
+ - Property: normalized scores always in [0, 1]
+ - Property: score ordering preserved
+ - Added 4 property-based tests using proptest
 
 ### Acceptance Criteria
 
@@ -315,69 +315,69 @@ cargo run --release -- recall "database" | jq '.score'
 ### Tasks
 
 - [x] **5.1** Add migration CLI command
-  - File: `src/cli/migrate.rs`, `src/commands/mod.rs`, `src/commands/migrate.rs`
-  - Subcommand: `subcog migrate embeddings`
-  - Options: `--dry-run`, `--force`, `--repo`
-  - Progress display for large datasets
+ - File: `src/cli/migrate.rs`, `src/commands/mod.rs`, `src/commands/migrate.rs`
+ - Subcommand: `subcog migrate embeddings`
+ - Options: `--dry-run`, `--force`, `--repo`
+ - Progress display for large datasets
 
 - [x] **5.2** Implement migration logic
-  - File: `src/services/migration.rs`, `src/commands/migrate.rs`
-  - List all memories from Index
-  - Skip memories with existing embeddings (unless --force)
-  - Generate embedding, upsert vector
-  - MigrationService with MigrationStats and MigrationOptions
+ - File: `src/services/migration.rs`, `src/commands/migrate.rs`
+ - List all memories from Index
+ - Skip memories with existing embeddings (unless --force)
+ - Generate embedding, upsert vector
+ - MigrationService with MigrationStats and MigrationOptions
 
 - [x] **5.3** Add migration tests
-  - File: `src/services/migration.rs`
-  - 11 tests: stats, options, needs_migration logic
-  - Test: dry-run doesn't modify anything
-  - Test: migration adds embeddings
-  - Test: --force re-embeds all
+ - File: `src/services/migration.rs`
+ - 11 tests: stats, options, needs_migration logic
+ - Test: dry-run doesn't modify anything
+ - Test: migration adds embeddings
+ - Test: --force re-embeds all
 
 - [x] **5.4** Expand recall service tests
-  - File: `src/services/recall.rs`, `tests/capture_recall_integration.rs`
-  - 32+ recall tests, including:
-  - Test: hybrid search with both backends
-  - Test: graceful degradation scenarios
-  - Test: namespace filtering
-  - Test: limit parameter honored
-  - 4 property-based tests
+ - File: `src/services/recall.rs`, `tests/capture_recall_integration.rs`
+ - 32+ recall tests, including:
+ - Test: hybrid search with both backends
+ - Test: graceful degradation scenarios
+ - Test: namespace filtering
+ - Test: limit parameter honored
+ - 4 property-based tests
 
 - [x] **5.5** Add end-to-end tests
-  - File: `tests/capture_recall_integration.rs`
-  - Test: full workflow (capture → recall → update → recall)
-  - Test: cross-namespace workflow
-  - Test: semantic search related concepts
-  - Test: score normalization verification
-  - Note: 4 new e2e tests added
+ - File: `tests/capture_recall_integration.rs`
+ - Test: full workflow (capture -> recall -> update -> recall)
+ - Test: cross-namespace workflow
+ - Test: semantic search related concepts
+ - Test: score normalization verification
+ - Note: 4 new e2e tests added
 
 - [x] **5.6** Add performance benchmarks
-  - File: `benches/search.rs`
-  - Benchmark: 100 memories (~82µs, target <20ms) ✅
-  - Benchmark: 1,000 memories (~413µs, target <50ms) ✅
-  - Benchmark: 10,000 memories (~3.7ms, target <100ms) ✅
-  - All targets exceeded by 10-100x
+ - File: `benches/search.rs`
+ - Benchmark: 100 memories (~82µs, target <20ms) 
+ - Benchmark: 1,000 memories (~413µs, target <50ms) 
+ - Benchmark: 10,000 memories (~3.7ms, target <100ms) 
+ - All targets exceeded by 10-100x
 
 - [x] **5.7** Update documentation
-  - File: `README.md`
-  - Documented new embedding behavior (fastembed, 384-dim vectors)
-  - Documented score normalization (0.0-1.0 range, --raw flag)
-  - Documented migration command with examples
-  - Updated performance targets with actual benchmark results
+ - File: `README.md`
+ - Documented new embedding behavior (fastembed, 384-dim vectors)
+ - Documented score normalization (0.0-1.0 range, --raw flag)
+ - Documented migration command with examples
+ - Updated performance targets with actual benchmark results
 
 - [x] **5.8** Run full CI pipeline
-  - All existing tests pass (933+ tests)
-  - All new tests pass
-  - Benchmarks within targets (all exceeded by 10-100x)
-  - Clippy clean (all warnings resolved)
-  - Documentation builds successfully
-  - Supply chain security verified
+ - All existing tests pass (933+ tests)
+ - All new tests pass
+ - Benchmarks within targets (all exceeded by 10-100x)
+ - Clippy clean (all warnings resolved)
+ - Documentation builds successfully
+ - Supply chain security verified
 
 - [x] **5.9** Create release notes
-  - File: `CHANGELOG.md`
-  - No breaking changes
-  - Documented all new features (real embeddings, vector search, score normalization, migration)
-  - Documented performance improvements (10-100x faster than targets)
+ - File: `CHANGELOG.md`
+ - No breaking changes
+ - Documented all new features (real embeddings, vector search, score normalization, migration)
+ - Documented performance improvements (10-100x faster than targets)
 
 ### Acceptance Criteria
 

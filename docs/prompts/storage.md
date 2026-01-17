@@ -25,7 +25,7 @@ Templates are scoped to domains:
 When getting a prompt, domains are searched in order:
 
 ```
-Project → User → Org
+Project -> User -> Org
 ```
 
 First match wins.
@@ -44,15 +44,15 @@ Default storage using embedded SQLite database.
 
 ```sql
 CREATE TABLE prompts (
-    name TEXT NOT NULL,
-    domain TEXT NOT NULL,
-    description TEXT,
-    content TEXT NOT NULL,
-    variables TEXT,  -- JSON array
-    tags TEXT,       -- JSON array
-    created_at INTEGER,
-    updated_at INTEGER,
-    PRIMARY KEY (name, domain)
+ name TEXT NOT NULL,
+ domain TEXT NOT NULL,
+ description TEXT,
+ content TEXT NOT NULL,
+ variables TEXT, -- JSON array
+ tags TEXT, -- JSON array
+ created_at INTEGER,
+ updated_at INTEGER,
+ PRIMARY KEY (name, domain)
 );
 
 CREATE INDEX idx_prompts_domain ON prompts(domain);
@@ -76,8 +76,8 @@ Simple file-based storage.
 
 ```yaml
 storage:
-  prompts: filesystem
-  prompts_path: ~/.subcog/prompts
+ prompts: filesystem
+ prompts_path: ~/.subcog/prompts
 ```
 
 ### Structure
@@ -85,14 +85,14 @@ storage:
 ```
 ~/.subcog/prompts/
 ├── project/
-│   └── zircote-subcog/
-│       ├── code-review.yaml
-│       └── security-audit.yaml
+│ └── zircote-subcog/
+│ ├── code-review.yaml
+│ └── security-audit.yaml
 ├── user/
-│   └── my-template.yaml
+│ └── my-template.yaml
 └── org/
-    └── zircote/
-        └── team-review.yaml
+ └── zircote/
+ └── team-review.yaml
 ```
 
 ### File Format
@@ -107,12 +107,12 @@ created_at: 2024-01-15T10:30:00Z
 updated_at: 2024-01-15T10:30:00Z
 ---
 content: |
-  Review {{file}} for {{issue_type}} issues
+ Review {{file}} for {{issue_type}} issues
 variables:
-  - name: file
-    required: true
-  - name: issue_type
-    default: general
+ - name: file
+ required: true
+ - name: issue_type
+ default: general
 ```
 
 ## PostgreSQL Storage
@@ -123,27 +123,27 @@ Enterprise-grade storage.
 
 ```yaml
 storage:
-  prompts: postgresql
+ prompts: postgresql
 
 postgresql:
-  host: localhost
-  database: subcog
+ host: localhost
+ database: subcog
 ```
 
 ### Schema
 
 ```sql
 CREATE TABLE prompts (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    domain VARCHAR(50) NOT NULL,
-    description TEXT,
-    content TEXT NOT NULL,
-    variables JSONB DEFAULT '[]',
-    tags TEXT[] DEFAULT '{}',
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE (name, domain)
+ id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+ name VARCHAR(255) NOT NULL,
+ domain VARCHAR(50) NOT NULL,
+ description TEXT,
+ content TEXT NOT NULL,
+ variables JSONB DEFAULT '[]',
+ tags TEXT[] DEFAULT '{}',
+ created_at TIMESTAMPTZ DEFAULT NOW(),
+ updated_at TIMESTAMPTZ DEFAULT NOW(),
+ UNIQUE (name, domain)
 );
 
 CREATE INDEX idx_prompts_domain ON prompts(domain);
@@ -178,7 +178,7 @@ subcog prompt list --domain user
 ### Get with Cascade
 
 ```bash
-# Searches: project → user → org
+# Searches: project -> user -> org
 subcog prompt get template-name
 
 # Specific domain only

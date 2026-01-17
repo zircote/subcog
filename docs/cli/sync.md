@@ -46,10 +46,10 @@ subcog sync
 Output:
 ```
 Syncing with origin...
-  Fetching from remote...
-  ← 3 new memories imported
-  Exporting to remote...
-  → 5 memories exported
+ Fetching from remote...
+ <- 3 new memories imported
+ Exporting to remote...
+ -> 5 memories exported
 Sync complete: 3 fetched, 5 pushed
 ```
 
@@ -86,8 +86,8 @@ subcog sync --dry-run
 Output:
 ```
 Would sync with origin:
-  Fetch: 3 memories would be imported
-  Push: 5 memories would be exported
+ Fetch: 3 memories would be imported
+ Push: 5 memories would be exported
 ```
 
 ## How Sync Works
