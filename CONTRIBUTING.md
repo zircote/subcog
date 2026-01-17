@@ -117,7 +117,7 @@ src/
 │
 ├── storage/                  # Three-layer storage abstraction
 │   ├── traits/              # PersistenceBackend, IndexBackend, VectorBackend
-│   ├── persistence/         # Git Notes, PostgreSQL, Filesystem
+│   ├── persistence/         # SQLite, PostgreSQL, Filesystem
 │   ├── index/               # SQLite+FTS5, PostgreSQL, Redis
 │   └── vector/              # usearch, pgvector, Redis
 │

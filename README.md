@@ -12,7 +12,7 @@ A persistent memory system for AI coding assistants. Subcog captures decisions, 
 
 ## Overview
 
-Subcog is a Rust rewrite of the [git-notes-memory](https://github.com/zircote/git-notes-memory) Python system, delivering:
+Subcog delivers:
 
 - **Single-binary distribution** (<100MB, <10ms cold start)
 - **Pluggable storage backends** (SQLite+usearch, PostgreSQL+pgvector, Filesystem)
@@ -621,7 +621,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- [git-notes-memory](https://github.com/zircote/git-notes-memory) - Python proof-of-concept
 - [fastembed](https://github.com/Anush008/fastembed-rs) - Embedding generation
 - [usearch](https://github.com/unum-cloud/usearch) - Vector similarity search
 - [rmcp](https://github.com/anthropics/rmcp) - MCP protocol implementation

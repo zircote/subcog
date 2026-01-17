@@ -258,7 +258,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### CaptureService Integration (MEM-003)
 - CaptureService now generates embeddings during capture
-- Writes to all three storage layers: Git Notes, SQLite FTS5, usearch HNSW
+- Writes to all storage layers: SQLite FTS5, usearch HNSW
 - Non-blocking index/vector operations (capture succeeds even if they fail)
 
 #### Score Normalization (MEM-005)
@@ -306,7 +306,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Initial release of Subcog (Rust rewrite)
-- Three-layer storage: Git Notes, SQLite FTS5, usearch HNSW
+- Two-layer storage: SQLite FTS5, usearch HNSW
 - MCP server integration
 - Claude Code hooks (all 5 hooks)
 - 10 memory namespaces
