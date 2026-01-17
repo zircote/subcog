@@ -25,25 +25,7 @@ Add to your MCP configuration:
 }
 ```
 
-### 3. Configure Hooks
-
-```json
-{
-  "hooks": {
-    "session_start": {
-      "command": "subcog hook session-start"
-    },
-    "pre_response": {
-      "command": "subcog hook user-prompt-submit \"$PROMPT\""
-    },
-    "post_tool": {
-      "command": "subcog hook post-tool-use"
-    }
-  }
-}
-```
-
-### 4. Add Protocol to Configuration
+### 3. Add Protocol to Configuration
 
 ```markdown
 ## Subcog Memory Protocol (MANDATORY)
@@ -55,6 +37,27 @@ During the session:
 - **Capture immediately**: When decisions, patterns, learnings, or fixes are identified
 - Access Subcog only via MCP tools, never shell commands
 ```
+
+### 4. Hooks (Optional)
+
+OpenCode supports hooks via its [TypeScript plugin system](https://opencode.ai/docs/plugins/). Create `.opencode/plugin/subcog.ts`:
+
+```typescript
+import type { Plugin } from "@opencode-ai/plugin"
+
+export const SubcogPlugin: Plugin = async ({ $ }) => {
+  return {
+    "session.created": async () => {
+      await $`subcog hook session-start`
+    },
+    "tool.execute.after": async () => {
+      await $`subcog hook post-tool-use`
+    }
+  }
+}
+```
+
+See [OpenCode Plugins documentation](https://opencode.ai/docs/plugins/) for details.
 
 ## Verification
 

@@ -98,45 +98,6 @@ During the session:
 
 ---
 
-## AGENTS.md Integration (GitHub Copilot)
-
-For projects using GitHub Copilot with Subcog, add to `.github/copilot-instructions.md` or `AGENTS.md`:
-
-```markdown
-# Subcog Memory Integration
-
-This project uses Subcog for persistent memory. When working on this codebase:
-
-## Before Making Changes
-
-1. Search for relevant context:
-   - Query `subcog_recall` with keywords related to your task
-   - Check `ns:decisions` for architectural constraints
-   - Check `ns:patterns` for coding conventions
-
-2. Review existing decisions before proposing alternatives
-
-## After Making Changes
-
-Capture significant decisions or learnings:
-- New architectural decisions → `ns:decisions`
-- Discovered patterns or conventions → `ns:patterns`
-- Debugging insights or gotchas → `ns:learnings`
-- Known issues or TODOs → `ns:tech-debt`
-
-## Memory Namespaces
-
-| Namespace | When to Use |
-|-----------|-------------|
-| `decisions` | Technology choices, architectural decisions |
-| `patterns` | Coding standards, conventions |
-| `learnings` | Discoveries, debugging insights |
-| `context` | Project background, onboarding info |
-| `tech-debt` | Known issues, future improvements |
-```
-
----
-
 ## Environment Variables
 
 Configure Subcog behavior via environment variables:
