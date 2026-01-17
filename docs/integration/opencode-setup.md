@@ -25,7 +25,25 @@ Add to your MCP configuration:
 }
 ```
 
-### 3. Add Protocol to Configuration
+### 3. Configure Hooks
+
+```json
+{
+  "hooks": {
+    "session_start": {
+      "command": "subcog hook session-start"
+    },
+    "pre_response": {
+      "command": "subcog hook user-prompt-submit \"$PROMPT\""
+    },
+    "post_tool": {
+      "command": "subcog hook post-tool-use"
+    }
+  }
+}
+```
+
+### 4. Add Protocol to Configuration
 
 ```markdown
 ## Subcog Memory Protocol (MANDATORY)
