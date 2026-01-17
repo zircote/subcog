@@ -96,7 +96,7 @@ subcog --version
 subcog status
 
 # Test MCP server
-subcog mcp-server --help
+subcog serve --help
 ```
 
 In Claude Code, call `mcp__subcog__subcog_status` to verify the MCP connection.

@@ -24,7 +24,7 @@ Add to your `~/.claude/settings.json`:
   "mcpServers": {
     "subcog": {
       "command": "subcog",
-      "args": ["mcp-server"],
+      "args": ["serve"],
       "env": {
         "SUBCOG_LOG_LEVEL": "info"
       }

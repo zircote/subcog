@@ -1,17 +1,18 @@
 # Subcog Integration Guide for Google Gemini
 
-This guide provides instructions for integrating Subcog's persistent memory system with Google Gemini, including Gemini Pro, Gemini Ultra, and AI Studio.
+This guide provides instructions for integrating Subcog's persistent memory system with Google Gemini, including Gemini Pro, Gemini Ultra, AI Studio, and any MCP-compatible Gemini client.
 
 ## Overview
 
 Gemini can interact with Subcog through:
-1. **CLI commands** - Via code execution capabilities
+1. **MCP Server** - Native Model Context Protocol integration (recommended)
 2. **Function Calling** - Gemini's native function calling feature
-3. **System Instructions** - Protocol guidance
+3. **CLI commands** - Via code execution capabilities
+4. **System Instructions** - Protocol guidance
 
 ---
 
-## Quick Start
+## Quick Start (MCP Server)
 
 ### 1. Install Subcog
 
@@ -23,7 +24,46 @@ cargo install subcog
 subcog --version
 ```
 
-### 2. CLI Usage
+### 2. Configure MCP Server
+
+For any MCP-compatible Gemini client, add to your MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "subcog": {
+      "command": "subcog",
+      "args": ["serve"],
+      "env": {
+        "SUBCOG_LOG_LEVEL": "info"
+      }
+    }
+  }
+}
+```
+
+This exposes all Subcog tools:
+- `subcog_capture` - Store memories
+- `subcog_recall` - Search memories (semantic + text hybrid)
+- `subcog_status` - System health
+- `subcog_get`, `subcog_update`, `subcog_delete` - Memory CRUD
+- And 20+ more tools for knowledge graph, consolidation, etc.
+
+### 3. Verify Connection
+
+Once configured, Gemini can call Subcog tools directly:
+
+```
+subcog_status: {}
+subcog_recall: { "query": "database architecture" }
+subcog_capture: { "content": "Using Firestore", "namespace": "decisions" }
+```
+
+---
+
+## CLI Usage (Alternative)
+
+If MCP is not available, use Subcog via shell:
 
 ```bash
 # Capture a memory

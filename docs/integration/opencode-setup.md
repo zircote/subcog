@@ -33,7 +33,7 @@ Add to your OpenCode configuration (`~/.config/opencode/config.json` or equivale
   "mcpServers": {
     "subcog": {
       "command": "subcog",
-      "args": ["mcp-server"],
+      "args": ["serve"],
       "env": {
         "SUBCOG_LOG_LEVEL": "info"
       }
@@ -240,7 +240,7 @@ Returns:
 | Issue | Solution |
 |-------|----------|
 | MCP tools not found | Check config path, restart OpenCode |
-| Connection refused | Ensure `subcog mcp-server` runs |
+| Connection refused | Ensure `subcog serve` runs |
 | No memories | Check `subcog status`, verify domain |
 | Slow search | Run `subcog reindex` |
 

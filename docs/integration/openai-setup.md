@@ -1,17 +1,17 @@
 # Subcog Integration Guide for OpenAI / ChatGPT
 
-This guide provides instructions for integrating Subcog's persistent memory system with OpenAI-based coding workflows, including ChatGPT, GPT-4, and custom GPTs.
+This guide provides instructions for integrating Subcog's persistent memory system with OpenAI-based coding workflows, including ChatGPT, GPT-4, custom GPTs, and any MCP-compatible OpenAI client.
 
 ## Overview
 
 OpenAI models can interact with Subcog through:
-1. **CLI commands** - Direct shell access (Code Interpreter, terminal)
-2. **MCP Bridge** - Via compatible clients
+1. **MCP Server** - Native Model Context Protocol integration (recommended)
+2. **CLI commands** - Direct shell access (Code Interpreter, terminal)
 3. **Custom Instructions** - Protocol guidance in system prompts
 
 ---
 
-## Quick Start
+## Quick Start (MCP Server)
 
 ### 1. Install Subcog
 
@@ -23,9 +23,46 @@ cargo install subcog
 subcog --version
 ```
 
-### 2. CLI Usage
+### 2. Configure MCP Server
 
-Use Subcog directly via shell commands:
+For any MCP-compatible OpenAI client, add to your MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "subcog": {
+      "command": "subcog",
+      "args": ["serve"],
+      "env": {
+        "SUBCOG_LOG_LEVEL": "info"
+      }
+    }
+  }
+}
+```
+
+This exposes all Subcog tools:
+- `subcog_capture` - Store memories
+- `subcog_recall` - Search memories (semantic + text hybrid)
+- `subcog_status` - System health
+- `subcog_get`, `subcog_update`, `subcog_delete` - Memory CRUD
+- And 20+ more tools for knowledge graph, consolidation, etc.
+
+### 3. Verify Connection
+
+Once configured, the model can call Subcog tools directly:
+
+```
+subcog_status: {}
+subcog_recall: { "query": "database architecture" }
+subcog_capture: { "content": "Using PostgreSQL", "namespace": "decisions" }
+```
+
+---
+
+## CLI Usage (Alternative)
+
+If MCP is not available, use Subcog directly via shell commands:
 
 ```bash
 # Capture a memory
