@@ -10,7 +10,7 @@ repository = "https://github.com/zircote/subcog"
 homepage = "https://github.com/zircote/subcog"
 documentation = "https://docs.rs/subcog"
 readme = "README.md"
-keywords = ["memory", "ai", "mcp", "claude", "semantic-search"]
+keywords = ["memory", "ai", "mcp", "semantic-search", "sqlite"]
 categories = ["command-line-utilities", "development-tools"]
 
 [lib]

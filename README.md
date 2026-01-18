@@ -15,12 +15,12 @@ A persistent memory system for AI coding assistants. Subcog captures decisions, 
 Subcog delivers:
 
 - **Single-binary distribution** (<100MB, <10ms cold start)
-- **Pluggable storage backends** (SQLite+usearch, PostgreSQL+pgvector, Filesystem)
+- **Three-layer storage architecture**: SQLite persistence, FTS5 indexing, usearch HNSW vectors
 - **MCP server integration** for AI agent interoperability
-- **Claude Code hooks** for seamless IDE integration
-- **Semantic search** with hybrid vector + BM25 ranking
+- **Claude Code plugin** with hooks for seamless IDE integration
+- **Semantic search** with hybrid vector + BM25 ranking (RRF fusion)
+- **Knowledge graph** with entity extraction and relationship inference
 - **Faceted storage** with project, branch, and file path filtering
-- **Branch garbage collection** for stale branch cleanup
 
 ## ADR Compliance
 
@@ -108,9 +108,6 @@ subcog recall "database storage decision" --raw
 # Check status
 subcog status
 
-# Sync with git remote
-subcog sync
-
 # Migrate existing memories to use real embeddings
 subcog migrate embeddings
 ```
@@ -153,7 +150,7 @@ Subcog exposes ~22 consolidated MCP tools (see [ADR-0061](docs/adrs/adr_0061.md)
 | Category | Tools | Description |
 |----------|-------|-------------|
 | **Core** | `subcog_capture`, `subcog_recall`, `subcog_status` | Memory CRUD and search |
-| **Lifecycle** | `subcog_sync`, `subcog_consolidate`, `subcog_reindex` | Maintenance operations |
+| **Lifecycle** | `subcog_consolidate`, `subcog_reindex` | Maintenance operations |
 | **CRUD** | `subcog_get`, `subcog_update`, `subcog_delete`, `subcog_list` | Individual memory operations |
 | **Bulk** | `subcog_delete_all`, `subcog_restore`, `subcog_history` | Bulk and recovery operations |
 | **Graph** | `subcog_graph`, `subcog_entities`, `subcog_relationships` | Knowledge graph queries |
@@ -179,7 +176,7 @@ The stdio transport is the default and recommended mode for local development:
 | **Trust Model** | Process isolation via OS - parent spawns subcog as child process |
 | **Network Exposure** | None - communication only via stdin/stdout pipes |
 | **Authentication** | Implicit - same-user execution, no credentials required |
-| **Confidentiality** | Data never leaves local machine unless explicitly synced |
+| **Confidentiality** | Data stays on local machine (SQLite is authoritative) |
 | **Integrity** | OS guarantees pipe integrity, no MITM attacks possible |
 
 **When to use**: Local development with Claude Desktop or other MCP clients that spawn subcog directly.
@@ -227,7 +224,7 @@ Subcog integrates with all 5 Claude Code hooks:
 | `UserPromptSubmit` | Detect capture signals in prompts |
 | `PostToolUse` | Surface related memories after file operations |
 | `PreCompact` | Analyze conversation for auto-capture |
-| `Stop` | Finalize session, sync to remote |
+| `Stop` | Finalize session, capture pending memories |
 
 Configure in `~/.claude/settings.json`:
 
@@ -277,7 +274,7 @@ Subcog uses a **three-layer storage architecture** to separate concerns:
 ```mermaid
 flowchart TB
     subgraph Access["Access Layer"]
-        CLI["CLI<br/>subcog capture/recall/sync"]
+        CLI["CLI<br/>subcog capture/recall/status"]
         MCP["MCP Server<br/>JSON-RPC over stdio"]
         Hooks["Claude Code Hooks<br/>SessionStart, UserPrompt, Stop"]
     end
@@ -285,7 +282,6 @@ flowchart TB
     subgraph Services["Service Layer"]
         Capture["CaptureService<br/>Memory ingestion"]
         Recall["RecallService<br/>Hybrid search"]
-        Sync["SyncService<br/>Git remote sync"]
         GC["GCService<br/>Branch cleanup"]
         Dedup["DeduplicationService<br/>3-tier duplicate detection"]
         Context["ContextBuilder<br/>Adaptive injection"]
@@ -314,12 +310,10 @@ flowchart TB
     subgraph External["External Systems"]
         FastEmbed["FastEmbed<br/>all-MiniLM-L6-v2"]
         LLM["LLM Provider<br/>Anthropic/OpenAI/Ollama"]
-        Git["Git Remote<br/>notes/subcog/*"]
     end
 
     CLI --> Capture
     CLI --> Recall
-    CLI --> Sync
     MCP --> Capture
     MCP --> Recall
     Hooks --> Context
@@ -334,8 +328,6 @@ flowchart TB
     Recall --> Index
     Recall --> Vector
     Recall --> FastEmbed
-
-    Sync --> Git
 
     Context --> Recall
     Context --> LLM
@@ -427,7 +419,7 @@ flowchart LR
                               +--------v--------+
                               |  Service Layer  |
                               +-----------------+
-                              | Capture | Recall | Sync | GC
+                              | Capture | Recall | GC
                               +--------+--------+
                                        |
         +------------------------------+------------------------------+
@@ -501,7 +493,7 @@ src/
 ├── models/             # Data structures (Memory, Domain, Namespace)
 ├── storage/            # Storage backends (SQLite, PostgreSQL, usearch)
 │   └── traits/         # Backend trait definitions (see mod.rs for docs)
-├── services/           # Business logic (Capture, Recall, Sync)
+├── services/           # Business logic (Capture, Recall, GC)
 ├── mcp/                # MCP server implementation
 ├── hooks/              # Claude Code hook handlers
 ├── embedding/          # Vector embedding generation

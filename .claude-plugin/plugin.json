@@ -14,11 +14,13 @@
     "memory",
     "persistence",
     "context",
-    "git-notes",
+    "sqlite",
     "vector-search",
     "mcp",
     "claude-code",
-    "semantic-search"
+    "semantic-search",
+    "knowledge-graph",
+    "hybrid-search"
   ],
   "mcpServers": "./.mcp.json"
 }
