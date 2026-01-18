@@ -1,6 +1,8 @@
 # Subcog
 
 [![CI](https://github.com/zircote/subcog/actions/workflows/ci.yml/badge.svg)](https://github.com/zircote/subcog/actions/workflows/ci.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/zircote/subcog?logo=github&logoColor=white)](https://github.com/zircote/subcog/releases)
+[![Crates.io](https://img.shields.io/crates/v/subcog?logo=rust&logoColor=white)](https://crates.io/crates/subcog)
 [![Rust Version](https://img.shields.io/badge/rust-1.88%2B-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Clippy](https://img.shields.io/badge/linting-clippy-orange?logo=rust&logoColor=white)](https://github.com/rust-lang/rust-clippy)
