@@ -118,3 +118,6 @@ observability/
 
 # Auto Claude data directory
 .auto-claude/
+
+# Subcog local data (should use ~/.local/share/subcog instead)
+.subcog/
