@@ -82,7 +82,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake
 
       - name: Cache cargo registry
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: |
             ~/.cargo/registry
@@ -93,7 +93,7 @@ jobs:
             ${{ runner.os }}-cargo-bench-
 
       - name: Cache Hugging Face models
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: |
             ~/.cache/huggingface
@@ -103,7 +103,7 @@ jobs:
             ${{ runner.os }}-huggingface-
 
       - name: Cache benchmark baselines
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: target/criterion
           key: ${{ runner.os }}-criterion-baseline-${{ github.base_ref || 'develop' }}-${{ hashFiles('**/Cargo.lock') }}
@@ -291,7 +291,7 @@ jobs:
 
       - name: Save baseline for develop
         if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
-        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache/save@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: target/criterion
           key: ${{ runner.os }}-criterion-baseline-develop-${{ hashFiles('**/Cargo.lock') }}-${{ github.sha }}
