@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1280" height="640" viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background gradient -->
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a1628"/>
+      <stop offset="50%" style="stop-color:#0d1f3c"/>
+      <stop offset="100%" style="stop-color:#0a1628"/>
+    </linearGradient>
+
+    <!-- Node gradient (cyan to purple) -->
+    <linearGradient id="nodeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00d4aa"/>
+      <stop offset="50%" style="stop-color:#00b4d8"/>
+      <stop offset="100%" style="stop-color:#9b5de5"/>
+    </linearGradient>
+
+    <!-- Glow filter -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Soft glow for connections -->
+    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1280" height="640" fill="url(#bgGradient)"/>
+
+  <!-- Subtle grid pattern -->
+  <g opacity="0.03">
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#ffffff" stroke-width="0.5"/>
+    </pattern>
+    <rect width="1280" height="640" fill="url(#grid)"/>
+  </g>
+
+  <!-- S-shaped network of nodes (positioned left-center) -->
+  <g transform="translate(280, 120)" filter="url(#softGlow)">
+    <!-- Connection lines -->
+    <g stroke="url(#nodeGradient)" stroke-width="1.5" fill="none" opacity="0.6">
+      <!-- Top curve connections -->
+      <path d="M 180 40 Q 220 20, 260 30"/>
+      <path d="M 260 30 Q 300 45, 280 80"/>
+      <path d="M 280 80 Q 260 110, 220 120"/>
+      <path d="M 220 120 Q 180 130, 140 120"/>
+      <path d="M 140 120 Q 100 110, 80 140"/>
+
+      <!-- Middle connections -->
+      <path d="M 80 140 Q 60 170, 80 200"/>
+      <path d="M 80 200 Q 100 230, 140 240"/>
+      <path d="M 140 240 Q 180 250, 220 240"/>
+      <path d="M 220 240 Q 260 230, 280 260"/>
+
+      <!-- Bottom curve connections -->
+      <path d="M 280 260 Q 300 290, 280 320"/>
+      <path d="M 280 320 Q 260 350, 220 360"/>
+      <path d="M 220 360 Q 180 370, 140 360"/>
+      <path d="M 140 360 Q 100 350, 80 320"/>
+
+      <!-- Cross connections for depth -->
+      <path d="M 180 40 Q 160 80, 140 120"/>
+      <path d="M 260 30 Q 240 70, 220 120"/>
+      <path d="M 140 240 Q 160 280, 140 360"/>
+      <path d="M 220 240 Q 240 300, 220 360"/>
+      <path d="M 80 140 Q 100 190, 80 200"/>
+      <path d="M 280 260 Q 260 290, 280 320"/>
+    </g>
+
+    <!-- Nodes - forming S shape -->
+    <g filter="url(#glow)">
+      <!-- Top of S -->
+      <circle cx="180" cy="40" r="8" fill="#00d4aa"/>
+      <circle cx="260" cy="30" r="6" fill="#00c4b8"/>
+      <circle cx="280" cy="80" r="5" fill="#00b4d8"/>
+      <circle cx="220" cy="120" r="7" fill="#4dabf7"/>
+      <circle cx="140" cy="120" r="5" fill="#748ffc"/>
+
+      <!-- Middle of S -->
+      <circle cx="80" cy="140" r="6" fill="#845ef7"/>
+      <circle cx="80" cy="200" r="7" fill="#9b5de5"/>
+      <circle cx="140" cy="240" r="5" fill="#a855f7"/>
+      <circle cx="220" cy="240" r="6" fill="#9b5de5"/>
+      <circle cx="280" cy="260" r="5" fill="#845ef7"/>
+
+      <!-- Bottom of S -->
+      <circle cx="280" cy="320" r="6" fill="#748ffc"/>
+      <circle cx="220" cy="360" r="7" fill="#4dabf7"/>
+      <circle cx="140" cy="360" r="5" fill="#00b4d8"/>
+      <circle cx="80" cy="320" r="6" fill="#00c4b8"/>
+
+      <!-- Accent nodes (smaller, scattered) -->
+      <circle cx="200" cy="80" r="3" fill="#00d4aa" opacity="0.7"/>
+      <circle cx="160" cy="160" r="3" fill="#748ffc" opacity="0.7"/>
+      <circle cx="200" cy="200" r="4" fill="#9b5de5" opacity="0.8"/>
+      <circle cx="160" cy="280" r="3" fill="#a855f7" opacity="0.7"/>
+      <circle cx="200" cy="320" r="3" fill="#4dabf7" opacity="0.7"/>
+      <circle cx="300" cy="180" r="2" fill="#00d4aa" opacity="0.5"/>
+      <circle cx="60" cy="260" r="2" fill="#9b5de5" opacity="0.5"/>
+    </g>
+  </g>
+
+  <!-- Project name -->
+  <text x="720" y="280" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+        font-size="96" font-weight="700" fill="#ffffff" text-anchor="start">
+    Subcog
+  </text>
+
+  <!-- Tagline -->
+  <text x="720" y="350" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+        font-size="28" font-weight="400" fill="#94a3b8" text-anchor="start">
+    Persistent Memory for AI Coding Assistants
+  </text>
+
+  <!-- Tech badges area -->
+  <g transform="translate(720, 400)">
+    <!-- Rust badge -->
+    <rect x="0" y="0" width="70" height="28" rx="4" fill="#dea584" opacity="0.2"/>
+    <text x="35" y="19" font-family="system-ui, -apple-system, sans-serif"
+          font-size="13" font-weight="500" fill="#dea584" text-anchor="middle">Rust</text>
+
+    <!-- MCP badge -->
+    <rect x="80" y="0" width="70" height="28" rx="4" fill="#00d4aa" opacity="0.2"/>
+    <text x="115" y="19" font-family="system-ui, -apple-system, sans-serif"
+          font-size="13" font-weight="500" fill="#00d4aa" text-anchor="middle">MCP</text>
+
+    <!-- SQLite badge -->
+    <rect x="160" y="0" width="70" height="28" rx="4" fill="#4dabf7" opacity="0.2"/>
+    <text x="195" y="19" font-family="system-ui, -apple-system, sans-serif"
+          font-size="13" font-weight="500" fill="#4dabf7" text-anchor="middle">SQLite</text>
+
+    <!-- Vector badge -->
+    <rect x="240" y="0" width="80" height="28" rx="4" fill="#9b5de5" opacity="0.2"/>
+    <text x="280" y="19" font-family="system-ui, -apple-system, sans-serif"
+          font-size="13" font-weight="500" fill="#9b5de5" text-anchor="middle">Vectors</text>
+  </g>
+
+  <!-- Decorative floating particles -->
+  <g opacity="0.3">
+    <circle cx="100" cy="100" r="2" fill="#00d4aa"/>
+    <circle cx="1180" cy="540" r="2" fill="#9b5de5"/>
+    <circle cx="1100" cy="120" r="1.5" fill="#4dabf7"/>
+    <circle cx="150" cy="500" r="1.5" fill="#748ffc"/>
+    <circle cx="1200" cy="300" r="1" fill="#00d4aa"/>
+    <circle cx="80" cy="350" r="1" fill="#9b5de5"/>
+  </g>
+</svg>
