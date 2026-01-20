@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-01-20
+
+### Added
+
+- **Documentation**: Added `subcog_init` to `prompt_understanding` guidance
+  - Documents preferred session initialization approach with example
+  - Includes full parameter documentation (`include_recall`, `recall_query`, `recall_limit`)
+  - Adds explicit warning about `recall_limit` vs `limit` parameter naming to prevent LLM confusion
+
+### Changed
+
+- **Dependencies**: Updated multiple dependencies
+  - parquet: 54.3.1 → 57.2.0
+  - arrow: 54.3.1 → 57.2.0
+  - chrono: 0.4.42 → 0.4.43
+  - thiserror: 2.0.17 → 2.0.18
+  - rmcp: 0.12.0 → 0.13.0
+  - peter-evans/create-pull-request: 7.0.5 → 8.0.0
+  - actions/upload-artifact: 4 → 6
+
 ## [0.9.2] - 2026-01-17
 
 ### Fixed

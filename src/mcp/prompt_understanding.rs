@@ -4,13 +4,26 @@ pub const PROMPT_UNDERSTANDING: &str = r#"# SUBCOG.MCP-SERVER - How to use Subco
 
 ## 1. Session Start Protocol
 
-When starting a session, establish context and tool availability:
+When starting a session, establish context and tool availability.
+
+**Preferred approach**: Call `subcog_init` - it combines guidance, status, and recall in one call.
+
+```yaml
+subcog_init:
+  include_recall: true
+  recall_query: "project setup OR architecture OR conventions"
+  recall_limit: 5
+```
+
+**Manual alternative** (if you need finer control):
 
 1) Call `prompt_understanding` to load usage guidance (you're reading it now).
 2) Call `subcog_status` to confirm memory system health and get statistics.
 3) For first project interaction:
    - `subcog_recall` with query: "project setup OR architecture OR conventions"
    - Check for existing patterns, decisions, and context.
+
+**Important**: `subcog_init` uses `recall_limit` (not `limit`). The `limit` parameter is for `subcog_recall`.
 
 ## 2. Core Concepts
 
@@ -49,6 +62,19 @@ Memories are categorized by namespace:
 | `testing` | Test strategies and edge cases |
 
 ## 3. Tool Catalog
+
+### 3.0 Session Initialization
+
+| Tool | Description |
+|------|-------------|
+| `subcog_init` | Initialize session by combining guidance, status check, and context recall in one call |
+
+**Parameters**:
+- `include_recall` (boolean, default: `true`): Whether to recall project context
+- `recall_query` (string, optional): Custom query for recall (default: "project setup OR architecture OR conventions")
+- `recall_limit` (integer, default: 5, max: 20): Maximum memories to recall
+
+**Warning**: Use `recall_limit`, not `limit`. The `limit` parameter belongs to `subcog_recall`, not `subcog_init`.
 
 ### 3.1 Memory CRUD Tools
 
