@@ -202,6 +202,8 @@ pub struct LlmConfig {
     pub api_key: Option<String>,
     /// Base URL for the provider (for self-hosted).
     pub base_url: Option<String>,
+    /// Maximum completion tokens for LLM responses.
+    pub max_tokens: Option<u32>,
     /// Request timeout in milliseconds.
     pub timeout_ms: Option<u64>,
     /// Connect timeout in milliseconds.
@@ -251,6 +253,7 @@ impl LlmConfig {
         {
             config.base_url = Some(base_url.clone());
         }
+        config.max_tokens = file.max_tokens;
         config.timeout_ms = file.timeout_ms;
         config.connect_timeout_ms = file.connect_timeout_ms;
         config.max_retries = file.max_retries;
@@ -288,6 +291,7 @@ impl LlmConfig {
             self.base_url = Some(base_url.clone());
         }
         // Use file value if present, otherwise keep existing value
+        self.max_tokens = file.max_tokens.or(self.max_tokens);
         self.timeout_ms = file.timeout_ms.or(self.timeout_ms);
         self.connect_timeout_ms = file.connect_timeout_ms.or(self.connect_timeout_ms);
         self.max_retries = file.max_retries.or(self.max_retries);
@@ -870,6 +874,8 @@ pub struct ConfigFileLlm {
     pub api_key: Option<String>,
     /// Base URL.
     pub base_url: Option<String>,
+    /// Maximum completion tokens for LLM responses (default: 8192).
+    pub max_tokens: Option<u32>,
     /// Request timeout in milliseconds.
     pub timeout_ms: Option<u64>,
     /// Connect timeout in milliseconds.
@@ -1659,6 +1665,9 @@ pub struct OperationTimeoutConfig {
     pub sqlite_ms: u64,
     /// Timeout for PostgreSQL operations in milliseconds.
     pub postgres_ms: u64,
+    /// Timeout for entity extraction LLM operations in milliseconds.
+    /// Default is 120 seconds (longer than general LLM timeout for complex content).
+    pub entity_extraction_ms: u64,
 }
 
 impl Default for OperationTimeoutConfig {
@@ -1672,6 +1681,7 @@ impl Default for OperationTimeoutConfig {
             redis_ms: 5_000,
             sqlite_ms: 5_000,
             postgres_ms: 10_000,
+            entity_extraction_ms: 120_000, // 120s for complex LLM extraction
         }
     }
 }
@@ -1689,6 +1699,7 @@ impl OperationTimeoutConfig {
             redis_ms: 5_000,
             sqlite_ms: 5_000,
             postgres_ms: 10_000,
+            entity_extraction_ms: 120_000,
         }
     }
 
@@ -1741,6 +1752,11 @@ impl OperationTimeoutConfig {
         {
             self.postgres_ms = parsed.max(100);
         }
+        if let Ok(v) = std::env::var("SUBCOG_TIMEOUT_ENTITY_EXTRACTION_MS")
+            && let Ok(parsed) = v.parse::<u64>()
+        {
+            self.entity_extraction_ms = parsed.max(1000); // Minimum 1s for LLM calls
+        }
         self
     }
 
@@ -1755,6 +1771,7 @@ impl OperationTimeoutConfig {
             OperationType::Redis => self.redis_ms,
             OperationType::Sqlite => self.sqlite_ms,
             OperationType::Postgres => self.postgres_ms,
+            OperationType::EntityExtraction => self.entity_extraction_ms,
             OperationType::Default => self.default_ms,
         };
         std::time::Duration::from_millis(ms)
@@ -1815,6 +1832,13 @@ impl OperationTimeoutConfig {
         self.postgres_ms = ms;
         self
     }
+
+    /// Builder method to set entity extraction timeout.
+    #[must_use]
+    pub const fn with_entity_extraction_ms(mut self, ms: u64) -> Self {
+        self.entity_extraction_ms = ms;
+        self
+    }
 }
 
 /// Operation types for timeout configuration.
@@ -1834,6 +1858,8 @@ pub enum OperationType {
     Sqlite,
     /// PostgreSQL operations.
     Postgres,
+    /// Entity extraction LLM operations.
+    EntityExtraction,
     /// Default/fallback timeout.
     Default,
 }

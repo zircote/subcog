@@ -83,6 +83,79 @@ impl<B: GraphBackend> GraphService<B> {
         self.backend.store_entity(entity)
     }
 
+    /// Stores an entity with automatic deduplication.
+    ///
+    /// Checks for an existing entity with the same name and type (case-insensitive).
+    /// If found:
+    /// - Updates confidence if the new entity has higher confidence
+    /// - Merges aliases from both entities
+    /// - Returns the existing entity's ID
+    ///
+    /// If not found, stores the new entity and returns its ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `entity` - The entity to store or merge
+    ///
+    /// # Returns
+    ///
+    /// The ID of the stored or existing entity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the storage or lookup operation fails.
+    pub fn store_entity_deduped(&self, entity: &Entity) -> Result<EntityId> {
+        // Look for existing entity with exact name+type match (case-insensitive)
+        let existing = self.backend.find_entities_by_name(
+            &entity.name,
+            Some(entity.entity_type),
+            Some(&entity.domain),
+            10, // Small limit since we're looking for exact matches
+        )?;
+
+        // Find exact case-insensitive match
+        let name_lower = entity.name.to_lowercase();
+        let exact_match = existing
+            .into_iter()
+            .find(|e| e.name.to_lowercase() == name_lower);
+
+        if let Some(mut existing_entity) = exact_match {
+            // Update confidence if new extraction has higher confidence
+            if entity.confidence > existing_entity.confidence {
+                existing_entity.confidence = entity.confidence;
+            }
+
+            // Merge aliases (add new aliases that don't already exist)
+            // Build set of existing aliases (lowercased) for efficient lookup
+            let existing_lower: std::collections::HashSet<String> = existing_entity
+                .aliases
+                .iter()
+                .map(|a| a.to_lowercase())
+                .chain(std::iter::once(existing_entity.name.to_lowercase()))
+                .collect();
+
+            let new_aliases: Vec<String> = entity
+                .aliases
+                .iter()
+                .filter(|alias| !existing_lower.contains(&alias.to_lowercase()))
+                .cloned()
+                .collect();
+            existing_entity.aliases.extend(new_aliases);
+
+            // Increment mention count
+            existing_entity.mention_count = existing_entity.mention_count.saturating_add(1);
+
+            // Store the updated entity
+            self.backend.store_entity(&existing_entity)?;
+
+            Ok(existing_entity.id)
+        } else {
+            // No duplicate found, store the new entity
+            self.backend.store_entity(entity)?;
+            Ok(entity.id.clone())
+        }
+    }
+
     /// Retrieves an entity by ID.
     ///
     /// # Returns

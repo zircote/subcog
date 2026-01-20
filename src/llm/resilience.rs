@@ -603,6 +603,12 @@ impl<P: LlmProvider> LlmProvider for ResilientLlmProvider<P> {
         self.execute("complete", || self.inner.complete(prompt))
     }
 
+    fn complete_with_system(&self, system: &str, user: &str) -> Result<String> {
+        self.execute("complete_with_system", || {
+            self.inner.complete_with_system(system, user)
+        })
+    }
+
     fn analyze_for_capture(&self, content: &str) -> Result<CaptureAnalysis> {
         self.execute("analyze_for_capture", || {
             self.inner.analyze_for_capture(content)

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-01-20
+
+### Fixed
+
+- **Entity Extraction**: Fixed auto entity extraction not running despite `auto_extract_entities = true` in config
+  - `ServiceContainer::for_repo()` and `for_user()` now properly propagate `auto_extract_entities` from loaded `SubcogConfig`
+  - Previously, `Config::new()` defaulted to `false`, ignoring user's config file setting
+  - Entities are now automatically extracted during memory capture when enabled
+
+- **Entity Extraction Timeout**: Increased default timeout from 30s to 120s for LLM-powered entity extraction
+  - Added `entity_extraction_ms` config option under `[timeouts]` section
+  - Complex content extraction no longer times out prematurely
+
+- **Graph Service**: Fixed `graph()` method to respect config `data_dir` instead of hardcoding `get_user_data_dir()`
+  - Graph database now correctly uses user-configured data directory
+
+### Changed
+
+- **Version**: Bumped to 0.11.0
+
 ## [0.10.0] - 2026-01-20
 
 ### Added

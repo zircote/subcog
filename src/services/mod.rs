@@ -145,6 +145,7 @@ pub use topic_index::{TopicIndexService, TopicInfo};
 #[cfg(feature = "group-scope")]
 pub use group::GroupService;
 
+use crate::cli::build_llm_provider_for_entity_extraction;
 use crate::config::SubcogConfig;
 use crate::context::GitContext;
 use crate::embedding::Embedder;
@@ -276,6 +277,8 @@ pub struct ServiceContainer {
     index_manager: Mutex<DomainIndexManager>,
     /// Repository path (if known).
     repo_path: Option<PathBuf>,
+    /// User data directory (from config, used for graph and other user-scoped data).
+    user_data_dir: PathBuf,
     /// Shared embedder for both capture and recall.
     embedder: Option<Arc<dyn Embedder>>,
     /// Shared vector backend for both capture and recall.
@@ -320,10 +323,15 @@ impl ServiceContainer {
 
         let index_manager = DomainIndexManager::new(config)?;
 
-        // Create CaptureService with repo_path for project-scoped storage
-        let capture_config = crate::config::Config::new().with_repo_path(&repo_root);
+        // Load config to get user's configured data_dir (respects config.toml)
+        let subcog_config = SubcogConfig::load_default();
 
-        let user_data_dir = get_user_data_dir()?;
+        // Create CaptureService with repo_path for project-scoped storage
+        // Propagate auto_extract_entities from loaded config
+        let mut capture_config = crate::config::Config::new().with_repo_path(&repo_root);
+        capture_config.features.auto_extract_entities = subcog_config.features.auto_extract_entities;
+        let user_data_dir = subcog_config.data_dir.clone();
+
         std::fs::create_dir_all(&user_data_dir).map_err(|e| Error::OperationFailed {
             operation: "create_user_data_dir".to_string(),
             cause: format!(
@@ -340,9 +348,12 @@ impl ServiceContainer {
         // Create backends using factory (centralizes initialization logic)
         let backends = BackendFactory::create_all(&paths.index_path(), &paths.vector_path());
 
+        // Build LLM provider for entity extraction with longer timeout (120s default)
+        let llm_provider = build_llm_provider_for_entity_extraction(&subcog_config);
+
         // Create entity extraction callback if auto-extraction is enabled
         let entity_extraction =
-            Self::create_entity_extraction_callback(&capture_config, &paths, None);
+            Self::create_entity_extraction_callback(&capture_config, &paths, llm_provider);
 
         // Build CaptureService based on available backends
         let capture = Self::build_capture_service(capture_config, &backends, entity_extraction);
@@ -352,6 +363,7 @@ impl ServiceContainer {
             sync: SyncService::default(),
             index_manager: Mutex::new(index_manager),
             repo_path: Some(repo_root),
+            user_data_dir,
             embedder: backends.embedder,
             vector: backends.vector,
         })
@@ -389,7 +401,9 @@ impl ServiceContainer {
     /// Returns an error if the user data directory cannot be created or
     /// storage backends fail to initialize.
     pub fn for_user() -> Result<Self> {
-        let user_data_dir = get_user_data_dir()?;
+        // Load config to get user's configured data_dir (respects config.toml)
+        let subcog_config = SubcogConfig::load_default();
+        let user_data_dir = subcog_config.data_dir.clone();
 
         // Ensure user data directory exists
         std::fs::create_dir_all(&user_data_dir).map_err(|e| Error::OperationFailed {
@@ -413,14 +427,19 @@ impl ServiceContainer {
         let index_manager = DomainIndexManager::new(config)?;
 
         // Create CaptureService WITHOUT repo_path (user scope)
-        let capture_config = crate::config::Config::new();
+        // Propagate auto_extract_entities from loaded config
+        let mut capture_config = crate::config::Config::new();
+        capture_config.features.auto_extract_entities = subcog_config.features.auto_extract_entities;
 
         // Create backends using factory (centralizes initialization logic)
         let backends = BackendFactory::create_all(&paths.index_path(), &paths.vector_path());
 
+        // Build LLM provider for entity extraction with longer timeout (120s default)
+        let llm_provider = build_llm_provider_for_entity_extraction(&subcog_config);
+
         // Create entity extraction callback if auto-extraction is enabled
         let entity_extraction =
-            Self::create_entity_extraction_callback(&capture_config, &paths, None);
+            Self::create_entity_extraction_callback(&capture_config, &paths, llm_provider);
 
         // Build CaptureService based on available backends
         let capture = Self::build_capture_service(capture_config, &backends, entity_extraction);
@@ -435,6 +454,7 @@ impl ServiceContainer {
             sync: SyncService::no_op(),
             index_manager: Mutex::new(index_manager),
             repo_path: None,
+            user_data_dir,
             embedder: backends.embedder,
             vector: backends.vector,
         })
@@ -712,22 +732,23 @@ impl ServiceContainer {
                         .with_confidence(extracted.confidence)
                         .with_aliases(extracted.aliases.iter().cloned());
 
-                // Store entity
-                match graph_service.store_entity(&entity) {
-                    Ok(()) => {
+                // Store entity with deduplication (returns actual ID, existing or new)
+                match graph_service.store_entity_deduped(&entity) {
+                    Ok(actual_id) => {
                         stats.entities_stored += 1;
 
                         // Track name to ID mapping for relationship resolution
-                        name_to_id.insert(extracted.name.clone(), entity.id.clone());
+                        // Use the actual ID returned (may be existing entity's ID)
+                        name_to_id.insert(extracted.name.clone(), actual_id.clone());
                         for alias in &extracted.aliases {
-                            name_to_id.insert(alias.clone(), entity.id.clone());
+                            name_to_id.insert(alias.clone(), actual_id.clone());
                         }
 
                         // Record mention linking memory to entity
-                        if let Err(e) = graph_service.record_mention(&entity.id, memory_id) {
+                        if let Err(e) = graph_service.record_mention(&actual_id, memory_id) {
                             tracing::debug!(
                                 memory_id = %memory_id,
-                                entity_id = %entity.id.as_ref(),
+                                entity_id = %actual_id.as_ref(),
                                 error = %e,
                                 "Failed to record entity mention"
                             );
@@ -982,8 +1003,8 @@ impl ServiceContainer {
     pub fn graph(&self) -> Result<GraphService<crate::storage::graph::SqliteGraphBackend>> {
         use crate::storage::graph::SqliteGraphBackend;
 
-        let user_data_dir = get_user_data_dir()?;
-        let paths = PathManager::for_user(&user_data_dir);
+        // Use the configured user_data_dir (respects config.toml data_dir setting)
+        let paths = PathManager::for_user(&self.user_data_dir);
         let graph_path = paths.graph_path();
 
         let backend = SqliteGraphBackend::new(&graph_path).map_err(|e| Error::OperationFailed {

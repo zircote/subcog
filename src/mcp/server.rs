@@ -174,21 +174,8 @@ async fn await_shutdown(cancel_token: rmcp::service::RunningServiceCancellationT
 fn execute_call_tool(
     state: &McpState,
     request: CallToolRequestParam,
-    context: &RequestContext<RoleServer>,
     start: Instant,
 ) -> McpResult<CallToolResult> {
-    #[cfg(feature = "http")]
-    if let Err(err) = ensure_tool_authorized(&state.tool_auth, context, &request.name) {
-        record_event(MemoryEvent::McpRequestError {
-            meta: EventMeta::new("mcp", current_request_id()),
-            operation: "call_tool".to_string(),
-            error: err.to_string(),
-        });
-        return Err(err);
-    }
-    #[cfg(not(feature = "http"))]
-    let _ = context;
-
     let arguments = match request.arguments {
         Some(args) => Value::Object(args),
         None => Value::Object(Map::new()),
@@ -686,11 +673,30 @@ impl ServerHandler for McpHandler {
                 tool_name = %tool_name
             );
 
+            // HTTP authorization check (must happen before spawn_blocking)
+            #[cfg(feature = "http")]
+            if let Err(err) = ensure_tool_authorized(&state.tool_auth, &context, &tool_name) {
+                record_event(MemoryEvent::McpRequestError {
+                    meta: EventMeta::new("mcp", current_request_id()),
+                    operation: "call_tool".to_string(),
+                    error: err.to_string(),
+                });
+                return Err(err);
+            }
+            #[cfg(not(feature = "http"))]
+            let _ = &context;
+
             run_mcp_with_context(
                 request_context,
                 span,
                 "call_tool",
-                move |start| async move { execute_call_tool(&state, request, &context, start) },
+                move |start| async move {
+                    // Use spawn_blocking to run the potentially blocking tool execution
+                    // (e.g., LLM calls use reqwest::blocking::Client)
+                    tokio::task::spawn_blocking(move || execute_call_tool(&state, request, start))
+                        .await
+                        .map_err(|e| McpError::internal_error(format!("Task join error: {e}"), None))?
+                },
             )
             .await
         }

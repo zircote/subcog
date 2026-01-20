@@ -1090,4 +1090,69 @@ Done!"#;
             assert!(entities[0].domain.is_user());
         }
     }
+
+    /// Integration test that actually calls the LLM API.
+    /// Run with: RUST_LOG=debug cargo test test_llm_extraction_integration -- --ignored --nocapture
+    #[test]
+    #[ignore = "requires OPENAI_API_KEY and makes real API calls"]
+    fn test_llm_extraction_integration() {
+        use crate::llm::{LlmHttpConfig, LlmProvider, OpenAiClient, build_http_client};
+        use std::sync::Arc;
+
+        // Initialize logging for debug output
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_test_writer()
+            .try_init();
+
+        // Check for API key
+        let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
+        assert!(!api_key.is_empty(), "OPENAI_API_KEY cannot be empty");
+
+        // Build client with longer timeout for debugging
+        let http_config = LlmHttpConfig {
+            timeout_ms: 60_000,
+            connect_timeout_ms: 10_000,
+        };
+        let client = OpenAiClient::new()
+            .with_api_key(&api_key)
+            .with_model("gpt-5-nano-2025-08-07")
+            .with_http_config(http_config);
+
+        let llm: Arc<dyn LlmProvider> = Arc::new(client);
+
+        let service = EntityExtractorService::with_shared_llm(llm, Domain::for_user());
+
+        // Test 1: Simple content (should work)
+        println!("\n=== Test 1: Simple content ===");
+        let simple_content = "PostgreSQL database with Redis cache";
+        let result = service.extract(simple_content);
+        match &result {
+            Ok(r) => {
+                println!("Simple content result: used_fallback={}, entities={:?}", r.used_fallback, r.entities);
+                assert!(!r.used_fallback, "Simple content should use LLM, not fallback");
+            }
+            Err(e) => {
+                println!("Simple content error: {e:?}");
+                panic!("Simple content extraction failed: {e}");
+            }
+        }
+
+        // Test 2: Complex code-heavy content (might trigger fallback)
+        println!("\n=== Test 2: Complex content ===");
+        let complex_content = r#"The EntityExtractorService::extract_with_llm() method at src/services/entity_extraction.rs:312 calls llm.complete_with_system(&system, &user) to process text. If the LLM fails, it falls back to extract_fallback() which uses TECH_PATTERNS regex matching against patterns like r"\b(Rust|Python|Go|Java)\b" defined in the static LAZY_STATIC block."#;
+        let result = service.extract(complex_content);
+        match &result {
+            Ok(r) => {
+                println!("Complex content result: used_fallback={}, entities={:?}, warnings={:?}",
+                    r.used_fallback, r.entities, r.warnings);
+                if r.used_fallback {
+                    println!("WARNING: Complex content fell back to pattern matching!");
+                }
+            }
+            Err(e) => {
+                println!("Complex content error: {e:?}");
+            }
+        }
+    }
 }

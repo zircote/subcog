@@ -61,8 +61,9 @@ pub use config::ConfigCommand;
 pub use consolidate::ConsolidateCommand;
 pub use hook::HookCommand;
 pub use llm_factory::{
-    build_anthropic_client, build_hook_llm_provider, build_http_config, build_lmstudio_client,
-    build_ollama_client, build_openai_client, build_resilience_config,
+    build_anthropic_client, build_hook_llm_provider, build_http_config, build_llm_provider,
+    build_llm_provider_for_entity_extraction, build_lmstudio_client, build_ollama_client,
+    build_openai_client, build_resilience_config,
 };
 pub use migrate::MigrateCommand;
 pub use namespaces::{NamespaceInfo, NamespacesOutputFormat, cmd_namespaces, get_all_namespaces};

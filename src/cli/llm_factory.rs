@@ -35,6 +35,9 @@ pub fn build_openai_client(llm_config: &LlmConfig) -> OpenAiClient {
     if let Some(ref base_url) = llm_config.base_url {
         client = client.with_endpoint(base_url);
     }
+    if let Some(max_tokens) = llm_config.max_tokens {
+        client = client.with_max_tokens(max_tokens);
+    }
     client.with_http_config(build_http_config(llm_config))
 }
 
@@ -126,6 +129,143 @@ pub fn build_hook_llm_provider(
         Provider::None => return None,
     };
 
+    Some(provider)
+}
+
+/// Builds an LLM provider for entity extraction with a longer timeout.
+///
+/// Entity extraction often requires processing complex content that can take
+/// longer than the default LLM timeout. This function creates an LLM provider
+/// with the entity extraction timeout from config (default: 120s).
+///
+/// Returns `None` if LLM features are disabled in config.
+#[must_use]
+pub fn build_llm_provider_for_entity_extraction(
+    config: &crate::config::SubcogConfig,
+) -> Option<Arc<dyn LlmProvider>> {
+    use crate::config::{LlmProvider as Provider, OperationType};
+
+    tracing::debug!(
+        llm_features = config.features.llm_features,
+        provider = ?config.llm.provider,
+        "build_llm_provider_for_entity_extraction called"
+    );
+
+    if !config.features.llm_features {
+        tracing::debug!("LLM features disabled in config, returning None");
+        return None;
+    }
+
+    // Create a modified LLM config with the entity extraction timeout
+    let entity_timeout_ms = config.timeouts.get(OperationType::EntityExtraction).as_millis() as u64;
+    let mut llm_config = config.llm.clone();
+    llm_config.timeout_ms = Some(entity_timeout_ms);
+
+    tracing::debug!(
+        entity_timeout_ms = entity_timeout_ms,
+        "Using entity extraction timeout for LLM"
+    );
+
+    let provider: Arc<dyn LlmProvider> = match llm_config.provider {
+        Provider::OpenAi => {
+            let resilience_config = build_resilience_config(&llm_config);
+            Arc::new(ResilientLlmProvider::new(
+                build_openai_client(&llm_config),
+                resilience_config,
+            ))
+        },
+        Provider::Anthropic => {
+            let resilience_config = build_resilience_config(&llm_config);
+            Arc::new(ResilientLlmProvider::new(
+                build_anthropic_client(&llm_config),
+                resilience_config,
+            ))
+        },
+        Provider::Ollama => {
+            let resilience_config = build_resilience_config(&llm_config);
+            Arc::new(ResilientLlmProvider::new(
+                build_ollama_client(&llm_config),
+                resilience_config,
+            ))
+        },
+        Provider::LmStudio => {
+            let resilience_config = build_resilience_config(&llm_config);
+            Arc::new(ResilientLlmProvider::new(
+                build_lmstudio_client(&llm_config),
+                resilience_config,
+            ))
+        },
+        Provider::None => {
+            tracing::debug!("LLM provider is None, returning None");
+            return None;
+        },
+    };
+
+    tracing::debug!(
+        provider_type = ?llm_config.provider,
+        timeout_ms = entity_timeout_ms,
+        "LLM provider for entity extraction built successfully"
+    );
+    Some(provider)
+}
+
+/// Builds an LLM provider from configuration.
+///
+/// Returns `None` if LLM features are disabled in config.
+/// This is a general-purpose LLM provider builder for entity extraction
+/// and other LLM-powered features (not tied to search intent).
+#[must_use]
+pub fn build_llm_provider(config: &crate::config::SubcogConfig) -> Option<Arc<dyn LlmProvider>> {
+    use crate::config::LlmProvider as Provider;
+
+    tracing::debug!(
+        llm_features = config.features.llm_features,
+        provider = ?config.llm.provider,
+        "build_llm_provider called"
+    );
+
+    if !config.features.llm_features {
+        tracing::debug!("LLM features disabled in config, returning None");
+        return None;
+    }
+
+    let llm_config = &config.llm;
+    let provider: Arc<dyn LlmProvider> = match llm_config.provider {
+        Provider::OpenAi => {
+            let resilience_config = build_resilience_config(llm_config);
+            Arc::new(ResilientLlmProvider::new(
+                build_openai_client(llm_config),
+                resilience_config,
+            ))
+        },
+        Provider::Anthropic => {
+            let resilience_config = build_resilience_config(llm_config);
+            Arc::new(ResilientLlmProvider::new(
+                build_anthropic_client(llm_config),
+                resilience_config,
+            ))
+        },
+        Provider::Ollama => {
+            let resilience_config = build_resilience_config(llm_config);
+            Arc::new(ResilientLlmProvider::new(
+                build_ollama_client(llm_config),
+                resilience_config,
+            ))
+        },
+        Provider::LmStudio => {
+            let resilience_config = build_resilience_config(llm_config);
+            Arc::new(ResilientLlmProvider::new(
+                build_lmstudio_client(llm_config),
+                resilience_config,
+            ))
+        },
+        Provider::None => {
+            tracing::debug!("LLM provider is None, returning None");
+            return None;
+        },
+    };
+
+    tracing::debug!(provider_type = ?llm_config.provider, "LLM provider built successfully");
     Some(provider)
 }
 

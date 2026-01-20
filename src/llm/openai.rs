@@ -35,6 +35,8 @@ pub struct OpenAiClient {
     endpoint: String,
     /// Model to use.
     model: String,
+    /// Maximum completion tokens (default: 8192).
+    max_tokens: Option<u32>,
     /// HTTP client.
     client: reqwest::blocking::Client,
 }
@@ -46,6 +48,9 @@ impl OpenAiClient {
     /// Default model.
     pub const DEFAULT_MODEL: &'static str = "gpt-5-mini";
 
+    /// Default max completion tokens.
+    pub const DEFAULT_MAX_TOKENS: u32 = 8192;
+
     /// Creates a new `OpenAI` client.
     #[must_use]
     pub fn new() -> Self {
@@ -54,6 +59,7 @@ impl OpenAiClient {
             api_key,
             endpoint: Self::DEFAULT_ENDPOINT.to_string(),
             model: Self::DEFAULT_MODEL.to_string(),
+            max_tokens: None,
             client: build_http_client(LlmHttpConfig::from_env()),
         }
     }
@@ -90,6 +96,13 @@ impl OpenAiClient {
     #[must_use]
     pub fn with_http_config(mut self, config: LlmHttpConfig) -> Self {
         self.client = build_http_client(config);
+        self
+    }
+
+    /// Sets the maximum completion tokens.
+    #[must_use]
+    pub const fn with_max_tokens(mut self, max_tokens: u32) -> Self {
+        self.max_tokens = Some(max_tokens);
         self
     }
 
@@ -146,6 +159,7 @@ impl OpenAiClient {
     }
 
     /// Makes a request to the `OpenAI` API.
+    #[allow(clippy::too_many_lines)]
     fn request(&self, messages: Vec<ChatMessage>) -> Result<String> {
         self.validate()?;
 
@@ -161,19 +175,20 @@ impl OpenAiClient {
 
         // GPT-5/o1/o3 models use max_completion_tokens and don't support temperature
         // GPT-4 and earlier use max_tokens and support temperature
+        let max_tokens = self.max_tokens.unwrap_or(Self::DEFAULT_MAX_TOKENS);
         let request = if self.is_gpt5_model() {
             ChatCompletionRequest {
                 model: self.model.clone(),
                 messages,
                 max_tokens: None,
-                max_completion_tokens: Some(1024),
+                max_completion_tokens: Some(max_tokens),
                 temperature: None, // GPT-5 only supports default (1)
             }
         } else {
             ChatCompletionRequest {
                 model: self.model.clone(),
                 messages,
-                max_tokens: Some(1024),
+                max_tokens: Some(max_tokens),
                 max_completion_tokens: None,
                 temperature: Some(0.7),
             }
@@ -230,11 +245,33 @@ impl OpenAiClient {
             });
         }
 
-        let response: ChatCompletionResponse = response.json().map_err(|e| {
+        // Get raw response text for debugging
+        let response_text = response.text().map_err(|e| {
             tracing::error!(
                 provider = "openai",
                 model = %self.model,
                 error = %e,
+                "Failed to read LLM response body"
+            );
+            Error::OperationFailed {
+                operation: "openai_response".to_string(),
+                cause: format!("Failed to read response: {e}"),
+            }
+        })?;
+
+        tracing::debug!(
+            provider = "openai",
+            response_len = response_text.len(),
+            response_preview = %response_text.chars().take(500).collect::<String>(),
+            "Raw API response"
+        );
+
+        let response: ChatCompletionResponse = serde_json::from_str(&response_text).map_err(|e| {
+            tracing::error!(
+                provider = "openai",
+                model = %self.model,
+                error = %e,
+                response_text = %response_text,
                 "Failed to parse LLM response"
             );
             Error::OperationFailed {
@@ -244,14 +281,23 @@ impl OpenAiClient {
         })?;
 
         // Extract content from first choice
-        response
+        let content = response
             .choices
             .first()
             .map(|choice| choice.message.content.clone())
             .ok_or_else(|| Error::OperationFailed {
                 operation: "openai_response".to_string(),
                 cause: "No choices in response".to_string(),
-            })
+            })?;
+
+        tracing::debug!(
+            provider = "openai",
+            content_len = content.len(),
+            content_preview = %content.chars().take(200).collect::<String>(),
+            "LLM response received"
+        );
+
+        Ok(content)
     }
 }
 
@@ -271,6 +317,21 @@ impl LlmProvider for OpenAiClient {
             role: "user".to_string(),
             content: prompt.to_string(),
         }];
+
+        self.request(messages)
+    }
+
+    fn complete_with_system(&self, system: &str, user: &str) -> Result<String> {
+        let messages = vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: system.to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: user.to_string(),
+            },
+        ];
 
         self.request(messages)
     }
@@ -406,6 +467,7 @@ mod tests {
             api_key: None,
             endpoint: OpenAiClient::DEFAULT_ENDPOINT.to_string(),
             model: OpenAiClient::DEFAULT_MODEL.to_string(),
+            max_tokens: None,
             client: reqwest::blocking::Client::new(),
         };
 
@@ -584,6 +646,7 @@ mod tests {
             api_key: None,
             endpoint: OpenAiClient::DEFAULT_ENDPOINT.to_string(),
             model: OpenAiClient::DEFAULT_MODEL.to_string(),
+            max_tokens: None,
             client: reqwest::blocking::Client::new(),
         };
 

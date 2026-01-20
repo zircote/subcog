@@ -9,6 +9,8 @@
 //! - Relationship inference
 //! - Graph visualization
 
+use crate::cli::build_llm_provider_for_entity_extraction;
+use crate::config::SubcogConfig;
 use crate::mcp::tool_types::{
     EntitiesArgs, EntityMergeArgs, ExtractEntitiesArgs, GraphArgs, GraphQueryArgs,
     GraphVisualizeArgs, RelationshipInferArgs, RelationshipsArgs, parse_entity_type,
@@ -225,8 +227,20 @@ fn execute_entity_extract(args: &EntitiesArgs) -> Result<ToolResult> {
 
     let container = ServiceContainer::from_current_dir_or_user()?;
 
-    // Use pattern-based extractor (LLM support requires provider injection)
-    let extractor = container.entity_extractor();
+    // Load config and build LLM provider if available
+    let config = SubcogConfig::load_default();
+    tracing::info!(
+        llm_features = config.features.llm_features,
+        provider = ?config.llm.provider,
+        "execute_entity_extract: loaded config"
+    );
+    let extractor = if let Some(llm) = build_llm_provider_for_entity_extraction(&config) {
+        tracing::info!("execute_entity_extract: using LLM-powered extraction");
+        container.entity_extractor_with_llm(llm)
+    } else {
+        tracing::info!("execute_entity_extract: LLM provider not available, using fallback");
+        container.entity_extractor()
+    };
 
     let min_confidence = args.min_confidence.unwrap_or(0.5);
     let extractor = extractor.with_min_confidence(min_confidence);
@@ -275,20 +289,22 @@ fn execute_entity_extract(args: &EntitiesArgs) -> Result<ToolResult> {
         }
     }
 
-    // Store entities if requested
+    // Store entities if requested (with automatic deduplication)
     if args.store && !result.entities.is_empty() {
         let graph = container.graph()?;
         let graph_entities = extractor.to_graph_entities(&result);
 
+        // Store entities with deduplication and build map with actual IDs
+        let mut entity_map: HashMap<String, Entity> = HashMap::new();
         for entity in &graph_entities {
-            graph.store_entity(entity)?;
+            let actual_id = graph.store_entity_deduped(entity)?;
+            // Create entity with the actual ID for relationship mapping
+            let mut stored_entity = entity.clone();
+            stored_entity.id = actual_id;
+            entity_map.insert(entity.name.clone(), stored_entity);
         }
 
-        // Store relationships too
-        let entity_map: HashMap<String, Entity> = graph_entities
-            .iter()
-            .map(|e| (e.name.clone(), e.clone()))
-            .collect();
+        // Store relationships using the actual entity IDs
         let graph_rels = extractor.to_graph_relationships(&result, &entity_map);
 
         for rel in &graph_rels {
@@ -296,7 +312,7 @@ fn execute_entity_extract(args: &EntitiesArgs) -> Result<ToolResult> {
         }
 
         text.push_str(&format!(
-            "\n✓ Stored {} entities and {} relationships in graph.\n",
+            "\n✓ Stored {} entities and {} relationships in graph (with deduplication).\n",
             graph_entities.len(),
             graph_rels.len()
         ));
@@ -605,8 +621,13 @@ fn execute_relationship_infer_action(args: &RelationshipsArgs) -> Result<ToolRes
         });
     }
 
-    // Use pattern-based extractor for inference (LLM support requires provider injection)
-    let extractor = container.entity_extractor();
+    // Load config and build LLM provider if available
+    let config = SubcogConfig::load_default();
+    let extractor = if let Some(llm) = build_llm_provider_for_entity_extraction(&config) {
+        container.entity_extractor_with_llm(llm)
+    } else {
+        container.entity_extractor()
+    };
 
     let min_confidence = args.min_confidence.unwrap_or(0.6);
     let extractor = extractor.with_min_confidence(min_confidence);
@@ -1095,8 +1116,13 @@ pub fn execute_extract_entities(arguments: Value) -> Result<ToolResult> {
 
     let container = ServiceContainer::from_current_dir_or_user()?;
 
-    // Use pattern-based extractor (LLM support requires provider injection)
-    let extractor = container.entity_extractor();
+    // Load config and build LLM provider if available
+    let config = SubcogConfig::load_default();
+    let extractor = if let Some(llm) = build_llm_provider_for_entity_extraction(&config) {
+        container.entity_extractor_with_llm(llm)
+    } else {
+        container.entity_extractor()
+    };
 
     let min_confidence = args.min_confidence.unwrap_or(0.5);
     let extractor = extractor.with_min_confidence(min_confidence);
@@ -1145,20 +1171,22 @@ pub fn execute_extract_entities(arguments: Value) -> Result<ToolResult> {
         }
     }
 
-    // Store entities if requested
+    // Store entities if requested (with automatic deduplication)
     if args.store && !result.entities.is_empty() {
         let graph = container.graph()?;
         let graph_entities = extractor.to_graph_entities(&result);
 
+        // Store entities with deduplication and build map with actual IDs
+        let mut entity_map: HashMap<String, Entity> = HashMap::new();
         for entity in &graph_entities {
-            graph.store_entity(entity)?;
+            let actual_id = graph.store_entity_deduped(entity)?;
+            // Create entity with the actual ID for relationship mapping
+            let mut stored_entity = entity.clone();
+            stored_entity.id = actual_id;
+            entity_map.insert(entity.name.clone(), stored_entity);
         }
 
-        // Store relationships too
-        let entity_map: HashMap<String, Entity> = graph_entities
-            .iter()
-            .map(|e| (e.name.clone(), e.clone()))
-            .collect();
+        // Store relationships using the actual entity IDs
         let graph_rels = extractor.to_graph_relationships(&result, &entity_map);
 
         for rel in &graph_rels {
@@ -1166,7 +1194,7 @@ pub fn execute_extract_entities(arguments: Value) -> Result<ToolResult> {
         }
 
         text.push_str(&format!(
-            "\n✓ Stored {} entities and {} relationships in graph.\n",
+            "\n✓ Stored {} entities and {} relationships in graph (with deduplication).\n",
             graph_entities.len(),
             graph_rels.len()
         ));
@@ -1346,8 +1374,13 @@ pub fn execute_relationship_infer(arguments: Value) -> Result<ToolResult> {
         });
     }
 
-    // Use pattern-based extractor for inference (LLM support requires provider injection)
-    let extractor = container.entity_extractor();
+    // Load config and build LLM provider if available
+    let config = SubcogConfig::load_default();
+    let extractor = if let Some(llm) = build_llm_provider_for_entity_extraction(&config) {
+        container.entity_extractor_with_llm(llm)
+    } else {
+        container.entity_extractor()
+    };
 
     let min_confidence = args.min_confidence.unwrap_or(0.6);
     let extractor = extractor.with_min_confidence(min_confidence);

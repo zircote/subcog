@@ -22,5 +22,5 @@
     "knowledge-graph",
     "hybrid-search"
   ],
-  "mcpServers": "./.mcp.json"
+  "mcpServers": "./subcog.mcp.json"
 }
