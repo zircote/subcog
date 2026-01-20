@@ -38,7 +38,7 @@ toml = "0.9"
 csv = "1.3"
 
 # Parquet support (optional)
-arrow = { version = "54", optional = true, default-features = false }
+arrow = { version = "57", optional = true, default-features = false }
 parquet = { version = "54", optional = true, default-features = false, features = ["arrow"] }
 rmcp = { version = "0.12.0", features = ["transport-io", "transport-streamable-http-server"] }
 
