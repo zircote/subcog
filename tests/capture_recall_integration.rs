@@ -430,12 +430,13 @@ fn test_captured_memory_has_embedding() {
 /// Test: Graceful degradation - capture succeeds without backends
 ///
 /// Verifies that capture works even when optional backends fail.
+/// Uses `new_minimal()` to avoid auto-initialization of `SQLite` backend.
 #[test]
 fn test_capture_graceful_degradation() {
     let config = subcog::config::Config::default();
 
-    // Create capture service without any backends
-    let capture_service = CaptureService::new(config);
+    // Create capture service without any backends using new_minimal()
+    let capture_service = CaptureService::new_minimal(config);
 
     assert!(!capture_service.has_embedder(), "Should not have embedder");
     assert!(!capture_service.has_index(), "Should not have index");
