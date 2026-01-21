@@ -118,6 +118,11 @@ use tracing::{Instrument, info_span};
 
 type McpResult<T> = std::result::Result<T, McpError>;
 
+/// Converts a task join error to an MCP internal error.
+fn join_error_to_mcp(e: &tokio::task::JoinError) -> McpError {
+    McpError::internal_error(format!("Task join error: {e}"), None)
+}
+
 fn record_mcp_metrics<T>(operation: &'static str, start: Instant, result: &McpResult<T>) {
     let status = if result.is_ok() { "success" } else { "error" };
     metrics::counter!(
@@ -695,7 +700,7 @@ impl ServerHandler for McpHandler {
                     // (e.g., LLM calls use reqwest::blocking::Client)
                     tokio::task::spawn_blocking(move || execute_call_tool(&state, request, start))
                         .await
-                        .map_err(|e| McpError::internal_error(format!("Task join error: {e}"), None))?
+                        .map_err(|e| join_error_to_mcp(&e))?
                 },
             )
             .await

@@ -157,7 +157,13 @@ pub fn build_llm_provider_for_entity_extraction(
     }
 
     // Create a modified LLM config with the entity extraction timeout
-    let entity_timeout_ms = config.timeouts.get(OperationType::EntityExtraction).as_millis() as u64;
+    let entity_timeout_ms = u64::try_from(
+        config
+            .timeouts
+            .get(OperationType::EntityExtraction)
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX);
     let mut llm_config = config.llm.clone();
     llm_config.timeout_ms = Some(entity_timeout_ms);
 

@@ -1092,11 +1092,12 @@ Done!"#;
     }
 
     /// Integration test that actually calls the LLM API.
-    /// Run with: RUST_LOG=debug cargo test test_llm_extraction_integration -- --ignored --nocapture
+    ///
+    /// Run with: `RUST_LOG=debug cargo test test_llm_extraction_integration -- --ignored --nocapture`
     #[test]
     #[ignore = "requires OPENAI_API_KEY and makes real API calls"]
     fn test_llm_extraction_integration() {
-        use crate::llm::{LlmHttpConfig, LlmProvider, OpenAiClient, build_http_client};
+        use crate::llm::{LlmHttpConfig, LlmProvider, OpenAiClient};
         use std::sync::Arc;
 
         // Initialize logging for debug output
@@ -1129,13 +1130,19 @@ Done!"#;
         let result = service.extract(simple_content);
         match &result {
             Ok(r) => {
-                println!("Simple content result: used_fallback={}, entities={:?}", r.used_fallback, r.entities);
-                assert!(!r.used_fallback, "Simple content should use LLM, not fallback");
-            }
+                println!(
+                    "Simple content result: used_fallback={}, entities={:?}",
+                    r.used_fallback, r.entities
+                );
+                assert!(
+                    !r.used_fallback,
+                    "Simple content should use LLM, not fallback"
+                );
+            },
             Err(e) => {
                 println!("Simple content error: {e:?}");
-                panic!("Simple content extraction failed: {e}");
-            }
+                unreachable!("Simple content extraction failed: {e}");
+            },
         }
 
         // Test 2: Complex code-heavy content (might trigger fallback)
@@ -1144,15 +1151,17 @@ Done!"#;
         let result = service.extract(complex_content);
         match &result {
             Ok(r) => {
-                println!("Complex content result: used_fallback={}, entities={:?}, warnings={:?}",
-                    r.used_fallback, r.entities, r.warnings);
+                println!(
+                    "Complex content result: used_fallback={}, entities={:?}, warnings={:?}",
+                    r.used_fallback, r.entities, r.warnings
+                );
                 if r.used_fallback {
                     println!("WARNING: Complex content fell back to pattern matching!");
                 }
-            }
+            },
             Err(e) => {
                 println!("Complex content error: {e:?}");
-            }
+            },
         }
     }
 }

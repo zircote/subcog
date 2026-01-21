@@ -266,19 +266,20 @@ impl OpenAiClient {
             "Raw API response"
         );
 
-        let response: ChatCompletionResponse = serde_json::from_str(&response_text).map_err(|e| {
-            tracing::error!(
-                provider = "openai",
-                model = %self.model,
-                error = %e,
-                response_text = %response_text,
-                "Failed to parse LLM response"
-            );
-            Error::OperationFailed {
-                operation: "openai_response".to_string(),
-                cause: e.to_string(),
-            }
-        })?;
+        let response: ChatCompletionResponse =
+            serde_json::from_str(&response_text).map_err(|e| {
+                tracing::error!(
+                    provider = "openai",
+                    model = %self.model,
+                    error = %e,
+                    response_text = %response_text,
+                    "Failed to parse LLM response"
+                );
+                Error::OperationFailed {
+                    operation: "openai_response".to_string(),
+                    cause: e.to_string(),
+                }
+            })?;
 
         // Extract content from first choice
         let content = response

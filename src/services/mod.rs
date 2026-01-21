@@ -329,7 +329,8 @@ impl ServiceContainer {
         // Create CaptureService with repo_path for project-scoped storage
         // Propagate auto_extract_entities from loaded config
         let mut capture_config = crate::config::Config::new().with_repo_path(&repo_root);
-        capture_config.features.auto_extract_entities = subcog_config.features.auto_extract_entities;
+        capture_config.features.auto_extract_entities =
+            subcog_config.features.auto_extract_entities;
         let user_data_dir = subcog_config.data_dir.clone();
 
         std::fs::create_dir_all(&user_data_dir).map_err(|e| Error::OperationFailed {
@@ -429,7 +430,8 @@ impl ServiceContainer {
         // Create CaptureService WITHOUT repo_path (user scope)
         // Propagate auto_extract_entities from loaded config
         let mut capture_config = crate::config::Config::new();
-        capture_config.features.auto_extract_entities = subcog_config.features.auto_extract_entities;
+        capture_config.features.auto_extract_entities =
+            subcog_config.features.auto_extract_entities;
 
         // Create backends using factory (centralizes initialization logic)
         let backends = BackendFactory::create_all(&paths.index_path(), &paths.vector_path());
