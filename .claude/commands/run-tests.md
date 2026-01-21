@@ -1,6 +1,9 @@
 ---
-description: Run automated functional tests for Subcog MCP tools
-allowed-tools: Read, Write, Bash, mcp__plugin_subcog_subcog__subcog_status
+name: run-tests
+description: Run automated functional tests for Subcog MCP tools. Execute the test suite to validate all MCP tool functionality including memory CRUD, search, knowledge graph, prompts, templates, and maintenance operations.
+argument-hint: "[--category <name>] [--tag <tag>] [--verbose] [--dry-run] [--skip-cleanup]"
+disable-model-invocation: true
+allowed-tools: Read, Write, Bash, Glob, Grep, mcp__plugin_subcog_subcog__subcog_status, mcp__plugin_subcog_subcog__subcog_capture, mcp__plugin_subcog_subcog__subcog_recall, mcp__plugin_subcog_subcog__subcog_get, mcp__plugin_subcog_subcog__subcog_update, mcp__plugin_subcog_subcog__subcog_delete, mcp__plugin_subcog_subcog__subcog_entities, mcp__plugin_subcog_subcog__subcog_relationships, mcp__plugin_subcog_subcog__subcog_graph, mcp__plugin_subcog_subcog__subcog_prompts, mcp__plugin_subcog_subcog__subcog_templates, mcp__plugin_subcog_subcog__subcog_consolidate, mcp__plugin_subcog_subcog__subcog_enrich, mcp__plugin_subcog_subcog__subcog_reindex, mcp__plugin_subcog_subcog__subcog_gdpr_export
 ---
 
 # /subcog:run-tests

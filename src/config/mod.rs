@@ -2257,7 +2257,10 @@ impl SubcogConfig {
     /// Loads configuration from the default location.
     ///
     /// Config location: `~/.config/subcog/config.toml`
-    /// Data location: `~/.config/subcog/`
+    /// Data location (platform-specific):
+    /// - macOS: `~/Library/Application Support/subcog/`
+    /// - Linux: `~/.local/share/subcog/`
+    /// - Windows: `C:\Users\<User>\AppData\Local\subcog\`
     ///
     /// Returns default configuration if no config file is found.
     #[must_use]
@@ -2271,8 +2274,14 @@ impl SubcogConfig {
         // Single config location: ~/.config/subcog/
         let config_dir = base_dirs.home_dir().join(".config").join("subcog");
 
+        // Use platform-appropriate data directory (not config directory)
+        // - macOS: ~/Library/Application Support/subcog/
+        // - Linux: ~/.local/share/subcog/
+        // - Windows: C:\Users\<User>\AppData\Local\subcog\
+        let data_dir = base_dirs.data_local_dir().join("subcog");
+
         let mut config = Self {
-            data_dir: config_dir.clone(),
+            data_dir,
             ..Self::default()
         };
 

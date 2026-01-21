@@ -97,7 +97,7 @@ cargo install subcog
 cargo install --git https://github.com/zircote/subcog.git
 
 # Specific version
-cargo install subcog --version 0.6.1
+cargo install subcog --version 0.12.0
 ```
 
 ## Docker
@@ -126,8 +126,8 @@ docker run --rm \
 | Tag | Description |
 |-----|-------------|
 | `latest` | Latest stable release |
-| `0.6.1` | Specific version |
-| `0.6` | Latest patch in minor version |
+| `0.12.0` | Specific version |
+| `0.12` | Latest patch in minor version |
 | `sha-abc1234` | Specific commit (for debugging) |
 
 ### Supported Architectures
@@ -187,22 +187,22 @@ Pre-built binaries are available from [GitHub Releases](https://github.com/zirco
 
 ```bash
 # macOS (Intel)
-curl -LO https://github.com/zircote/subcog/releases/download/v0.6.1/subcog-0.6.1-x86_64-apple-darwin.tar.gz
+curl -LO https://github.com/zircote/subcog/releases/download/v0.12.0/subcog-0.12.0-x86_64-apple-darwin.tar.gz
 
 # macOS (Apple Silicon)
-curl -LO https://github.com/zircote/subcog/releases/download/v0.6.1/subcog-0.6.1-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/zircote/subcog/releases/download/v0.12.0/subcog-0.12.0-aarch64-apple-darwin.tar.gz
 
 # Linux (x64, glibc)
-curl -LO https://github.com/zircote/subcog/releases/download/v0.6.1/subcog-0.6.1-x86_64-unknown-linux-gnu.tar.gz
+curl -LO https://github.com/zircote/subcog/releases/download/v0.12.0/subcog-0.12.0-x86_64-unknown-linux-gnu.tar.gz
 
 # Linux (x64, musl/Alpine)
-curl -LO https://github.com/zircote/subcog/releases/download/v0.6.1/subcog-0.6.1-x86_64-unknown-linux-musl.tar.gz
+curl -LO https://github.com/zircote/subcog/releases/download/v0.12.0/subcog-0.12.0-x86_64-unknown-linux-musl.tar.gz
 
 # Linux (arm64, musl)
-curl -LO https://github.com/zircote/subcog/releases/download/v0.6.1/subcog-0.6.1-aarch64-unknown-linux-musl.tar.gz
+curl -LO https://github.com/zircote/subcog/releases/download/v0.12.0/subcog-0.12.0-aarch64-unknown-linux-musl.tar.gz
 
 # Windows (x64)
-curl -LO https://github.com/zircote/subcog/releases/download/v0.6.1/subcog-0.6.1-x86_64-pc-windows-msvc.zip
+curl -LO https://github.com/zircote/subcog/releases/download/v0.12.0/subcog-0.12.0-x86_64-pc-windows-msvc.zip
 ```
 
 ### Installation Steps
@@ -226,7 +226,7 @@ All releases include SHA256 checksums in `checksums.txt`:
 
 ```bash
 # Download checksums
-curl -LO https://github.com/zircote/subcog/releases/download/v0.6.1/checksums.txt
+curl -LO https://github.com/zircote/subcog/releases/download/v0.12.0/checksums.txt
 
 # Verify (Unix)
 sha256sum -c checksums.txt --ignore-missing

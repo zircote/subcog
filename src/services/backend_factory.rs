@@ -165,6 +165,14 @@ impl BackendFactory {
 
         match result {
             Ok(backend) => {
+                // Load previously saved embeddings from disk
+                if let Err(e) = backend.load() {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "Failed to load vector index, starting with empty index"
+                    );
+                }
                 tracing::debug!(path = %path.display(), "Created usearch vector backend");
                 Some(Arc::new(backend))
             },

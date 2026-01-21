@@ -316,15 +316,17 @@ impl ServiceContainer {
             }
         }
 
+        // Load config FIRST to get user's configured data_dir (respects config.toml)
+        // This must happen before creating DomainIndexManager so all components use the same path.
+        let subcog_config = SubcogConfig::load_default();
+
         let config = DomainIndexConfig {
             repo_path: Some(repo_root.clone()),
             org_config,
+            user_data_dir: Some(subcog_config.data_dir.clone()),
         };
 
         let index_manager = DomainIndexManager::new(config)?;
-
-        // Load config to get user's configured data_dir (respects config.toml)
-        let subcog_config = SubcogConfig::load_default();
 
         // Create CaptureService with repo_path for project-scoped storage
         // Propagate auto_extract_entities from loaded config
@@ -421,9 +423,11 @@ impl ServiceContainer {
         let paths = PathManager::for_user(&user_data_dir);
 
         // Create domain index config for user-only mode (no repo)
+        // Pass user_data_dir to ensure consistency with CaptureService paths
         let config = DomainIndexConfig {
             repo_path: None,
             org_config: None,
+            user_data_dir: Some(user_data_dir.clone()),
         };
         let index_manager = DomainIndexManager::new(config)?;
 

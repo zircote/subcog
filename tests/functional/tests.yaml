@@ -78,7 +78,7 @@ tests:
     category: crud
     action: |
       Call subcog_capture with:
-        content: "TEST_DECISION: Use YAML for test definitions because it's human-readable"
+        content: "TEST_DECISION: Use YAML for test definitions"
         namespace: "decisions"
         tags: ["test", "automated", "cleanup-required"]
     expect:
@@ -105,13 +105,52 @@ tests:
     category: crud
     action: |
       Call subcog_capture with:
-        content: "TEST_LEARNING: The hook system supports replace behavior for prompts"
+        content: "TEST_LEARNING: Hook system supports replace behavior"
         namespace: "learnings"
         tags: ["test", "automated", "cleanup-required"]
     expect:
       - contains: "memory_id"
     tags: [crud, capture]
     save_as: captured_learning_id
+
+  - id: capture_with_source
+    description: "Capture memory with source reference"
+    category: crud
+    action: |
+      Call subcog_capture with:
+        content: "TEST_SOURCE: Memory with file source reference"
+        namespace: "context"
+        tags: ["test", "automated", "cleanup-required"]
+        source: "src/main.rs:42"
+    expect:
+      - contains: "memory_id"
+    tags: [crud, capture, source]
+
+  - id: capture_with_ttl
+    description: "Capture memory with TTL expiration"
+    category: crud
+    action: |
+      Call subcog_capture with:
+        content: "TEST_TTL: Temporary memory that expires"
+        namespace: "context"
+        tags: ["test", "automated", "cleanup-required"]
+        ttl: "7d"
+    expect:
+      - contains: "memory_id"
+    tags: [crud, capture, ttl]
+
+  - id: capture_user_domain
+    description: "Capture memory in user domain"
+    category: crud
+    action: |
+      Call subcog_capture with:
+        content: "TEST_USER_DOMAIN: User-scoped memory"
+        namespace: "learnings"
+        tags: ["test", "automated", "cleanup-required", "user-scope"]
+        domain: "user"
+    expect:
+      - contains: "memory_id"
+    tags: [crud, capture, domain]
 
   - id: get_memory
     description: "Retrieve a captured memory by ID"
@@ -251,6 +290,45 @@ tests:
       - regex: "(memories|results|found)"
     tags: [search, list]
 
+  - id: recall_pagination_offset
+    description: "Recall with pagination offset"
+    category: search
+    action: |
+      Call subcog_recall with:
+        limit: 5
+        offset: 5
+    expect:
+      - regex: "(memories|results|found)"
+    tags: [search, pagination]
+
+  - id: recall_entity_filter
+    description: "Recall filtered by entity name"
+    category: search
+    action: |
+      Call subcog_recall with:
+        query: "test"
+        entity: "TestPerson_AutomatedTest"
+        limit: 10
+    expect:
+      - regex: "(memories|results|found|No)"
+    tags: [search, entity]
+    depends_on: entity_create_person
+
+  - id: recall_with_mode_and_filter
+    description: "Recall combining search mode with filter"
+    category: search
+    action: |
+      Call subcog_recall with:
+        query: "TEST"
+        mode: "text"
+        filter: "ns:decisions"
+        detail: "medium"
+        limit: 10
+    expect:
+      - regex: "(TEST|decisions|memories)"
+    tags: [search, combined]
+    depends_on: capture_decision
+
   # ============================================
   # Category 4: Filter Syntax
   # ============================================
@@ -263,6 +341,17 @@ tests:
         limit: 10
     expect:
       - regex: "(decisions|decision)"
+    tags: [filters, namespace]
+
+  - id: filter_namespace_multiple
+    description: "Filter by multiple namespaces"
+    category: filters
+    action: |
+      Call subcog_recall with:
+        filter: "ns:decisions ns:patterns"
+        limit: 10
+    expect:
+      - regex: "(decisions|patterns|memories)"
     tags: [filters, namespace]
 
   - id: filter_tag_include
@@ -300,6 +389,28 @@ tests:
       - regex: "(memories|results|found)"
     tags: [filters, time]
 
+  - id: filter_source
+    description: "Filter by source path (source:)"
+    category: filters
+    action: |
+      Call subcog_recall with:
+        filter: "source:src/*"
+        limit: 10
+    expect:
+      - regex: "(memories|results|found|No)"
+    tags: [filters, source]
+
+  - id: filter_status
+    description: "Filter by status"
+    category: filters
+    action: |
+      Call subcog_recall with:
+        filter: "status:active"
+        limit: 10
+    expect:
+      - regex: "(memories|results|found)"
+    tags: [filters, status]
+
   - id: filter_combined
     description: "Combined filters"
     category: filters
@@ -309,6 +420,18 @@ tests:
         limit: 10
     expect:
       - regex: "(TEST|decisions)"
+    tags: [filters, combined]
+    depends_on: capture_decision
+
+  - id: filter_combined_complex
+    description: "Complex combined filter with exclusion"
+    category: filters
+    action: |
+      Call subcog_recall with:
+        filter: "ns:decisions tag:automated -tag:deleted since:7d"
+        limit: 10
+    expect:
+      - regex: "(memories|results|decisions)"
     tags: [filters, combined]
     depends_on: capture_decision
 
@@ -365,6 +488,46 @@ tests:
     tags: [entities, get]
     depends_on: entity_create_person
 
+  - id: entity_create_with_aliases
+    description: "Create entity with aliases"
+    category: entities
+    action: |
+      Call subcog_entities with:
+        action: "create"
+        name: "TestOrg_AutomatedTest"
+        entity_type: "Organization"
+        aliases: ["TestOrganization", "Test Org"]
+    expect:
+      - contains: "entity_id"
+    tags: [entities, create, aliases]
+    save_as: test_org_id
+
+  - id: entity_create_concept
+    description: "Create a Concept entity"
+    category: entities
+    action: |
+      Call subcog_entities with:
+        action: "create"
+        name: "TestConcept_Microservices"
+        entity_type: "Concept"
+    expect:
+      - contains: "entity_id"
+    tags: [entities, create, concept]
+    save_as: test_concept_id
+
+  - id: entity_create_file
+    description: "Create a File entity"
+    category: entities
+    action: |
+      Call subcog_entities with:
+        action: "create"
+        name: "TestFile_main.rs"
+        entity_type: "File"
+    expect:
+      - contains: "entity_id"
+    tags: [entities, create, file]
+    save_as: test_file_id
+
   - id: entity_extract
     description: "Extract entities from text (LLM)"
     category: entities
@@ -376,6 +539,17 @@ tests:
     expect:
       - regex: "(Alice|Anthropic|Rust|Claude|entities)"
     tags: [entities, extract, llm]
+
+  - id: entity_merge_find_duplicates
+    description: "Find duplicate entities"
+    category: entities
+    action: |
+      Call subcog_entity_merge with:
+        action: "find_duplicates"
+        threshold: 0.5
+    expect:
+      - regex: "(duplicates|candidates|entities|found|No)"
+    tags: [entities, merge, duplicates]
 
   # ============================================
   # Category 6: Knowledge Graph - Relationships
@@ -407,6 +581,62 @@ tests:
       - regex: "(relationships|Uses|list)"
     tags: [relationships, list]
     depends_on: relationship_create
+
+  - id: relationship_list_outgoing
+    description: "List outgoing relationships only"
+    category: relationships
+    action: |
+      Call subcog_relationships with:
+        action: "list"
+        entity_id: "${test_person_id}"
+        direction: "outgoing"
+        limit: 20
+    expect:
+      - regex: "(relationships|outgoing|list)"
+    tags: [relationships, list, direction]
+    depends_on: relationship_create
+
+  - id: relationship_list_incoming
+    description: "List incoming relationships only"
+    category: relationships
+    action: |
+      Call subcog_relationships with:
+        action: "list"
+        entity_id: "${test_tech_id}"
+        direction: "incoming"
+        limit: 20
+    expect:
+      - regex: "(relationships|incoming|list)"
+    tags: [relationships, list, direction]
+    depends_on: relationship_create
+
+  - id: relationship_create_implements
+    description: "Create Implements relationship"
+    category: relationships
+    action: |
+      Call subcog_relationships with:
+        action: "create"
+        from_entity: "${test_file_id}"
+        to_entity: "${test_concept_id}"
+        relationship_type: "Implements"
+    expect:
+      - regex: "(relationship|created|success)"
+    tags: [relationships, create, types]
+    depends_on: [entity_create_file, entity_create_concept]
+
+  - id: relationship_create_part_of
+    description: "Create PartOf relationship"
+    category: relationships
+    action: |
+      Call subcog_relationships with:
+        action: "create"
+        from_entity: "${test_person_id}"
+        to_entity: "${test_org_id}"
+        relationship_type: "PartOf"
+    expect:
+      - regex: "(relationship|created|success)"
+    tags: [relationships, create, types]
+    depends_on: [entity_create_person, entity_create_with_aliases]
 
   - id: relationship_infer
     description: "Infer relationships (LLM)"
@@ -470,6 +700,71 @@ tests:
       - regex: "(digraph|->|graph)"
     tags: [graph, visualize]
 
+  - id: graph_visualize_ascii
+    description: "Visualize graph as ASCII"
+    category: graph
+    action: |
+      Call subcog_graph with:
+        operation: "visualize"
+        format: "ascii"
+        limit: 20
+    expect:
+      - regex: "(graph|entities|ascii|─|│)"
+    tags: [graph, visualize, ascii]
+
+  - id: graph_path
+    description: "Find path between entities"
+    category: graph
+    action: |
+      Call subcog_graph with:
+        operation: "path"
+        from_entity: "${test_person_id}"
+        to_entity: "${test_tech_id}"
+        depth: 3
+    expect:
+      - regex: "(path|entities|found|No)"
+    tags: [graph, path]
+    depends_on: relationship_create
+
+  - id: graph_visualize_entity_types
+    description: "Visualize filtered by entity types"
+    category: graph
+    action: |
+      Call subcog_graph with:
+        operation: "visualize"
+        format: "mermaid"
+        entity_types: ["Person", "Technology"]
+        limit: 20
+    expect:
+      - regex: "(graph|Person|Technology|mermaid)"
+    tags: [graph, visualize, filter]
+
+  - id: graph_visualize_relationship_types
+    description: "Visualize filtered by relationship types"
+    category: graph
+    action: |
+      Call subcog_graph with:
+        operation: "visualize"
+        format: "mermaid"
+        relationship_types: ["Uses", "Implements"]
+        limit: 20
+    expect:
+      - regex: "(graph|Uses|Implements|mermaid)"
+    tags: [graph, visualize, filter]
+
+  - id: graph_neighbors_depth
+    description: "Get neighbors with different depth"
+    category: graph
+    action: |
+      Call subcog_graph with:
+        operation: "neighbors"
+        entity_id: "${test_person_id}"
+        depth: 3
+    expect:
+      - regex: "(neighbors|entities|depth)"
+    tags: [graph, neighbors, depth]
+    depends_on: relationship_create
+
   # ============================================
   # Category 8: Prompt Templates
   # ============================================
@@ -527,6 +822,35 @@ tests:
     tags: [prompts, run]
     depends_on: prompt_save
 
+  - id: prompt_save_skip_enrichment
+    description: "Save prompt with skip_enrichment"
+    category: prompts
+    action: |
+      Call subcog_prompts with:
+        action: "save"
+        name: "test-prompt-no-enrich"
+        content: "Simple prompt: {{input}}"
+        description: "Test without LLM enrichment"
+        skip_enrichment: true
+        domain: "project"
+    expect:
+      - regex: "(saved|created|success)"
+    tags: [prompts, save, enrichment]
+
+  - id: prompt_list_name_pattern
+    description: "List prompts with name pattern filter"
+    category: prompts
+    action: |
+      Call subcog_prompts with:
+        action: "list"
+        name_pattern: "test-*"
+        domain: "project"
+        limit: 20
+    expect:
+      - regex: "(prompts|templates|list|test)"
+    tags: [prompts, list, pattern]
+    depends_on: prompt_save
+
   - id: prompt_delete
     description: "Delete a prompt template"
     category: prompts
@@ -539,6 +863,19 @@ tests:
       - regex: "(deleted|removed|success)"
     tags: [prompts, delete]
     depends_on: prompt_run
+
+  - id: prompt_delete_no_enrich
+    description: "Cleanup: Delete skip_enrichment prompt"
+    category: prompts
+    action: |
+      Call subcog_prompts with:
+        action: "delete"
+        name: "test-prompt-no-enrich"
+        domain: "project"
+    expect:
+      - regex: "(deleted|removed|success)"
+    tags: [prompts, delete, cleanup]
+    depends_on: prompt_save_skip_enrichment
 
   # ============================================
   # Category 9: Context Templates
@@ -603,6 +940,50 @@ tests:
     tags: [templates, render]
     depends_on: template_save
 
+  - id: template_render_json
+    description: "Render template as JSON"
+    category: templates
+    action: |
+      Call subcog_templates with:
+        action: "render"
+        name: "test-template-automated"
+        query: "TEST"
+        format: "json"
+        limit: 5
+    expect:
+      - regex: "(json|\\{|\\})"
+    tags: [templates, render, format]
+    depends_on: template_save
+
+  - id: template_render_namespaces
+    description: "Render template filtered by namespaces"
+    category: templates
+    action: |
+      Call subcog_templates with:
+        action: "render"
+        name: "test-template-automated"
+        query: "TEST"
+        namespaces: ["decisions", "patterns"]
+        limit: 5
+    expect:
+      - regex: "(Test Results|decisions|patterns)"
+    tags: [templates, render, namespaces]
+    depends_on: template_save
+
+  - id: template_list_name_pattern
+    description: "List templates with name pattern"
+    category: templates
+    action: |
+      Call subcog_templates with:
+        action: "list"
+        name_pattern: "test-*"
+        domain: "project"
+        limit: 20
+    expect:
+      - regex: "(templates|list|test)"
+    tags: [templates, list, pattern]
+    depends_on: template_save
+
   - id: template_delete
     description: "Delete a context template"
     category: templates
@@ -632,6 +1013,20 @@ tests:
       - regex: "(consolidate|groups|dry.?run|would)"
     tags: [maintenance, consolidate]
 
+  - id: consolidate_min_memories
+    description: "Consolidate with min_memories threshold"
+    category: maintenance
+    action: |
+      Call subcog_consolidate with:
+        namespaces: ["decisions", "learnings"]
+        days: 30
+        min_memories: 5
+        similarity: 0.7
+        dry_run: true
+    expect:
+      - regex: "(consolidate|groups|dry.?run|would|minimum)"
+    tags: [maintenance, consolidate, threshold]
+
   - id: enrich_memory
     description: "Enrich a memory with LLM"
     category: maintenance
@@ -644,6 +1039,32 @@ tests:
       - regex: "(enriched|tags|structure)"
     tags: [maintenance, enrich, llm]
     depends_on: capture_decision
+
+  - id: enrich_memory_add_context
+    description: "Enrich memory with add_context"
+    category: maintenance
+    action: |
+      Call subcog_enrich with:
+        memory_id: "${captured_learning_id}"
+        enrich_tags: true
+        enrich_structure: false
+        add_context: true
+    expect:
+      - regex: "(enriched|context|rationale)"
+    tags: [maintenance, enrich, context, llm]
+    depends_on: capture_learning
+
+  - id: delete_memory_hard
+    description: "Hard delete a memory permanently"
+    category: maintenance
+    action: |
+      Call subcog_delete with:
+        memory_id: "${captured_learning_id}"
+        hard: true
+    expect:
+      - regex: "(deleted|removed|permanent)"
+    tags: [maintenance, delete, hard]
+    depends_on: enrich_memory_add_context
 
   - id: reindex
     description: "Rebuild search index"
@@ -702,3 +1123,39 @@ tests:
       - regex: "(deleted|removed|success)"
     tags: [cleanup]
     depends_on: entity_create_technology
+
+  - id: cleanup_entities_org
+    description: "Clean up test organization entity"
+    category: cleanup
+    action: |
+      Call subcog_entities with:
+        action: "delete"
+        entity_id: "${test_org_id}"
+    expect:
+      - regex: "(deleted|removed|success)"
+    tags: [cleanup]
+    depends_on: entity_create_with_aliases
+
+  - id: cleanup_entities_concept
+    description: "Clean up test concept entity"
+    category: cleanup
+    action: |
+      Call subcog_entities with:
+        action: "delete"
+        entity_id: "${test_concept_id}"
+    expect:
+      - regex: "(deleted|removed|success)"
+    tags: [cleanup]
+    depends_on: entity_create_concept
+
+  - id: cleanup_entities_file
+    description: "Clean up test file entity"
+    category: cleanup
+    action: |
+      Call subcog_entities with:
+        action: "delete"
+        entity_id: "${test_file_id}"
+    expect:
+      - regex: "(deleted|removed|success)"
+    tags: [cleanup]
+    depends_on: entity_create_file

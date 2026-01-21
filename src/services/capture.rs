@@ -63,6 +63,7 @@ use crate::models::{
 use crate::observability::current_request_id;
 use crate::security::{ContentRedactor, SecretDetector, record_event};
 use crate::services::deduplication::ContentHasher;
+use crate::storage::index::{SqliteBackend, get_user_data_dir};
 use crate::storage::traits::{IndexBackend, VectorBackend};
 use crate::{Error, Result};
 use std::path::Path;
@@ -181,10 +182,14 @@ pub struct CaptureService {
 }
 
 impl CaptureService {
-    /// Creates a new capture service (persistence only).
+    /// Creates a new capture service with `SQLite` storage backend.
     ///
-    /// For full searchability, use [`with_backends`](Self::with_backends) to
-    /// also configure index and vector backends.
+    /// Automatically initializes the `SQLite` backend from the user data directory.
+    /// If initialization fails, the service is created without storage (captures
+    /// will not persist) and a warning is logged.
+    ///
+    /// For full searchability with vector search, use [`with_backends`](Self::with_backends)
+    /// to also configure embedder and vector backends.
     ///
     /// # Examples
     ///
@@ -195,10 +200,32 @@ impl CaptureService {
     /// let config = Config::default();
     /// let service = CaptureService::new(config);
     /// assert!(!service.has_embedder());
-    /// assert!(!service.has_index());
+    /// // Index is auto-initialized from user data dir
     /// ```
     #[must_use]
     pub fn new(config: Config) -> Self {
+        let index = Self::try_init_sqlite_backend();
+
+        Self {
+            config,
+            secret_detector: SecretDetector::new(),
+            redactor: ContentRedactor::new(),
+            embedder: None,
+            index,
+            vector: None,
+            entity_extraction: None,
+            expiration_config: None,
+            org_index: None,
+        }
+    }
+
+    /// Creates a capture service without auto-initializing storage backends.
+    ///
+    /// Use this for testing graceful degradation or when storage initialization
+    /// should be handled explicitly by the caller.
+    #[cfg(test)]
+    #[must_use]
+    pub fn new_minimal(config: Config) -> Self {
         Self {
             config,
             secret_detector: SecretDetector::new(),
@@ -209,6 +236,39 @@ impl CaptureService {
             entity_extraction: None,
             expiration_config: None,
             org_index: None,
+        }
+    }
+
+    /// Attempts to initialize `SQLite` backend from user data directory.
+    ///
+    /// Returns `Some(backend)` on success, `None` on failure (with warning logged).
+    fn try_init_sqlite_backend() -> Option<Arc<dyn IndexBackend + Send + Sync>> {
+        let data_dir = match get_user_data_dir() {
+            Ok(dir) => dir,
+            Err(e) => {
+                tracing::warn!(
+                    "CaptureService: unable to get user data dir ({e}) - captures will not persist"
+                );
+                return None;
+            },
+        };
+
+        if let Err(e) = std::fs::create_dir_all(&data_dir) {
+            tracing::warn!(
+                "CaptureService: unable to create data dir ({e}) - captures will not persist"
+            );
+            return None;
+        }
+
+        let db_path = data_dir.join("index.db");
+        match SqliteBackend::new(&db_path) {
+            Ok(backend) => Some(Arc::new(backend)),
+            Err(e) => {
+                tracing::warn!(
+                    "CaptureService: unable to open SQLite backend ({e}) - captures will not persist"
+                );
+                None
+            },
         }
     }
 
@@ -1194,7 +1254,7 @@ mod tests {
     #[test]
     fn test_capture_succeeds_without_backends() {
         // Graceful degradation: capture should succeed even without optional backends
-        let service = CaptureService::new(test_config());
+        let service = CaptureService::new_minimal(test_config());
 
         assert!(!service.has_embedder());
         assert!(!service.has_index());
@@ -1209,7 +1269,7 @@ mod tests {
     fn test_capture_succeeds_with_only_embedder() {
         // Test partial configuration: only embedder (no storage backends)
         let embedder: Arc<dyn Embedder> = Arc::new(FastEmbedEmbedder::new());
-        let service = CaptureService::new(test_config()).with_embedder(embedder);
+        let service = CaptureService::new_minimal(test_config()).with_embedder(embedder);
 
         assert!(service.has_embedder());
         assert!(!service.has_index());
@@ -1243,8 +1303,21 @@ mod tests {
 
     #[test]
     fn test_has_index_returns_false_when_not_configured() {
-        let service = CaptureService::new(test_config());
+        // Test minimal service (no auto-initialization)
+        let service = CaptureService::new_minimal(test_config());
         assert!(!service.has_index());
+    }
+
+    #[test]
+    fn test_new_auto_initializes_index() {
+        // Test that new() auto-initializes SQLite backend
+        let service = CaptureService::new(test_config());
+        // Index should be initialized (or None if user data dir unavailable)
+        // In test environment, this should succeed
+        assert!(
+            service.has_index(),
+            "CaptureService::new() should auto-initialize SQLite backend"
+        );
     }
 
     #[test]

@@ -20,7 +20,7 @@ Thank you for your interest in contributing to Subcog! This guide will help you 
 
 | Tool | Version | Installation |
 |------|---------|--------------|
-| **Rust** | 1.85+ | [rustup.rs](https://rustup.rs) |
+| **Rust** | 1.88+ | [rustup.rs](https://rustup.rs) |
 | **Git** | 2.30+ | [git-scm.com](https://git-scm.com) |
 | **cargo-deny** | latest | `cargo install cargo-deny` |
 
@@ -36,7 +36,7 @@ Thank you for your interest in contributing to Subcog! This guide will help you 
 ### Verify Installation
 
 ```bash
-# Check Rust version (must be 1.85+)
+# Check Rust version (must be 1.88+)
 rustc --version
 
 # Check cargo-deny

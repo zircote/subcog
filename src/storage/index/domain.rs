@@ -69,6 +69,11 @@ pub struct DomainIndexConfig {
     pub repo_path: Option<PathBuf>,
     /// Organization index configuration.
     pub org_config: Option<OrgIndexConfig>,
+    /// User data directory (from config). If `None`, uses platform default.
+    ///
+    /// This should be set from `SubcogConfig.data_dir` to ensure all components
+    /// use the same path, respecting user configuration.
+    pub user_data_dir: Option<PathBuf>,
 }
 
 /// Organization index configuration.
@@ -103,7 +108,12 @@ impl DomainIndexManager {
     ///
     /// Returns an error if required paths cannot be determined.
     pub fn new(config: DomainIndexConfig) -> Result<Self> {
-        let user_data_dir = get_user_data_dir()?;
+        // Use config's user_data_dir if provided, otherwise fall back to platform default.
+        // This ensures all components use the same path, respecting user configuration.
+        let user_data_dir = config
+            .user_data_dir
+            .clone()
+            .map_or_else(get_user_data_dir, Ok)?;
 
         Ok(Self {
             indices: HashMap::new(),
@@ -372,6 +382,7 @@ mod tests {
         let config = DomainIndexConfig {
             repo_path: Some(PathBuf::from("/path/to/repo")),
             org_config: None,
+            user_data_dir: None,
         };
         let manager = DomainIndexManager::new(config).unwrap();
 
@@ -385,6 +396,7 @@ mod tests {
         let config = DomainIndexConfig {
             repo_path: Some(PathBuf::from("/path/to/repo")),
             org_config: None,
+            user_data_dir: None,
         };
         let manager = DomainIndexManager::new(config).unwrap();
 
@@ -400,6 +412,7 @@ mod tests {
             org_config: Some(OrgIndexConfig::SqlitePath(PathBuf::from(
                 "/shared/org/index.db",
             ))),
+            user_data_dir: None,
         };
         let manager = DomainIndexManager::new(config).unwrap();
 

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-01-21
+
+### Added
+
+- **Testing**: Hook-driven automated test framework for MCP tool validation
+  - 88 functional tests across 12 categories (initialization, CRUD, search, filters, entities, relationships, graph, prompts, templates, maintenance, privacy, cleanup)
+  - State management via `.claude/test-state.json`
+  - Test definitions in `tests/functional/tests.yaml`
+
+- **MCP**: URN parsing and support in MCP handlers
+  - Enables direct URN-based memory access
+
+### Changed
+
+- **Project Structure**: Moved commands and skills to `.claude` directory
+  - Better organization following Claude Code conventions
+
+- **Code Quality**: Code formatting and error handling improvements
+
 ## [0.11.0] - 2026-01-20
 
 ### Fixed
@@ -365,7 +384,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prompt template management
 - Deduplication service
 
-[Unreleased]: https://github.com/zircote/subcog/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/zircote/subcog/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/zircote/subcog/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/zircote/subcog/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/zircote/subcog/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/zircote/subcog/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/zircote/subcog/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/zircote/subcog/compare/v0.6.1...v0.7.0

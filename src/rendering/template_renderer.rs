@@ -320,14 +320,20 @@ impl TemplateRenderer {
             rendered = rendered.replace(&pattern, value);
         }
 
-        // Also handle the generic {{item.field}} pattern
+        // Also handle {{this.field}} pattern (common Handlebars/Mustache syntax)
+        for (field, value) in item {
+            let pattern = format!("{{{{this.{field}}}}}");
+            rendered = rendered.replace(&pattern, value);
+        }
+
+        // Also handle the generic {{prefix.field}} pattern via regex
         rendered = ITEM_VAR_PATTERN
             .replace_all(&rendered, |caps: &regex::Captures| {
                 let prefix = caps.get(1).map_or("", |m| m.as_str());
                 let field = caps.get(2).map_or("", |m| m.as_str());
 
-                // Only replace if prefix matches our item prefix
-                if prefix == item_prefix {
+                // Replace if prefix matches our item prefix or is "this"
+                if prefix == item_prefix || prefix == "this" {
                     item.get(field).cloned().unwrap_or_default()
                 } else {
                     // Leave other patterns unchanged
@@ -741,6 +747,32 @@ mod tests {
 
         let owned: RenderValue = String::from("owned").into();
         assert_eq!(owned.as_string(), Some("owned"));
+    }
+
+    #[test]
+    fn test_iteration_with_this_syntax() {
+        let renderer = TemplateRenderer::new();
+        let template = ContextTemplate::new(
+            "test",
+            "## Memories\n{{#each memories}}- **{{this.namespace}}**: {{this.content}}\n{{/each}}",
+        );
+
+        let mut ctx = RenderContext::new();
+        let mut mem1 = HashMap::new();
+        mem1.insert("namespace".to_string(), "decisions".to_string());
+        mem1.insert("content".to_string(), "Use Rust".to_string());
+        let mut mem2 = HashMap::new();
+        mem2.insert("namespace".to_string(), "learnings".to_string());
+        mem2.insert("content".to_string(), "SQLite is fast".to_string());
+        ctx.add_list("memories", vec![mem1, mem2]);
+
+        let result = renderer
+            .render(&template, &ctx, OutputFormat::Markdown)
+            .unwrap();
+        assert!(result.contains("**decisions**"));
+        assert!(result.contains("Use Rust"));
+        assert!(result.contains("**learnings**"));
+        assert!(result.contains("SQLite is fast"));
     }
 
     #[test]
