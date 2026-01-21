@@ -5,10 +5,10 @@ name: Docker
 
 on:
   # Triggered after release workflow completes
+  # Note: No branch filter - releases are triggered by tag pushes (v*), not main branch
   workflow_run:
     workflows: ["Release"]
     types: [completed]
-    branches: [main]
 
   # Manual trigger for testing
   workflow_dispatch:
