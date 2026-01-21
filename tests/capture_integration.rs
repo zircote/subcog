@@ -388,10 +388,11 @@ fn test_capture_service_has_configured_backends() {
 /// Test: Service without backends still works
 ///
 /// Verifies graceful degradation without optional backends.
+/// Uses `new_minimal()` to avoid auto-initialization of `SQLite` backend.
 #[test]
 fn test_capture_service_without_backends() {
     let config = Config::default();
-    let capture_service = CaptureService::new(config);
+    let capture_service = CaptureService::new_minimal(config);
 
     assert!(!capture_service.has_embedder(), "Should not have embedder");
     assert!(!capture_service.has_index(), "Should not have index");

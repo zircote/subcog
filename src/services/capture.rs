@@ -223,7 +223,9 @@ impl CaptureService {
     ///
     /// Use this for testing graceful degradation or when storage initialization
     /// should be handled explicitly by the caller.
-    #[cfg(test)]
+    ///
+    /// Unlike [`new`](Self::new), this does not attempt to create a `SQLite`
+    /// backend from the user data directory.
     #[must_use]
     pub fn new_minimal(config: Config) -> Self {
         Self {
