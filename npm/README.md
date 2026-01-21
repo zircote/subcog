@@ -48,13 +48,57 @@ subcog mcp serve
 | Linux | ARM64 | Pre-built |
 | Windows | x64 | Cargo fallback |
 
+## Security & Transparency
+
+### Postinstall Script
+
+This package includes a `postinstall` script that automatically downloads and installs the appropriate pre-built binary for your platform. This is a common pattern used by packages like esbuild, turbo, and prisma that distribute native binaries via npm.
+
+**What the postinstall script does:**
+
+1. Detects your platform and architecture
+2. Downloads the matching pre-built binary from [GitHub Releases](https://github.com/zircote/subcog/releases)
+3. Verifies the download using SHA256 checksums
+4. Extracts the binary to `node_modules/@zircote/subcog/bin/`
+5. Falls back to `cargo install` if download fails
+
+**Security measures:**
+
+- ✅ **Source code is open**: [View postinstall.js](https://github.com/zircote/subcog/blob/main/npm/scripts/postinstall.js)
+- ✅ **Checksum verification**: SHA256 checksums verify binary integrity
+- ✅ **Official releases only**: Downloads only from GitHub Releases
+- ✅ **No arbitrary code execution**: Script only downloads and extracts binaries
+- ✅ **Transparent operations**: All network requests are logged
+- ✅ **Opt-out available**: Use `SUBCOG_SKIP_INSTALL=1` to skip installation
+
+**To skip the postinstall script:**
+
+```bash
+# Skip automatic installation
+SUBCOG_SKIP_INSTALL=1 npm install -g @zircote/subcog
+
+# Then provide your own binary
+export SUBCOG_BINARY_PATH=/path/to/your/subcog
+npm install -g @zircote/subcog
+```
+
+**To audit the installation process:**
+
+```bash
+# Review the postinstall script source
+npm view @zircote/subcog dist.scripts.postinstall
+
+# Or view it on GitHub
+# https://github.com/zircote/subcog/blob/main/npm/scripts/postinstall.js
+```
+
 ## Installation Methods
 
 This package uses a multi-tier installation strategy:
 
-1. **Pre-built binaries** (fastest): Downloads from GitHub Releases
+1. **Pre-built binaries** (fastest): Downloads from GitHub Releases with checksum verification
 2. **cargo install** (fallback): Builds from crates.io if binary unavailable
-3. **cargo install --git** (last resort): Builds from source
+3. **cargo install --git** (last resort): Builds from source repository
 
 ## Environment Variables
 

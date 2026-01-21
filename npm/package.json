@@ -27,7 +27,8 @@
     "bin/",
     "scripts/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "SECURITY.md"
   ],
   "scripts": {
     "postinstall": "node scripts/postinstall.js",

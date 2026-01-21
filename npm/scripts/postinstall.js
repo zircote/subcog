@@ -4,6 +4,17 @@
  *
  * Downloads pre-built binaries from GitHub Releases with fallback to cargo install.
  * Follows patterns established by esbuild, turbo, and prisma for binary distribution.
+ *
+ * SECURITY:
+ * - Downloads only from official GitHub Releases
+ * - Verifies all downloads with SHA256 checksums
+ * - No arbitrary code execution (uses spawn with argument arrays)
+ * - No eval, shell execution, or dynamic code generation
+ * - Transparent logging of all operations
+ * - Environment variables for opt-out (SUBCOG_SKIP_INSTALL)
+ *
+ * To skip: SUBCOG_SKIP_INSTALL=1 npm install
+ * To audit: View source at https://github.com/zircote/subcog/blob/main/npm/scripts/postinstall.js
  */
 
 'use strict';
@@ -380,6 +391,16 @@ function cargoInstallFromGit() {
 
 // Main installation flow
 async function main() {
+  console.log('');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('  @zircote/subcog postinstall');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('');
+  console.log('This package downloads pre-built binaries from GitHub Releases.');
+  console.log('For security information, see: npm/SECURITY.md');
+  console.log('To skip: SUBCOG_SKIP_INSTALL=1 npm install');
+  console.log('');
+
   // Skip installation in CI environments if SUBCOG_SKIP_INSTALL is set
   if (process.env.SUBCOG_SKIP_INSTALL === '1' || process.env.SUBCOG_SKIP_INSTALL === 'true') {
     console.log('Skipping binary installation (SUBCOG_SKIP_INSTALL is set)');
