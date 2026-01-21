@@ -17,7 +17,7 @@ use crate::mcp::tool_types::{
 use crate::models::SearchResult;
 use crate::models::{
     CaptureRequest, DetailLevel, Domain, EventMeta, MemoryEvent, MemoryId, MemoryStatus, Namespace,
-    SearchFilter, SearchMode,
+    SearchFilter, SearchMode, Urn,
 };
 use crate::observability::current_request_id;
 use crate::security::record_event;
@@ -1030,7 +1030,8 @@ pub fn execute_get(arguments: Value) -> Result<ToolResult> {
     let services = ServiceContainer::from_current_dir_or_user()?;
     let index = services.index()?;
 
-    let memory_id = MemoryId::new(&args.memory_id);
+    // Support both raw IDs and full URNs (e.g., "subcog://project/patterns/abc123")
+    let memory_id = MemoryId::new(Urn::extract_memory_id(&args.memory_id));
 
     match index.get_memory(&memory_id)? {
         Some(memory) => {
@@ -1115,7 +1116,8 @@ pub fn execute_delete(arguments: Value) -> Result<ToolResult> {
     let services = ServiceContainer::from_current_dir_or_user()?;
     let index = services.index()?;
 
-    let memory_id = MemoryId::new(&args.memory_id);
+    // Support both raw IDs and full URNs
+    let memory_id = MemoryId::new(Urn::extract_memory_id(&args.memory_id));
 
     // First check if memory exists
     let Some(memory) = index.get_memory(&memory_id)? else {
@@ -1218,7 +1220,7 @@ pub fn execute_update(arguments: Value) -> Result<ToolResult> {
     let services = ServiceContainer::from_current_dir_or_user()?;
     let index = services.index()?;
 
-    let memory_id = MemoryId::new(&args.memory_id);
+    let memory_id = MemoryId::new(Urn::extract_memory_id(&args.memory_id));
 
     // Get existing memory
     let Some(mut memory) = index.get_memory(&memory_id)? else {
@@ -1685,7 +1687,7 @@ pub fn execute_restore(arguments: Value) -> Result<ToolResult> {
     let services = ServiceContainer::from_current_dir_or_user()?;
     let index = services.index()?;
 
-    let memory_id = MemoryId::new(&args.memory_id);
+    let memory_id = MemoryId::new(Urn::extract_memory_id(&args.memory_id));
 
     // Get existing memory
     let Some(mut memory) = index.get_memory(&memory_id)? else {
@@ -1767,7 +1769,7 @@ pub fn execute_history(arguments: Value) -> Result<ToolResult> {
     let services = ServiceContainer::from_current_dir_or_user()?;
     let index = services.index()?;
 
-    let memory_id = MemoryId::new(&args.memory_id);
+    let memory_id = MemoryId::new(Urn::extract_memory_id(&args.memory_id));
     let _limit = args.limit.unwrap_or(20).min(100);
 
     // Query event log for this memory

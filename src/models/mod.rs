@@ -13,6 +13,7 @@ mod memory;
 mod prompt;
 mod search;
 pub mod temporal;
+mod urn;
 
 pub use capture::{CaptureRequest, CaptureResult};
 pub use consolidation::{EdgeType, MemoryTier, RetentionScore};
@@ -29,6 +30,7 @@ pub use prompt::{
     sanitize_variable_value, substitute_variables, validate_prompt_content,
 };
 pub use search::{DetailLevel, SearchFilter, SearchHit, SearchMode, SearchResult};
+pub use urn::{Urn, UrnComponent};
 
 // Group types (feature-gated)
 #[cfg(feature = "group-scope")]
