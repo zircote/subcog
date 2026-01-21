@@ -121,3 +121,7 @@ observability/
 
 # Subcog local data (should use ~/.local/share/subcog instead)
 .subcog/
+
+# Test framework runtime state
+.claude/test-state.json
+tests/functional/report.md

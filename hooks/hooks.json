@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "subcog hook user-prompt-submit"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/test-wrapper.sh user-prompt-submit"
           }
         ]
       }
