@@ -3,8 +3,9 @@
 # ==============================================================================
 # Subcog Container Image
 # ==============================================================================
-# Multi-arch (amd64/arm64) minimal container using distroless static base.
+# Multi-arch (amd64/arm64) minimal container using scratch base.
 # Built from pre-compiled musl binaries for fully static linking.
+# Includes CA certificates for HTTPS support (~200KB overhead).
 #
 # Build args:
 #   VERSION     - Semver version (e.g., 0.6.1)
@@ -22,6 +23,11 @@ FROM --platform=$BUILDPLATFORM alpine:3.21 AS downloader
 
 ARG VERSION
 ARG TARGETARCH
+
+# Validate VERSION is provided
+RUN if [ -z "${VERSION}" ]; then \
+      echo "ERROR: VERSION build arg is required (e.g., --build-arg VERSION=0.14.0)" && exit 1; \
+    fi
 
 # Install download and verification tools
 RUN apk add --no-cache curl ca-certificates
@@ -56,10 +62,21 @@ RUN --mount=type=cache,target=/var/cache/apk \
       ./subcog --version; \
     fi
 
+# Create minimal passwd/group files for non-root user support in scratch
+# Using uid/gid 65532 (same as distroless nonroot user)
+RUN mkdir -p /scratch-etc && \
+    echo "root:x:0:0:root:/root:/sbin/nologin" > /scratch-etc/passwd && \
+    echo "nonroot:x:65532:65532:nonroot:/home/nonroot:/sbin/nologin" >> /scratch-etc/passwd && \
+    echo "root:x:0:" > /scratch-etc/group && \
+    echo "nonroot:x:65532:" >> /scratch-etc/group
+
+# Create data directory with correct ownership
+RUN mkdir -p /scratch-data && chown 65532:65532 /scratch-data
+
 # ------------------------------------------------------------------------------
-# Stage 2: Production image (distroless static)
+# Stage 2: Production image (scratch - truly minimal)
 # ------------------------------------------------------------------------------
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime
+FROM scratch AS runtime
 
 # Metadata labels (OCI Image Spec)
 LABEL org.opencontainers.image.title="Subcog" \
@@ -67,10 +84,21 @@ LABEL org.opencontainers.image.title="Subcog" \
       org.opencontainers.image.url="https://github.com/zircote/subcog" \
       org.opencontainers.image.source="https://github.com/zircote/subcog" \
       org.opencontainers.image.vendor="zircote" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.base.name="scratch"
+
+# Copy CA certificates for HTTPS support
+COPY --from=downloader /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
+# Copy minimal passwd/group for non-root user support
+COPY --from=downloader /scratch-etc/passwd /etc/passwd
+COPY --from=downloader /scratch-etc/group /etc/group
+
+# Copy data directory with correct ownership
+COPY --from=downloader --chown=65532:65532 /scratch-data /data
 
 # Copy binary from downloader stage
-COPY --from=downloader --chown=nonroot:nonroot /download/subcog /usr/local/bin/subcog
+COPY --from=downloader --chown=65532:65532 /download/subcog /usr/local/bin/subcog
 
 # Data directory for SQLite database and embeddings cache
 VOLUME ["/data"]
@@ -78,10 +106,11 @@ VOLUME ["/data"]
 # Environment configuration
 ENV SUBCOG_DATA_DIR=/data \
     SUBCOG_LOG_FORMAT=json \
-    RUST_BACKTRACE=1
+    RUST_BACKTRACE=1 \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
 # Run as non-root user (uid 65532, gid 65532)
-USER nonroot:nonroot
+USER 65532:65532
 
 # Default entrypoint
 ENTRYPOINT ["/usr/local/bin/subcog"]
