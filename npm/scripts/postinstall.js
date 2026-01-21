@@ -397,7 +397,7 @@ async function main() {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('');
   console.log('This package downloads pre-built binaries from GitHub Releases.');
-  console.log('For security information, see: npm/SECURITY.md');
+  console.log('For security information, see: SECURITY.md in this package');
   console.log('To skip: SUBCOG_SKIP_INSTALL=1 npm install');
   console.log('');
 

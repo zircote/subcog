@@ -101,11 +101,11 @@ npm pack @zircote/subcog --dry-run
 #### Verify Binary Checksums
 
 ```bash
-# Download checksums file
-curl -LO https://github.com/zircote/subcog/releases/download/v0.13.1/checksums.txt
+# Download checksums file (replace VERSION with actual version, e.g., 0.13.1)
+curl -LO https://github.com/zircote/subcog/releases/download/vVERSION/checksums.txt
 
 # Verify your downloaded binary
-sha256sum subcog-0.13.1-x86_64-unknown-linux-gnu.tar.gz
+sha256sum subcog-VERSION-TARGET.tar.gz
 # Compare with checksums.txt
 ```
 

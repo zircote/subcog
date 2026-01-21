@@ -85,11 +85,11 @@ npm install -g @zircote/subcog
 **To audit the installation process:**
 
 ```bash
-# Review the postinstall script source
-npm view @zircote/subcog dist.scripts.postinstall
-
-# Or view it on GitHub
+# Review the postinstall script source on GitHub
 # https://github.com/zircote/subcog/blob/main/npm/scripts/postinstall.js
+
+# Or view it locally after installation
+cat node_modules/@zircote/subcog/scripts/postinstall.js
 ```
 
 ## Installation Methods
