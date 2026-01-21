@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-01-21
+
 ### Changed
 
 - **Hooks**: Updated all hooks to use npx-based invocation with cache fallback
@@ -14,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fallback: `npx -y @zircote/subcog` (downloads if cache miss)
   - Users no longer need `subcog` binary in PATH
   - Works in conjunction with MCP server's `npx -y` which populates the cache
+
+- **Documentation**: Updated all docs to use npx-based MCP server configuration
+  - README, QUICKSTART, integration guides now show `npx -y @zircote/subcog serve`
+  - Hook documentation updated with npx cache fallback pattern
+
+### Fixed
+
+- **Tests**: Fixed graceful degradation tests that expected no auto-initialized backends
+  - `CaptureService::new()` now auto-initializes SQLite from user data dir
+  - Tests now use `new_minimal()` which skips auto-initialization
 
 ## [0.13.0] - 2026-01-21
 
