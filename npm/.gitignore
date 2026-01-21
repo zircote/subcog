@@ -1,9 +1,9 @@
 # Dependencies
 node_modules/
 
-# Downloaded binaries (not the wrapper script)
-# The wrapper script (bin/subcog - Node.js) is tracked
-# The native binary is downloaded to bin/subcog-native or overwritten at install time
+# Downloaded binaries at install time
+# The bin directory is created by postinstall script
+bin/subcog
 bin/*.exe
 bin/subcog-*
 
