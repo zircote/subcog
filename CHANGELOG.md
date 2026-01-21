@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Hooks**: Updated all hooks to use npx-based invocation with cache fallback
+  - Primary: `npx --prefer-offline @zircote/subcog` (uses cached package, no network)
+  - Fallback: `npx -y @zircote/subcog` (downloads if cache miss)
+  - Users no longer need `subcog` binary in PATH
+  - Works in conjunction with MCP server's `npx -y` which populates the cache
+
 ## [0.13.0] - 2026-01-21
 
 ### Added

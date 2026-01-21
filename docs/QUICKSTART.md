@@ -106,8 +106,8 @@ Add Subcog to your Claude Code configuration:
 {
   "mcpServers": {
     "subcog": {
-      "command": "subcog",
-      "args": ["serve"],
+      "command": "npx",
+      "args": ["-y", "@zircote/subcog", "serve"],
       "env": {
         "SUBCOG_LOG_LEVEL": "info"
       }
@@ -122,29 +122,41 @@ Create `hooks/hooks.json` in your project:
 
 ```json
 {
-  "hooks": [
-    {
-      "matcher": { "event": "session_start" },
-      "hooks": [{
-        "type": "command",
-        "command": "subcog hook session-start"
-      }]
-    },
-    {
-      "matcher": { "event": "user_prompt_submit" },
-      "hooks": [{
-        "type": "command",
-        "command": "sh -c 'subcog hook user-prompt-submit \"$PROMPT\"'"
-      }]
-    },
-    {
-      "matcher": { "event": "stop" },
-      "hooks": [{
-        "type": "command",
-        "command": "subcog hook stop"
-      }]
-    }
-  ]
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx --prefer-offline @zircote/subcog hook session-start 2>/dev/null || npx -y @zircote/subcog hook session-start"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx --prefer-offline @zircote/subcog hook user-prompt-submit 2>/dev/null || npx -y @zircote/subcog hook user-prompt-submit"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx --prefer-offline @zircote/subcog hook stop 2>/dev/null || npx -y @zircote/subcog hook stop"
+          }
+        ]
+      }
+    ]
+  }
 }
 ```
 

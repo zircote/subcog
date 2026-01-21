@@ -177,8 +177,8 @@ sudo dnf install gcc pkg-config openssl-devel
    {
      "mcpServers": {
        "subcog": {
-         "command": "subcog",
-         "args": ["serve"]
+         "command": "npx",
+         "args": ["-y", "@zircote/subcog", "serve"]
        }
      }
    }

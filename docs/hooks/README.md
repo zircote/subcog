@@ -40,43 +40,63 @@ Create `hooks/hooks.json` in your project root:
 
 ```json
 {
-  "hooks": [
-    {
-      "matcher": { "event": "session_start" },
-      "hooks": [{
-        "type": "command",
-        "command": "subcog hook session-start"
-      }]
-    },
-    {
-      "matcher": { "event": "user_prompt_submit" },
-      "hooks": [{
-        "type": "command",
-        "command": "sh -c 'subcog hook user-prompt-submit \"$PROMPT\"'"
-      }]
-    },
-    {
-      "matcher": { "event": "post_tool_use" },
-      "hooks": [{
-        "type": "command",
-        "command": "subcog hook post-tool-use"
-      }]
-    },
-    {
-      "matcher": { "event": "pre_compact" },
-      "hooks": [{
-        "type": "command",
-        "command": "subcog hook pre-compact"
-      }]
-    },
-    {
-      "matcher": { "event": "stop" },
-      "hooks": [{
-        "type": "command",
-        "command": "subcog hook stop"
-      }]
-    }
-  ]
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx --prefer-offline @zircote/subcog hook session-start 2>/dev/null || npx -y @zircote/subcog hook session-start"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx --prefer-offline @zircote/subcog hook user-prompt-submit 2>/dev/null || npx -y @zircote/subcog hook user-prompt-submit"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Read|Write|Edit|Bash|Grep|Glob|LSP",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx --prefer-offline @zircote/subcog hook post-tool-use 2>/dev/null || npx -y @zircote/subcog hook post-tool-use"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx --prefer-offline @zircote/subcog hook pre-compact 2>/dev/null || npx -y @zircote/subcog hook pre-compact"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx --prefer-offline @zircote/subcog hook stop 2>/dev/null || npx -y @zircote/subcog hook stop"
+          }
+        ]
+      }
+    ]
+  }
 }
 ```
 
