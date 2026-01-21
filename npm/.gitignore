@@ -1,9 +1,11 @@
 # Dependencies
 node_modules/
 
-# Binary (downloaded at install time)
-bin/subcog
-bin/subcog.exe
+# Downloaded binaries (not the wrapper script)
+# The wrapper script (bin/subcog - Node.js) is tracked
+# The native binary is downloaded to bin/subcog-native or overwritten at install time
+bin/*.exe
+bin/subcog-*
 
 # Logs
 *.log
