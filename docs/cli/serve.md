@@ -55,8 +55,8 @@ Add to your Claude Code configuration:
 {
   "mcpServers": {
     "subcog": {
-      "command": "subcog",
-      "args": ["serve"],
+      "command": "npx",
+      "args": ["-y", "@zircote/subcog", "serve"],
       "env": {
         "SUBCOG_LOG_LEVEL": "info"
       }

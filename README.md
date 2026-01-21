@@ -138,8 +138,8 @@ Configure in Claude Desktop's `claude_desktop_config.json`:
 {
   "mcpServers": {
     "subcog": {
-      "command": "subcog",
-      "args": ["serve"]
+      "command": "npx",
+      "args": ["-y", "@zircote/subcog", "serve"]
     }
   }
 }

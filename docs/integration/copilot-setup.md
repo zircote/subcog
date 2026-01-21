@@ -22,8 +22,8 @@ Configure MCP servers in your repository settings on GitHub.com using JSON:
 {
   "mcpServers": {
     "subcog": {
-      "command": "subcog",
-      "args": ["serve"]
+      "command": "npx",
+      "args": ["-y", "@zircote/subcog", "serve"]
     }
   }
 }
