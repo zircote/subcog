@@ -398,3 +398,38 @@ jobs:
             echo "Failed to push Homebrew tap changes. Please check for conflicts, branch protection rules, or permission issues." >&2
             exit 1
           fi
+
+  publish-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: release
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Update npm package version
+        shell: bash
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          cd npm
+          # Update version in package.json to match the release
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          echo "Updated npm package to version $VERSION"
+
+      - name: Publish to npm
+        shell: bash
+        run: |
+          cd npm
+          npm publish --access public --provenance

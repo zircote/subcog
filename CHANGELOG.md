@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-01-21
+
+### Added
+
+- **Release**: npm package publishing with OIDC Trusted Publishing in release workflow
+  - Automated npm publish job triggered after GitHub release
+  - Uses `--provenance` flag for supply chain security
+  - Version synced from release tag automatically
+
+### Changed
+
+- **MCP Config**: Updated `subcog.mcp.json` to use npm package installation
+  - Changed from direct `subcog` binary to `npx -y @zircote/subcog serve`
+  - Enables zero-install usage via npm
+
 ## [0.12.0] - 2026-01-21
 
 ### Added
@@ -384,7 +399,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prompt template management
 - Deduplication service
 
-[Unreleased]: https://github.com/zircote/subcog/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/zircote/subcog/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/zircote/subcog/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/zircote/subcog/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/zircote/subcog/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/zircote/subcog/compare/v0.9.0...v0.10.0
