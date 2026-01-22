@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **MCP**: `subcog_init` now returns compressed XML output instead of full markdown documentation
+  - Reduces token usage from ~10,000+ to ~1,100-1,300 tokens
+  - XML format with snake_case elements includes: namespaces (with counts), domains, tools reference, status, and recalled memory previews
+  - Full markdown documentation remains available via `prompt_understanding` tool
+  - Memory previews limited to 150 characters; use `subcog_get` for full content
+
+### Fixed
+
+- **Hooks**: CaptureService now uses config's `data_dir` for SQLite persistence
+  - Fixes issue where hook-based captures used different database than MCP server
+  - Ensures consistent memory storage across all entry points
+
 ## [0.14.2] - 2026-01-22
 
 ### Changed
