@@ -4,10 +4,10 @@
       "command": "subcog",
       "args": ["serve"],
       "env": {
-        "RUST_LOG": "info",
-        "OPENAI_API_KEY": "${OPENAI_API_KEY}",
-        "GEMINI_API_KEY": "${GEMINI_API_KEY}",
-        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"
+        "RUST_LOG": "${RUST_LOG:-info}",
+        "OPENAI_API_KEY": "${OPENAI_API_KEY:-}",
+        "GEMINI_API_KEY": "${GEMINI_API_KEY:-}",
+        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY:-}"
       }
     }
   }
