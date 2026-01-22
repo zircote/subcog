@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-01-22
+
+### Changed
+
+- **Installation**: Switched to binary-first installation approach
+  - MCP configs now use `subcog serve` directly instead of `npx @zircote/subcog serve`
+  - Installation priority: Cargo (recommended) → Homebrew → Docker → npx (fallback only)
+  - npx remains available as fallback for environments where binary installation is not possible
+
+- **Hooks**: Simplified hook configuration to use native binary only
+  - Removed npx fallback chains from all hook commands
+  - Improves hook execution from ~2-5s (npx) to ~10ms (native binary)
+  - Eliminates "Killed: 9" errors from macOS killing slow npx processes
+
+- **Documentation**: Updated all docs to reflect binary-first approach
+  - README, INSTALLATION, QUICKSTART, integration guides updated
+  - Reordered INSTALLATION.md sections: Cargo → Homebrew → Docker → Binary → npm/npx
+  - npx documented as "fallback" option rather than primary method
+  - Expanded market analysis with additional competitive research
+
 ## [0.14.1] - 2026-01-21
 
 ### Added
