@@ -1,0 +1,10 @@
+# Trivy Ignore File
+# See: https://aquasecurity.github.io/trivy/latest/docs/configuration/filtering/
+
+# =============================================================================
+# Docker Misconfigurations - Accepted Risks
+# =============================================================================
+
+# AVD-DS-0001: Specify tag in FROM statement
+# grafana/grafana:latest is intentional for dev/monitoring setup
+AVD-DS-0001

@@ -59,6 +59,8 @@ jobs:
         with:
           scan-type: 'fs'
           scan-ref: '.'
+          # Use config file for skip-dirs/skip-files (more reliable across versions)
+          trivy-config: '.trivy.yaml'
           # Scan Cargo.lock for Rust dependencies
           scanners: 'vuln,secret,misconfig'
           format: 'sarif'
@@ -69,8 +71,8 @@ jobs:
           ignore-unfixed: ${{ github.event_name == 'schedule' }}
           # Exit with error on HIGH/CRITICAL in PRs
           exit-code: ${{ github.event_name == 'pull_request' && '1' || '0' }}
-          # Limit to production dependencies
-          skip-dirs: 'target,benches,tests'
+          # Use .trivyignore for misconfig exclusions
+          trivyignores: '.trivyignore'
 
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@ff0a06e83cb2de871e5a09832bc6a81e7276941f # v3.28.18
@@ -146,22 +148,19 @@ jobs:
           # Fail on high and critical vulnerabilities
           fail-on-severity: high
           # Allow specific licenses (aligned with deny.toml)
+          # Note: Cannot use deny-licenses with allow-licenses
           allow-licenses: >-
             MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC,
             OpenSSL, Zlib, MPL-2.0, Unicode-3.0, CC0-1.0, BSL-1.0,
             CDLA-Permissive-2.0
-          # Deny known problematic licenses
-          deny-licenses: GPL-3.0, AGPL-3.0
           # Comment on PR with findings
           comment-summary-in-pr: on-failure
-          # Warn on unknown licenses instead of failing
-          allow-unknown-licenses: false
           # Check for GHSA advisories
           vulnerability-check: true
           # Ignore dev dependencies
           deny-packages: ''
           # Allow specific advisories (aligned with deny.toml)
-          allow-ghsa: 'GHSA-r77p-m9xr-f26c'  # RSA timing sidechannel
+          allow-ghsas: 'GHSA-r77p-m9xr-f26c'  # RSA timing sidechannel
 
   # ==========================================================================
   # Cargo Audit - RustSec advisory database check

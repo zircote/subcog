@@ -1,0 +1,26 @@
+# Trivy Configuration
+# See: https://aquasecurity.github.io/trivy/latest/docs/configuration/config/
+
+# Scan configuration
+scan:
+  # Skip directories
+  skip-dirs:
+    - target
+    - benches
+    - tests
+  # Skip files (test files with example secret patterns - false positives)
+  skip-files:
+    - src/security/secrets.rs
+    - src/security/redactor.rs
+    - src/security/mod.rs
+  # Scanners to use
+  scanners:
+    - vuln
+    - secret
+    - misconfig
+
+# Severity filter
+severity:
+  - CRITICAL
+  - HIGH
+  - MEDIUM
