@@ -1834,92 +1834,173 @@ pub fn execute_history(arguments: Value) -> Result<ToolResult> {
     })
 }
 
-/// Formats the status section for init output.
-fn format_init_status(services: &ServiceContainer) -> String {
-    let mut output = String::new();
-
-    let Ok(recall) = services.recall() else {
-        output.push_str("- **Status**: ✅ Healthy\n");
-        return output;
-    };
-
-    let filter = SearchFilter::new();
-    let Ok(result) = recall.search("*", SearchMode::Text, &filter, 1000) else {
-        output.push_str("- **Status**: ✅ Healthy\n");
-        return output;
-    };
-
-    output.push_str(&format!(
-        "- **Total memories**: {}\n",
-        result.memories.len()
-    ));
-
-    // Count by namespace
-    let mut ns_counts = std::collections::HashMap::new();
-    for hit in &result.memories {
-        *ns_counts
-            .entry(format!("{:?}", hit.memory.namespace))
-            .or_insert(0) += 1;
-    }
-    if !ns_counts.is_empty() {
-        output.push_str("- **By namespace**: ");
-        let ns_summary: Vec<String> = ns_counts
-            .iter()
-            .map(|(ns, count)| format!("{ns}: {count}"))
-            .collect();
-        output.push_str(&ns_summary.join(", "));
-        output.push('\n');
-    }
-    output.push_str("- **Status**: ✅ Healthy\n");
-    output
+/// Escapes special XML characters for safe embedding in XML output.
+fn escape_xml(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
-/// Formats the recall section for init output.
-fn format_init_recall(services: &ServiceContainer, query: &str, limit: usize) -> String {
-    let mut output = String::new();
+/// Namespace definitions with descriptions for XML output.
+const NAMESPACE_DEFS: &[(&str, &str)] = &[
+    ("decisions", "Architectural and design decisions"),
+    ("patterns", "Coding conventions and standards"),
+    ("learnings", "Insights and discoveries"),
+    ("context", "Project background and state"),
+    ("tech_debt", "Known issues and TODOs"),
+    ("apis", "API documentation and contracts"),
+    ("config", "Configuration details"),
+    ("security", "Security policies and findings"),
+    ("performance", "Performance observations"),
+    ("testing", "Test strategies and edge cases"),
+];
+
+/// Builds the namespaces XML section with counts from the service.
+fn build_xml_namespaces(services: Option<&ServiceContainer>) -> String {
+    let mut xml = String::from("  <namespaces>\n");
+
+    // Get counts if services available
+    let ns_counts: std::collections::HashMap<String, usize> = services
+        .and_then(|svc| svc.recall().ok())
+        .and_then(|recall| {
+            let filter = SearchFilter::new();
+            recall.search("*", SearchMode::Text, &filter, 1000).ok()
+        })
+        .map(|result| {
+            let mut counts = std::collections::HashMap::new();
+            for hit in &result.memories {
+                let ns_name = format!("{:?}", hit.memory.namespace).to_lowercase();
+                *counts.entry(ns_name).or_insert(0) += 1;
+            }
+            counts
+        })
+        .unwrap_or_default();
+
+    for (name, desc) in NAMESPACE_DEFS {
+        let count = ns_counts.get(*name).copied().unwrap_or(0);
+        xml.push_str(&format!(
+            "    <ns name=\"{name}\" count=\"{count}\">{}</ns>\n",
+            escape_xml(desc)
+        ));
+    }
+
+    xml.push_str("  </namespaces>\n");
+    xml
+}
+
+/// Builds the domains XML section.
+fn build_xml_domains() -> String {
+    r#"  <domains>
+    <domain name="project" default="true">Repository-scoped memories</domain>
+    <domain name="user">User-wide memories (cross-project)</domain>
+    <domain name="org">Organization-shared memories</domain>
+  </domains>
+"#
+    .to_string()
+}
+
+/// Builds the tools XML section with essential parameters.
+fn build_xml_tools() -> String {
+    r#"  <tools>
+    <tool name="subcog_capture" required="content,namespace">
+      <param name="tags" type="array" optional="true"/>
+      <param name="source" type="string" optional="true"/>
+      <param name="domain" type="enum" default="project"/>
+      <param name="ttl" type="string" optional="true" hint="7d, 24h, 60m"/>
+    </tool>
+    <tool name="subcog_recall" required="">
+      <param name="query" type="string" optional="true"/>
+      <param name="filter" type="string" optional="true" hint="ns:X tag:Y since:Nd"/>
+      <param name="mode" type="enum" default="hybrid" values="hybrid,vector,text"/>
+      <param name="detail" type="enum" default="medium" values="light,medium,everything"/>
+      <param name="limit" type="int" default="10" max="50"/>
+    </tool>
+    <tool name="subcog_get" required="memory_id">Retrieve full memory by ID or URN</tool>
+    <tool name="subcog_update" required="memory_id">Update content and/or tags</tool>
+    <tool name="subcog_delete" required="memory_id">Soft delete (restorable)</tool>
+    <tool name="subcog_status">System health and statistics</tool>
+    <tool name="subcog_entities" required="action">Knowledge graph entity operations</tool>
+    <tool name="subcog_graph" required="operation">Graph queries and visualization</tool>
+    <tool name="prompt_understanding">Full markdown documentation</tool>
+  </tools>
+"#
+    .to_string()
+}
+
+/// Builds the status XML element.
+fn build_xml_status(services: Option<&ServiceContainer>) -> String {
+    let version = env!("CARGO_PKG_VERSION");
+
+    let (health, memory_count) = services
+        .and_then(|svc| svc.recall().ok())
+        .and_then(|recall| {
+            let filter = SearchFilter::new();
+            recall
+                .search("*", SearchMode::Text, &filter, 1000)
+                .ok()
+                .map(|r| ("healthy", r.memories.len()))
+        })
+        .unwrap_or(("healthy", 0));
+
+    format!(
+        "  <status health=\"{health}\" memory_count=\"{memory_count}\" version=\"{version}\"/>\n"
+    )
+}
+
+/// Formats the recall section as XML for init output.
+fn format_init_recall_xml(services: &ServiceContainer, query: &str, limit: usize) -> String {
+    let mut xml = String::from("  <recalled_memories>\n");
 
     let Ok(recall) = services.recall() else {
-        output.push_str("_Could not access recall service._\n");
-        return output;
+        xml.push_str("    <!-- recall service unavailable -->\n");
+        xml.push_str("  </recalled_memories>\n");
+        return xml;
     };
 
     let filter = SearchFilter::new();
     match recall.search(query, SearchMode::Hybrid, &filter, limit) {
         Ok(result) if !result.memories.is_empty() => {
-            output.push_str(&format!(
-                "Found **{}** relevant memories for context:\n\n",
+            xml.push_str(&format!(
+                "    <!-- {} memories found. Use subcog_get for full content -->\n",
                 result.memories.len()
             ));
-            for (i, hit) in result.memories.iter().enumerate() {
+            for hit in &result.memories {
                 let preview = if hit.memory.content.len() > 150 {
                     format!("{}...", &hit.memory.content[..150])
                 } else {
                     hit.memory.content.clone()
                 };
-                output.push_str(&format!(
-                    "{}. **{:?}** (score: {:.2})\n   {}\n\n",
-                    i + 1,
-                    hit.memory.namespace,
+                let ns_name = format!("{:?}", hit.memory.namespace).to_lowercase();
+                xml.push_str(&format!(
+                    "    <memory id=\"{}\" ns=\"{}\" score=\"{:.2}\">{}</memory>\n",
+                    hit.memory.id,
+                    ns_name,
                     hit.score,
-                    preview.replace('\n', " ")
+                    escape_xml(&preview.replace('\n', " "))
                 ));
             }
         },
         Ok(_) => {
-            output.push_str("_No existing context memories found. This may be a new project._\n\n");
-            output.push_str("**Tip**: Capture decisions, patterns, and learnings as you work!\n");
+            xml.push_str("    <!-- no memories found - new project -->\n");
         },
         Err(e) => {
-            output.push_str(&format!("_Could not recall context: {e}_\n"));
+            xml.push_str(&format!(
+                "    <!-- error: {} -->\n",
+                escape_xml(&e.to_string())
+            ));
         },
     }
-    output
+
+    xml.push_str("  </recalled_memories>\n");
+    xml
 }
 
 /// Executes the init tool for session initialization.
 ///
-/// Combines `prompt_understanding`, status, and optional context recall into
-/// a single initialization call. Marks the session as initialized.
+/// Returns compressed XML output with namespaces, domains, tools, status,
+/// and optionally recalled memories. Use `prompt_understanding` for full docs.
 pub fn execute_init(arguments: Value) -> Result<ToolResult> {
     let args: InitArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
@@ -1927,49 +2008,49 @@ pub fn execute_init(arguments: Value) -> Result<ToolResult> {
     // Mark session as initialized
     crate::mcp::session::mark_initialized();
 
-    let mut output = String::new();
-
-    // Section 1: Guidance (prompt_understanding)
-    output.push_str("# Subcog Session Initialized\n\n");
-    output.push_str("## 📚 Usage Guidance\n\n");
-    output.push_str(PROMPT_UNDERSTANDING);
-    output.push_str("\n\n---\n\n");
-
-    // Section 2: Status check
-    output.push_str("## 🔍 System Status\n\n");
     let services_result = ServiceContainer::from_current_dir_or_user();
-    match &services_result {
-        Ok(services) => output.push_str(&format_init_status(services)),
-        Err(e) => output.push_str(&format!("- **Status**: ⚠️ Degraded ({e})\n")),
-    }
-    output.push_str("\n---\n\n");
+    let services = services_result.as_ref().ok();
 
-    // Section 3: Optional context recall
+    // Build XML output
+    let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    xml.push_str("<subcog_init>\n");
+
+    // Namespaces with counts
+    xml.push_str(&build_xml_namespaces(services));
+
+    // Storage domains
+    xml.push_str(&build_xml_domains());
+
+    // Essential tools reference
+    xml.push_str(&build_xml_tools());
+
+    // System status
+    xml.push_str(&build_xml_status(services));
+
+    // Optional recalled memories (previews only)
     if args.include_recall {
-        output.push_str("## 🧠 Project Context\n\n");
         let query = args
             .recall_query
             .unwrap_or_else(|| "project setup OR architecture OR conventions".to_string());
         let limit = args.recall_limit.unwrap_or(5).min(20) as usize;
 
-        if let Ok(services) = &services_result {
-            output.push_str(&format_init_recall(services, &query, limit));
+        if let Some(svc) = services {
+            xml.push_str(&format_init_recall_xml(svc, &query, limit));
+        } else {
+            xml.push_str("  <recalled_memories>\n");
+            xml.push_str("    <!-- services unavailable -->\n");
+            xml.push_str("  </recalled_memories>\n");
         }
-    } else {
-        output.push_str("_Context recall skipped (include_recall=false)_\n");
     }
 
-    output.push_str("\n---\n\n");
-    output.push_str("✅ **Session initialized.** You now have full memory context.\n\n");
-    output.push_str("**Next steps**:\n");
-    output.push_str("- Use `subcog_recall` to search for relevant memories\n");
-    output.push_str("- Use `subcog_capture` to store decisions, patterns, and learnings\n");
-    output.push_str("- Use `subcog_status` for detailed health checks\n");
+    // Guidance note
+    xml.push_str("  <guidance>Use prompt_understanding tool for full documentation</guidance>\n");
+    xml.push_str("</subcog_init>\n");
 
     metrics::counter!("mcp_init_total").increment(1);
 
     Ok(ToolResult {
-        content: vec![ToolContent::Text { text: output }],
+        content: vec![ToolContent::Text { text: xml }],
         is_error: false,
     })
 }

@@ -1164,12 +1164,12 @@ pub fn graph_tool() -> ToolDefinition {
 
 /// Defines the init tool for session initialization.
 ///
-/// Combines `prompt_understanding`, status, and optional context recall
-/// into a single initialization call. Marks the session as initialized.
+/// Returns compressed XML with namespaces, domains, tools, status, and
+/// optional recalled memories. Use `prompt_understanding` for full docs.
 pub fn init_tool() -> ToolDefinition {
     ToolDefinition {
         name: "subcog_init".to_string(),
-        description: "Initialize a Subcog session. Combines prompt_understanding (guidance), status (health check), and optional context recall into one call. Call this at the start of every session for optimal memory integration.".to_string(),
+        description: "Initialize a Subcog session. Returns compressed XML with namespaces (with counts), domains, tools reference, status, and optional recalled memory previews. Call at session start. Use prompt_understanding tool for full markdown documentation.".to_string(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
