@@ -59,6 +59,8 @@ jobs:
         with:
           scan-type: 'fs'
           scan-ref: '.'
+          # Use config file for skip-dirs/skip-files (more reliable across versions)
+          trivy-config: '.trivy.yaml'
           # Scan Cargo.lock for Rust dependencies
           scanners: 'vuln,secret,misconfig'
           format: 'sarif'
@@ -69,10 +71,6 @@ jobs:
           ignore-unfixed: ${{ github.event_name == 'schedule' }}
           # Exit with error on HIGH/CRITICAL in PRs
           exit-code: ${{ github.event_name == 'pull_request' && '1' || '0' }}
-          # Limit to production dependencies
-          skip-dirs: 'target,benches,tests'
-          # Skip test files with example secret patterns (false positives)
-          skip-files: 'src/security/secrets.rs,src/security/redactor.rs,src/security/mod.rs'
           # Use .trivyignore for misconfig exclusions
           trivyignores: '.trivyignore'
 
