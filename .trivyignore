@@ -1,0 +1,22 @@
+# Trivy Ignore File
+# See: https://aquasecurity.github.io/trivy/latest/docs/configuration/filtering/
+
+# =============================================================================
+# False Positives - Test Files with Example Secret Patterns
+# =============================================================================
+# These files contain test patterns for secret detection functionality.
+# They are NOT real secrets - they are regex patterns and test fixtures.
+
+# Secret detection test patterns (contains example API key formats for testing)
+src/security/secrets.rs
+src/security/redactor.rs
+src/security/mod.rs
+
+# =============================================================================
+# Docker Misconfigurations - Accepted Risks
+# =============================================================================
+# DS002: Image user should use non-root
+# Our containers run in controlled environments and use scratch base
+
+# DS026: No HEALTHCHECK instruction
+# Health checks are handled at orchestration layer (k8s probes)
