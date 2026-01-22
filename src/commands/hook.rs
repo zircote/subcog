@@ -3,6 +3,7 @@
 //! Contains the implementation of the `hook` CLI command for
 //! Claude Code hook event handling.
 
+use std::path::Path;
 use subcog::config::SubcogConfig;
 use subcog::context::GitContext;
 use subcog::hooks::{
@@ -15,7 +16,6 @@ use subcog::observability::{
 };
 use subcog::security::record_event;
 use subcog::services::ContextBuilderService;
-use subcog::storage::get_user_data_dir;
 use subcog::storage::index::SqliteBackend;
 use subcog::{CaptureService, RecallService, SyncService};
 use tracing::info_span;
@@ -47,7 +47,8 @@ pub fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn s
     let input = read_hook_input()?;
 
     // Try to initialize services for hooks (may fail if no data dir)
-    let recall_service = try_init_recall_service();
+    // Use config.data_dir to respect user's config.toml setting
+    let recall_service = try_init_recall_service(&config.data_dir);
 
     // Get repo path for project facet metadata
     let cwd = std::env::current_dir().ok();
@@ -139,10 +140,11 @@ pub fn cmd_hook(event: HookEvent, config: &SubcogConfig) -> Result<(), Box<dyn s
 }
 
 /// Tries to initialize a recall service with `SQLite` backend.
-fn try_init_recall_service() -> Option<RecallService> {
-    let data_dir = get_user_data_dir().ok()?;
-
-    if std::fs::create_dir_all(&data_dir).is_err() {
+///
+/// Uses the provided `data_dir` from config to ensure hooks use the same
+/// data directory as the MCP server (respects config.toml `data_dir` setting).
+fn try_init_recall_service(data_dir: &Path) -> Option<RecallService> {
+    if std::fs::create_dir_all(data_dir).is_err() {
         return None;
     }
 
