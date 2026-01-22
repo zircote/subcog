@@ -204,7 +204,7 @@ impl CaptureService {
     /// ```
     #[must_use]
     pub fn new(config: Config) -> Self {
-        let index = Self::try_init_sqlite_backend();
+        let index = Self::try_init_sqlite_backend(config.data_dir.as_deref());
 
         Self {
             config,
@@ -244,14 +244,21 @@ impl CaptureService {
     /// Attempts to initialize `SQLite` backend from user data directory.
     ///
     /// Returns `Some(backend)` on success, `None` on failure (with warning logged).
-    fn try_init_sqlite_backend() -> Option<Arc<dyn IndexBackend + Send + Sync>> {
-        let data_dir = match get_user_data_dir() {
-            Ok(dir) => dir,
-            Err(e) => {
-                tracing::warn!(
-                    "CaptureService: unable to get user data dir ({e}) - captures will not persist"
-                );
-                return None;
+    fn try_init_sqlite_backend(
+        config_data_dir: Option<&Path>,
+    ) -> Option<Arc<dyn IndexBackend + Send + Sync>> {
+        // Use config data_dir if provided (hooks pass this from SubcogConfig),
+        // otherwise fall back to platform-specific user data directory.
+        let data_dir = match config_data_dir {
+            Some(dir) => dir.to_path_buf(),
+            None => match get_user_data_dir() {
+                Ok(dir) => dir,
+                Err(e) => {
+                    tracing::warn!(
+                        "CaptureService: unable to get user data dir ({e}) - captures will not persist"
+                    );
+                    return None;
+                },
             },
         };
 
