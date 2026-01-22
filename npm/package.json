@@ -1,6 +1,6 @@
 {
   "name": "@zircote/subcog",
-  "version": "0.13.1",
+  "version": "0.14.1",
   "description": "A persistent memory system for AI coding assistants",
   "keywords": [
     "memory",

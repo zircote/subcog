@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-01-21
+
 ### Added
 
 - **Docker**: Migrated to scratch base image for minimal container footprint
@@ -23,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Plugin**: Updated version to 0.14.0 and corrected npx-based MCP config
+- **Hooks**: Fixed recall service to use config's `data_dir` instead of hardcoded path
+  - Respects user's config.toml `data_dir` setting
 
 ## [0.14.0] - 2026-01-21
 
@@ -436,7 +440,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prompt template management
 - Deduplication service
 
-[Unreleased]: https://github.com/zircote/subcog/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/zircote/subcog/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/zircote/subcog/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/zircote/subcog/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/zircote/subcog/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/zircote/subcog/compare/v0.11.0...v0.12.0
