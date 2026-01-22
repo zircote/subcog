@@ -57,8 +57,8 @@ If you prefer not to run the postinstall script, you have several alternatives:
 SUBCOG_SKIP_INSTALL=1 npm install -g @zircote/subcog
 
 # Manually download binary from GitHub Releases
-curl -LO https://github.com/zircote/subcog/releases/latest/download/subcog-VERSION-TARGET.tar.gz
-tar xzf subcog-VERSION-TARGET.tar.gz
+curl -LO https://github.com/zircote/subcog/releases/latest/download/subcog-<VERSION>-<TARGET>.tar.gz
+tar xzf subcog-<VERSION>-<TARGET>.tar.gz
 mv subcog ~/.npm-global/lib/node_modules/@zircote/subcog/bin/
 ```
 
@@ -101,11 +101,11 @@ npm pack @zircote/subcog --dry-run
 #### Verify Binary Checksums
 
 ```bash
-# Download checksums file (replace VERSION with actual version, e.g., 0.13.1)
-curl -LO https://github.com/zircote/subcog/releases/download/vVERSION/checksums.txt
+# Download checksums file (replace <VERSION> with actual version, e.g., v0.13.1)
+curl -LO https://github.com/zircote/subcog/releases/download/v<VERSION>/checksums.txt
 
 # Verify your downloaded binary
-sha256sum subcog-VERSION-TARGET.tar.gz
+sha256sum subcog-<VERSION>-<TARGET>.tar.gz
 # Compare with checksums.txt
 ```
 
