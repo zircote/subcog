@@ -71,7 +71,9 @@ jobs:
           exit-code: ${{ github.event_name == 'pull_request' && '1' || '0' }}
           # Limit to production dependencies
           skip-dirs: 'target,benches,tests'
-          # Use .trivyignore for false positive exclusions
+          # Skip test files with example secret patterns (false positives)
+          skip-files: 'src/security/secrets.rs,src/security/redactor.rs,src/security/mod.rs'
+          # Use .trivyignore for misconfig exclusions
           trivyignores: '.trivyignore'
 
       - name: Upload Trivy scan results to GitHub Security tab
