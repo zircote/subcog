@@ -71,6 +71,8 @@ jobs:
           exit-code: ${{ github.event_name == 'pull_request' && '1' || '0' }}
           # Limit to production dependencies
           skip-dirs: 'target,benches,tests'
+          # Use .trivyignore for false positive exclusions
+          trivyignores: '.trivyignore'
 
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@ff0a06e83cb2de871e5a09832bc6a81e7276941f # v3.28.18
