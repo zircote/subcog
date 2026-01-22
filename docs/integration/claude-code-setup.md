@@ -23,8 +23,8 @@ Add to your `~/.claude/settings.json`:
 {
   "mcpServers": {
     "subcog": {
-      "command": "npx",
-      "args": ["-y", "@zircote/subcog", "serve"],
+      "command": "subcog",
+      "args": ["serve"],
       "env": {
         "SUBCOG_LOG_LEVEL": "info"
       }
@@ -46,7 +46,7 @@ Create `.claude/hooks.json` in your project root:
         "hooks": [
           {
             "type": "command",
-            "command": "npx --prefer-offline @zircote/subcog hook session-start 2>/dev/null || npx -y @zircote/subcog hook session-start"
+            "command": "subcog hook session-start"
           }
         ]
       }
@@ -57,7 +57,7 @@ Create `.claude/hooks.json` in your project root:
         "hooks": [
           {
             "type": "command",
-            "command": "npx --prefer-offline @zircote/subcog hook user-prompt-submit 2>/dev/null || npx -y @zircote/subcog hook user-prompt-submit"
+            "command": "subcog hook user-prompt-submit"
           }
         ]
       }
@@ -68,7 +68,7 @@ Create `.claude/hooks.json` in your project root:
         "hooks": [
           {
             "type": "command",
-            "command": "npx --prefer-offline @zircote/subcog hook post-tool-use 2>/dev/null || npx -y @zircote/subcog hook post-tool-use"
+            "command": "subcog hook post-tool-use"
           }
         ]
       }
@@ -79,7 +79,7 @@ Create `.claude/hooks.json` in your project root:
         "hooks": [
           {
             "type": "command",
-            "command": "npx --prefer-offline @zircote/subcog hook pre-compact 2>/dev/null || npx -y @zircote/subcog hook pre-compact"
+            "command": "subcog hook pre-compact"
           }
         ]
       }
@@ -90,7 +90,7 @@ Create `.claude/hooks.json` in your project root:
         "hooks": [
           {
             "type": "command",
-            "command": "npx --prefer-offline @zircote/subcog hook stop 2>/dev/null || npx -y @zircote/subcog hook stop"
+            "command": "subcog hook stop"
           }
         ]
       }

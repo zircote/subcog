@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "subcog": {
-      "command": "npx",
-      "args": ["-y", "@zircote/subcog", "serve"],
+      "command": "subcog",
+      "args": ["serve"],
       "env": {
         "RUST_LOG": "info",
         "OPENAI_API_KEY": "${OPENAI_API_KEY}",

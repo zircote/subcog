@@ -1,7 +1,7 @@
 # Subcog Competitive Analysis: Feature Parity with Industry AI Memory Tools
 
-**Date:** 2026-01-13
-**Version:** 1.1
+**Date:** 2026-01-22
+**Version:** 1.2
 **Status:** Updated
 
 ---
@@ -31,40 +31,123 @@ Subcog is a **mature, feature-rich memory system** that exceeds many competitors
 
 ### Industry Players Analyzed
 
-| Tool | Focus | Deployment | Primary Users |
-|------|-------|------------|---------------|
-| **Mem0** | General AI memory layer | Cloud (SaaS) | Startups, Enterprise |
-| **Zep** | Knowledge graphs + RAG | Cloud (SaaS) | Enterprise |
-| **LangMem** | LangChain ecosystem | Self-hosted | Developers |
-| **Subcog** | Code assistant memory | Self-hosted | Developers, Teams |
+| Tool | Focus | Deployment | Primary Users | Funding |
+|------|-------|------------|---------------|---------|
+| **Mem0** | General AI memory layer | Cloud (SaaS) | Startups, Enterprise | $24M Series A (Oct 2025) |
+| **Zep** | Knowledge graphs + RAG | Cloud (SaaS) | Enterprise | - |
+| **Letta** | Self-editing memory (MemGPT) | Hybrid | Developers, Enterprise | $10M Seed (2024) |
+| **Cognee** | ECL pipeline + CodeGraph | Self-hosted | Developers | - |
+| **LangMem** | LangChain ecosystem | Self-hosted | Developers | - |
+| **Graphlit** | Managed connectors | Cloud (SaaS) | Enterprise | - |
+| **Supermemory** | Multimodal memory | Cloud (SaaS) | Consumers, Developers | $2.6M Seed (Oct 2025) |
+| **Subcog** | Code assistant memory | Self-hosted | Developers, Teams | Open Source |
+
+### Key Benchmarks
+
+| Provider | DMR Score | Latency | Notable |
+|----------|-----------|---------|---------|
+| **Zep** | 94.8% | 200ms | Best accuracy |
+| **Mem0** | 66.9% | 150ms p95 | Best latency |
+| **Letta** | 74% LoCoMo | - | Open source leader |
 
 ---
 
 ## Feature Comparison Matrix
 
-| Feature Category | Subcog | Mem0 | Zep | LangMem |
-|-----------------|--------|------|-----|---------|
-| **Core CRUD** | ✅ Full | ✅ Full | ✅ Full | ✅ Full |
-| **Semantic Search** | ✅ Hybrid | ✅ Advanced | ✅ Graph RAG | ✅ Basic |
-| **Graph Memory** | ✅ Temporal KG | ✅ Native | ✅ Temporal KG | ❌ None |
-| **Multimodal** | ❌ Missing | ✅ Images/Docs | ❌ None | ❌ None |
-| **Memory Expiration** | ✅ TTL | ✅ TTL | ❌ None | ❌ None |
-| **Webhooks** | ❌ Missing | ✅ Native | ✅ Native | ❌ None |
-| **Custom Categories** | ⚠️ Namespaces | ✅ Dynamic | ✅ Ontologies | ❌ None |
-| **Entity Extraction** | ✅ Auto | ✅ Auto | ✅ Auto | ✅ Auto |
-| **Context Templates** | ✅ Full | ⚠️ Partial | ✅ Full | ❌ None |
-| **Batch Operations** | ✅ Full | ✅ Full | ✅ Full | ❌ None |
-| **MCP Integration** | ✅ Native | ✅ Native | ✅ Native | ❌ None |
-| **GDPR Compliance** | ✅ Full | ✅ Full | ⚠️ Partial | ❌ None |
-| **Local/Offline** | ✅ Full | ❌ Cloud | ❌ Cloud | ✅ InMemory |
-| **CLI Tools** | ✅ Rich | ⚠️ Basic | ✅ zepctl | ❌ None |
-| **Observability** | ✅ Full OTLP | ⚠️ Basic | ⚠️ Audit | ❌ None |
+| Feature Category | Subcog | Mem0 | Zep | Letta | Cognee | LangMem |
+|-----------------|--------|------|-----|-------|--------|---------|
+| **Core CRUD** | ✅ Full | ✅ Full | ✅ Full | ✅ Full | ✅ Full | ✅ Full |
+| **Semantic Search** | ✅ Hybrid | ✅ Advanced | ✅ Graph RAG | ✅ Archival | ✅ ECL | ✅ Basic |
+| **Graph Memory** | ✅ Temporal KG | ✅ Native | ✅ Temporal KG | ⚠️ Basic | ✅ Full | ❌ None |
+| **Self-Editing Memory** | ❌ Missing | ❌ Missing | ❌ Missing | ✅ Native | ❌ Missing | ❌ Missing |
+| **Multimodal** | ❌ Missing | ✅ Images/Docs | ❌ None | ❌ None | ⚠️ Partial | ❌ None |
+| **Memory Expiration** | ✅ TTL | ✅ TTL | ❌ None | ❌ None | ❌ None | ❌ None |
+| **Conflict Resolution** | ❌ Missing | ✅ Graph-based | ✅ Temporal | ✅ LLM-powered | ❌ Missing | ❌ Missing |
+| **Multi-Agent Coord** | ❌ Missing | ⚠️ Partial | ⚠️ Partial | ✅ Full | ⚠️ Partial | ⚠️ Partial |
+| **Bi-Temporal Model** | ❌ Missing | ❌ Missing | ✅ Full | ❌ Missing | ✅ Full | ❌ Missing |
+| **CodeGraph Layer** | ❌ Missing | ❌ Missing | ❌ Missing | ❌ Missing | ✅ Full | ❌ Missing |
+| **Agent Dev Environment** | ❌ Missing | ❌ Missing | ⚠️ Basic | ✅ ADE | ❌ Missing | ❌ Missing |
+| **Managed Connectors** | ❌ Missing | ⚠️ Limited | ⚠️ Limited | ❌ Missing | ⚠️ Limited | ❌ Missing |
+| **Entity Extraction** | ✅ Auto | ✅ Auto | ✅ Auto | ✅ Auto | ✅ Auto | ✅ Auto |
+| **Context Templates** | ✅ Full | ⚠️ Partial | ✅ Full | ✅ Blocks | ⚠️ Partial | ❌ None |
+| **MCP Integration** | ✅ Native | ✅ Native | ✅ Native | ✅ Native | ✅ Native | ❌ None |
+| **Local/Offline** | ✅ Full | ❌ Cloud | ❌ Cloud | ✅ Full | ✅ Full | ✅ InMemory |
+| **CLI Tools** | ✅ Rich | ⚠️ Basic | ✅ zepctl | ✅ letta | ⚠️ Basic | ❌ None |
+| **Observability** | ✅ Full OTLP | ⚠️ Basic | ⚠️ Audit | ⚠️ Logs | ⚠️ Basic | ❌ None |
 
 ---
 
 ## Gap Analysis
 
 ### 🔴 Critical Gaps (High Priority)
+
+#### 1. Self-Editing Memory ([#75](https://github.com/zircote/subcog/issues/75))
+
+**Industry Standard (Letta/MemGPT):**
+- LLM autonomously decides when to store/retrieve/update memories
+- Memory tools: `memory_replace`, `memory_insert`, `memory_rethink`
+- Context window "compiled" from existing DB state on each request
+
+**Subcog Current State:**
+- Requires explicit `subcog_capture` commands
+- Hook-based automation available but not autonomous
+
+**Recommendation:**
+- Priority: **CRITICAL**
+- Impact: Major friction reduction, Letta differentiator
+
+---
+
+#### 2. Memory Conflict Detection/Resolution ([#76](https://github.com/zircote/subcog/issues/76))
+
+**Industry Standard (Mem0g, Zep):**
+- LLM-powered resolution for contradictory memories
+- Strategies: Add, Merge, Invalidate, Skip
+- 2% accuracy improvement reported by Mem0g
+
+**Subcog Current State:**
+- No conflict detection mechanism
+- Contradictory memories can coexist
+
+**Recommendation:**
+- Priority: **CRITICAL**
+- Impact: Essential for production reliability
+
+---
+
+#### 3. Multi-Agent Memory Coordination ([#77](https://github.com/zircote/subcog/issues/77))
+
+**Industry Standard (Letta, Research):**
+- Memory layers: agent-private, team-shared, blackboard
+- Consensus mechanisms for multi-agent decisions
+- Provenance tracking per agent
+
+**Subcog Current State:**
+- No multi-agent coordination patterns
+- Basic domain scoping only
+
+**Recommendation:**
+- Priority: **CRITICAL**
+- Impact: Growing multi-agent market segment
+
+---
+
+#### 4. Collaborative Memory with ACLs ([#78](https://github.com/zircote/subcog/issues/78))
+
+**Industry Standard (Enterprise):**
+- Fine-grained sharing of specific memories
+- Time-bounded access permissions
+- Compliance audit trails
+
+**Subcog Current State:**
+- Static project/user/org scoping
+- No per-memory access controls
+
+**Recommendation:**
+- Priority: **CRITICAL**
+- Impact: Enterprise compliance requirements
+
+---
 
 <!-- #### 1. Graph Memory / Knowledge Graphs
 
@@ -171,7 +254,76 @@ Subcog is a **mature, feature-rich memory system** that exceeds many competitors
 ---
 
 ### 🟡 Important Gaps (Medium Priority)
-#### 5. Automatic Entity Extraction
+
+#### 5. Agent Development Environment ([#79](https://github.com/zircote/subcog/issues/79))
+
+**Industry Standard (Letta ADE):**
+- Real-time event history visualization
+- Memory block editing in browser
+- "White-box memory" - see exactly what LLM receives
+
+**Subcog Current State:**
+- CLI-only memory inspection
+- No real-time visualization
+
+**Recommendation:**
+- Priority: **HIGH**
+- Impact: Major developer experience differentiator
+
+---
+
+#### 6. Bi-Temporal Model ([#80](https://github.com/zircote/subcog/issues/80))
+
+**Industry Standard (Zep Graphiti):**
+- Track valid time (t_valid) and ingestion time (t_ingested)
+- Historical queries: "What did we know at time T?"
+- 18.5% accuracy improvement on temporal queries
+
+**Subcog Current State:**
+- Only created_at and updated_at timestamps
+- No point-in-time queries
+
+**Recommendation:**
+- Priority: **HIGH**
+- Impact: Compliance and audit requirements
+
+---
+
+#### 7. CodeGraph Layer ([#81](https://github.com/zircote/subcog/issues/81))
+
+**Industry Standard (Cognee):**
+- AST-aware entity extraction
+- Dependency graph construction
+- Symbol-to-memory linking
+
+**Subcog Current State:**
+- Text-only memory, no code structure awareness
+- File renames break references
+
+**Recommendation:**
+- Priority: **HIGH**
+- Impact: Aligns with "developer's AI memory" positioning
+
+---
+
+#### 8. Memory Portability Standard ([#82](https://github.com/zircote/subcog/issues/82))
+
+**Industry Standard:**
+- No current interoperability standard exists
+- Vendor lock-in concerns emerging
+
+**Subcog Opportunity:**
+- Define open Memory Interchange Format (MIF)
+- Lead standardization effort
+- Differentiate from cloud-locked competitors
+
+**Recommendation:**
+- Priority: **HIGH**
+- Impact: Strategic market positioning opportunity
+
+---
+
+<!-- #### 5. Automatic Entity Extraction
 
 **Industry Standard (Mem0, Zep, LangMem):**
 - Auto-extract entities (people, organizations, concepts)
@@ -331,7 +483,66 @@ These features enable team collaboration and shared knowledge bases and currentl
 
 ### 🟢 Nice-to-Have Features (Lower Priority)
 
-#### 6. Framework Integrations
+#### 9. ECL Pipeline ([#83](https://github.com/zircote/subcog/issues/83))
+
+**Industry Standard (Cognee):**
+- Extract-Cognify-Load replacing traditional RAG
+- Multi-stage pipeline with pluggable stages
+
+---
+
+#### 10. Memory Freshness System ([#84](https://github.com/zircote/subcog/issues/84))
+
+**Industry Standard (Cognee Memify):**
+- Automated stale node cleanup
+- Association strengthening based on access patterns
+
+---
+
+#### 11. Managed Connectors ([#85](https://github.com/zircote/subcog/issues/85))
+
+**Industry Standard (Graphlit):**
+- Auto-import from Slack, GitHub, Jira, Notion
+- OAuth-based with polling/webhooks
+
+---
+
+#### 12. Cognitive Memory Types ([#86](https://github.com/zircote/subcog/issues/86))
+
+**Industry Standard (LangMem):**
+- Procedural (skills), Episodic (experiences), Semantic (facts)
+
+---
+
+#### 13. Background Memory Manager ([#87](https://github.com/zircote/subcog/issues/87))
+
+**Industry Standard (LangMem):**
+- Automatic extraction/consolidation based on triggers
+
+---
+
+#### 14. Conversations API ([#88](https://github.com/zircote/subcog/issues/88))
+
+**Industry Standard (Letta):**
+- Shared memory across parallel sessions
+
+---
+
+#### 15. Compressed Memory Snippets ([#89](https://github.com/zircote/subcog/issues/89))
+
+**Industry Standard (Mem0):**
+- 80% token reduction through intelligent compression
+
+---
+
+#### 16. Community Subgraph ([#90](https://github.com/zircote/subcog/issues/90))
+
+**Industry Standard (Zep Graphiti):**
+- Hierarchical graph tiers for community-level aggregations
+
+---
+
+#### 17. Framework Integrations
 
 **Industry Standard (Mem0, Zep):**
 - Native LangChain, CrewAI, LlamaIndex integrations
@@ -443,33 +654,40 @@ Areas where Subcog **already leads** or **equals** industry standards:
 
 **Outcome:** Major competitive gaps closed. Subcog now has feature parity with Mem0/Zep on core graph and entity capabilities.
 
-### Phase 1: Remaining Critical Gaps (Q1-Q2 2026)
+### Phase 1: Critical Market Differentiators (Q1-Q2 2026)
 
-| Feature | Effort | Priority | Target |
-|---------|--------|----------|--------|
-| Webhooks | 2 weeks | 🔴 Critical | Feb 2026 |
-| Multimodal Support | 2-3 weeks | 🔴 Critical | Mar 2026 |
+| Feature | Issue | Effort | Priority | Target |
+|---------|-------|--------|----------|--------|
+| Self-Editing Memory | [#75](https://github.com/zircote/subcog/issues/75) | 3-4 weeks | 🔴 Critical | Feb 2026 |
+| Conflict Detection | [#76](https://github.com/zircote/subcog/issues/76) | 2 weeks | 🔴 Critical | Feb 2026 |
+| Multi-Agent Coordination | [#77](https://github.com/zircote/subcog/issues/77) | 3 weeks | 🔴 Critical | Mar 2026 |
+| Webhooks | - | 2 weeks | 🔴 Critical | Mar 2026 |
+| Multimodal Support | - | 2-3 weeks | 🔴 Critical | Apr 2026 |
 
-**Phase 1 Outcome:** Address remaining critical gaps for enterprise integrations and modern AI agents.
+**Phase 1 Outcome:** Address competitive necessity features and enterprise integrations.
 
-### Phase 2: Feature Expansion (Q2 2026)
+### Phase 2: Enterprise Differentiators (Q2 2026)
 
-| Feature | Effort | Priority | Target |
-|---------|--------|----------|--------|
-| Custom Namespaces | 1 week | 🟡 Important | Mar 2026 |
-| Group Memory | 2-3 weeks | 🟡 Important | Apr 2026 |
-| Bulk Import/Export | 2 weeks | 🟡 Important | Apr 2026 |
+| Feature | Issue | Effort | Priority | Target |
+|---------|-------|--------|----------|--------|
+| Collaborative ACLs | [#78](https://github.com/zircote/subcog/issues/78) | 2-3 weeks | 🟡 Important | Apr 2026 |
+| Agent Dev Environment | [#79](https://github.com/zircote/subcog/issues/79) | 4 weeks | 🟡 Important | May 2026 |
+| Bi-Temporal Model | [#80](https://github.com/zircote/subcog/issues/80) | 2 weeks | 🟡 Important | May 2026 |
+| CodeGraph Layer | [#81](https://github.com/zircote/subcog/issues/81) | 3-4 weeks | 🟡 Important | Jun 2026 |
+| Memory Portability | [#82](https://github.com/zircote/subcog/issues/82) | 2 weeks | 🟡 Important | Jun 2026 |
 
-**Phase 2 Outcome:** Enhance flexibility and team collaboration capabilities.
+**Phase 2 Outcome:** Establish enterprise differentiators and strategic positioning.
 
-### Phase 3: Ecosystem Growth (Q3 2026)
+### Phase 3: Feature Expansion (Q3 2026)
 
-| Feature | Effort | Priority | Target |
-|---------|--------|----------|--------|
-| Framework SDKs | 3 weeks | 🟢 Nice-to-Have | Jul 2026 |
-| Voice Integration | 2 weeks | 🟢 Nice-to-Have | Aug 2026 |
+| Feature | Issue | Effort | Priority | Target |
+|---------|-------|--------|----------|--------|
+| ECL Pipeline | [#83](https://github.com/zircote/subcog/issues/83) | 3 weeks | 🟢 Nice-to-Have | Jul 2026 |
+| Memory Freshness | [#84](https://github.com/zircote/subcog/issues/84) | 2 weeks | 🟢 Nice-to-Have | Jul 2026 |
+| Managed Connectors | [#85](https://github.com/zircote/subcog/issues/85) | 4 weeks | 🟢 Nice-to-Have | Aug 2026 |
+| Framework SDKs | - | 3 weeks | 🟢 Nice-to-Have | Sep 2026 |
 
-**Phase 3 Outcome:** Expand ecosystem reach and developer adoption.
+**Phase 3 Outcome:** Expand ecosystem reach and automation capabilities.
 
 ---
 
@@ -502,19 +720,38 @@ Subcog should position as:
 ### Mem0 Documentation
 - Overview: https://docs.mem0.ai/overview
 - Memory API: https://docs.mem0.ai/features/memory-api
-- Graph Memory: https://docs.mem0.ai/features/graph-memory
+- Graph Memory: https://docs.mem0.ai/open-source/features/graph-memory
 
 ### Zep Documentation
 - Help Center: https://help.getzep.com/
 - Knowledge Graphs: https://help.getzep.com/knowledge-graphs
-- Context Engineering: https://help.getzep.com/context-engineering
+- Temporal Knowledge Graph Architecture: https://arxiv.org/abs/2501.13956
+
+### Letta Documentation
+- Memory Blocks: https://www.letta.com/blog/memory-blocks
+- Agent Development Environment: https://www.letta.com/blog/introducing-the-agent-development-environment
+- MemGPT Concepts: https://docs.letta.com/concepts/memgpt/
+
+### Cognee Documentation
+- ECL Pipeline (LanceDB Case Study): https://lancedb.com/blog/case-study-cognee/
+- Temporal Cognification: https://www.cognee.ai/blog/cognee-news/unlock-your-llm-s-time-awareness-introducing-temporal-cognification
+- CodeGraph: https://memgraph.com/blog/from-rag-to-graphs-cognee-ai-memory
 
 ### LangMem Documentation
 - GitHub: https://langchain-ai.github.io/langmem/
 - Memory API: https://langchain-ai.github.io/langmem/concepts/
 
+### Research Papers
+- Collaborative Memory: https://arxiv.org/abs/2505.18279
+- AI Memory Survey (Dec 2025): https://arxiv.org/abs/2512.13564
+- Multi-Agent Memory Engineering: https://www.mongodb.com/company/blog/technical/why-multi-agent-systems-need-memory-engineering
+
+### Other Providers
+- Graphlit (Managed Connectors): https://www.graphlit.com/
+- Graphiti Knowledge Graph: https://neo4j.com/blog/developer/graphiti-knowledge-graph-memory/
+
 ---
 
 *Report generated: 2026-01-12*
-*Last updated: 2026-01-13*
-*Next review: 2026-02-15*
+*Last updated: 2026-01-22*
+*Next review: 2026-02-22*

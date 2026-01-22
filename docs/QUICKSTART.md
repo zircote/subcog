@@ -106,8 +106,8 @@ Add Subcog to your Claude Code configuration:
 {
   "mcpServers": {
     "subcog": {
-      "command": "npx",
-      "args": ["-y", "@zircote/subcog", "serve"],
+      "command": "subcog",
+      "args": ["serve"],
       "env": {
         "SUBCOG_LOG_LEVEL": "info"
       }
@@ -115,6 +115,8 @@ Add Subcog to your Claude Code configuration:
   }
 }
 ```
+
+> **Note**: This requires the subcog binary installed via `cargo install subcog`, Homebrew, or binary download. See [INSTALLATION.md](INSTALLATION.md) for details.
 
 ### Configure Hooks
 
@@ -129,7 +131,7 @@ Create `hooks/hooks.json` in your project:
         "hooks": [
           {
             "type": "command",
-            "command": "npx --prefer-offline @zircote/subcog hook session-start 2>/dev/null || npx -y @zircote/subcog hook session-start"
+            "command": "subcog hook session-start"
           }
         ]
       }
@@ -140,7 +142,7 @@ Create `hooks/hooks.json` in your project:
         "hooks": [
           {
             "type": "command",
-            "command": "npx --prefer-offline @zircote/subcog hook user-prompt-submit 2>/dev/null || npx -y @zircote/subcog hook user-prompt-submit"
+            "command": "subcog hook user-prompt-submit"
           }
         ]
       }
@@ -151,7 +153,7 @@ Create `hooks/hooks.json` in your project:
         "hooks": [
           {
             "type": "command",
-            "command": "npx --prefer-offline @zircote/subcog hook stop 2>/dev/null || npx -y @zircote/subcog hook stop"
+            "command": "subcog hook stop"
           }
         ]
       }

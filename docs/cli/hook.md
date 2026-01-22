@@ -215,7 +215,7 @@ Configure hooks in your project:
         "hooks": [
           {
             "type": "command",
-            "command": "npx --prefer-offline @zircote/subcog hook session-start 2>/dev/null || npx -y @zircote/subcog hook session-start"
+            "command": "subcog hook session-start"
           }
         ]
       }
@@ -226,7 +226,7 @@ Configure hooks in your project:
         "hooks": [
           {
             "type": "command",
-            "command": "npx --prefer-offline @zircote/subcog hook user-prompt-submit 2>/dev/null || npx -y @zircote/subcog hook user-prompt-submit"
+            "command": "subcog hook user-prompt-submit"
           }
         ]
       }
@@ -237,7 +237,7 @@ Configure hooks in your project:
         "hooks": [
           {
             "type": "command",
-            "command": "npx --prefer-offline @zircote/subcog hook post-tool-use 2>/dev/null || npx -y @zircote/subcog hook post-tool-use"
+            "command": "subcog hook post-tool-use"
           }
         ]
       }
@@ -248,7 +248,7 @@ Configure hooks in your project:
         "hooks": [
           {
             "type": "command",
-            "command": "npx --prefer-offline @zircote/subcog hook pre-compact 2>/dev/null || npx -y @zircote/subcog hook pre-compact"
+            "command": "subcog hook pre-compact"
           }
         ]
       }
@@ -259,7 +259,7 @@ Configure hooks in your project:
         "hooks": [
           {
             "type": "command",
-            "command": "npx --prefer-offline @zircote/subcog hook stop 2>/dev/null || npx -y @zircote/subcog hook stop"
+            "command": "subcog hook stop"
           }
         ]
       }

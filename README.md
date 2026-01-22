@@ -70,30 +70,29 @@ Subcog achieves **97% accuracy on factual recall** (LongMemEval) and **57% on pe
 Multiple installation methods are available. See [INSTALLATION.md](docs/INSTALLATION.md) for detailed instructions.
 
 ```bash
-# npm/npx (recommended for quick start)
-npx @zircote/subcog --help
-npm install -g @zircote/subcog
+# Cargo (recommended - Rust developers)
+cargo install subcog
 
 # Homebrew (macOS/Linux)
 brew install zircote/tap/subcog
-
-# Cargo (Rust developers)
-cargo install subcog
 
 # Docker
 docker run --rm ghcr.io/zircote/subcog --help
 
 # Binary download
 curl -LO https://github.com/zircote/subcog/releases/latest/download/subcog-VERSION-TARGET.tar.gz
+
+# npm/npx (fallback if binary install unavailable)
+npx @zircote/subcog --help
 ```
 
 | Method | Platforms | Auto-update |
 |--------|-----------|-------------|
-| npm/npx | macOS, Linux, Windows | Via npm |
-| Homebrew | macOS, Linux | `brew upgrade` |
 | Cargo | All | `cargo install` |
+| Homebrew | macOS, Linux | `brew upgrade` |
 | Docker | linux/amd64, linux/arm64 | Pull latest tag |
 | Binary | All | Manual |
+| npm/npx | macOS, Linux, Windows | Via npm |
 
 ## Quick Start
 
@@ -138,12 +137,17 @@ Configure in Claude Desktop's `claude_desktop_config.json`:
 {
   "mcpServers": {
     "subcog": {
-      "command": "npx",
-      "args": ["-y", "@zircote/subcog", "serve"]
+      "command": "subcog",
+      "args": ["serve"]
     }
   }
 }
 ```
+
+> **Note**: This configuration requires the subcog binary to be installed and in your PATH. Install via `cargo install subcog`, Homebrew, or download from [GitHub Releases](https://github.com/zircote/subcog/releases). If you cannot install the binary, use npx as a fallback:
+> ```json
+> { "command": "npx", "args": ["-y", "@zircote/subcog", "serve"] }
+> ```
 
 ### Available MCP Tools
 

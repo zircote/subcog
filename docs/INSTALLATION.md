@@ -6,13 +6,180 @@ Subcog provides multiple installation methods to fit your workflow. Choose the o
 
 | Method | Command | Best For |
 |--------|---------|----------|
-| **npm/npx** | `npx @zircote/subcog --help` | Node.js projects, quick testing |
+| **Cargo** | `cargo install subcog` | Recommended - fast native binary |
 | **Homebrew** | `brew install zircote/tap/subcog` | macOS/Linux users |
-| **Cargo** | `cargo install subcog` | Rust developers |
 | **Docker** | `docker run ghcr.io/zircote/subcog` | Containers, CI/CD |
 | **Binary** | [GitHub Releases](https://github.com/zircote/subcog/releases) | Manual installation |
+| **npm/npx** | `npx @zircote/subcog --help` | Fallback if binary install unavailable |
 
-## npm / npx
+## Cargo (Rust) - Recommended
+
+Requires [Rust 1.88+](https://rustup.rs/).
+
+```bash
+# From crates.io (recommended)
+cargo install subcog
+
+# From GitHub (latest)
+cargo install --git https://github.com/zircote/subcog.git
+
+# Specific version
+cargo install subcog --version 0.14.0
+```
+
+The Cargo installation provides the fastest startup time and best performance, as it compiles a native binary optimized for your system.
+
+## Homebrew (macOS/Linux)
+
+```bash
+# Add the tap (one-time)
+brew tap zircote/tap
+
+# Install
+brew install subcog
+
+# Upgrade
+brew upgrade subcog
+```
+
+## Docker
+
+Multi-architecture images are available on GitHub Container Registry.
+
+### Quick Start
+
+```bash
+# Run subcog in a container
+docker run --rm ghcr.io/zircote/subcog --help
+
+# With persistent storage
+docker run --rm \
+  -v ~/.local/share/subcog:/data \
+  ghcr.io/zircote/subcog status
+
+# Capture a memory
+docker run --rm \
+  -v ~/.local/share/subcog:/data \
+  ghcr.io/zircote/subcog capture --namespace decisions "Use Docker for deployment"
+```
+
+### Available Tags
+
+| Tag | Description |
+|-----|-------------|
+| `latest` | Latest stable release |
+| `0.14.0` | Specific version |
+| `0.14` | Latest patch in minor version |
+| `sha-abc1234` | Specific commit (for debugging) |
+
+### Supported Architectures
+
+- `linux/amd64` (x86_64)
+- `linux/arm64` (aarch64)
+
+### Docker Compose
+
+```yaml
+version: '3.8'
+services:
+  subcog:
+    image: ghcr.io/zircote/subcog:latest
+    volumes:
+      - subcog-data:/data
+    command: serve --http --port 8080
+    ports:
+      - "8080:8080"
+
+volumes:
+  subcog-data:
+```
+
+### MCP Server in Docker
+
+Run subcog as an MCP server for AI agent integration:
+
+```bash
+# Stdio transport (for local clients)
+docker run --rm -i \
+  -v ~/.local/share/subcog:/data \
+  ghcr.io/zircote/subcog serve
+
+# HTTP transport (for network access)
+docker run --rm \
+  -v ~/.local/share/subcog:/data \
+  -p 8080:8080 \
+  ghcr.io/zircote/subcog serve --http --port 8080
+```
+
+### Image Details
+
+| Property | Value |
+|----------|-------|
+| Base Image | `scratch` |
+| Size | ~15MB compressed |
+| User | `nonroot` (65532) |
+| Working Dir | `/data` |
+| Entrypoint | `/usr/local/bin/subcog` |
+
+## Binary Downloads
+
+Pre-built binaries are available from [GitHub Releases](https://github.com/zircote/subcog/releases).
+
+### Download URLs
+
+```bash
+# macOS (Intel)
+curl -LO https://github.com/zircote/subcog/releases/download/v0.14.0/subcog-0.14.0-x86_64-apple-darwin.tar.gz
+
+# macOS (Apple Silicon)
+curl -LO https://github.com/zircote/subcog/releases/download/v0.14.0/subcog-0.14.0-aarch64-apple-darwin.tar.gz
+
+# Linux (x64, glibc)
+curl -LO https://github.com/zircote/subcog/releases/download/v0.14.0/subcog-0.14.0-x86_64-unknown-linux-gnu.tar.gz
+
+# Linux (x64, musl/Alpine)
+curl -LO https://github.com/zircote/subcog/releases/download/v0.14.0/subcog-0.14.0-x86_64-unknown-linux-musl.tar.gz
+
+# Linux (arm64, musl)
+curl -LO https://github.com/zircote/subcog/releases/download/v0.14.0/subcog-0.14.0-aarch64-unknown-linux-musl.tar.gz
+
+# Windows (x64)
+curl -LO https://github.com/zircote/subcog/releases/download/v0.14.0/subcog-0.14.0-x86_64-pc-windows-msvc.zip
+```
+
+### Installation Steps
+
+```bash
+# Download and extract (Unix)
+curl -LO https://github.com/zircote/subcog/releases/latest/download/subcog-VERSION-TARGET.tar.gz
+tar -xzf subcog-*.tar.gz
+sudo mv subcog /usr/local/bin/
+chmod +x /usr/local/bin/subcog
+
+# Windows (PowerShell)
+Invoke-WebRequest -Uri "https://github.com/zircote/subcog/releases/latest/download/subcog-VERSION-x86_64-pc-windows-msvc.zip" -OutFile subcog.zip
+Expand-Archive subcog.zip -DestinationPath .
+Move-Item subcog.exe $env:USERPROFILE\bin\
+```
+
+### Verify Checksums
+
+All releases include SHA256 checksums in `checksums.txt`:
+
+```bash
+# Download checksums
+curl -LO https://github.com/zircote/subcog/releases/download/v0.14.0/checksums.txt
+
+# Verify (Unix)
+sha256sum -c checksums.txt --ignore-missing
+
+# Verify (macOS)
+shasum -a 256 -c checksums.txt --ignore-missing
+```
+
+## npm / npx (Fallback)
+
+The npm package is provided as a fallback for environments where binary installation is not possible. **We recommend installing the native binary via Cargo, Homebrew, or direct download for best performance.**
 
 The npm package downloads pre-built binaries automatically for your platform.
 
@@ -71,169 +238,6 @@ If pre-built binaries are unavailable, the postinstall script will attempt:
 1. Download from GitHub Releases
 2. `cargo install subcog` (if Rust is installed)
 3. `cargo install --git https://github.com/zircote/subcog.git` (from source)
-
-## Homebrew (macOS/Linux)
-
-```bash
-# Add the tap (one-time)
-brew tap zircote/tap
-
-# Install
-brew install subcog
-
-# Upgrade
-brew upgrade subcog
-```
-
-## Cargo (Rust)
-
-Requires [Rust 1.88+](https://rustup.rs/).
-
-```bash
-# From crates.io
-cargo install subcog
-
-# From GitHub (latest)
-cargo install --git https://github.com/zircote/subcog.git
-
-# Specific version
-cargo install subcog --version 0.12.0
-```
-
-## Docker
-
-Multi-architecture images are available on GitHub Container Registry.
-
-### Quick Start
-
-```bash
-# Run subcog in a container
-docker run --rm ghcr.io/zircote/subcog --help
-
-# With persistent storage
-docker run --rm \
-  -v ~/.local/share/subcog:/data \
-  ghcr.io/zircote/subcog status
-
-# Capture a memory
-docker run --rm \
-  -v ~/.local/share/subcog:/data \
-  ghcr.io/zircote/subcog capture --namespace decisions "Use Docker for deployment"
-```
-
-### Available Tags
-
-| Tag | Description |
-|-----|-------------|
-| `latest` | Latest stable release |
-| `0.12.0` | Specific version |
-| `0.12` | Latest patch in minor version |
-| `sha-abc1234` | Specific commit (for debugging) |
-
-### Supported Architectures
-
-- `linux/amd64` (x86_64)
-- `linux/arm64` (aarch64)
-
-### Docker Compose
-
-```yaml
-version: '3.8'
-services:
-  subcog:
-    image: ghcr.io/zircote/subcog:latest
-    volumes:
-      - subcog-data:/data
-    command: serve --http --port 8080
-    ports:
-      - "8080:8080"
-
-volumes:
-  subcog-data:
-```
-
-### MCP Server in Docker
-
-Run subcog as an MCP server for AI agent integration:
-
-```bash
-# Stdio transport (for local clients)
-docker run --rm -i \
-  -v ~/.local/share/subcog:/data \
-  ghcr.io/zircote/subcog serve
-
-# HTTP transport (for network access)
-docker run --rm \
-  -v ~/.local/share/subcog:/data \
-  -p 8080:8080 \
-  ghcr.io/zircote/subcog serve --http --port 8080
-```
-
-### Image Details
-
-| Property | Value |
-|----------|-------|
-| Base Image | `gcr.io/distroless/static-debian12:nonroot` |
-| Size | ~15MB compressed |
-| User | `nonroot` (65532) |
-| Working Dir | `/data` |
-| Entrypoint | `/usr/local/bin/subcog` |
-
-## Binary Downloads
-
-Pre-built binaries are available from [GitHub Releases](https://github.com/zircote/subcog/releases).
-
-### Download URLs
-
-```bash
-# macOS (Intel)
-curl -LO https://github.com/zircote/subcog/releases/download/v0.12.0/subcog-0.12.0-x86_64-apple-darwin.tar.gz
-
-# macOS (Apple Silicon)
-curl -LO https://github.com/zircote/subcog/releases/download/v0.12.0/subcog-0.12.0-aarch64-apple-darwin.tar.gz
-
-# Linux (x64, glibc)
-curl -LO https://github.com/zircote/subcog/releases/download/v0.12.0/subcog-0.12.0-x86_64-unknown-linux-gnu.tar.gz
-
-# Linux (x64, musl/Alpine)
-curl -LO https://github.com/zircote/subcog/releases/download/v0.12.0/subcog-0.12.0-x86_64-unknown-linux-musl.tar.gz
-
-# Linux (arm64, musl)
-curl -LO https://github.com/zircote/subcog/releases/download/v0.12.0/subcog-0.12.0-aarch64-unknown-linux-musl.tar.gz
-
-# Windows (x64)
-curl -LO https://github.com/zircote/subcog/releases/download/v0.12.0/subcog-0.12.0-x86_64-pc-windows-msvc.zip
-```
-
-### Installation Steps
-
-```bash
-# Download and extract (Unix)
-curl -LO https://github.com/zircote/subcog/releases/latest/download/subcog-VERSION-TARGET.tar.gz
-tar -xzf subcog-*.tar.gz
-sudo mv subcog /usr/local/bin/
-chmod +x /usr/local/bin/subcog
-
-# Windows (PowerShell)
-Invoke-WebRequest -Uri "https://github.com/zircote/subcog/releases/latest/download/subcog-VERSION-x86_64-pc-windows-msvc.zip" -OutFile subcog.zip
-Expand-Archive subcog.zip -DestinationPath .
-Move-Item subcog.exe $env:USERPROFILE\bin\
-```
-
-### Verify Checksums
-
-All releases include SHA256 checksums in `checksums.txt`:
-
-```bash
-# Download checksums
-curl -LO https://github.com/zircote/subcog/releases/download/v0.12.0/checksums.txt
-
-# Verify (Unix)
-sha256sum -c checksums.txt --ignore-missing
-
-# Verify (macOS)
-shasum -a 256 -c checksums.txt --ignore-missing
-```
 
 ## Building from Source
 
@@ -297,11 +301,11 @@ subcog recall "installation"
 # Check if subcog is in PATH
 which subcog
 
-# If using npm, check node_modules
-ls node_modules/.bin/subcog
-
 # If using cargo, check cargo bin
 ls ~/.cargo/bin/subcog
+
+# If using npm (fallback), check node_modules
+ls node_modules/.bin/subcog
 ```
 
 ### Permission Denied
