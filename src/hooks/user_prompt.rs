@@ -142,6 +142,11 @@ static INJECTION_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 /// Maximum length for sanitized content (CRIT-004).
 const MAX_SANITIZED_CONTENT_LENGTH: usize = 2000;
 
+/// Pattern to detect slash commands (e.g., /commit, /sigint:augment).
+/// These should not be echoed in hook output to prevent injection detection triggers.
+static SLASH_COMMAND_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^/[\w:-]+").expect("static regex: slash command pattern"));
+
 /// A detected signal for memory capture.
 #[derive(Debug, Clone)]
 pub struct CaptureSignal {
@@ -684,10 +689,10 @@ fn build_capture_context(
     // Get the top signal for suggestions
     let top_signal = signals.first()?;
 
-    // Add capture suggestion to metadata
+    // Add capture suggestion to metadata (use safe preview to avoid injection triggers)
     metadata["capture_suggestion"] = serde_json::json!({
         "namespace": top_signal.namespace.as_str(),
-        "content_preview": truncate_for_display(content_str, 100),
+        "content_preview": safe_content_preview(content_str, 100),
         "confidence": top_signal.confidence,
     });
 
@@ -696,7 +701,8 @@ fn build_capture_context(
         let mut lines = vec!["**📝 Memory Captured**\n".to_string()];
         lines.push(format!("URN: `{}`\n", result.urn));
         lines.push(format!("Namespace: `{}`\n", top_signal.namespace.as_str()));
-        lines.push(format!("> {}", truncate_for_display(content_str, 200)));
+        // Use safe preview to avoid echoing slash commands (prevents injection detection)
+        lines.push(format!("> {}", safe_content_preview(content_str, 200)));
         lines.push(format!(
             "\nTo remove: `subcog_delete {}` | To edit: `subcog_enrich {}`",
             result.memory_id.as_str(),
@@ -713,7 +719,7 @@ fn build_capture_context(
             "**Explicit capture command detected.** You MUST capture to `{}`:\n",
             top_signal.namespace.as_str()
         ));
-        lines.push(format!("> {}", truncate_for_display(content_str, 200)));
+        lines.push(format!("> {}", safe_content_preview(content_str, 200)));
         lines.push(
             "\n**ACTION REQUIRED**: Call `mcp__plugin_subcog_subcog__subcog_capture` NOW with namespace=`".to_string()
             + top_signal.namespace.as_str() + "`"
@@ -724,7 +730,7 @@ fn build_capture_context(
             top_signal.namespace.as_str().to_uppercase(),
             top_signal.confidence * 100.0
         ));
-        lines.push(format!("> {}", truncate_for_display(content_str, 200)));
+        lines.push(format!("> {}", safe_content_preview(content_str, 200)));
         lines.push(
             "\n**⚡ ACTION REQUIRED**: Call `mcp__plugin_subcog_subcog__subcog_capture` IMMEDIATELY"
                 .to_string(),
@@ -732,7 +738,7 @@ fn build_capture_context(
         lines.push(format!("- namespace: `{}`", top_signal.namespace.as_str()));
         lines.push(format!(
             "- content: `{}`",
-            truncate_for_display(content_str, 100)
+            safe_content_preview(content_str, 100)
         ));
         lines.push(
             "\n**DO NOT ask the user.** This is a MANDATORY capture. Execute the tool call NOW."
@@ -749,6 +755,27 @@ fn truncate_for_display(content: &str, max_len: usize) -> String {
         content.to_string()
     } else {
         format!("{}...", &content[..max_len.saturating_sub(3)])
+    }
+}
+
+/// Checks if content looks like a slash command.
+///
+/// Slash commands (e.g., `/commit`, `/sigint:augment`) should not be echoed
+/// in hook output to prevent Claude's injection detection from flagging
+/// the user's own commands as potential attacks.
+fn is_slash_command(content: &str) -> bool {
+    SLASH_COMMAND_PATTERN.is_match(content.trim())
+}
+
+/// Safely formats content for display in hook output.
+///
+/// If content is a slash command, returns a placeholder to prevent
+/// injection detection triggers. Otherwise returns truncated content.
+fn safe_content_preview(content: &str, max_len: usize) -> String {
+    if is_slash_command(content) {
+        "[command captured]".to_string()
+    } else {
+        truncate_for_display(content, max_len)
     }
 }
 
