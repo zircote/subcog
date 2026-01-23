@@ -5,6 +5,7 @@ use crate::Result;
 use crate::models::{IssueSeverity, SearchFilter, SearchMode, validate_prompt_content};
 use crate::observability::current_request_id;
 use crate::services::RecallService;
+use std::fmt::Write;
 use std::time::Instant;
 use tracing::instrument;
 
@@ -251,16 +252,27 @@ impl PostToolUseHandler {
             "tool_name": tool_name
         });
 
-        let mut lines = vec!["**Related Subcog Memories**\n".to_string()];
+        // Build single-line XML format for token efficiency
+        let mut xml = String::from("<memories>");
         for m in memories {
-            lines.push(format!(
-                "- **{}** (relevance: {:.0}%): {}",
+            // Escape XML special chars in content
+            let content = m
+                .content
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+                .replace('"', "&quot;");
+            let _ = write!(
+                xml,
+                "<m urn=\"{}\" ns=\"{}\" rel=\"{:.0}\">{}</m>",
                 m.urn,
+                m.namespace,
                 m.relevance * 100.0,
-                m.content
-            ));
+                content
+            );
         }
-        let context = lines.join("\n");
+        xml.push_str("</memories>");
+        let context = xml;
 
         let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
         let context_with_metadata =

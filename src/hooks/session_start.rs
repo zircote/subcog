@@ -11,6 +11,7 @@ use super::HookHandler;
 use crate::Result;
 use crate::observability::current_request_id;
 use crate::services::{ContextBuilderService, MemoryStatistics};
+use std::fmt::Write;
 use std::time::{Duration, Instant};
 use tracing::instrument;
 
@@ -336,9 +337,9 @@ impl SessionStartHandler {
         let mut statistics: Option<MemoryStatistics> = None;
         let mut timed_out = false;
 
-        // Add session header
+        // Add session header as XML
         context_parts.push(format!(
-            "# Subcog Memory Context\n\nSession: {session_id}\nWorking Directory: {cwd}"
+            "<subcog_session id=\"{session_id}\" cwd=\"{cwd}\">"
         ));
 
         // Build context based on guidance level
@@ -381,7 +382,9 @@ impl SessionStartHandler {
             self.add_guidance(&mut context_parts);
         }
 
-        let content = context_parts.join("\n\n");
+        // Close XML and join as single line
+        context_parts.push("</subcog_session>".to_string());
+        let content = context_parts.join("");
         let token_estimate = ContextBuilderService::estimate_tokens(&content);
 
         // Record timing metrics
@@ -408,77 +411,60 @@ impl SessionStartHandler {
         })
     }
 
-    /// Formats memory statistics for context injection.
+    /// Formats memory statistics as single-line XML for context injection.
     fn format_statistics(stats: &MemoryStatistics) -> String {
-        let mut parts = vec!["## Project Memory Summary".to_string()];
-        parts.push(format!("\n**Total memories**: {}", stats.total_count));
+        let mut xml = format!("<stats total=\"{}\">", stats.total_count);
 
         // Namespace breakdown
         if !stats.namespace_counts.is_empty() {
-            parts.push("\n**By namespace**:".to_string());
+            xml.push_str("<namespaces>");
             let mut sorted: Vec<_> = stats.namespace_counts.iter().collect();
             sorted.sort_by(|a, b| b.1.cmp(a.1));
             for (ns, count) in sorted.iter().take(6) {
-                parts.push(format!("- `{ns}`: {count}"));
+                let _ = write!(xml, "<ns name=\"{ns}\" count=\"{count}\"/>");
             }
+            xml.push_str("</namespaces>");
         }
 
         // Top tags
         if !stats.top_tags.is_empty() {
-            parts.push("\n**Top tags**:".to_string());
-            let tag_list: Vec<String> = stats
-                .top_tags
-                .iter()
-                .take(8)
-                .map(|(tag, count)| format!("`{tag}` ({count})"))
-                .collect();
-            parts.push(tag_list.join(", "));
+            xml.push_str("<tags>");
+            for (tag, count) in stats.top_tags.iter().take(8) {
+                let tag_escaped = tag
+                    .replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;")
+                    .replace('"', "&quot;");
+                let _ = write!(xml, "<tag name=\"{tag_escaped}\" count=\"{count}\"/>");
+            }
+            xml.push_str("</tags>");
         }
 
         // Recent topics
         if !stats.recent_topics.is_empty() {
-            parts.push("\n**Recent topics**:".to_string());
+            xml.push_str("<topics>");
             for topic in stats.recent_topics.iter().take(5) {
-                parts.push(format!("- {topic}"));
+                let topic_escaped = topic
+                    .replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;");
+                let _ = write!(xml, "<topic>{topic_escaped}</topic>");
             }
+            xml.push_str("</topics>");
         }
 
-        // Proactive nudge
-        parts.push("\n**Tip**: Use `mcp__plugin_subcog_subcog__subcog_recall` to search for relevant memories when these topics come up in conversation.".to_string());
-
-        parts.join("\n")
+        xml.push_str("</stats>");
+        xml
     }
 
-    /// Returns standard guidance text.
+    /// Returns standard guidance as single-line XML.
     fn standard_guidance() -> String {
-        r"## Subcog Memory Protocol (Quick Start)
-
-Use the `prompt_understanding` tool for full, authoritative guidance.
-
-**Required steps:**
-1) Call `mcp__plugin_subcog_subcog__prompt_understanding` at session start.
-2) Before any substantive response, call `mcp__plugin_subcog_subcog__subcog_recall`.
-3) Capture decisions/patterns/learnings immediately with `mcp__plugin_subcog_subcog__subcog_capture`.
-
-Call `mcp__plugin_subcog_subcog__prompt_understanding` whenever you need the full protocol, namespaces, and workflow examples."
-            .to_string()
+        "<guidance level=\"standard\"><tip>Use prompt_understanding for full docs</tip><steps><step>Call subcog_recall before responses</step><step>Capture decisions/patterns/learnings immediately</step></steps></guidance>".to_string()
     }
 
-    /// Returns detailed guidance text.
+    /// Returns detailed guidance as single-line XML.
     fn detailed_guidance() -> String {
-        r"# Subcog Memory Protocol (Detailed)
-
-This hook is intentionally concise. Use the `prompt_understanding` tool for the full protocol,
-namespaces, workflows, and examples.
-
-**Required steps:**
-1) Call `mcp__plugin_subcog_subcog__prompt_understanding` at session start.
-2) Before any substantive response, call `mcp__plugin_subcog_subcog__subcog_recall`.
-3) Capture decisions/patterns/learnings immediately with `mcp__plugin_subcog_subcog__subcog_capture`.
-
-**Reminder:** The authoritative guidance lives in `prompt_understanding` and should be used
-whenever you need detailed instructions."
-            .to_string()
+        "<guidance level=\"detailed\"><tip>prompt_understanding has full protocol</tip><steps><step>Call subcog_recall before responses</step><step>Capture decisions/patterns/learnings immediately</step><step>Use namespaces: decisions, patterns, learnings, context, tech-debt, apis, config, security, performance, testing</step></steps></guidance>".to_string()
     }
 
     /// Checks if this is the first session (no user memories).
@@ -677,13 +663,13 @@ mod tests {
             hook_output.get("hookEventName"),
             Some(&serde_json::Value::String("SessionStart".to_string()))
         );
-        // Should have additionalContext with session info and metadata embedded
+        // Should have additionalContext with session info as XML and metadata embedded
         let context = hook_output
             .get("additionalContext")
             .unwrap()
             .as_str()
             .unwrap();
-        assert!(context.contains("Subcog Memory Context"));
+        assert!(context.contains("<subcog_session"));
         assert!(context.contains("test-session-abc123def456"));
         assert!(context.contains("subcog-metadata"));
     }
@@ -709,16 +695,16 @@ mod tests {
     fn test_standard_guidance() {
         let guidance = SessionStartHandler::standard_guidance();
         assert!(guidance.contains("prompt_understanding"));
+        assert!(guidance.contains("<guidance"));
         assert!(guidance.contains("subcog_recall"));
-        assert!(guidance.contains("subcog_capture"));
     }
 
     #[test]
     fn test_detailed_guidance() {
         let guidance = SessionStartHandler::detailed_guidance();
         assert!(guidance.contains("prompt_understanding"));
-        assert!(guidance.contains("subcog_recall"));
-        assert!(guidance.contains("subcog_capture"));
+        assert!(guidance.contains("<guidance"));
+        assert!(guidance.contains("namespaces"));
     }
 
     #[test]
