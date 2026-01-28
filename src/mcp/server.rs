@@ -83,9 +83,9 @@ use axum::routing::any_service;
 #[cfg(feature = "http")]
 use axum::{Json, Router};
 use rmcp::model::{
-    AnnotateAble, CallToolRequestParam, CallToolResult, Content, GetPromptRequestParam,
+    AnnotateAble, CallToolRequestParams, CallToolResult, Content, GetPromptRequestParams,
     GetPromptResult, Implementation, ListPromptsResult, ListResourceTemplatesResult,
-    ListResourcesResult, ListToolsResult, PaginatedRequestParam, Prompt,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParams, Prompt,
     PromptArgument as RmcpPromptArgument, PromptMessage as RmcpPromptMessage, PromptMessageContent,
     PromptMessageRole, RawResource, Resource, ResourceContents, ServerCapabilities, ServerInfo,
     Tool,
@@ -178,7 +178,7 @@ async fn await_shutdown(cancel_token: rmcp::service::RunningServiceCancellationT
 
 fn execute_call_tool(
     state: &McpState,
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     start: Instant,
 ) -> McpResult<CallToolResult> {
     let arguments = match request.arguments {
@@ -628,7 +628,7 @@ impl ServerHandler for McpHandler {
 
     fn list_tools(
         &self,
-        _request: Option<PaginatedRequestParam>,
+        _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListToolsResult>> + Send + '_ {
         let state = self.state.clone();
@@ -660,7 +660,7 @@ impl ServerHandler for McpHandler {
 
     fn call_tool(
         &self,
-        request: CallToolRequestParam,
+        request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<CallToolResult>> + Send + '_ {
         let state = self.state.clone();
@@ -709,7 +709,7 @@ impl ServerHandler for McpHandler {
 
     fn list_resources(
         &self,
-        _request: Option<PaginatedRequestParam>,
+        _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListResourcesResult>> + Send + '_ {
         let state = self.state.clone();
@@ -747,7 +747,7 @@ impl ServerHandler for McpHandler {
 
     fn list_resource_templates(
         &self,
-        _request: Option<PaginatedRequestParam>,
+        _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListResourceTemplatesResult>> + Send + '_ {
         let (request_context, request_id) = init_request_context();
@@ -775,7 +775,7 @@ impl ServerHandler for McpHandler {
 
     fn read_resource(
         &self,
-        request: rmcp::model::ReadResourceRequestParam,
+        request: rmcp::model::ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<rmcp::model::ReadResourceResult>> + Send + '_
     {
@@ -816,7 +816,7 @@ impl ServerHandler for McpHandler {
 
     fn list_prompts(
         &self,
-        _request: Option<PaginatedRequestParam>,
+        _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<ListPromptsResult>> + Send + '_ {
         let state = self.state.clone();
@@ -847,7 +847,7 @@ impl ServerHandler for McpHandler {
 
     fn get_prompt(
         &self,
-        request: GetPromptRequestParam,
+        request: GetPromptRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = McpResult<GetPromptResult>> + Send + '_ {
         let state = self.state.clone();
