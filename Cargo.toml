@@ -98,7 +98,7 @@ usearch = { version = "2.21", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
 
 # JWT authentication for MCP HTTP transport
-jsonwebtoken = { version = "10.2", features = ["rust_crypto"] }
+jsonwebtoken = { version = "10.3", features = ["rust_crypto"] }
 
 # HTTP server for MCP HTTP transport (optional)
 axum = { version = "0.8", optional = true }
