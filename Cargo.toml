@@ -126,7 +126,7 @@ ctrlc = "3.5.1"
 # Testing
 proptest = "1.10"
 test-case = "3.3"
-tempfile = "3.14"
+tempfile = "3.25"
 tower = "0.5"
 
 # Async testing
