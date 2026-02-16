@@ -124,7 +124,7 @@ ctrlc = "3.5.1"
 
 [dev-dependencies]
 # Testing
-proptest = "1.5"
+proptest = "1.10"
 test-case = "3.3"
 tempfile = "3.14"
 tower = "0.5"
