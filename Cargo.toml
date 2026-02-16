@@ -81,7 +81,7 @@ secrecy = { version = "0.10", features = ["serde"] }
 
 # Encryption at rest (optional)
 aes-gcm = { version = "0.10", optional = true }
-rand = { version = "0.9", optional = true }
+rand = { version = "0.10", optional = true }
 base64 = { version = "0.22", optional = true }
 
 # LRU cache for recent capture tracking
