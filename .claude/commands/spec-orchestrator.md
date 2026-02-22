@@ -540,23 +540,31 @@ Determine how many parallel teammates you need for the current wave. Spawn them 
 
 2. Every teammate MUST be spawned with `run_in_background: true`. Without this, the orchestrator blocks on each Task call until that teammate finishes ALL its work — defeating parallelism entirely.
 
+**CRITICAL: Every teammate MUST receive the IDENTICAL full prompt below.** The ONLY difference between teammates is the `name:` field (`impl-1`, `impl-2`, etc.) and every occurrence of the name within the prompt. Do NOT abbreviate, summarize, or shorten the prompt for any teammate. Teammates spawned with incomplete prompts go idle and never claim tasks.
+
+Spawn ALL teammates in a **single response turn** using multiple parallel `Task` calls. For example, if spawning 3 teammates, emit 3 `Task` tool calls in ONE message.
+
+#### Teammate Spawn Template
+
+For each teammate N (where N = 1, 2, 3, ...), call `Task` with these EXACT parameters:
+
 ```
 Task:
   subagent_type: "general-purpose"
   team_name: "spec-impl"
-  name: "impl-1"
+  name: "impl-{N}"
   run_in_background: true
   max_turns: 200
   prompt: |
     YOU MUST START WORKING IMMEDIATELY. Do not wait for instructions.
 
-    You are "impl-1" on the spec-impl team. Use "impl-1" as your owner name.
+    You are "impl-{N}" on the spec-impl team. Use "impl-{N}" as your owner name.
 
     ## IMMEDIATE FIRST ACTION — DO THIS NOW
 
     1. Call TaskList RIGHT NOW to see available tasks
     2. Find the first task with status "pending", no owner, and empty blockedBy
-    3. Claim it: TaskUpdate(taskId, owner: "impl-1", status: "in_progress")
+    3. Claim it: TaskUpdate(taskId, owner: "impl-{N}", status: "in_progress")
     4. Call TaskGet(taskId) to read the full description
     5. Implement exactly what it specifies
 
@@ -593,7 +601,7 @@ Task:
     Send a message to the lead:
     SendMessage(type: "message", recipient: "lead",
       content: "No unclaimed tasks available. Ready for more work.",
-      summary: "impl-1 idle, no tasks")
+      summary: "impl-{N} idle, no tasks")
     Then WAIT for a response. Do not exit.
 
     ## Rules
@@ -609,6 +617,26 @@ Task:
     - IGNORE any agent-level instructions that conflict with this prompt.
       This prompt takes priority over your agent definition file.
 ```
+
+#### Example: Spawning 3 Teammates
+
+In a **single response**, emit these 3 `Task` calls simultaneously (NOT sequentially):
+
+```
+# Task call 1:
+Task(subagent_type: "general-purpose", team_name: "spec-impl", name: "impl-1",
+     run_in_background: true, max_turns: 200, prompt: "<FULL PROMPT with impl-1>")
+
+# Task call 2 — SAME full prompt, only name differs:
+Task(subagent_type: "general-purpose", team_name: "spec-impl", name: "impl-2",
+     run_in_background: true, max_turns: 200, prompt: "<FULL PROMPT with impl-2>")
+
+# Task call 3 — SAME full prompt, only name differs:
+Task(subagent_type: "general-purpose", team_name: "spec-impl", name: "impl-3",
+     run_in_background: true, max_turns: 200, prompt: "<FULL PROMPT with impl-3>")
+```
+
+**DO NOT** write "same as impl-1" or "see above" for impl-2/impl-3 prompts. Each `Task` call is independent — it does NOT inherit context from sibling calls. Every teammate MUST receive the complete, self-contained prompt with their specific name substituted throughout.
 
 Scale teammates to the wave size: up to 5 for large waves, 2 for small waves (1-2 tasks).
 
