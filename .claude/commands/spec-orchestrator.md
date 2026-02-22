@@ -26,7 +26,7 @@ You are now running the **spec-orchestrator** procedure. You will execute this s
 
 Parse `$ARGUMENTS` for flags and the spec directory:
 
-- **`--auto`**: Autonomous mode. Skip all `AskUserQuestion` checkpoints, accept all recommendations as-is, and perform maximum work identified. Log decisions to `/tmp/orchestrator-decisions.md` instead of asking.
+- **`--auto`**: Autonomous mode. Skip all `AskUserQuestion` checkpoints, accept all recommendations as-is, and perform maximum work identified. Log decisions to `${WORK_DIR}/orchestrator-decisions.md` instead of asking.
 - **Spec directory**: Any argument that is not a flag. Defaults to `docs/spec/`.
 
 Examples:
@@ -36,6 +36,32 @@ Examples:
 - `/spec-orchestrator --auto docs/api-spec/` → autonomous mode, `docs/api-spec/`
 
 Set `AUTO_MODE=true` if `--auto` is present, `false` otherwise.
+
+### Work Directory
+
+All orchestration artifacts are stored in the **mnemonic blackboard** under a project-specific path. This avoids collisions when running concurrent orchestrations across multiple projects and persists data across sessions for audit and resumption.
+
+```bash
+# Derive the mnemonic blackboard path for this project
+# MNEMONIC_ROOT is typically ~/.local/share/mnemonic
+# The org/project path mirrors the git remote (e.g., zircote/atlatl)
+MNEMONIC_ROOT="${MNEMONIC_ROOT:-$HOME/.local/share/mnemonic}"
+GIT_REMOTE_PATH=$(git remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]||; s|\.git$||')
+WORK_DIR="${MNEMONIC_ROOT}/${GIT_REMOTE_PATH}/.blackboard/orchestrator"
+mkdir -p "${WORK_DIR}/discovery"
+```
+
+Example paths per project:
+- `atlatl` → `~/.local/share/mnemonic/zircote/atlatl/.blackboard/orchestrator/`
+- `nsip` → `~/.local/share/mnemonic/zircote/nsip/.blackboard/orchestrator/`
+
+All paths in this command reference `${WORK_DIR}` — e.g., `${WORK_DIR}/discovery/`, `${WORK_DIR}/task-manifest.md`, `${WORK_DIR}/orchestrator-decisions.md`, `${WORK_DIR}/audit-report.md`.
+
+**Benefits over `/tmp`**:
+- No collisions between concurrent runs across projects
+- Artifacts survive reboots — useful for resuming failed orchestrations
+- Discoverable via mnemonic tooling (`rg` across `~/.local/share/mnemonic/`)
+- Phase 5 cleanup can optionally preserve artifacts for post-mortem analysis
 
 ---
 
@@ -60,7 +86,7 @@ From this, build a **partition plan**: group spec files into batches of 3-5, pai
 
 ### 1.1 Spawn Discovery Subagents
 
-Spawn one `Task` subagent per partition (up to 5 concurrent), using `subagent_type: "general-purpose"`. Each produces a **structured inventory** at `/tmp/discovery/partition-{N}.json`.
+Spawn one `Task` subagent per partition (up to 5 concurrent), using `subagent_type: "general-purpose"`. Each produces a **structured inventory** at `${WORK_DIR}/discovery/partition-{N}.json`.
 
 **IMPORTANT**: Discovery subagents are fire-and-done `Task` calls with NO `team_name`. They cannot use `SendMessage`. Their output is returned via the Task tool result.
 
@@ -88,7 +114,7 @@ and related source code, then produce a structured inventory.
 ## What to Extract
 
 Read every file completely. Do not skim. Then produce a JSON inventory written to
-`/tmp/discovery/{partition_name}.json` with this structure:
+`${WORK_DIR}/discovery/{partition_name}.json` with this structure:
 
 {
   "partition": "{partition_name}",
@@ -175,7 +201,7 @@ If an OpenAPI spec exists, spawn a dedicated `Task` subagent (`subagent_type: "g
 
 ```
 You are an **OpenAPI analyst**. Read the OpenAPI spec completely and produce
-a structured inventory at `/tmp/discovery/openapi.json`.
+a structured inventory at `${WORK_DIR}/discovery/openapi.json`.
 
 Extract:
 - Every path + method combination with full request/response schemas
@@ -202,7 +228,7 @@ If there are standalone JSON schemas, spawn a `Task` subagent (`subagent_type: "
 
 ```
 You are a **schema analyst**. Read the JSON schema completely.
-Produce inventory at `/tmp/discovery/schema.json`.
+Produce inventory at `${WORK_DIR}/discovery/schema.json`.
 
 Extract every type definition, property, constraint, $ref resolution, enum,
 required field, and validation pattern. Map each to the Rust type it should become.
@@ -212,14 +238,14 @@ When done, report: the path to your inventory file, total types found, and a bri
 
 ### 1.4 Collect & Validate Discovery
 
-After all discovery `Task` subagents return their results, use `Glob` pattern `/tmp/discovery/*.json` to verify all inventory files exist. Read only the inventory JSON files — do NOT re-read the original spec files.
+After all discovery `Task` subagents return their results, use `Glob` pattern `${WORK_DIR}/discovery/*.json` to verify all inventory files exist. Read only the inventory JSON files — do NOT re-read the original spec files.
 
 ### 1.5 User Checkpoint
 
 Present a summary of discovery results (endpoint count, model count, gaps).
 
 - **Interactive mode** (`AUTO_MODE=false`): Use `AskUserQuestion` to ask if discovery looks complete or if additional areas need investigation. Do NOT proceed to Phase 2 until the user confirms.
-- **Autonomous mode** (`AUTO_MODE=true`): Log the summary to `/tmp/orchestrator-decisions.md` with the heading `## Phase 1: Discovery Results — Auto-Accepted`. Proceed immediately to Phase 2.
+- **Autonomous mode** (`AUTO_MODE=true`): Log the summary to `${WORK_DIR}/orchestrator-decisions.md` with the heading `## Phase 1: Discovery Results — Auto-Accepted`. Proceed immediately to Phase 2.
 
 ---
 
@@ -246,20 +272,20 @@ jq -s '{
   total_business_logic: [.[].business_logic // [] | length] | add,
   total_gaps: [.[].gaps // [] | length] | add,
   partitions: [.[].partition]
-}' /tmp/discovery/*.json
+}' ${WORK_DIR}/discovery/*.json
 ```
 
 #### Step 2: Extract deduplicated entity lists
 
 ```bash
 # Unique model names across all partitions
-jq -s '[.[].models // [] | .[].name] | unique | .[]' /tmp/discovery/*.json
+jq -s '[.[].models // [] | .[].name] | unique | .[]' ${WORK_DIR}/discovery/*.json
 
 # Unique endpoint paths with methods
-jq -s '[.[].endpoints // [] | .[] | "\(.method) \(.path)"] | unique | sort | .[]' /tmp/discovery/*.json
+jq -s '[.[].endpoints // [] | .[] | "\(.method) \(.path)"] | unique | sort | .[]' ${WORK_DIR}/discovery/*.json
 
 # All gaps aggregated
-jq -s '[.[].gaps // [] | .[]] | unique | .[]' /tmp/discovery/*.json
+jq -s '[.[].gaps // [] | .[]] | unique | .[]' ${WORK_DIR}/discovery/*.json
 ```
 
 #### Step 3: Build merged inventory file (for task generation)
@@ -275,32 +301,32 @@ jq -s '{
   cross_cutting: [.[].cross_cutting // [] | .[]],
   existing_code_notes: [.[].existing_code_notes // [] | .[]],
   gaps: [.[].gaps // [] | .[]] | unique
-}' /tmp/discovery/*.json > /tmp/discovery/merged.json
+}' ${WORK_DIR}/discovery/*.json > ${WORK_DIR}/discovery/merged.json
 ```
 
 #### Step 4: Generate task candidates per phase
 
 ```bash
 # Phase A candidates: shared types, enums, error variants
-jq '[.enums[] | {phase: "A", subject: "Define \(.name) enum", spec_file: .spec_file, existing: .existing_impl}]' /tmp/discovery/merged.json
+jq '[.enums[] | {phase: "A", subject: "Define \(.name) enum", spec_file: .spec_file, existing: .existing_impl}]' ${WORK_DIR}/discovery/merged.json
 
 # Phase B candidates: one task per model
-jq '[.models[] | {phase: "B", subject: "Implement \(.name) model", fields: [.fields[].name], spec_file: .spec_file, existing: .existing_impl}]' /tmp/discovery/merged.json
+jq '[.models[] | {phase: "B", subject: "Implement \(.name) model", fields: [.fields[].name], spec_file: .spec_file, existing: .existing_impl}]' ${WORK_DIR}/discovery/merged.json
 
 # Phase C candidates: repository/data layer per model
-jq '[.models[] | {phase: "C", subject: "Implement \(.name) repository and queries", spec_file: .spec_file, relationships: .relationships}]' /tmp/discovery/merged.json
+jq '[.models[] | {phase: "C", subject: "Implement \(.name) repository and queries", spec_file: .spec_file, relationships: .relationships}]' ${WORK_DIR}/discovery/merged.json
 
 # Phase D candidates: one task per endpoint
-jq '[.endpoints[] | {phase: "D", subject: "\(.method) \(.path)", status_codes: .status_codes, error_cases: .error_cases, spec_file: .spec_file}]' /tmp/discovery/merged.json
+jq '[.endpoints[] | {phase: "D", subject: "\(.method) \(.path)", status_codes: .status_codes, error_cases: .error_cases, spec_file: .spec_file}]' ${WORK_DIR}/discovery/merged.json
 
 # Phase E candidates: business logic and cross-entity workflows
-jq '[.business_logic[] | {phase: "E", subject: "Implement: \(.description)", affected_entities: .affected_entities, spec_file: .spec_file}]' /tmp/discovery/merged.json
+jq '[.business_logic[] | {phase: "E", subject: "Implement: \(.description)", affected_entities: .affected_entities, spec_file: .spec_file}]' ${WORK_DIR}/discovery/merged.json
 
 # Phase F candidates: auth, middleware, cross-cutting concerns
-jq '[.cross_cutting[] | {phase: "F", subject: "Implement \(.concern)", details: .details, spec_file: .spec_file}]' /tmp/discovery/merged.json
+jq '[.cross_cutting[] | {phase: "F", subject: "Implement \(.concern)", details: .details, spec_file: .spec_file}]' ${WORK_DIR}/discovery/merged.json
 
 # Phase G candidates: integration tests per endpoint
-jq '[.endpoints[] | {phase: "G", subject: "Integration tests for \(.method) \(.path)", error_cases: .error_cases, spec_file: .spec_file}]' /tmp/discovery/merged.json
+jq '[.endpoints[] | {phase: "G", subject: "Integration tests for \(.method) \(.path)", error_cases: .error_cases, spec_file: .spec_file}]' ${WORK_DIR}/discovery/merged.json
 
 # Phase H: polish tasks are static (not derived from inventory)
 # - Clippy clean, fmt, doc comments, final `just check`, missing coverage
@@ -313,7 +339,7 @@ After `jq` extracts structured summaries, read only specific sections into conte
 - Read the **gaps** output (Step 3) to identify missing coverage
 - Read individual model/endpoint details from `merged.json` using targeted `jq` queries **only when writing specific task descriptions**
 
-**NEVER read `/tmp/discovery/*.json` files directly with the `Read` tool.** Always use `jq` to extract the specific fields needed.
+**NEVER read `${WORK_DIR}/discovery/*.json` files directly with the `Read` tool.** Always use `jq` to extract the specific fields needed.
 
 #### Merging rules
 
@@ -406,16 +432,16 @@ description: |
   If you need more context beyond this description, query the merged inventory:
   ```bash
   # Full model definition with all fields and constraints
-  jq '.models[] | select(.name == "Thing")' /tmp/discovery/merged.json
+  jq '.models[] | select(.name == "Thing")' ${WORK_DIR}/discovery/merged.json
 
   # All endpoints that reference this model
-  jq '.endpoints[] | select(.request_schema + .response_schema | test("Thing"))' /tmp/discovery/merged.json
+  jq '.endpoints[] | select(.request_schema + .response_schema | test("Thing"))' ${WORK_DIR}/discovery/merged.json
 
   # Validation rules for this entity
-  jq '.validation_rules[] | select(.entity == "Thing")' /tmp/discovery/merged.json
+  jq '.validation_rules[] | select(.entity == "Thing")' ${WORK_DIR}/discovery/merged.json
 
   # Business logic affecting this entity
-  jq '.business_logic[] | select(.affected_entities | index("Thing"))' /tmp/discovery/merged.json
+  jq '.business_logic[] | select(.affected_entities | index("Thing"))' ${WORK_DIR}/discovery/merged.json
   ```
   Do NOT read spec files directly. Use these jq queries to get precisely the context you need.
 
@@ -427,7 +453,7 @@ activeForm: "Implementing Thing model"
 blockedBy: [Phase A task IDs]
 ```
 
-**Critical**: Include enough context in each task description that the implementing teammate does NOT need to read the full spec — only the specific files referenced. Always include a `## Discovery Context` section with entity-specific `jq` queries so the teammate can self-serve additional detail from `/tmp/discovery/merged.json` without reading raw spec files or exhausting their context window.
+**Critical**: Include enough context in each task description that the implementing teammate does NOT need to read the full spec — only the specific files referenced. Always include a `## Discovery Context` section with entity-specific `jq` queries so the teammate can self-serve additional detail from `${WORK_DIR}/discovery/merged.json` without reading raw spec files or exhausting their context window.
 
 #### jq Query Patterns by Phase
 
@@ -446,7 +472,7 @@ Include the appropriate `jq` queries based on the task's phase:
 
 ### 2.4 Write the Task Manifest
 
-Use `Write` to save the full plan to `/tmp/task-manifest.md` as an audit trail for spec coverage.
+Use `Write` to save the full plan to `${WORK_DIR}/task-manifest.md` as an audit trail for spec coverage.
 
 Structure:
 
@@ -476,7 +502,7 @@ Structure:
 Present the task breakdown with dependency graph and spec coverage audit.
 
 - **Interactive mode** (`AUTO_MODE=false`): Use `AskUserQuestion` to ask the user to approve the plan before any code is written. Do NOT proceed to Phase 3 until the user explicitly approves.
-- **Autonomous mode** (`AUTO_MODE=true`): Log the full task manifest to `/tmp/orchestrator-decisions.md` with the heading `## Phase 2: Task Plan — Auto-Accepted`. Proceed immediately to Phase 3.
+- **Autonomous mode** (`AUTO_MODE=true`): Log the full task manifest to `${WORK_DIR}/orchestrator-decisions.md` with the heading `## Phase 2: Task Plan — Auto-Accepted`. Proceed immediately to Phase 3.
 
 ---
 
@@ -543,13 +569,13 @@ Task:
     If you need more detail than the task description provides:
 
     1. Run the `jq` commands listed in the task description via Bash
-    2. These query `/tmp/discovery/merged.json` — the merged spec inventory
-    3. Do NOT read spec files or `/tmp/discovery/*.json` directly with the Read tool
+    2. These query `${WORK_DIR}/discovery/merged.json` — the merged spec inventory
+    3. Do NOT read spec files or `${WORK_DIR}/discovery/*.json` directly with the Read tool
     4. Use targeted `jq` queries to extract only what you need
 
     Example: if your task is about the "Thing" model and you need field constraints:
     ```bash
-    jq '.models[] | select(.name == "Thing") | .fields' /tmp/discovery/merged.json
+    jq '.models[] | select(.name == "Thing") | .fields' ${WORK_DIR}/discovery/merged.json
     ```
 
     ## After Each Task
@@ -642,14 +668,14 @@ Spawn a **verification** `Task` subagent (`subagent_type: "general-purpose"`, no
 You are an **audit analyst**. Verify the implementation fully covers the specification.
 
 Read these via `Read` (use `Glob` to enumerate files first):
-- /tmp/task-manifest.md (the task plan)
-- /tmp/discovery/*.json (the spec inventories)
+- ${WORK_DIR}/task-manifest.md (the task plan)
+- ${WORK_DIR}/discovery/*.json (the spec inventories)
 - Source files under the project's source root (check CLAUDE.md — may be `crates/`, not `src/`)
 
 For every endpoint: verify handler exists, tests exist, error cases are handled.
 For every model: verify struct has all fields and validation logic exists.
 
-Produce a coverage report at /tmp/audit-report.md (covered, missing, partial items
+Produce a coverage report at ${WORK_DIR}/audit-report.md (covered, missing, partial items
 with file references). Report the summary as your final output.
 ```
 
@@ -664,7 +690,7 @@ git add {files_modified}
 git commit -m "feat: complete specification implementation
 
 Implements all endpoints, models, validation, and tests per spec.
-See /tmp/task-manifest.md for full task breakdown."
+See ${WORK_DIR}/task-manifest.md for full task breakdown."
 ```
 
 ---
@@ -698,7 +724,7 @@ Present to the user:
 - Total tasks completed
 - Files created/modified
 - Test results
-- Any unresolved issues or ambiguities logged in `/tmp/issues/`
+- Any unresolved issues or ambiguities logged in `${WORK_DIR}/issues/`
 
 ---
 
@@ -717,7 +743,7 @@ Present to the user:
 11. **Teammates MUST use `subagent_type: "general-purpose"`** — Custom agent types (e.g., `rust-developer`) do not function as teammates. They go permanently idle after spawn, ignore `SendMessage`, and don't claim tasks. Only `general-purpose` works reliably as a teammate because it has all tools and no conflicting agent-level instructions.
 12. **Teammates self-claim tasks** — Teammates find unblocked unclaimed tasks via `TaskList` and claim them with `TaskUpdate(owner)`. This is more resilient than leader-assignment.
 13. **Clean shutdown** — Always send `shutdown_request` to all teammates and call `TeamDelete` when done.
-14. **User checkpoints are mandatory in interactive mode** — `AskUserQuestion` gates between discovery→synthesis and synthesis→execution. In `--auto` mode, checkpoints are logged to `/tmp/orchestrator-decisions.md` and auto-accepted. The user can review decisions after completion.
+14. **User checkpoints are mandatory in interactive mode** — `AskUserQuestion` gates between discovery→synthesis and synthesis→execution. In `--auto` mode, checkpoints are logged to `${WORK_DIR}/orchestrator-decisions.md` and auto-accepted. The user can review decisions after completion.
 
 ---
 
