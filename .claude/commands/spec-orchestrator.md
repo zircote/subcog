@@ -402,6 +402,23 @@ description: |
   ## Existing Code
   - src/models/thing.rs exists but missing archived_at field — extend it
 
+  ## Discovery Context (jq queries for additional detail)
+  If you need more context beyond this description, query the merged inventory:
+  ```bash
+  # Full model definition with all fields and constraints
+  jq '.models[] | select(.name == "Thing")' /tmp/discovery/merged.json
+
+  # All endpoints that reference this model
+  jq '.endpoints[] | select(.request_schema + .response_schema | test("Thing"))' /tmp/discovery/merged.json
+
+  # Validation rules for this entity
+  jq '.validation_rules[] | select(.entity == "Thing")' /tmp/discovery/merged.json
+
+  # Business logic affecting this entity
+  jq '.business_logic[] | select(.affected_entities | index("Thing"))' /tmp/discovery/merged.json
+  ```
+  Do NOT read spec files directly. Use these jq queries to get precisely the context you need.
+
   ## Convention Reminders
   - Use thiserror for error types
   - Follow builder pattern from CLAUDE.md
@@ -410,7 +427,22 @@ activeForm: "Implementing Thing model"
 blockedBy: [Phase A task IDs]
 ```
 
-**Critical**: Include enough context in each task description that the implementing teammate does NOT need to read the full spec — only the specific files referenced.
+**Critical**: Include enough context in each task description that the implementing teammate does NOT need to read the full spec — only the specific files referenced. Always include a `## Discovery Context` section with entity-specific `jq` queries so the teammate can self-serve additional detail from `/tmp/discovery/merged.json` without reading raw spec files or exhausting their context window.
+
+#### jq Query Patterns by Phase
+
+Include the appropriate `jq` queries based on the task's phase:
+
+| Phase | Primary query | Supporting queries |
+|---|---|---|
+| A (enums) | `jq '.enums[] \| select(.name == "X")'` | variants, spec_file |
+| B (models) | `jq '.models[] \| select(.name == "X")'` | fields, relationships, constraints |
+| C (data layer) | `jq '.models[] \| select(.name == "X") \| .relationships'` | related models, foreign keys |
+| D (endpoints) | `jq '.endpoints[] \| select(.path == "/api/X")'` | status_codes, error_cases, auth |
+| E (business logic) | `jq '.business_logic[] \| select(.affected_entities \| index("X"))'` | cross-entity workflows |
+| F (cross-cutting) | `jq '.cross_cutting[] \| select(.concern == "X")'` | rate limits, auth schemes |
+| G (tests) | `jq '.endpoints[] \| select(.path == "/api/X") \| .error_cases'` | all error scenarios to test |
+| H (polish) | `jq '.gaps'` | remaining gaps to address |
 
 ### 2.4 Write the Task Manifest
 
@@ -504,6 +536,21 @@ Task:
 
     DO NOT read CLAUDE.md first. DO NOT explore the codebase first.
     Claim a task IMMEDIATELY, then read CLAUDE.md only if needed for conventions.
+
+    ## Getting Additional Context
+
+    Each task description includes a `## Discovery Context` section with `jq` queries.
+    If you need more detail than the task description provides:
+
+    1. Run the `jq` commands listed in the task description via Bash
+    2. These query `/tmp/discovery/merged.json` — the merged spec inventory
+    3. Do NOT read spec files or `/tmp/discovery/*.json` directly with the Read tool
+    4. Use targeted `jq` queries to extract only what you need
+
+    Example: if your task is about the "Thing" model and you need field constraints:
+    ```bash
+    jq '.models[] | select(.name == "Thing") | .fields' /tmp/discovery/merged.json
+    ```
 
     ## After Each Task
 
