@@ -132,7 +132,6 @@ template-sync:
     git clone --depth 1 --branch {{ template_branch }} \
         "https://github.com/{{ template_repo }}.git" "$TMPDIR/template" 2>/dev/null
     SYNC_PATHS=( \
-        ".claude/agents" \
         ".claude/commands/spec-orchestrator.md" \
         "clippy.toml" \
         "rustfmt.toml" \

@@ -393,13 +393,13 @@ Determine how many parallel teammates you need for the current wave. Spawn them 
 
 **CRITICAL requirements for teammate spawning:**
 
-1. Every teammate MUST be spawned with `run_in_background: true`. Without this, the orchestrator blocks on each Task call until that teammate finishes ALL its work — defeating parallelism entirely.
+1. Every teammate MUST use `subagent_type: "general-purpose"`. Custom agent types (e.g., `rust-developer`) are **broken as teammates** — they do not respond to `SendMessage`, do not claim tasks from `TaskList`, and go permanently idle after spawn. This is a known limitation: custom agents defined in `.claude/agents/` have conflicting instructions that override the teammate prompt. Only `general-purpose` (Tools: `*`, no conflicting agent instructions) works reliably as a teammate.
 
-2. Teammate agent types MUST have team coordination tools (`SendMessage`, `TaskList`, `TaskGet`, `TaskCreate`, `TaskUpdate`) in their tool list. The `rust-developer` agent includes these. If using a custom agent, verify its tools first.
+2. Every teammate MUST be spawned with `run_in_background: true`. Without this, the orchestrator blocks on each Task call until that teammate finishes ALL its work — defeating parallelism entirely.
 
 ```
 Task:
-  subagent_type: "rust-developer"
+  subagent_type: "general-purpose"
   team_name: "spec-impl"
   name: "impl-1"
   run_in_background: true
@@ -582,7 +582,7 @@ Present to the user:
 8. **Context budget** — give each subagent or teammate only CLAUDE.md, the relevant spec files, the relevant source files, and a self-contained task description.
 9. **Task lifecycle is MANDATORY** — `TaskCreate` → teammate claims via `TaskUpdate(owner + in_progress)` → work → verify → `TaskUpdate(completed)`. Never skip status updates; they unblock dependent tasks.
 10. **Team before tasks, tasks before teammates** — Phase 3.1 (TeamCreate) → 3.2 (TaskCreate) → 3.3 (spawn teammates). Tasks created without a team land in the wrong list. No exceptions.
-11. **Teammate agent types MUST include team coordination tools** — Any agent used as a teammate needs `SendMessage`, `TaskList`, `TaskGet`, `TaskCreate`, `TaskUpdate` in its tool list. The `rust-developer` agent includes these. If using a custom agent, verify its tools first. Teammates are spawned via `Task` with `team_name`, `name`, and `run_in_background: true`.
+11. **Teammates MUST use `subagent_type: "general-purpose"`** — Custom agent types (e.g., `rust-developer`) do not function as teammates. They go permanently idle after spawn, ignore `SendMessage`, and don't claim tasks. Only `general-purpose` works reliably as a teammate because it has all tools and no conflicting agent-level instructions.
 12. **Teammates self-claim tasks** — Teammates find unblocked unclaimed tasks via `TaskList` and claim them with `TaskUpdate(owner)`. This is more resilient than leader-assignment.
 13. **Clean shutdown** — Always send `shutdown_request` to all teammates and call `TeamDelete` when done.
 14. **User checkpoints are mandatory in interactive mode** — `AskUserQuestion` gates between discovery→synthesis and synthesis→execution. In `--auto` mode, checkpoints are logged to `/tmp/orchestrator-decisions.md` and auto-accepted. The user can review decisions after completion.
@@ -604,7 +604,7 @@ Present to the user:
 **Discovery subagent can't SendMessage** — This is by design. Fire-and-done `Task` subagents (no `team_name`) communicate via their Task return value, not `SendMessage`. Only team-member teammates (spawned with `team_name`) can use `SendMessage`.
 
 **Teammates not responding / not claiming tasks** — Three possible causes:
-1. **Missing tools**: Verify the agent type's tool list includes `SendMessage`, `TaskList`, `TaskUpdate`, `TaskGet`, `TaskCreate`. Check `.claude/agents/*.md` and add missing tools.
+1. **Wrong agent type**: Custom agents (e.g., `rust-developer`) do not work as teammates. Always use `subagent_type: "general-purpose"`.
 2. **Tasks in wrong namespace**: Tasks created before `TeamCreate` land in the default task list, not the team's. Always create the team FIRST.
 3. **Passive prompt**: The teammate prompt must command immediate action, not describe a workflow. Start with "Call TaskList RIGHT NOW" not "Your workflow is to check TaskList."
 
