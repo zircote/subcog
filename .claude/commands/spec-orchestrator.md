@@ -282,13 +282,28 @@ jq -s '{
 
 ```bash
 # Phase A candidates: shared types, enums, error variants
-jq '[.enums[] | {subject: "Define \(.name) enum", spec_file: .spec_file, existing: .existing_impl}]' /tmp/discovery/merged.json
+jq '[.enums[] | {phase: "A", subject: "Define \(.name) enum", spec_file: .spec_file, existing: .existing_impl}]' /tmp/discovery/merged.json
 
 # Phase B candidates: one task per model
-jq '[.models[] | {subject: "Implement \(.name) model", fields: [.fields[].name], spec_file: .spec_file, existing: .existing_impl}]' /tmp/discovery/merged.json
+jq '[.models[] | {phase: "B", subject: "Implement \(.name) model", fields: [.fields[].name], spec_file: .spec_file, existing: .existing_impl}]' /tmp/discovery/merged.json
+
+# Phase C candidates: repository/data layer per model
+jq '[.models[] | {phase: "C", subject: "Implement \(.name) repository and queries", spec_file: .spec_file, relationships: .relationships}]' /tmp/discovery/merged.json
 
 # Phase D candidates: one task per endpoint
-jq '[.endpoints[] | {subject: "\(.method) \(.path)", status_codes: .status_codes, error_cases: .error_cases, spec_file: .spec_file}]' /tmp/discovery/merged.json
+jq '[.endpoints[] | {phase: "D", subject: "\(.method) \(.path)", status_codes: .status_codes, error_cases: .error_cases, spec_file: .spec_file}]' /tmp/discovery/merged.json
+
+# Phase E candidates: business logic and cross-entity workflows
+jq '[.business_logic[] | {phase: "E", subject: "Implement: \(.description)", affected_entities: .affected_entities, spec_file: .spec_file}]' /tmp/discovery/merged.json
+
+# Phase F candidates: auth, middleware, cross-cutting concerns
+jq '[.cross_cutting[] | {phase: "F", subject: "Implement \(.concern)", details: .details, spec_file: .spec_file}]' /tmp/discovery/merged.json
+
+# Phase G candidates: integration tests per endpoint
+jq '[.endpoints[] | {phase: "G", subject: "Integration tests for \(.method) \(.path)", error_cases: .error_cases, spec_file: .spec_file}]' /tmp/discovery/merged.json
+
+# Phase H: polish tasks are static (not derived from inventory)
+# - Clippy clean, fmt, doc comments, final `just check`, missing coverage
 ```
 
 #### Step 5: Read only what you need
