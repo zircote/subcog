@@ -586,6 +586,14 @@ Task:
     jq '.models[] | select(.name == "Thing") | .fields' ${WORK_DIR}/discovery/merged.json
     ```
 
+    ## During Long Tasks (heartbeat)
+
+    If a task takes more than 5 minutes of work, send a mid-task progress update:
+    SendMessage(type: "message", recipient: "lead",
+      content: "Working on task {id}: {what you've done so far, what remains}",
+      summary: "impl-{N} progress on {id}")
+    This lets the orchestrator know you are active, not stale.
+
     ## After Each Task
 
     1. Run `cargo fmt && cargo clippy -- -D warnings` via Bash
@@ -639,6 +647,38 @@ Task(subagent_type: "general-purpose", team_name: "spec-impl", name: "impl-3",
 **DO NOT** write "same as impl-1" or "see above" for impl-2/impl-3 prompts. Each `Task` call is independent — it does NOT inherit context from sibling calls. Every teammate MUST receive the complete, self-contained prompt with their specific name substituted throughout.
 
 Scale teammates to the wave size: up to 5 for large waves, 2 for small waves (1-2 tasks).
+
+### 3.3.1 Staleness Prevention
+
+Teammates become "stale" (idle, unresponsive, or not claiming tasks) for specific, preventable reasons. Apply these measures proactively:
+
+#### Just-in-Time Spawning
+
+Do NOT spawn all teammates at Phase 3.3 and leave them waiting across multiple waves. Instead:
+
+1. **Spawn teammates when their wave's tasks are unblocked** — not before. Teammates sitting idle while blocked tasks wait for dependencies are wasted resources and may exhaust their turn budget on idle cycles.
+2. **Right-size each wave** — spawn only as many teammates as there are unblocked tasks. If Wave 1 has 4 tasks, spawn 4 teammates. If Wave 2 has 8 tasks, spawn up to 5 (the max).
+3. **Reuse active teammates across waves** — if a teammate from Wave 1 completes and Wave 2 tasks are unblocked, send a `SendMessage` to the existing teammate rather than spawning a new one. Only spawn new teammates if more parallelism is needed.
+4. **Shutdown idle teammates between waves** — if the gap between waves is long (e.g., waiting for cargo check), send `shutdown_request` to idle teammates and spawn fresh ones when the next wave starts. Fresh teammates have full turn budgets.
+
+#### Progress Polling
+
+During wave execution, periodically check progress:
+
+1. Call `TaskList` every 60-90 seconds (approximately every 2-3 orchestrator turns) to check task statuses.
+2. Compare claimed vs completed: if a teammate claimed a task more than 2 polling cycles ago with no completion, it may be struggling.
+3. **Proactive nudge**: Send a `SendMessage` asking for a status update: "impl-2: what's your progress on task {id}? Report status."
+4. A teammate that responds with progress is fine — it's working, just on a complex task. Reset the staleness timer.
+5. A teammate that doesn't respond after a nudge is genuinely stale — follow the escalation procedure in Troubleshooting.
+
+#### Teammate Heartbeat
+
+The teammate prompt already includes "report to lead after each task." For long-running tasks, add a mid-task heartbeat. Include this in the teammate prompt's "After Each Task" section:
+
+> **For tasks that take more than 5 minutes**: Send a progress update to the lead mid-task:
+> `SendMessage(type: "message", recipient: "lead", content: "Working on task {id}: {what you've done so far, what remains}", summary: "impl-{N} progress on {id}")`
+
+This is already included in the teammate prompt template above. The orchestrator uses these heartbeats to distinguish "working but slow" from "genuinely stale."
 
 ### 3.4 Execute in Waves
 
@@ -772,6 +812,9 @@ Present to the user:
 12. **Teammates self-claim tasks** — Teammates find unblocked unclaimed tasks via `TaskList` and claim them with `TaskUpdate(owner)`. This is more resilient than leader-assignment.
 13. **Clean shutdown** — Always send `shutdown_request` to all teammates and call `TeamDelete` when done.
 14. **User checkpoints are mandatory in interactive mode** — `AskUserQuestion` gates between discovery→synthesis and synthesis→execution. In `--auto` mode, checkpoints are logged to `${WORK_DIR}/orchestrator-decisions.md` and auto-accepted. The user can review decisions after completion.
+15. **NEVER take over teammate work** — If teammates appear idle or "stale," you MUST NOT write code, run tests, or complete tasks yourself. The orchestrator's ONLY role is coordination. If you find yourself about to write implementation code, STOP — you are violating this rule. Follow the escalation procedure in Troubleshooting instead.
+16. **Every teammate prompt must be complete and self-contained** — When spawning multiple teammates, each `Task` call must contain the FULL prompt. Do NOT abbreviate prompts for teammates 2+ (e.g., "same as impl-1"). Each `Task` call is independent with no shared context.
+17. **Prevent staleness with just-in-time spawning** — Spawn teammates when their wave's tasks are unblocked, not all at once upfront. Reuse active teammates across waves via `SendMessage`. Shut down idle teammates between long waits and spawn fresh ones with full turn budgets for the next wave. Poll `TaskList` every 60-90 seconds during execution to detect stuck teammates early.
 
 ---
 
@@ -795,3 +838,21 @@ Present to the user:
 3. **Passive prompt**: The teammate prompt must command immediate action, not describe a workflow. Start with "Call TaskList RIGHT NOW" not "Your workflow is to check TaskList."
 
 **No parallelism despite multiple teammates** — Verify every teammate `Task` call includes `run_in_background: true`. Without it, the orchestrator blocks on each spawn until that teammate finishes, making execution sequential.
+
+**Teammates appear "stale" or unresponsive — ESCALATION PROCEDURE** — Do NOT take over their work. Follow this sequence:
+
+1. **Nudge first** (attempt 1): Send a `SendMessage` to the idle teammate:
+   ```
+   SendMessage(type: "message", recipient: "impl-2",
+     content: "Tasks are available. Call TaskList NOW and claim the next pending task.",
+     summary: "Nudge impl-2 to claim tasks")
+   ```
+2. **Wait 30 seconds** — Teammates go idle between turns. A nudge message wakes them up. Give them time to process.
+3. **Nudge again** (attempt 2): If still idle after 30s, send another `SendMessage` with more urgency.
+4. **Spawn replacement** (attempt 3): If a teammate is truly unresponsive after 2 nudges, spawn a NEW teammate with a fresh full prompt:
+   ```
+   Task(subagent_type: "general-purpose", team_name: "spec-impl",
+     name: "impl-2b", run_in_background: true, max_turns: 200,
+     prompt: "<FULL PROMPT with impl-2b>")
+   ```
+5. **NEVER do the work yourself** — Even if all teammates are unresponsive, spawn new ones. The orchestrator coordinates; it does not implement. If you catch yourself writing implementation code, you have violated Rule 15.
