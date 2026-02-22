@@ -230,7 +230,77 @@ With all inventories loaded, synthesize the complete task plan.
 
 ### 2.1 Merge Inventories
 
-Combine all discovery outputs into a unified picture:
+**CRITICAL: Use `jq` to process inventory JSON files instead of reading them into context.**
+Discovery inventories can be large. Reading them all into the context window risks exhaustion.
+Use `jq` via `Bash` to extract, merge, and summarize without loading raw JSON into context.
+
+#### Step 1: Get aggregate counts (zero context cost)
+
+```bash
+# Count endpoints, models, enums across all partitions
+jq -s '{
+  total_endpoints: [.[].endpoints // [] | length] | add,
+  total_models: [.[].models // [] | length] | add,
+  total_enums: [.[].enums // [] | length] | add,
+  total_validation_rules: [.[].validation_rules // [] | length] | add,
+  total_business_logic: [.[].business_logic // [] | length] | add,
+  total_gaps: [.[].gaps // [] | length] | add,
+  partitions: [.[].partition]
+}' /tmp/discovery/*.json
+```
+
+#### Step 2: Extract deduplicated entity lists
+
+```bash
+# Unique model names across all partitions
+jq -s '[.[].models // [] | .[].name] | unique | .[]' /tmp/discovery/*.json
+
+# Unique endpoint paths with methods
+jq -s '[.[].endpoints // [] | .[] | "\(.method) \(.path)"] | unique | sort | .[]' /tmp/discovery/*.json
+
+# All gaps aggregated
+jq -s '[.[].gaps // [] | .[]] | unique | .[]' /tmp/discovery/*.json
+```
+
+#### Step 3: Build merged inventory file (for task generation)
+
+```bash
+# Merge all partitions into a single deduplicated inventory
+jq -s '{
+  endpoints: [.[].endpoints // [] | .[]] | unique_by(.method + .path),
+  models: [.[].models // [] | .[]] | unique_by(.name),
+  enums: [.[].enums // [] | .[]] | unique_by(.name),
+  validation_rules: [.[].validation_rules // [] | .[]],
+  business_logic: [.[].business_logic // [] | .[]],
+  cross_cutting: [.[].cross_cutting // [] | .[]],
+  existing_code_notes: [.[].existing_code_notes // [] | .[]],
+  gaps: [.[].gaps // [] | .[]] | unique
+}' /tmp/discovery/*.json > /tmp/discovery/merged.json
+```
+
+#### Step 4: Generate task candidates per phase
+
+```bash
+# Phase A candidates: shared types, enums, error variants
+jq '[.enums[] | {subject: "Define \(.name) enum", spec_file: .spec_file, existing: .existing_impl}]' /tmp/discovery/merged.json
+
+# Phase B candidates: one task per model
+jq '[.models[] | {subject: "Implement \(.name) model", fields: [.fields[].name], spec_file: .spec_file, existing: .existing_impl}]' /tmp/discovery/merged.json
+
+# Phase D candidates: one task per endpoint
+jq '[.endpoints[] | {subject: "\(.method) \(.path)", status_codes: .status_codes, error_cases: .error_cases, spec_file: .spec_file}]' /tmp/discovery/merged.json
+```
+
+#### Step 5: Read only what you need
+
+After `jq` extracts structured summaries, read only specific sections into context:
+- Read the **counts** output (Step 1) to understand scope
+- Read the **gaps** output (Step 3) to identify missing coverage
+- Read individual model/endpoint details from `merged.json` using targeted `jq` queries **only when writing specific task descriptions**
+
+**NEVER read `/tmp/discovery/*.json` files directly with the `Read` tool.** Always use `jq` to extract the specific fields needed.
+
+#### Merging rules
 
 - **Deduplicate**: Same model referenced in multiple partitions → merge into one entry
 - **Resolve cross-references**: Endpoint X references Model Y from a different partition
