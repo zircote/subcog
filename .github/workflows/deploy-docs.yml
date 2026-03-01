@@ -161,7 +161,7 @@ jobs:
           echo "- Name: \`$ARTIFACT_NAME\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: docs-${{ env.PROJECT_ID }}
           path: /tmp/docs-deploy-${{ env.PROJECT_ID }}/
