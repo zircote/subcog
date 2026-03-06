@@ -121,7 +121,7 @@ impl GcResult {
 ///     println!("Stale branches: {:?}", result.stale_branches);
 /// }
 /// ```
-pub struct BranchGarbageCollector<I: IndexBackend> {
+pub struct BranchGarbageCollector<I: IndexBackend + ?Sized> {
     /// Reference to the index backend for querying and updating memories.
     index: Arc<I>,
 
@@ -130,7 +130,7 @@ pub struct BranchGarbageCollector<I: IndexBackend> {
     repo_path: Option<std::path::PathBuf>,
 }
 
-impl<I: IndexBackend> BranchGarbageCollector<I> {
+impl<I: IndexBackend + ?Sized> BranchGarbageCollector<I> {
     /// Creates a new branch garbage collector.
     ///
     /// # Arguments

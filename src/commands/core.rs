@@ -319,7 +319,7 @@ pub fn cmd_consolidate(
     let recall_service = services.recall()?;
 
     // Get index backend
-    let index = Arc::new(services.index()?);
+    let index = services.index()?;
 
     // Build LLM provider (optional, for summarization)
     let llm_provider: Option<Arc<dyn subcog::llm::LlmProvider>> = {

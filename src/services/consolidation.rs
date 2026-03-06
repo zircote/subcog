@@ -22,8 +22,7 @@ use crate::models::{
 };
 use crate::observability::current_request_id;
 use crate::security::record_event;
-use crate::storage::index::SqliteBackend;
-use crate::storage::traits::PersistenceBackend;
+use crate::storage::traits::{IndexBackend, PersistenceBackend};
 use lru::LruCache;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
@@ -63,7 +62,7 @@ pub struct ConsolidationService<P: PersistenceBackend> {
     /// Optional LLM provider for intelligent consolidation.
     llm: Option<Arc<dyn LlmProvider + Send + Sync>>,
     /// Optional index backend for storing memory edges.
-    index: Option<Arc<SqliteBackend>>,
+    index: Option<Arc<dyn IndexBackend + Send + Sync>>,
 }
 
 impl<P: PersistenceBackend> ConsolidationService<P> {
@@ -132,7 +131,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     ///
     /// # Arguments
     ///
-    /// * `index` - The `SQLite` index backend to use for edge storage.
+    /// * `index` - The index backend to use for edge storage.
     ///
     /// # Examples
     ///
@@ -149,7 +148,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     /// # Ok::<(), subcog::Error>(())
     /// ```
     #[must_use]
-    pub fn with_index(mut self, index: Arc<SqliteBackend>) -> Self {
+    pub fn with_index(mut self, index: Arc<dyn IndexBackend + Send + Sync>) -> Self {
         self.index = Some(index);
         self
     }
@@ -1372,7 +1371,6 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
         // from_id and to_id referencing the memories table.
         if let Some(ref index) = self.index {
             // Index the summary node first so foreign key constraint for to_id is satisfied
-            use crate::storage::traits::IndexBackend;
             if let Err(e) = index.index(&summary_node) {
                 tracing::warn!(
                     error = %e,
@@ -1490,7 +1488,7 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     /// # Ok::<(), subcog::Error>(())
     /// ```
     #[instrument(skip(self, memories, index), fields(memory_count = memories.len()))]
-    fn create_related_edges(&self, memories: &[Memory], index: &Arc<SqliteBackend>) -> Result<()> {
+    fn create_related_edges(&self, memories: &[Memory], index: &Arc<dyn IndexBackend + Send + Sync>) -> Result<()> {
         if memories.len() < 2 {
             tracing::debug!("Fewer than 2 memories, skipping edge creation");
             return Ok(());
@@ -2860,7 +2858,7 @@ mod tests {
 
         // Create SQLite index backend
         let index = SqliteBackend::in_memory().expect("Failed to create in-memory SQLite");
-        let index_arc = Arc::new(index);
+        let index_arc: Arc<dyn IndexBackend + Send + Sync> = Arc::new(index);
 
         let service = ConsolidationService::new(backend).with_index(index_arc.clone());
 
@@ -2939,7 +2937,7 @@ mod tests {
         let backend = FilesystemBackend::new(&path);
 
         let index = SqliteBackend::in_memory().expect("Failed to create in-memory SQLite");
-        let index_arc = Arc::new(index);
+        let index_arc: Arc<dyn IndexBackend + Send + Sync> = Arc::new(index);
 
         let service = ConsolidationService::new(backend).with_index(index_arc.clone());
 

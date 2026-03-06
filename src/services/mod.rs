@@ -151,7 +151,7 @@ use crate::context::GitContext;
 use crate::embedding::Embedder;
 use crate::models::{Memory, MemoryId, SearchFilter};
 use crate::storage::index::{
-    DomainIndexConfig, DomainIndexManager, DomainScope, OrgIndexConfig, SqliteBackend,
+    DomainIndexConfig, DomainIndexManager, DomainScope, OrgIndexConfig,
     find_repo_root, get_user_data_dir,
 };
 use crate::storage::traits::{IndexBackend, VectorBackend};
@@ -283,6 +283,11 @@ pub struct ServiceContainer {
     embedder: Option<Arc<dyn Embedder>>,
     /// Shared vector backend for both capture and recall.
     vector: Option<Arc<dyn VectorBackend + Send + Sync>>,
+    /// Shared index backend for recall (from factory, may be PostgreSQL or `SQLite`).
+    ///
+    /// When `Some`, this is used by [`recall_for_scope`](Self::recall_for_scope)
+    /// instead of the `DomainIndexManager` (which only creates `SQLite` backends).
+    index: Option<Arc<dyn IndexBackend + Send + Sync>>,
 }
 
 impl ServiceContainer {
@@ -373,6 +378,7 @@ impl ServiceContainer {
             user_data_dir,
             embedder: backends.embedder,
             vector: backends.vector,
+            index: backends.index,
         })
     }
 
@@ -471,6 +477,7 @@ impl ServiceContainer {
             user_data_dir,
             embedder: backends.embedder,
             vector: backends.vector,
+            index: backends.index,
         })
     }
 
@@ -520,28 +527,36 @@ impl ServiceContainer {
     /// Creates a recall service for a specific domain scope.
     ///
     /// The recall service is configured with:
-    /// - Index backend (`SQLite` FTS5) for text search
+    /// - Index backend (`SQLite` FTS5 or PostgreSQL tsvector) for text search
     /// - Embedder for generating query embeddings (if available)
     /// - Vector backend for similarity search (if available)
+    ///
+    /// When a factory-created index is available (e.g., PostgreSQL), it is used
+    /// directly. Otherwise, falls back to creating a `SQLite` backend via
+    /// `DomainIndexManager`.
     ///
     /// # Errors
     ///
     /// Returns an error if the index cannot be initialized.
     pub fn recall_for_scope(&self, scope: DomainScope) -> Result<RecallService> {
-        // Use high-level API that handles path resolution and directory creation
-        let index = {
-            let manager = self
-                .index_manager
-                .lock()
-                .map_err(|e| Error::OperationFailed {
-                    operation: "lock_index_manager".to_string(),
-                    cause: e.to_string(),
-                })?;
-            manager.create_backend(scope)?
-        }; // Lock released here
-
-        // Start with index-only service
-        let mut service = RecallService::with_index(index);
+        // Prefer the factory-created index (may be PostgreSQL or SQLite)
+        let mut service = if let Some(ref index) = self.index {
+            tracing::debug!("Using factory-created index backend for recall");
+            RecallService::with_dyn_index(Arc::clone(index))
+        } else {
+            // Fall back to DomainIndexManager (always SQLite)
+            let index = {
+                let manager = self
+                    .index_manager
+                    .lock()
+                    .map_err(|e| Error::OperationFailed {
+                        operation: "lock_index_manager".to_string(),
+                        cause: e.to_string(),
+                    })?;
+                manager.create_backend(scope)?
+            }; // Lock released here
+            RecallService::with_index(index)
+        };
 
         // Add embedder and vector backends if available
         if let Some(ref embedder) = self.embedder {
@@ -614,12 +629,18 @@ impl ServiceContainer {
         self.vector.clone()
     }
 
-    /// Creates an index backend for the project scope.
+    /// Returns the index backend for the project scope.
+    ///
+    /// When a factory-created index is available (e.g., PostgreSQL), returns it.
+    /// Otherwise, falls back to creating a `SQLite` backend via `DomainIndexManager`.
     ///
     /// # Errors
     ///
     /// Returns an error if the index cannot be initialized.
-    pub fn index(&self) -> Result<SqliteBackend> {
+    pub fn index(&self) -> Result<Arc<dyn IndexBackend + Send + Sync>> {
+        if let Some(ref index) = self.index {
+            return Ok(Arc::clone(index));
+        }
         let manager = self
             .index_manager
             .lock()
@@ -627,7 +648,8 @@ impl ServiceContainer {
                 operation: "lock_index_manager".to_string(),
                 cause: e.to_string(),
             })?;
-        manager.create_backend(DomainScope::Project)
+        let backend = manager.create_backend(DomainScope::Project)?;
+        Ok(Arc::new(backend))
     }
 
     /// Builds a `CaptureService` from available backends.
@@ -903,10 +925,10 @@ impl ServiceContainer {
         manager.get_index_path(scope)
     }
 
-    /// Rebuilds the FTS index from `SQLite` data for a specific scope.
+    /// Rebuilds the FTS index for a specific scope.
     ///
-    /// Since `SQLite` is the authoritative storage, this function reads all memories
-    /// from the `SQLite` database and rebuilds the FTS5 full-text search index.
+    /// Reads all memories from the index backend and rebuilds the full-text
+    /// search index. Works with both `SQLite` and PostgreSQL backends.
     ///
     /// # Arguments
     ///
@@ -922,8 +944,10 @@ impl ServiceContainer {
     pub fn reindex_scope(&self, scope: DomainScope) -> Result<usize> {
         use crate::models::SearchFilter;
 
-        // Create index backend using high-level API
-        let index = {
+        // Use factory index if available, otherwise fall back to DomainIndexManager
+        let index: Arc<dyn IndexBackend + Send + Sync> = if let Some(ref idx) = self.index {
+            Arc::clone(idx)
+        } else {
             let manager = self
                 .index_manager
                 .lock()
@@ -931,7 +955,7 @@ impl ServiceContainer {
                     operation: "lock_index_manager".to_string(),
                     cause: e.to_string(),
                 })?;
-            manager.create_backend(scope)?
+            Arc::new(manager.create_backend(scope)?)
         };
 
         // Get all memory IDs from SQLite
