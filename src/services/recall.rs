@@ -68,7 +68,7 @@ pub const DEFAULT_SEARCH_TIMEOUT_MS: u64 = 5_000;
 /// Service for searching and retrieving memories.
 ///
 /// Supports three search modes:
-/// - **Text**: BM25 full-text search via `SQLite` FTS5
+/// - **Text**: BM25 full-text search via `SQLite` FTS5 or PostgreSQL tsvector
 /// - **Vector**: Semantic similarity search via embedding + vector backend
 /// - **Hybrid**: Combines both using Reciprocal Rank Fusion (RRF)
 ///
@@ -84,8 +84,8 @@ pub const DEFAULT_SEARCH_TIMEOUT_MS: u64 = 5_000;
 /// Search operations respect a configurable timeout (default 5 seconds).
 /// If the deadline is exceeded, the search returns partial results or an error.
 pub struct RecallService {
-    /// `SQLite` index backend for BM25 text search.
-    index: Option<SqliteBackend>,
+    /// Index backend for BM25 text search (`SQLite` FTS5 or PostgreSQL tsvector).
+    index: Option<Arc<dyn IndexBackend + Send + Sync>>,
     /// Embedder for generating query embeddings (optional).
     embedder: Option<Arc<dyn Embedder>>,
     /// Vector backend for similarity search (optional).
@@ -104,7 +104,7 @@ impl RecallService {
     /// This is primarily for testing. Use [`with_index`](Self::with_index) or
     /// [`with_backends`](Self::with_backends) for production use.
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             index: None,
             embedder: None,
@@ -115,11 +115,28 @@ impl RecallService {
         }
     }
 
-    /// Creates a recall service with an index backend (text search only).
+    /// Creates a recall service with a `SQLite` index backend (text search only).
     ///
     /// Vector search will be disabled; hybrid search falls back to text-only.
     #[must_use]
-    pub const fn with_index(index: SqliteBackend) -> Self {
+    pub fn with_index(index: SqliteBackend) -> Self {
+        Self {
+            index: Some(Arc::new(index)),
+            embedder: None,
+            vector: None,
+            graph: None,
+            scope_filter: None,
+            timeout_ms: DEFAULT_SEARCH_TIMEOUT_MS,
+        }
+    }
+
+    /// Creates a recall service with a dynamic index backend (text search only).
+    ///
+    /// Use this when the index backend is already wrapped in `Arc` (e.g., from
+    /// [`BackendFactory`](crate::services::BackendFactory)). This supports both
+    /// `SQLite` FTS5 and PostgreSQL tsvector backends.
+    #[must_use]
+    pub fn with_dyn_index(index: Arc<dyn IndexBackend + Send + Sync>) -> Self {
         Self {
             index: Some(index),
             embedder: None,
@@ -144,7 +161,7 @@ impl RecallService {
         vector: Arc<dyn VectorBackend + Send + Sync>,
     ) -> Self {
         Self {
-            index: Some(index),
+            index: Some(Arc::new(index)),
             embedder: Some(embedder),
             vector: Some(vector),
             graph: None,

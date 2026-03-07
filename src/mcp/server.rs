@@ -911,6 +911,7 @@ fn tool_definition_to_rmcp(def: &ToolDefinition) -> Tool {
         output_schema: None,
         annotations: None,
         icons: None,
+        execution: None,
         meta: None,
     }
 }

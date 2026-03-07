@@ -38,7 +38,6 @@ use crate::Result;
 use crate::models::{EventMeta, Memory, MemoryEvent, MemoryId, SearchFilter};
 use crate::observability::current_request_id;
 use crate::security::{AuditEntry, AuditOutcome, global_logger, record_event};
-use crate::storage::index::SqliteBackend;
 use crate::storage::traits::{IndexBackend, VectorBackend};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -336,8 +335,8 @@ pub struct DeletionFailure {
 /// - `gdpr.export` - Data export requests
 /// - `gdpr.delete` - Data deletion requests
 pub struct DataSubjectService {
-    /// `SQLite` index backend for listing and deleting memories.
-    index: SqliteBackend,
+    /// Index backend for listing and deleting memories.
+    index: Arc<dyn IndexBackend + Send + Sync>,
     /// Optional vector backend for deleting embeddings.
     vector: Option<Arc<dyn VectorBackend + Send + Sync>>,
 }
@@ -347,9 +346,9 @@ impl DataSubjectService {
     ///
     /// # Arguments
     ///
-    /// * `index` - `SQLite` index backend for memory operations
+    /// * `index` - Index backend for memory operations
     #[must_use]
-    pub const fn new(index: SqliteBackend) -> Self {
+    pub fn new(index: Arc<dyn IndexBackend + Send + Sync>) -> Self {
         Self {
             index,
             vector: None,
@@ -815,6 +814,11 @@ mod tests {
     use super::*;
     use crate::models::{Domain, MemoryStatus, Namespace};
     use crate::storage::index::SqliteBackend;
+    use crate::storage::traits::IndexBackend;
+
+    fn in_memory_index() -> Arc<dyn IndexBackend + Send + Sync> {
+        Arc::new(SqliteBackend::in_memory().expect("Failed to create index"))
+    }
 
     fn create_test_memory(id: &str, content: &str, namespace: Namespace) -> Memory {
         Memory {
@@ -843,7 +847,7 @@ mod tests {
 
     #[test]
     fn test_export_user_data_empty() {
-        let index = SqliteBackend::in_memory().expect("Failed to create index");
+        let index = in_memory_index();
         let service = DataSubjectService::new(index);
 
         let export = service.export_user_data().expect("Export failed");
@@ -857,7 +861,7 @@ mod tests {
 
     #[test]
     fn test_export_user_data_with_memories() {
-        let index = SqliteBackend::in_memory().expect("Failed to create index");
+        let index = in_memory_index();
 
         // Add test memories
         let mem1 = create_test_memory("id1", "Decision: Use PostgreSQL", Namespace::Decisions);
@@ -891,7 +895,7 @@ mod tests {
 
     #[test]
     fn test_delete_user_data_empty() {
-        let index = SqliteBackend::in_memory().expect("Failed to create index");
+        let index = in_memory_index();
         let service = DataSubjectService::new(index);
 
         let result = service.delete_user_data().expect("Delete failed");
@@ -905,7 +909,7 @@ mod tests {
 
     #[test]
     fn test_delete_user_data_with_memories() {
-        let index = SqliteBackend::in_memory().expect("Failed to create index");
+        let index = in_memory_index();
 
         // Add test memories
         let mem1 = create_test_memory("id1", "To be deleted 1", Namespace::Decisions);
@@ -1007,7 +1011,7 @@ mod tests {
 
     #[test]
     fn test_service_builder_pattern() {
-        let index = SqliteBackend::in_memory().expect("Failed to create index");
+        let index = in_memory_index();
 
         // Test builder pattern compiles and works
         let service = DataSubjectService::new(index);
@@ -1019,7 +1023,7 @@ mod tests {
 
     #[test]
     fn test_export_preserves_all_namespaces() {
-        let index = SqliteBackend::in_memory().expect("Failed to create index");
+        let index = in_memory_index();
 
         // Add memories with different namespaces
         for ns in Namespace::user_namespaces() {
@@ -1054,7 +1058,7 @@ mod tests {
 
     #[test]
     fn test_delete_clears_all_memories() {
-        let index = SqliteBackend::in_memory().expect("Failed to create index");
+        let index = in_memory_index();
 
         // Add many memories
         for i in 0..10 {
@@ -1175,7 +1179,7 @@ mod tests {
 
     #[test]
     fn test_service_record_consent() {
-        let index = SqliteBackend::in_memory().expect("Failed to create index");
+        let index = in_memory_index();
         let service = DataSubjectService::new(index);
 
         let record = ConsentRecord::grant(ConsentPurpose::DataStorage, "1.0");
@@ -1186,7 +1190,7 @@ mod tests {
 
     #[test]
     fn test_service_revoke_consent() {
-        let index = SqliteBackend::in_memory().expect("Failed to create index");
+        let index = in_memory_index();
         let service = DataSubjectService::new(index);
 
         let result = service.revoke_consent(ConsentPurpose::Analytics, "1.0");
@@ -1196,7 +1200,7 @@ mod tests {
 
     #[test]
     fn test_service_has_consent() {
-        let index = SqliteBackend::in_memory().expect("Failed to create index");
+        let index = in_memory_index();
         let service = DataSubjectService::new(index);
 
         // Default is true for backward compatibility
@@ -1206,7 +1210,7 @@ mod tests {
 
     #[test]
     fn test_service_consent_status() {
-        let index = SqliteBackend::in_memory().expect("Failed to create index");
+        let index = in_memory_index();
         let service = DataSubjectService::new(index);
 
         let status = service.consent_status();

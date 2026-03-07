@@ -1554,6 +1554,9 @@ pub struct ConfigFileStorageBackend {
     pub connection_string: Option<String>,
     /// Redis URL for redis backend.
     pub redis_url: Option<String>,
+    /// Maximum connection pool size for PostgreSQL backends.
+    /// Defaults to 20 if not specified.
+    pub pool_max_size: Option<usize>,
     /// Enable encryption at rest (COMP-CRIT-002).
     /// Defaults to true when not specified.
     pub encryption_enabled: Option<bool>,
@@ -1879,6 +1882,7 @@ impl StorageConfig {
                 .project
                 .connection_string
                 .clone_from(&project.connection_string);
+            config.project.pool_max_size = project.pool_max_size;
             // COMP-CRIT-002: Allow explicit override, default is true
             if let Some(encryption) = project.encryption_enabled {
                 config.project.encryption_enabled = encryption;
@@ -1894,6 +1898,7 @@ impl StorageConfig {
                 .user
                 .connection_string
                 .clone_from(&user.connection_string);
+            config.user.pool_max_size = user.pool_max_size;
             // COMP-CRIT-002: Allow explicit override, default is true
             if let Some(encryption) = user.encryption_enabled {
                 config.user.encryption_enabled = encryption;
@@ -1909,6 +1914,7 @@ impl StorageConfig {
                 .org
                 .connection_string
                 .clone_from(&org.connection_string);
+            config.org.pool_max_size = org.pool_max_size;
             // COMP-CRIT-002: Allow explicit override, default is true
             if let Some(encryption) = org.encryption_enabled {
                 config.org.encryption_enabled = encryption;
@@ -2307,6 +2313,41 @@ impl SubcogConfig {
             self.features.org_scope_enabled = enabled;
             if enabled {
                 tracing::info!("Org-scope enabled via SUBCOG_ORG_SCOPE_ENABLED");
+            }
+        }
+
+        // Storage backend env var overrides for k8s/container deployments.
+        // These override ALL scopes (project, user, org) for simplicity.
+        if let Ok(value) = std::env::var("SUBCOG_STORAGE_BACKEND") {
+            let backend = StorageBackendType::parse(&value);
+            self.storage.project.backend = backend;
+            self.storage.user.backend = backend;
+            self.storage.org.backend = backend;
+            tracing::info!(
+                backend = ?backend,
+                "Storage backend configured via SUBCOG_STORAGE_BACKEND"
+            );
+        }
+        if let Ok(value) = std::env::var("SUBCOG_STORAGE_CONNECTION_STRING") {
+            self.storage.project.connection_string = Some(value.clone());
+            self.storage.user.connection_string = Some(value.clone());
+            self.storage.org.connection_string = Some(value);
+            tracing::info!("Storage connection string configured via SUBCOG_STORAGE_CONNECTION_STRING");
+        }
+        if let Ok(value) = std::env::var("SUBCOG_STORAGE_POOL_MAX_SIZE") {
+            if let Ok(size) = value.parse::<usize>() {
+                self.storage.project.pool_max_size = Some(size);
+                self.storage.user.pool_max_size = Some(size);
+                self.storage.org.pool_max_size = Some(size);
+                tracing::info!(
+                    pool_max_size = size,
+                    "Storage pool size configured via SUBCOG_STORAGE_POOL_MAX_SIZE"
+                );
+            } else {
+                tracing::warn!(
+                    value = %value,
+                    "Invalid SUBCOG_STORAGE_POOL_MAX_SIZE value, ignoring"
+                );
             }
         }
 
