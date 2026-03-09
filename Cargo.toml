@@ -43,7 +43,7 @@ parquet = { version = "58", optional = true, default-features = false, features 
 rmcp = { version = "0.17.0", features = ["transport-io", "transport-streamable-http-server"] }
 
 # Async runtime
-tokio = { version = "1.0", features = ["full"] }
+tokio = { version = "1.50", features = ["full"] }
 
 # Logging and tracing
 tracing = "0.1"
