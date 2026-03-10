@@ -9,8 +9,8 @@ use std::error::Error;
 
 use subcog::config::SubcogConfig;
 use subcog::models::graph::{Entity, EntityId, EntityQuery, EntityType};
-use subcog::services::GraphService;
-use subcog::storage::graph::SqliteGraphBackend;
+use subcog::services::{GraphService, ServiceContainer};
+use subcog::storage::graph::GraphBackend;
 
 /// Graph action subcommands.
 #[derive(clap::Subcommand)]
@@ -87,19 +87,18 @@ pub fn cmd_graph(config: &SubcogConfig, action: GraphAction) -> Result<(), Box<d
     }
 }
 
-/// Open the graph service with `SQLite` backend.
+/// Open the graph service with the configured backend (PostgreSQL or SQLite).
 fn open_graph_service(
     config: &SubcogConfig,
-) -> Result<GraphService<SqliteGraphBackend>, Box<dyn Error>> {
-    let db_path = config.data_dir.join("graph.db");
-    let backend =
-        SqliteGraphBackend::new(&db_path).map_err(|e| format!("Failed to open graph: {e}"))?;
+) -> Result<GraphService<Box<dyn GraphBackend>>, Box<dyn Error>> {
+    let backend = ServiceContainer::create_graph_backend(config, &config.data_dir)
+        .map_err(|e| format!("Failed to open graph: {e}"))?;
     Ok(GraphService::new(backend))
 }
 
 /// List or search entities.
 fn cmd_entities(
-    service: &GraphService<SqliteGraphBackend>,
+    service: &GraphService<Box<dyn GraphBackend>>,
     query: Option<String>,
     entity_type: Option<String>,
     limit: usize,
@@ -137,7 +136,7 @@ fn cmd_entities(
 
 /// Show relationships for an entity.
 fn cmd_relationships(
-    service: &GraphService<SqliteGraphBackend>,
+    service: &GraphService<Box<dyn GraphBackend>>,
     entity: &str,
     depth: u32,
     format: &str,
@@ -178,7 +177,7 @@ fn cmd_relationships(
 }
 
 /// Show graph statistics.
-fn cmd_stats(service: &GraphService<SqliteGraphBackend>) -> Result<(), Box<dyn Error>> {
+fn cmd_stats(service: &GraphService<Box<dyn GraphBackend>>) -> Result<(), Box<dyn Error>> {
     let stats = service.get_stats()?;
 
     println!("Knowledge Graph Statistics");
@@ -201,7 +200,7 @@ fn cmd_stats(service: &GraphService<SqliteGraphBackend>) -> Result<(), Box<dyn E
 
 /// Get details for a specific entity.
 fn cmd_get_entity(
-    service: &GraphService<SqliteGraphBackend>,
+    service: &GraphService<Box<dyn GraphBackend>>,
     entity: &str,
     format: &str,
 ) -> Result<(), Box<dyn Error>> {
@@ -269,7 +268,7 @@ fn parse_entity_type(s: &str) -> Result<EntityType, Box<dyn Error>> {
 
 /// Resolve an entity by ID or name.
 fn resolve_entity(
-    service: &GraphService<SqliteGraphBackend>,
+    service: &GraphService<Box<dyn GraphBackend>>,
     entity: &str,
 ) -> Result<EntityId, Box<dyn Error>> {
     // First try as an ID

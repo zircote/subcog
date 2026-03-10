@@ -374,6 +374,136 @@ pub trait GraphBackend: Send + Sync {
     fn clear(&self) -> Result<()>;
 }
 
+// Blanket impl for Box<dyn GraphBackend> to support dynamic dispatch.
+impl GraphBackend for Box<dyn GraphBackend> {
+    fn store_entity(&self, entity: &Entity) -> Result<()> {
+        (**self).store_entity(entity)
+    }
+
+    fn get_entity(&self, id: &EntityId) -> Result<Option<Entity>> {
+        (**self).get_entity(id)
+    }
+
+    fn query_entities(&self, query: &EntityQuery) -> Result<Vec<Entity>> {
+        (**self).query_entities(query)
+    }
+
+    fn delete_entity(&self, id: &EntityId) -> Result<bool> {
+        (**self).delete_entity(id)
+    }
+
+    fn merge_entities(&self, entity_ids: &[EntityId], canonical_name: &str) -> Result<Entity> {
+        (**self).merge_entities(entity_ids, canonical_name)
+    }
+
+    fn find_entities_by_name(
+        &self,
+        name: &str,
+        entity_type: Option<EntityType>,
+        domain: Option<&Domain>,
+        limit: usize,
+    ) -> Result<Vec<Entity>> {
+        (**self).find_entities_by_name(name, entity_type, domain, limit)
+    }
+
+    fn store_relationship(&self, relationship: &Relationship) -> Result<()> {
+        (**self).store_relationship(relationship)
+    }
+
+    fn query_relationships(&self, query: &RelationshipQuery) -> Result<Vec<Relationship>> {
+        (**self).query_relationships(query)
+    }
+
+    fn delete_relationships(&self, query: &RelationshipQuery) -> Result<usize> {
+        (**self).delete_relationships(query)
+    }
+
+    fn get_relationship_types(
+        &self,
+        from_entity: &EntityId,
+        to_entity: &EntityId,
+    ) -> Result<Vec<RelationshipType>> {
+        (**self).get_relationship_types(from_entity, to_entity)
+    }
+
+    fn store_mention(&self, mention: &EntityMention) -> Result<()> {
+        (**self).store_mention(mention)
+    }
+
+    fn get_mentions_for_entity(&self, entity_id: &EntityId) -> Result<Vec<EntityMention>> {
+        (**self).get_mentions_for_entity(entity_id)
+    }
+
+    fn get_entities_in_memory(&self, memory_id: &MemoryId) -> Result<Vec<Entity>> {
+        (**self).get_entities_in_memory(memory_id)
+    }
+
+    fn delete_mentions_for_entity(&self, entity_id: &EntityId) -> Result<usize> {
+        (**self).delete_mentions_for_entity(entity_id)
+    }
+
+    fn delete_mentions_for_memory(&self, memory_id: &MemoryId) -> Result<usize> {
+        (**self).delete_mentions_for_memory(memory_id)
+    }
+
+    fn traverse(
+        &self,
+        start: &EntityId,
+        max_depth: u32,
+        relationship_types: Option<&[RelationshipType]>,
+        min_confidence: Option<f32>,
+    ) -> Result<TraversalResult> {
+        (**self).traverse(start, max_depth, relationship_types, min_confidence)
+    }
+
+    fn find_path(
+        &self,
+        from: &EntityId,
+        to: &EntityId,
+        max_depth: u32,
+    ) -> Result<Option<TraversalResult>> {
+        (**self).find_path(from, to, max_depth)
+    }
+
+    fn query_entities_at(
+        &self,
+        query: &EntityQuery,
+        point: &BitemporalPoint,
+    ) -> Result<Vec<Entity>> {
+        (**self).query_entities_at(query, point)
+    }
+
+    fn query_relationships_at(
+        &self,
+        query: &RelationshipQuery,
+        point: &BitemporalPoint,
+    ) -> Result<Vec<Relationship>> {
+        (**self).query_relationships_at(query, point)
+    }
+
+    fn close_entity_valid_time(&self, id: &EntityId, end_time: i64) -> Result<()> {
+        (**self).close_entity_valid_time(id, end_time)
+    }
+
+    fn close_relationship_valid_time(
+        &self,
+        from_entity: &EntityId,
+        to_entity: &EntityId,
+        relationship_type: RelationshipType,
+        end_time: i64,
+    ) -> Result<()> {
+        (**self).close_relationship_valid_time(from_entity, to_entity, relationship_type, end_time)
+    }
+
+    fn get_stats(&self) -> Result<GraphStats> {
+        (**self).get_stats()
+    }
+
+    fn clear(&self) -> Result<()> {
+        (**self).clear()
+    }
+}
+
 /// Statistics about the knowledge graph.
 #[derive(Debug, Clone, Default)]
 pub struct GraphStats {

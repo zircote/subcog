@@ -30,7 +30,6 @@ use crate::models::{EventMeta, Memory, MemoryEvent, MemoryId, MemoryStatus};
 use crate::observability::current_request_id;
 use crate::security::record_event;
 use crate::services::ServiceContainer;
-use crate::storage::index::SqliteBackend;
 use crate::storage::traits::IndexBackend;
 use chrono::TimeZone;
 use std::io::{self, Write};
@@ -156,9 +155,9 @@ pub fn execute(ids: Vec<String>, hard: bool, force: bool, dry_run: bool) -> Resu
 
     // Execute deletion
     let result = if hard {
-        hard_delete(&index, &valid_ids)
+        hard_delete(&*index, &valid_ids)
     } else {
-        soft_delete(&index, &valid_ids)
+        soft_delete(&*index, &valid_ids)
     };
 
     // Report results
@@ -180,7 +179,7 @@ pub fn execute(ids: Vec<String>, hard: bool, force: bool, dry_run: bool) -> Resu
 }
 
 /// Performs soft delete (tombstone) on the given memories.
-fn soft_delete(index: &SqliteBackend, ids: &[(MemoryId, String, Memory)]) -> DeleteResult {
+fn soft_delete(index: &dyn IndexBackend, ids: &[(MemoryId, String, Memory)]) -> DeleteResult {
     let mut result = DeleteResult::default();
     let now = crate::current_timestamp();
     let now_i64 = i64::try_from(now).unwrap_or(i64::MAX);
@@ -227,7 +226,7 @@ fn soft_delete(index: &SqliteBackend, ids: &[(MemoryId, String, Memory)]) -> Del
 }
 
 /// Performs hard delete (permanent) on the given memories.
-fn hard_delete(index: &SqliteBackend, ids: &[(MemoryId, String, Memory)]) -> DeleteResult {
+fn hard_delete(index: &dyn IndexBackend, ids: &[(MemoryId, String, Memory)]) -> DeleteResult {
     let mut result = DeleteResult::default();
 
     for (id, _namespace, _memory) in ids {
@@ -267,6 +266,7 @@ fn hard_delete(index: &SqliteBackend, ids: &[(MemoryId, String, Memory)]) -> Del
 mod tests {
     use super::*;
     use crate::models::{Domain, Namespace};
+    use crate::storage::index::SqliteBackend;
     use tempfile::TempDir;
 
     fn create_test_memory(id: &str) -> Memory {
