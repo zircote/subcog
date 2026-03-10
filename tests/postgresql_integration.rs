@@ -56,12 +56,16 @@ macro_rules! require_postgres {
 mod persistence {
     use super::*;
     use subcog::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace};
-    use subcog::storage::persistence::PostgresBackend;
+    use subcog::storage::index::PostgresBackend;
     use subcog::storage::traits::PersistenceBackend;
     use uuid::Uuid;
 
     fn unique_table_name() -> String {
         format!("test_memories_{}", Uuid::new_v4().simple())
+    }
+
+    fn vector_table_name(table_name: &str) -> String {
+        format!("{table_name}_vectors")
     }
 
     fn create_test_memory(content: &str, namespace: Namespace) -> Memory {
@@ -94,7 +98,7 @@ mod persistence {
         let url = require_postgres!();
         let table_name = unique_table_name();
 
-        let backend = PostgresBackend::new(&url, &table_name);
+        let backend = PostgresBackend::new(&url, &table_name, vector_table_name(&table_name));
         assert!(
             backend.is_ok(),
             "Should connect to PostgreSQL: {:?}",
@@ -112,7 +116,8 @@ mod persistence {
         let url = require_postgres!();
         let table_name = unique_table_name();
 
-        let backend = PostgresBackend::new(&url, &table_name).expect("Failed to create backend");
+        let backend = PostgresBackend::new(&url, &table_name, vector_table_name(&table_name))
+            .expect("Failed to create backend");
 
         let memory = Memory {
             id: MemoryId::new(Uuid::new_v4().to_string()),
@@ -168,7 +173,8 @@ mod persistence {
         let url = require_postgres!();
         let table_name = unique_table_name();
 
-        let backend = PostgresBackend::new(&url, &table_name).expect("Failed to create backend");
+        let backend = PostgresBackend::new(&url, &table_name, vector_table_name(&table_name))
+            .expect("Failed to create backend");
 
         // Create memories
         let decision = create_test_memory("Decision memory", Namespace::Decisions);
@@ -192,7 +198,8 @@ mod persistence {
         let url = require_postgres!();
         let table_name = unique_table_name();
 
-        let backend = PostgresBackend::new(&url, &table_name).expect("Failed to create backend");
+        let backend = PostgresBackend::new(&url, &table_name, vector_table_name(&table_name))
+            .expect("Failed to create backend");
 
         let memory = create_test_memory("Memory to delete", Namespace::Learnings);
 
@@ -220,7 +227,8 @@ mod persistence {
         let url = require_postgres!();
         let table_name = unique_table_name();
 
-        let backend = PostgresBackend::new(&url, &table_name).expect("Failed to create backend");
+        let backend = PostgresBackend::new(&url, &table_name, vector_table_name(&table_name))
+            .expect("Failed to create backend");
 
         let mut memory = Memory {
             id: MemoryId::new(Uuid::new_v4().to_string()),
@@ -269,7 +277,8 @@ mod persistence {
         let url = require_postgres!();
         let table_name = unique_table_name();
 
-        let backend = PostgresBackend::new(&url, &table_name).expect("Failed to create backend");
+        let backend = PostgresBackend::new(&url, &table_name, vector_table_name(&table_name))
+            .expect("Failed to create backend");
 
         let mem1 = create_test_memory("Memory 1", Namespace::Decisions);
         let mem2 = create_test_memory("Memory 2", Namespace::Patterns);
@@ -293,7 +302,8 @@ mod persistence {
         let url = require_postgres!();
         let table_name = unique_table_name();
 
-        let backend = PostgresBackend::new(&url, &table_name).expect("Failed to create backend");
+        let backend = PostgresBackend::new(&url, &table_name, vector_table_name(&table_name))
+            .expect("Failed to create backend");
 
         let memory = create_test_memory("Test exists", Namespace::Apis);
         backend.store(&memory).expect("Store");
@@ -307,7 +317,8 @@ mod persistence {
         let url = require_postgres!();
         let table_name = unique_table_name();
 
-        let backend = PostgresBackend::new(&url, &table_name).expect("Failed to create backend");
+        let backend = PostgresBackend::new(&url, &table_name, vector_table_name(&table_name))
+            .expect("Failed to create backend");
 
         assert_eq!(backend.count().unwrap(), 0);
 
@@ -326,6 +337,7 @@ mod persistence {
         let result = PostgresBackend::new(
             "postgres://invalid:invalid@localhost:5432/nonexistent",
             "test",
+            "test_vectors",
         );
         // Connection might succeed but operations will fail, or it might fail immediately
         // Either way, this shouldn't panic
@@ -347,7 +359,7 @@ mod persistence {
 mod index {
     use super::*;
     use subcog::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace, SearchFilter};
-    use subcog::storage::index::PostgresIndexBackend;
+    use subcog::storage::index::PostgresBackend as PostgresIndexBackend;
     use subcog::storage::traits::IndexBackend;
     use uuid::Uuid;
 
@@ -360,7 +372,7 @@ mod index {
         let url = require_postgres!();
         let table_name = unique_table_name();
 
-        let backend = PostgresIndexBackend::new(&url, &table_name);
+        let backend = PostgresIndexBackend::new(&url, &table_name, format!("{table_name}_vectors"));
         if backend.is_err() {
             eprintln!("Skipping test: PostgreSQL index backend not available");
             return;
@@ -414,14 +426,15 @@ mod index {
 
 mod pool {
     use super::*;
-    use subcog::storage::persistence::PostgresBackend;
+    use subcog::storage::index::PostgresBackend;
 
     #[test]
     fn test_postgres_pool_size_configuration() {
         let url = require_postgres!();
 
         // Test with custom pool size
-        let backend = PostgresBackend::with_pool_size(&url, "test_pool", Some(5));
+        let backend =
+            PostgresBackend::with_pool_size(&url, "test_pool", "test_pool_vectors", Some(5));
         assert!(backend.is_ok(), "Should accept custom pool size");
     }
 
@@ -430,7 +443,12 @@ mod pool {
         let url = require_postgres!();
 
         // Test with default pool size (None)
-        let backend = PostgresBackend::with_pool_size(&url, "test_pool_default", None);
+        let backend = PostgresBackend::with_pool_size(
+            &url,
+            "test_pool_default",
+            "test_pool_default_vectors",
+            None,
+        );
         assert!(backend.is_ok(), "Should work with default pool size");
     }
 }
@@ -442,14 +460,15 @@ mod pool {
 mod errors {
     use super::*;
     use subcog::models::MemoryId;
-    use subcog::storage::persistence::PostgresBackend;
+    use subcog::storage::index::PostgresBackend;
     use subcog::storage::traits::PersistenceBackend;
 
     #[test]
     fn test_postgres_get_nonexistent() {
         let url = require_postgres!();
 
-        let backend = PostgresBackend::new(&url, "test_errors").expect("Backend creation");
+        let backend = PostgresBackend::new(&url, "test_errors", "test_errors_vectors")
+            .expect("Backend creation");
         let result = backend.get(&MemoryId::new("nonexistent-id-12345"));
 
         assert!(result.is_ok(), "Get for nonexistent should not error");
@@ -463,7 +482,9 @@ mod errors {
     fn test_postgres_delete_nonexistent() {
         let url = require_postgres!();
 
-        let backend = PostgresBackend::new(&url, "test_errors_delete").expect("Backend creation");
+        let backend =
+            PostgresBackend::new(&url, "test_errors_delete", "test_errors_delete_vectors")
+                .expect("Backend creation");
         let result = backend.delete(&MemoryId::new("nonexistent-id-67890"));
 
         // Delete of nonexistent should return false (nothing deleted)

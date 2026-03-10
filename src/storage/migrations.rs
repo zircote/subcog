@@ -68,7 +68,8 @@ mod implementation {
             placeholder: impl Into<String>,
             value: impl Into<String>,
         ) -> Self {
-            self.extra_replacements.push((placeholder.into(), value.into()));
+            self.extra_replacements
+                .push((placeholder.into(), value.into()));
             self
         }
 
@@ -92,7 +93,10 @@ mod implementation {
             // Acquire advisory lock to prevent concurrent migration runs.
             // hashtext('subcog_migrations') produces a stable int4 lock key.
             client
-                .execute("SELECT pg_advisory_lock(hashtext('subcog_migrations'))", &[])
+                .execute(
+                    "SELECT pg_advisory_lock(hashtext('subcog_migrations'))",
+                    &[],
+                )
                 .await
                 .map_err(|e| Error::OperationFailed {
                     operation: "migration_advisory_lock".to_string(),
@@ -103,7 +107,10 @@ mod implementation {
 
             // Always release the advisory lock, even on failure
             let _ = client
-                .execute("SELECT pg_advisory_unlock(hashtext('subcog_migrations'))", &[])
+                .execute(
+                    "SELECT pg_advisory_unlock(hashtext('subcog_migrations'))",
+                    &[],
+                )
                 .await;
 
             result
@@ -144,7 +151,7 @@ mod implementation {
 
             // Check if migrations table exists first
             let migrations_table = self.migrations_table_name();
-            let exists = self.table_exists(&client, &migrations_table).await?;
+            let exists = self.table_exists(&client, migrations_table).await?;
 
             if !exists {
                 return Ok(0);
@@ -154,7 +161,7 @@ mod implementation {
         }
 
         /// Returns the name of the migrations tracking table.
-        fn migrations_table_name(&self) -> &str {
+        const fn migrations_table_name(&self) -> &'static str {
             "migrations"
         }
 
@@ -255,13 +262,13 @@ mod implementation {
             // Uses dollar-quote-aware splitting so PL/pgSQL function
             // bodies containing semicolons are not split incorrectly.
             for statement in split_sql_statements(&sql) {
-                tx.execute(statement.as_str(), &[])
-                    .await
-                    .map_err(|e| {
-                        // tokio_postgres::Error Display impl only shows "db error"
-                        // for database errors — use Debug format to include the
-                        // actual message, detail, and hint from PostgreSQL.
-                        let cause = if let Some(db_err) = e.as_db_error() {
+                tx.execute(statement.as_str(), &[]).await.map_err(|e| {
+                    // tokio_postgres::Error Display impl only shows "db error"
+                    // for database errors — use Debug format to include the
+                    // actual message, detail, and hint from PostgreSQL.
+                    let cause = e.as_db_error().map_or_else(
+                        || e.to_string(),
+                        |db_err| {
                             format!(
                                 "{}: {} (detail: {:?}, hint: {:?})",
                                 db_err.severity(),
@@ -269,17 +276,16 @@ mod implementation {
                                 db_err.detail(),
                                 db_err.hint(),
                             )
-                        } else {
-                            e.to_string()
-                        };
-                        Error::OperationFailed {
-                            operation: format!(
-                                "migration_v{}: {}",
-                                migration.version, migration.description
-                            ),
-                            cause,
-                        }
-                    })?;
+                        },
+                    );
+                    Error::OperationFailed {
+                        operation: format!(
+                            "migration_v{}: {}",
+                            migration.version, migration.description
+                        ),
+                        cause,
+                    }
+                })?;
             }
 
             // Record the migration within the same transaction
@@ -349,7 +355,9 @@ mod implementation {
                 }
             }
 
-            let ch = sql[i..].chars().next().unwrap();
+            let Some(ch) = sql[i..].chars().next() else {
+                break;
+            };
             if ch == ';' && dollar_quote_tag.is_none() {
                 let trimmed = current.trim().to_string();
                 if !trimmed.is_empty() {

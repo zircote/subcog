@@ -1021,7 +1021,6 @@ pub fn execute_gdpr_export(_arguments: Value) -> Result<ToolResult> {
 /// This is a fundamental CRUD operation that provides direct access to
 /// a specific memory without requiring a search query.
 pub fn execute_get(arguments: Value) -> Result<ToolResult> {
-
     let args: GetArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
@@ -1589,7 +1588,6 @@ fn delete_memory_hard(
     memory_id: &MemoryId,
     now: u64,
 ) -> bool {
-
     match index.remove(memory_id) {
         Ok(true) => {
             record_event(MemoryEvent::Deleted {

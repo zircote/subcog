@@ -59,9 +59,8 @@ jobs:
         with:
           scan-type: 'fs'
           scan-ref: '.'
-          # Use config file for skip-dirs/skip-files (more reliable across versions)
-          trivy-config: '.trivy.yaml'
-          # Scan Cargo.lock for Rust dependencies
+          # Note: .trivy.yaml is auto-discovered by Trivy for skip-dirs/skip-files
+          # Do NOT set trivy-config explicitly, as it causes action inputs to be ignored
           scanners: 'vuln,secret,misconfig'
           format: 'sarif'
           output: 'trivy-fs-results.sarif'

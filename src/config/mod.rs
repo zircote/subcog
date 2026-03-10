@@ -2332,7 +2332,9 @@ impl SubcogConfig {
             self.storage.project.connection_string = Some(value.clone());
             self.storage.user.connection_string = Some(value.clone());
             self.storage.org.connection_string = Some(value);
-            tracing::info!("Storage connection string configured via SUBCOG_STORAGE_CONNECTION_STRING");
+            tracing::info!(
+                "Storage connection string configured via SUBCOG_STORAGE_CONNECTION_STRING"
+            );
         }
         if let Ok(value) = std::env::var("SUBCOG_STORAGE_POOL_MAX_SIZE") {
             if let Ok(size) = value.parse::<usize>() {

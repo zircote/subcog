@@ -87,7 +87,7 @@ pub fn cmd_graph(config: &SubcogConfig, action: GraphAction) -> Result<(), Box<d
     }
 }
 
-/// Open the graph service with the configured backend (PostgreSQL or SQLite).
+/// Open the graph service with the configured backend (PostgreSQL or `SQLite`).
 fn open_graph_service(
     config: &SubcogConfig,
 ) -> Result<GraphService<Box<dyn GraphBackend>>, Box<dyn Error>> {

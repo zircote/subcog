@@ -44,7 +44,7 @@ mod implementation {
         aead::{Aead, KeyInit},
     };
     use base64::Engine;
-    use rand::RngCore;
+    use rand::Rng;
 
     /// Magic bytes to identify encrypted files.
     /// Format: `SUBCOG_ENC_V1\0` (14 bytes)

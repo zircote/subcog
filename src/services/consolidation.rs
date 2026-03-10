@@ -1488,7 +1488,11 @@ impl<P: PersistenceBackend> ConsolidationService<P> {
     /// # Ok::<(), subcog::Error>(())
     /// ```
     #[instrument(skip(self, memories, index), fields(memory_count = memories.len()))]
-    fn create_related_edges(&self, memories: &[Memory], index: &Arc<dyn IndexBackend + Send + Sync>) -> Result<()> {
+    fn create_related_edges(
+        &self,
+        memories: &[Memory],
+        index: &Arc<dyn IndexBackend + Send + Sync>,
+    ) -> Result<()> {
         if memories.len() < 2 {
             tracing::debug!("Fewer than 2 memories, skipping edge creation");
             return Ok(());

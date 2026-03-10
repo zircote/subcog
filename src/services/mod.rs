@@ -151,8 +151,8 @@ use crate::context::GitContext;
 use crate::embedding::Embedder;
 use crate::models::{Memory, MemoryId, SearchFilter};
 use crate::storage::index::{
-    DomainIndexConfig, DomainIndexManager, DomainScope, OrgIndexConfig,
-    find_repo_root, get_user_data_dir,
+    DomainIndexConfig, DomainIndexManager, DomainScope, OrgIndexConfig, find_repo_root,
+    get_user_data_dir,
 };
 use crate::storage::traits::{IndexBackend, VectorBackend};
 use crate::{Error, Result};
@@ -711,7 +711,7 @@ impl ServiceContainer {
     #[allow(clippy::excessive_nesting)] // Callback closures require nested scopes
     fn create_entity_extraction_callback(
         config: &crate::config::Config,
-        paths: &PathManager,
+        _paths: &PathManager,
         llm: Option<Arc<dyn crate::llm::LlmProvider>>,
     ) -> Option<capture::EntityExtractionCallback> {
         // Check if auto-extraction is enabled
@@ -1048,6 +1048,10 @@ impl ServiceContainer {
     }
 
     /// Creates the appropriate graph backend based on storage config.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if backend initialization fails.
     pub fn create_graph_backend(
         config: &SubcogConfig,
         user_data_dir: &std::path::Path,
@@ -1056,17 +1060,17 @@ impl ServiceContainer {
         use crate::storage::graph::SqliteGraphBackend;
 
         // Check project storage config for PostgreSQL
-        if config.storage.project.backend == StorageBackendType::PostgreSQL {
-            if let Some(ref conn_str) = config.storage.project.connection_string {
-                return Self::try_create_pg_graph(conn_str, user_data_dir);
-            }
+        if config.storage.project.backend == StorageBackendType::PostgreSQL
+            && let Some(ref conn_str) = config.storage.project.connection_string
+        {
+            return Self::try_create_pg_graph(conn_str, user_data_dir);
         }
 
         // Check user storage config for PostgreSQL
-        if config.storage.user.backend == StorageBackendType::PostgreSQL {
-            if let Some(ref conn_str) = config.storage.user.connection_string {
-                return Self::try_create_pg_graph(conn_str, user_data_dir);
-            }
+        if config.storage.user.backend == StorageBackendType::PostgreSQL
+            && let Some(ref conn_str) = config.storage.user.connection_string
+        {
+            return Self::try_create_pg_graph(conn_str, user_data_dir);
         }
 
         // Default: SQLite
@@ -1079,7 +1083,7 @@ impl ServiceContainer {
         Ok(Box::new(backend))
     }
 
-    /// Attempts to create a PostgreSQL graph backend, falling back to SQLite.
+    /// Attempts to create a PostgreSQL graph backend, falling back to `SQLite`.
     #[cfg(feature = "postgres")]
     fn try_create_pg_graph(
         connection_url: &str,
@@ -1099,7 +1103,7 @@ impl ServiceContainer {
                     "Failed to create PostgreSQL graph backend, falling back to SQLite"
                 );
                 let paths = PathManager::for_user(user_data_dir);
-                let backend = SqliteGraphBackend::new(&paths.graph_path()).map_err(|e| {
+                let backend = SqliteGraphBackend::new(paths.graph_path()).map_err(|e| {
                     Error::OperationFailed {
                         operation: "create_graph_backend_fallback".to_string(),
                         cause: e.to_string(),
@@ -1118,14 +1122,15 @@ impl ServiceContainer {
     ) -> Result<Box<dyn crate::storage::traits::GraphBackend>> {
         use crate::storage::graph::SqliteGraphBackend;
 
-        tracing::warn!("PostgreSQL graph backend configured but postgres feature not enabled, using SQLite");
+        tracing::warn!(
+            "PostgreSQL graph backend configured but postgres feature not enabled, using SQLite"
+        );
         let paths = PathManager::for_user(user_data_dir);
-        let backend = SqliteGraphBackend::new(&paths.graph_path()).map_err(|e| {
-            Error::OperationFailed {
+        let backend =
+            SqliteGraphBackend::new(&paths.graph_path()).map_err(|e| Error::OperationFailed {
                 operation: "create_graph_backend".to_string(),
                 cause: e.to_string(),
-            }
-        })?;
+            })?;
         Ok(Box::new(backend))
     }
 

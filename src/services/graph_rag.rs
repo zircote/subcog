@@ -311,6 +311,7 @@ impl<G: GraphBackend> GraphRAGService<G> {
     /// * `graph` - The graph service for knowledge graph operations.
     /// * `extractor` - The entity extractor for query analysis.
     /// * `config` - Configuration for the service.
+    #[must_use]
     pub const fn new(
         recall: Arc<RecallService>,
         graph: Arc<GraphService<G>>,

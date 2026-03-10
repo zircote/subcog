@@ -1025,7 +1025,8 @@ mod consolidation_integration_tests {
         let consolidation_backend = FilesystemBackend::new(temp_dir.path());
         let mut consolidation_service = ConsolidationService::new(consolidation_backend)
             .with_llm(mock_llm)
-            .with_index(Arc::clone(&index_backend));
+            .with_index(index_backend.clone()
+                as Arc<dyn subcog::storage::traits::IndexBackend + Send + Sync>);
 
         // Create recall service for finding related memories
         let recall = subcog::services::RecallService::new();

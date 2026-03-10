@@ -17,20 +17,47 @@
 //! ```
 
 #[cfg(feature = "postgres")]
+#[allow(
+    clippy::excessive_nesting,
+    clippy::redundant_closure_for_method_calls,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::future_not_send,
+    clippy::too_many_lines,
+    clippy::needless_pass_by_value,
+    clippy::needless_borrow,
+    clippy::use_self,
+    clippy::if_not_else,
+    clippy::collapsible_if,
+    clippy::uninlined_format_args,
+    clippy::or_fun_call,
+    clippy::option_map_or_none,
+    clippy::doc_markdown,
+    clippy::missing_errors_doc,
+    clippy::must_use_candidate,
+    clippy::return_self_not_must_use,
+    clippy::unnecessary_wraps,
+    clippy::implicit_clone,
+    clippy::explicit_deref_methods,
+    clippy::str_to_string,
+    clippy::needless_lifetimes
+)]
 mod implementation {
-    use crate::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace, SearchFilter};
     use crate::models::graph::{
-        Entity, EntityId, EntityMention, EntityQuery, EntityType, Relationship,
-        RelationshipQuery, RelationshipType, TraversalResult,
+        Entity, EntityId, EntityMention, EntityQuery, EntityType, Relationship, RelationshipQuery,
+        RelationshipType, TraversalResult,
     };
     use crate::models::temporal::{BitemporalPoint, TransactionTime, ValidTimeRange};
+    use crate::models::{Domain, Memory, MemoryId, MemoryStatus, Namespace, SearchFilter};
     use crate::storage::migrations::{Migration, MigrationRunner};
     use crate::storage::traits::graph::{GraphBackend, GraphStats};
     use crate::storage::traits::{IndexBackend, VectorBackend, VectorFilter};
     use crate::{Error, Result};
     use chrono::TimeZone;
-    use std::collections::HashMap;
     use deadpool_postgres::{Config, Pool, Runtime};
+    use std::collections::HashMap;
     use tokio::runtime::Handle;
 
     #[cfg(not(feature = "postgres-tls"))]
@@ -45,11 +72,10 @@ mod implementation {
     /// instead of `GENERATED ALWAYS AS` because `to_tsvector()` is STABLE, not
     /// IMMUTABLE, and PostgreSQL 18+ enforces immutability for generated columns.
     /// The trigger approach works across all PostgreSQL versions (12+).
-    const MIGRATIONS: &[Migration] = &[
-        Migration {
-            version: 1,
-            description: "Initial memories table with FTS and indexes",
-            sql: r"
+    const MIGRATIONS: &[Migration] = &[Migration {
+        version: 1,
+        description: "Initial memories table with FTS and indexes",
+        sql: r"
                 CREATE TABLE IF NOT EXISTS {table} (
                     id TEXT PRIMARY KEY,
                     content TEXT NOT NULL,
@@ -162,29 +188,24 @@ mod implementation {
                 CREATE INDEX IF NOT EXISTS idx_graph_entity_mentions_entity ON graph_entity_mentions(entity_id);
                 CREATE INDEX IF NOT EXISTS idx_graph_entity_mentions_memory ON graph_entity_mentions(memory_id)
             ",
-        },
-    ];
+    }];
 
     /// Allowed table names for SQL injection prevention.
-    const ALLOWED_TABLE_NAMES: &[&str] = &[
-        "memories",
-        "subcog_memories",
-        "org_memories_index",
-    ];
+    const ALLOWED_TABLE_NAMES: &[&str] = &["memories", "subcog_memories", "org_memories_index"];
 
     /// Allowed vector table names.
-    const ALLOWED_VECTOR_TABLE_NAMES: &[&str] = &[
-        "memory_vectors",
-        "subcog_vectors",
-        "org_memory_vectors",
-    ];
+    const ALLOWED_VECTOR_TABLE_NAMES: &[&str] =
+        &["memory_vectors", "subcog_vectors", "org_memory_vectors"];
 
     /// Validates that a table name is in the whitelist.
     fn validate_table_name(name: &str) -> Result<()> {
         if ALLOWED_TABLE_NAMES.contains(&name) || ALLOWED_VECTOR_TABLE_NAMES.contains(&name) {
             Ok(())
         } else {
-            let all: Vec<&&str> = ALLOWED_TABLE_NAMES.iter().chain(ALLOWED_VECTOR_TABLE_NAMES.iter()).collect();
+            let all: Vec<&&str> = ALLOWED_TABLE_NAMES
+                .iter()
+                .chain(ALLOWED_VECTOR_TABLE_NAMES.iter())
+                .collect();
             Err(Error::InvalidInput(format!(
                 "Table name '{name}' is not allowed. Allowed names: {all:?}",
             )))
@@ -353,7 +374,12 @@ mod implementation {
             })?;
 
             let dimensions = crate::embedding::DEFAULT_DIMENSIONS;
-            let backend = Self { pool, table_name, vector_table_name, dimensions };
+            let backend = Self {
+                pool,
+                table_name,
+                vector_table_name,
+                dimensions,
+            };
             backend.run_migrations()?;
             Ok(backend)
         }
@@ -409,7 +435,12 @@ mod implementation {
             })?;
 
             let dimensions = crate::embedding::DEFAULT_DIMENSIONS;
-            let backend = Self { pool, table_name, vector_table_name, dimensions };
+            let backend = Self {
+                pool,
+                table_name,
+                vector_table_name,
+                dimensions,
+            };
             backend.run_migrations()?;
             Ok(backend)
         }
@@ -470,7 +501,10 @@ mod implementation {
         /// `RecyclingMethod::Fast` setting preserves connections (and their statement
         /// caches) across uses, providing implicit statement caching without
         /// additional configuration.
-        fn build_pool_config(config: &tokio_postgres::Config, pool_max_size: Option<usize>) -> Config {
+        fn build_pool_config(
+            config: &tokio_postgres::Config,
+            pool_max_size: Option<usize>,
+        ) -> Config {
             let mut cfg = Config::new();
             cfg.host = config.get_hosts().first().map(Self::host_to_string);
             cfg.port = config.get_ports().first().copied();
@@ -500,12 +534,16 @@ mod implementation {
         ///
         /// Returns an error if the connection fails.
         pub fn with_defaults() -> Result<Self> {
-            Self::new("postgresql://localhost/subcog", "memories", "memory_vectors")
+            Self::new(
+                "postgresql://localhost/subcog",
+                "memories",
+                "memory_vectors",
+            )
         }
 
         /// Returns the embedding dimensions.
         #[must_use]
-        pub fn dimensions(&self) -> usize {
+        pub const fn dimensions(&self) -> usize {
             self.dimensions
         }
 
@@ -704,8 +742,8 @@ mod implementation {
             );
 
             let tags: Vec<&str> = memory.tags.iter().map(String::as_str).collect();
-            let domain_str = serde_json::to_string(&memory.domain)
-                .unwrap_or_else(|_| memory.domain.to_string());
+            let domain_str =
+                serde_json::to_string(&memory.domain).unwrap_or_else(|_| memory.domain.to_string());
             let namespace_str = memory.namespace.as_str();
             let status_str = memory.status.as_str();
             #[allow(clippy::cast_possible_wrap)]
@@ -717,12 +755,14 @@ mod implementation {
             let expires_at = memory.expires_at.map(|t| t as i64);
             #[allow(clippy::cast_possible_wrap)]
             let consolidation_ts = memory.consolidation_timestamp.map(|t| t as i64);
-            let source_memory_ids_json: Option<serde_json::Value> = memory
-                .source_memory_ids
-                .as_ref()
-                .map(|ids| {
-                    let strs: Vec<&str> = ids.iter().map(|id| id.as_str()).collect();
-                    serde_json::Value::Array(strs.into_iter().map(|s| serde_json::Value::String(s.to_string())).collect())
+            let source_memory_ids_json: Option<serde_json::Value> =
+                memory.source_memory_ids.as_ref().map(|ids| {
+                    serde_json::Value::Array(
+                        ids.iter()
+                            .map(MemoryId::as_str)
+                            .map(|s| serde_json::Value::String(s.to_string()))
+                            .collect(),
+                    )
                 });
 
             client
@@ -915,7 +955,7 @@ mod implementation {
                 .collect())
         }
 
-        /// Async implementation of list_ids operation.
+        /// Async implementation of `list_ids` operation.
         async fn list_ids_async(&self) -> Result<Vec<MemoryId>> {
             let client = self.pool.get().await.map_err(pool_error)?;
             let query = format!("SELECT id FROM {}", self.table_name);
@@ -924,10 +964,13 @@ mod implementation {
                 .await
                 .map_err(|e| query_error("postgres_list_ids", e))?;
 
-            Ok(rows.iter().map(|row| {
-                let id: String = row.get(0);
-                MemoryId::new(id)
-            }).collect())
+            Ok(rows
+                .iter()
+                .map(|row| {
+                    let id: String = row.get(0);
+                    MemoryId::new(id)
+                })
+                .collect())
         }
 
         /// Converts a PostgreSQL row into a `Memory`.
@@ -965,16 +1008,17 @@ mod implementation {
                 _ => MemoryStatus::Active,
             };
 
-            let tombstoned_at = tombstoned_at_epoch
-                .and_then(|ts| chrono::Utc.timestamp_opt(ts, 0).single());
+            let tombstoned_at =
+                tombstoned_at_epoch.and_then(|ts| chrono::Utc.timestamp_opt(ts, 0).single());
 
-            let source_memory_ids = source_memory_ids_json.and_then(|v| {
-                v.as_array().map(|arr| {
+            let source_memory_ids = source_memory_ids_json
+                .as_ref()
+                .and_then(|v| v.as_array())
+                .map(|arr| {
                     arr.iter()
-                        .filter_map(|s| s.as_str().map(|s| MemoryId::new(s)))
+                        .filter_map(|s| s.as_str().map(MemoryId::new))
                         .collect()
-                })
-            });
+                });
 
             Memory {
                 id: MemoryId::new(id),
@@ -1104,7 +1148,7 @@ mod implementation {
         }
 
         /// Async implementation of vector search.
-        /// Returns cosine similarity (1 - cosine_distance).
+        /// Returns cosine similarity (1 - `cosine_distance`).
         async fn vector_search_async(
             &self,
             query_embedding: &[f32],
@@ -1114,8 +1158,7 @@ mod implementation {
             let client = self.pool.get().await.map_err(pool_error)?;
             let embedding_str = Self::format_embedding(query_embedding);
 
-            let (namespace_join, namespace_params) =
-                self.build_vector_namespace_filter(filter);
+            let (namespace_join, namespace_params) = self.build_vector_namespace_filter(filter);
 
             let search_query = format!(
                 r"SELECT v.id, 1 - (v.embedding <=> $1::text::vector) as similarity
@@ -1237,7 +1280,7 @@ mod implementation {
     // ========================================================================
 
     impl PostgresBackend {
-        /// Parses an entity from a tokio_postgres Row.
+        /// Parses an entity from a `tokio_postgres` Row.
         fn parse_entity(row: &tokio_postgres::Row) -> Entity {
             let id: String = row.get("id");
             let entity_type_str: String = row.get("entity_type");
@@ -1271,6 +1314,7 @@ mod implementation {
                     project: domain_project,
                     repository: domain_repo,
                 },
+                #[allow(clippy::cast_possible_truncation)]
                 confidence: confidence as f32,
                 valid_time: ValidTimeRange {
                     start: valid_time_start,
@@ -1278,11 +1322,11 @@ mod implementation {
                 },
                 transaction_time: TransactionTime::at(transaction_time),
                 properties,
-                mention_count: mention_count as u32,
+                mention_count: mention_count.cast_unsigned(),
             }
         }
 
-        /// Parses a relationship from a tokio_postgres Row.
+        /// Parses a relationship from a `tokio_postgres` Row.
         fn parse_relationship(row: &tokio_postgres::Row) -> Relationship {
             let from_entity_id: String = row.get("from_entity_id");
             let to_entity_id: String = row.get("to_entity_id");
@@ -1291,22 +1335,24 @@ mod implementation {
             let valid_time_start: Option<i64> = row.get("valid_time_start");
             let valid_time_end: Option<i64> = row.get("valid_time_end");
 
-            let relationship_type =
-                RelationshipType::parse(&relationship_type_str).unwrap_or(RelationshipType::RelatesTo);
+            let relationship_type = RelationshipType::parse(&relationship_type_str)
+                .unwrap_or(RelationshipType::RelatesTo);
 
+            #[allow(clippy::cast_possible_truncation)]
+            let conf = confidence as f32;
             Relationship::new(
                 EntityId::new(from_entity_id),
                 EntityId::new(to_entity_id),
                 relationship_type,
             )
-            .with_confidence(confidence as f32)
+            .with_confidence(conf)
             .with_valid_time(ValidTimeRange {
                 start: valid_time_start,
                 end: valid_time_end,
             })
         }
 
-        /// Parses a mention from a tokio_postgres Row.
+        /// Parses a mention from a `tokio_postgres` Row.
         fn parse_mention(row: &tokio_postgres::Row) -> EntityMention {
             let entity_id: String = row.get("entity_id");
             let memory_id: String = row.get("memory_id");
@@ -1316,11 +1362,15 @@ mod implementation {
             let matched_text: Option<String> = row.get("matched_text");
             let tx_time: i64 = row.get("transaction_time");
 
+            #[allow(clippy::cast_possible_truncation)]
+            let conf = confidence as f32;
             EntityMention {
                 entity_id: EntityId::new(entity_id),
                 memory_id: MemoryId::new(memory_id),
-                confidence: confidence as f32,
+                confidence: conf,
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                 start_offset: start_offset.map(|v| v as usize),
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                 end_offset: end_offset.map(|v| v as usize),
                 matched_text,
                 transaction_time: TransactionTime::at(tx_time),
@@ -1450,7 +1500,10 @@ mod implementation {
             let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
                 params.iter().map(|p| p.as_ref()).collect();
 
-            let rows = client.query(&sql, &param_refs).await.map_err(|e| query_error("query_entities", e))?;
+            let rows = client
+                .query(&sql, &param_refs)
+                .await
+                .map_err(|e| query_error("query_entities", e))?;
 
             Ok(rows.iter().map(Self::parse_entity).collect())
         }
@@ -1459,10 +1512,7 @@ mod implementation {
             let client = self.pool.get().await.map_err(pool_error)?;
 
             let rows = client
-                .execute(
-                    "DELETE FROM graph_entities WHERE id = $1",
-                    &[&id.as_str()],
-                )
+                .execute("DELETE FROM graph_entities WHERE id = $1", &[&id.as_str()])
                 .await
                 .map_err(|e| query_error("delete_entity", e))?;
 
@@ -1493,13 +1543,13 @@ mod implementation {
                 .await
                 .map_err(|e| query_error("merge_entities_get_canonical", e))?;
 
-            let canonical_entity = rows
-                .first()
-                .map(Self::parse_entity)
-                .ok_or_else(|| Error::OperationFailed {
-                    operation: "merge_entities".to_string(),
-                    cause: format!("Canonical entity not found: {}", canonical_id.as_str()),
-                })?;
+            let canonical_entity =
+                rows.first()
+                    .map(Self::parse_entity)
+                    .ok_or_else(|| Error::OperationFailed {
+                        operation: "merge_entities".to_string(),
+                        cause: format!("Canonical entity not found: {}", canonical_id.as_str()),
+                    })?;
 
             let mut all_aliases = canonical_entity.aliases.clone();
             all_aliases.push(canonical_entity.name.clone());
@@ -1598,7 +1648,11 @@ mod implementation {
 
             tx.execute(
                 "UPDATE graph_entities SET name = $1, aliases = $2 WHERE id = $3",
-                &[&canonical_name, &aliases_json.as_str(), &canonical_id.as_str()],
+                &[
+                    &canonical_name,
+                    &aliases_json.as_str(),
+                    &canonical_id.as_str(),
+                ],
             )
             .await
             .map_err(|e| query_error("merge_entities_update", e))?;
@@ -1629,7 +1683,8 @@ mod implementation {
             let client = self.pool.get().await.map_err(pool_error)?;
 
             let like_pattern = format!("%{name}%");
-            let mut params: Vec<Box<dyn tokio_postgres::types::ToSql + Sync>> = vec![Box::new(like_pattern)];
+            let mut params: Vec<Box<dyn tokio_postgres::types::ToSql + Sync>> =
+                vec![Box::new(like_pattern)];
             let mut conditions = vec!["(name LIKE $1 OR aliases LIKE $1)".to_string()];
 
             if let Some(ref et) = entity_type {
@@ -1661,7 +1716,10 @@ mod implementation {
             let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
                 params.iter().map(|p| p.as_ref()).collect();
 
-            let rows = client.query(&sql, &param_refs).await.map_err(|e| query_error("find_entities_by_name", e))?;
+            let rows = client
+                .query(&sql, &param_refs)
+                .await
+                .map_err(|e| query_error("find_entities_by_name", e))?;
 
             Ok(rows.iter().map(Self::parse_entity).collect())
         }
@@ -1669,8 +1727,8 @@ mod implementation {
         async fn store_relationship_async(&self, relationship: &Relationship) -> Result<()> {
             let client = self.pool.get().await.map_err(pool_error)?;
 
-            let properties_json =
-                serde_json::to_string(&relationship.properties).unwrap_or_else(|_| "{}".to_string());
+            let properties_json = serde_json::to_string(&relationship.properties)
+                .unwrap_or_else(|_| "{}".to_string());
 
             client
                 .execute(
@@ -1688,7 +1746,8 @@ mod implementation {
                         &relationship.to_entity.as_str(),
                         &relationship.relationship_type.as_str(),
                         &f64::from(relationship.confidence),
-                        &relationship.valid_time.start as &(dyn tokio_postgres::types::ToSql + Sync),
+                        &relationship.valid_time.start
+                            as &(dyn tokio_postgres::types::ToSql + Sync),
                         &relationship.valid_time.end as &(dyn tokio_postgres::types::ToSql + Sync),
                         &relationship.transaction_time.timestamp(),
                         &properties_json.as_str(),
@@ -1741,7 +1800,10 @@ mod implementation {
             let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
                 params.iter().map(|p| p.as_ref()).collect();
 
-            let rows = client.query(&sql, &param_refs).await.map_err(|e| query_error("query_relationships", e))?;
+            let rows = client
+                .query(&sql, &param_refs)
+                .await
+                .map_err(|e| query_error("query_relationships", e))?;
 
             Ok(rows.iter().map(Self::parse_relationship).collect())
         }
@@ -1777,7 +1839,10 @@ mod implementation {
             let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
                 params.iter().map(|p| p.as_ref()).collect();
 
-            let rows = client.execute(&sql, &param_refs).await.map_err(|e| query_error("delete_relationships", e))?;
+            let rows = client
+                .execute(&sql, &param_refs)
+                .await
+                .map_err(|e| query_error("delete_relationships", e))?;
 
             Ok(rows as usize)
         }
@@ -1846,7 +1911,10 @@ mod implementation {
             Ok(())
         }
 
-        async fn get_mentions_for_entity_async(&self, entity_id: &EntityId) -> Result<Vec<EntityMention>> {
+        async fn get_mentions_for_entity_async(
+            &self,
+            entity_id: &EntityId,
+        ) -> Result<Vec<EntityMention>> {
             let client = self.pool.get().await.map_err(pool_error)?;
 
             let rows = client
@@ -2060,8 +2128,10 @@ mod implementation {
                     "SELECT * FROM graph_entities WHERE id IN ({})",
                     placeholders.join(", ")
                 );
-                let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
-                    path_ids.iter().map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+                let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = path_ids
+                    .iter()
+                    .map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync))
+                    .collect();
 
                 let entity_rows = client
                     .query(&entity_sql, &params)
@@ -2138,7 +2208,10 @@ mod implementation {
             let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
                 params.iter().map(|p| p.as_ref()).collect();
 
-            let rows = client.query(&sql, &param_refs).await.map_err(|e| query_error("query_entities_at", e))?;
+            let rows = client
+                .query(&sql, &param_refs)
+                .await
+                .map_err(|e| query_error("query_entities_at", e))?;
 
             Ok(rows.iter().map(Self::parse_entity).collect())
         }
@@ -2190,7 +2263,10 @@ mod implementation {
             let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
                 params.iter().map(|p| p.as_ref()).collect();
 
-            let rows = client.query(&sql, &param_refs).await.map_err(|e| query_error("query_relationships_at", e))?;
+            let rows = client
+                .query(&sql, &param_refs)
+                .await
+                .map_err(|e| query_error("query_relationships_at", e))?;
 
             Ok(rows.iter().map(Self::parse_relationship).collect())
         }
@@ -2657,29 +2733,142 @@ mod stub {
     }
 
     impl crate::storage::traits::graph::GraphBackend for PostgresBackend {
-        fn store_entity(&self, _entity: &crate::models::graph::Entity) -> Result<()> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn get_entity(&self, _id: &crate::models::graph::EntityId) -> Result<Option<crate::models::graph::Entity>> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn query_entities(&self, _query: &crate::models::graph::EntityQuery) -> Result<Vec<crate::models::graph::Entity>> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn delete_entity(&self, _id: &crate::models::graph::EntityId) -> Result<bool> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn merge_entities(&self, _entity_ids: &[crate::models::graph::EntityId], _canonical_name: &str) -> Result<crate::models::graph::Entity> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn find_entities_by_name(&self, _name: &str, _entity_type: Option<crate::models::graph::EntityType>, _domain: Option<&crate::models::Domain>, _limit: usize) -> Result<Vec<crate::models::graph::Entity>> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn store_relationship(&self, _relationship: &crate::models::graph::Relationship) -> Result<()> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn query_relationships(&self, _query: &crate::models::graph::RelationshipQuery) -> Result<Vec<crate::models::graph::Relationship>> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn delete_relationships(&self, _query: &crate::models::graph::RelationshipQuery) -> Result<usize> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn get_relationship_types(&self, _from: &crate::models::graph::EntityId, _to: &crate::models::graph::EntityId) -> Result<Vec<crate::models::graph::RelationshipType>> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn store_mention(&self, _mention: &crate::models::graph::EntityMention) -> Result<()> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn get_mentions_for_entity(&self, _entity_id: &crate::models::graph::EntityId) -> Result<Vec<crate::models::graph::EntityMention>> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn get_entities_in_memory(&self, _memory_id: &MemoryId) -> Result<Vec<crate::models::graph::Entity>> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn delete_mentions_for_entity(&self, _entity_id: &crate::models::graph::EntityId) -> Result<usize> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn delete_mentions_for_memory(&self, _memory_id: &MemoryId) -> Result<usize> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn traverse(&self, _start: &crate::models::graph::EntityId, _max_depth: u32, _relationship_types: Option<&[crate::models::graph::RelationshipType]>, _min_confidence: Option<f32>) -> Result<crate::models::graph::TraversalResult> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn find_path(&self, _from: &crate::models::graph::EntityId, _to: &crate::models::graph::EntityId, _max_depth: u32) -> Result<Option<crate::models::graph::TraversalResult>> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn query_entities_at(&self, _query: &crate::models::graph::EntityQuery, _point: &crate::models::temporal::BitemporalPoint) -> Result<Vec<crate::models::graph::Entity>> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn query_relationships_at(&self, _query: &crate::models::graph::RelationshipQuery, _point: &crate::models::temporal::BitemporalPoint) -> Result<Vec<crate::models::graph::Relationship>> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn close_entity_valid_time(&self, _id: &crate::models::graph::EntityId, _end_time: i64) -> Result<()> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn close_relationship_valid_time(&self, _from: &crate::models::graph::EntityId, _to: &crate::models::graph::EntityId, _rt: crate::models::graph::RelationshipType, _end_time: i64) -> Result<()> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn get_stats(&self) -> Result<crate::storage::traits::graph::GraphStats> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
-        fn clear(&self) -> Result<()> { Err(Error::FeatureNotEnabled("postgres".to_string())) }
+        fn store_entity(&self, _entity: &crate::models::graph::Entity) -> Result<()> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn get_entity(
+            &self,
+            _id: &crate::models::graph::EntityId,
+        ) -> Result<Option<crate::models::graph::Entity>> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn query_entities(
+            &self,
+            _query: &crate::models::graph::EntityQuery,
+        ) -> Result<Vec<crate::models::graph::Entity>> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn delete_entity(&self, _id: &crate::models::graph::EntityId) -> Result<bool> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn merge_entities(
+            &self,
+            _entity_ids: &[crate::models::graph::EntityId],
+            _canonical_name: &str,
+        ) -> Result<crate::models::graph::Entity> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn find_entities_by_name(
+            &self,
+            _name: &str,
+            _entity_type: Option<crate::models::graph::EntityType>,
+            _domain: Option<&crate::models::Domain>,
+            _limit: usize,
+        ) -> Result<Vec<crate::models::graph::Entity>> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn store_relationship(
+            &self,
+            _relationship: &crate::models::graph::Relationship,
+        ) -> Result<()> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn query_relationships(
+            &self,
+            _query: &crate::models::graph::RelationshipQuery,
+        ) -> Result<Vec<crate::models::graph::Relationship>> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn delete_relationships(
+            &self,
+            _query: &crate::models::graph::RelationshipQuery,
+        ) -> Result<usize> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn get_relationship_types(
+            &self,
+            _from: &crate::models::graph::EntityId,
+            _to: &crate::models::graph::EntityId,
+        ) -> Result<Vec<crate::models::graph::RelationshipType>> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn store_mention(&self, _mention: &crate::models::graph::EntityMention) -> Result<()> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn get_mentions_for_entity(
+            &self,
+            _entity_id: &crate::models::graph::EntityId,
+        ) -> Result<Vec<crate::models::graph::EntityMention>> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn get_entities_in_memory(
+            &self,
+            _memory_id: &MemoryId,
+        ) -> Result<Vec<crate::models::graph::Entity>> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn delete_mentions_for_entity(
+            &self,
+            _entity_id: &crate::models::graph::EntityId,
+        ) -> Result<usize> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn delete_mentions_for_memory(&self, _memory_id: &MemoryId) -> Result<usize> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn traverse(
+            &self,
+            _start: &crate::models::graph::EntityId,
+            _max_depth: u32,
+            _relationship_types: Option<&[crate::models::graph::RelationshipType]>,
+            _min_confidence: Option<f32>,
+        ) -> Result<crate::models::graph::TraversalResult> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn find_path(
+            &self,
+            _from: &crate::models::graph::EntityId,
+            _to: &crate::models::graph::EntityId,
+            _max_depth: u32,
+        ) -> Result<Option<crate::models::graph::TraversalResult>> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn query_entities_at(
+            &self,
+            _query: &crate::models::graph::EntityQuery,
+            _point: &crate::models::temporal::BitemporalPoint,
+        ) -> Result<Vec<crate::models::graph::Entity>> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn query_relationships_at(
+            &self,
+            _query: &crate::models::graph::RelationshipQuery,
+            _point: &crate::models::temporal::BitemporalPoint,
+        ) -> Result<Vec<crate::models::graph::Relationship>> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn close_entity_valid_time(
+            &self,
+            _id: &crate::models::graph::EntityId,
+            _end_time: i64,
+        ) -> Result<()> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn close_relationship_valid_time(
+            &self,
+            _from: &crate::models::graph::EntityId,
+            _to: &crate::models::graph::EntityId,
+            _rt: crate::models::graph::RelationshipType,
+            _end_time: i64,
+        ) -> Result<()> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn get_stats(&self) -> Result<crate::storage::traits::graph::GraphStats> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
+        fn clear(&self) -> Result<()> {
+            Err(Error::FeatureNotEnabled("postgres".to_string()))
+        }
     }
 }
 

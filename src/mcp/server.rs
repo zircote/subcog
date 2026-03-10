@@ -84,11 +84,10 @@ use axum::routing::any_service;
 use axum::{Json, Router};
 use rmcp::model::{
     AnnotateAble, CallToolRequestParams, CallToolResult, Content, GetPromptRequestParams,
-    GetPromptResult, Implementation, ListPromptsResult, ListResourceTemplatesResult,
-    ListResourcesResult, ListToolsResult, PaginatedRequestParams, Prompt,
-    PromptArgument as RmcpPromptArgument, PromptMessage as RmcpPromptMessage, PromptMessageContent,
-    PromptMessageRole, RawResource, Resource, ResourceContents, ServerCapabilities, ServerInfo,
-    Tool,
+    GetPromptResult, ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult,
+    ListToolsResult, PaginatedRequestParams, Prompt, PromptArgument as RmcpPromptArgument,
+    PromptMessage as RmcpPromptMessage, PromptMessageContent, PromptMessageRole, RawResource,
+    Resource, ResourceContents, ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::transport::stdio;
@@ -101,7 +100,6 @@ use rmcp::transport::streamable_http_server::tower::{
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::borrow::Cow;
 #[cfg(feature = "http")]
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -614,16 +612,14 @@ impl McpHandler {
 
 impl ServerHandler for McpHandler {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            protocol_version: rmcp::model::ProtocolVersion::default(),
-            capabilities: ServerCapabilities::builder()
+        ServerInfo::new(
+            ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
                 .enable_prompts()
                 .build(),
-            server_info: Implementation::from_build_env(),
-            instructions: Some("Subcog MCP server".to_string()),
-        }
+        )
+        .with_instructions("Subcog MCP server")
     }
 
     fn list_tools(
@@ -807,7 +803,7 @@ impl ServerHandler for McpHandler {
                         .map_err(|e| McpError::resource_not_found(e.to_string(), None))?;
 
                     let contents = vec![resource_content_to_rmcp(content)];
-                    Ok(rmcp::model::ReadResourceResult { contents })
+                    Ok(rmcp::model::ReadResourceResult::new(contents))
                 },
             )
             .await
@@ -894,26 +890,17 @@ fn resolve_prompt(
     let rmcp_messages: Vec<RmcpPromptMessage> =
         messages.into_iter().map(prompt_message_to_rmcp).collect();
 
-    Ok(GetPromptResult {
-        description: prompt_def.and_then(|p| p.description.clone()),
-        messages: rmcp_messages,
-    })
+    let mut result = GetPromptResult::new(rmcp_messages);
+    if let Some(desc) = prompt_def.and_then(|p| p.description.clone()) {
+        result = result.with_description(desc);
+    }
+    Ok(result)
 }
 
 fn tool_definition_to_rmcp(def: &ToolDefinition) -> Tool {
     let schema = def.input_schema.as_object().cloned().unwrap_or_default();
 
-    Tool {
-        name: Cow::Owned(def.name.clone()),
-        title: None,
-        description: Some(Cow::Owned(def.description.clone())),
-        input_schema: Arc::new(schema),
-        output_schema: None,
-        annotations: None,
-        icons: None,
-        execution: None,
-        meta: None,
-    }
+    Tool::new(def.name.clone(), def.description.clone(), Arc::new(schema))
 }
 
 fn tool_content_to_rmcp(content: ToolContent) -> Content {
@@ -957,24 +944,19 @@ fn prompt_definition_to_rmcp(def: &PromptDefinition) -> Prompt {
         Some(
             def.arguments
                 .iter()
-                .map(|arg| RmcpPromptArgument {
-                    name: arg.name.clone(),
-                    title: None,
-                    description: arg.description.clone(),
-                    required: Some(arg.required),
+                .map(|arg| {
+                    let mut pa =
+                        RmcpPromptArgument::new(arg.name.clone()).with_required(arg.required);
+                    if let Some(ref desc) = arg.description {
+                        pa = pa.with_description(desc.clone());
+                    }
+                    pa
                 })
                 .collect(),
         )
     };
 
-    Prompt {
-        name: def.name.clone(),
-        title: None,
-        description: def.description.clone(),
-        arguments,
-        icons: None,
-        meta: None,
-    }
+    Prompt::from_raw(def.name.clone(), def.description.clone(), arguments)
 }
 
 fn prompt_message_to_rmcp(msg: crate::mcp::prompts::PromptMessage) -> RmcpPromptMessage {
@@ -1001,7 +983,7 @@ fn prompt_message_to_rmcp(msg: crate::mcp::prompts::PromptMessage) -> RmcpPrompt
         },
     };
 
-    RmcpPromptMessage { role, content }
+    RmcpPromptMessage::new(role, content)
 }
 
 fn resource_content_to_rmcp(content: ResourceContent) -> ResourceContents {

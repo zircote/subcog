@@ -151,8 +151,7 @@ impl BackendFactory {
                 // Create filesystem persistence if a path is configured
                 if let Some(ref path) = config.path {
                     let fs_path = std::path::Path::new(path);
-                    set.persistence =
-                        Some(Arc::new(FilesystemBackend::new(fs_path)));
+                    set.persistence = Some(Arc::new(FilesystemBackend::new(fs_path)));
                     tracing::debug!(
                         path = %fs_path.display(),
                         "Created filesystem persistence backend"
@@ -188,7 +187,12 @@ impl BackendFactory {
             return Self::create_all(index_path, vector_path);
         };
 
-        Self::create_postgres_backends_inner(connection_string, config.pool_max_size, index_path, vector_path)
+        Self::create_postgres_backends_inner(
+            connection_string,
+            config.pool_max_size,
+            index_path,
+            vector_path,
+        )
     }
 
     /// Inner implementation for PostgreSQL backend creation (feature-gated).
@@ -203,7 +207,12 @@ impl BackendFactory {
 
         // Create a single PostgreSQL backend that handles both FTS (memories table)
         // and vector search (memory_vectors table) with one shared connection pool.
-        match PostgresBackend::with_pool_size(connection_url, "memories", "memory_vectors", pool_max_size) {
+        match PostgresBackend::with_pool_size(
+            connection_url,
+            "memories",
+            "memory_vectors",
+            pool_max_size,
+        ) {
             Ok(backend) => {
                 tracing::info!("Created PostgreSQL backend (index + vector + persistence)");
                 let backend = Arc::new(backend);
