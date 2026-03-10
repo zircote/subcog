@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-03-10
+
+### Fixed
+
+- **Release**: Re-released as v0.15.1 due to GitHub tag immutability lock on v0.15.0
+
 ## [0.15.0] - 2026-03-10
 
 ### Added
@@ -541,7 +547,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prompt template management
 - Deduplication service
 
-[Unreleased]: https://github.com/zircote/subcog/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/zircote/subcog/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/zircote/subcog/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/zircote/subcog/compare/v0.14.7...v0.15.0
 [0.14.7]: https://github.com/zircote/subcog/compare/v0.14.6...v0.14.7
 [0.14.6]: https://github.com/zircote/subcog/compare/v0.14.3...v0.14.6
