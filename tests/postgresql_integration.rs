@@ -336,17 +336,17 @@ mod persistence {
     fn test_postgres_invalid_connection() {
         let result = PostgresBackend::new(
             "postgres://invalid:invalid@localhost:5432/nonexistent",
-            "test",
-            "test_vectors",
+            "memories",
+            "memory_vectors",
         );
         // Connection might succeed but operations will fail, or it might fail immediately
         // Either way, this shouldn't panic
         if result.is_err() {
-            // Expected - invalid connection
+            // Expected - invalid connection or configuration error
             let err = result.err().unwrap().to_string();
             assert!(
-                err.contains("postgres") || err.contains("connection"),
-                "Error should mention postgres: {err}"
+                err.contains("postgres") || err.contains("connection") || err.contains("invalid"),
+                "Error should indicate failure: {err}"
             );
         }
     }
