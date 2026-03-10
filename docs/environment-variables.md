@@ -164,42 +164,46 @@ consolidation = false    # Memory consolidation
 
 ## Storage Backend Configuration
 
-Configure storage backends via config file. SQLite is the default and recommended backend.
+Configure storage backends via environment variables or config file. SQLite is the default.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `SUBCOG_STORAGE_BACKEND` | string | `sqlite` | Backend type for all scopes: `sqlite`, `postgresql`, `filesystem` |
+| `SUBCOG_STORAGE_CONNECTION_STRING` | string | - | PostgreSQL connection URL for all scopes |
+| `SUBCOG_STORAGE_POOL_MAX_SIZE` | integer | `20` | Connection pool size for PostgreSQL |
+| `SUBCOG_STORAGE_ENCRYPTION_ENABLED` | boolean | `true` | Enable encryption at rest |
+
+### Config File
 
 ```toml
-[storage]
-# Persistence layer (SQLite is default)
-persistence = "sqlite"  # sqlite, postgresql, filesystem
+[storage.user]
+backend = "postgresql"
+connection_string = "postgresql://user:pass@localhost:5432/subcog"
+pool_max_size = 20
 
-# Index layer
-index = "sqlite"  # sqlite, postgresql, redis
-
-# Vector layer
-vector = "usearch"  # usearch, pgvector, redis
-
-# Data directory
-data_dir = "~/.local/share/subcog"
+[storage.project]
+backend = "postgresql"
+connection_string = "postgresql://user:pass@localhost:5432/subcog"
 ```
 
-### PostgreSQL Configuration
+### PostgreSQL for Kubernetes
 
-For high-performance deployments:
+Set environment variables in your pod spec:
 
-```toml
-[postgresql]
-host = "localhost"
-port = 5432
-database = "subcog"
-user = "subcog"
-password = "${SUBCOG_PG_PASSWORD}"
-ssl_mode = "prefer"
+```yaml
+env:
+  - name: SUBCOG_STORAGE_BACKEND
+    value: "postgresql"
+  - name: SUBCOG_STORAGE_CONNECTION_STRING
+    valueFrom:
+      secretKeyRef:
+        name: subcog-db
+        key: connection-string
+  - name: SUBCOG_STORAGE_POOL_MAX_SIZE
+    value: "10"
 ```
 
-Or via connection URL:
-
-```bash
-export DATABASE_URL="postgres://subcog:pass@localhost:5432/subcog"
-```
+Build with PostgreSQL support: `cargo build --features postgres`
 
 ## API Key Configuration Examples
 

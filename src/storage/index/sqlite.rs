@@ -1638,6 +1638,25 @@ impl IndexBackend for SqliteBackend {
         self.record_operation_metrics("reindex", start, status);
         result
     }
+
+    fn store_edge(
+        &self,
+        from_id: &MemoryId,
+        to_id: &MemoryId,
+        edge_type: crate::models::EdgeType,
+    ) -> Result<()> {
+        // Delegate to the inherent method
+        Self::store_edge(self, from_id, to_id, edge_type)
+    }
+
+    fn query_edges(
+        &self,
+        from_id: &MemoryId,
+        edge_type: crate::models::EdgeType,
+    ) -> Result<Vec<MemoryId>> {
+        // Delegate to the inherent method
+        Self::query_edges(self, from_id, edge_type)
+    }
 }
 
 // Implement PersistenceBackend for SqliteBackend so it can be used with ConsolidationService
