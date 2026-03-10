@@ -334,6 +334,10 @@ mod persistence {
 
     #[test]
     fn test_postgres_invalid_connection() {
+        // This test requires the postgres feature and a TLS crypto provider,
+        // so only run when postgres test URL is configured
+        let _url = require_postgres!();
+
         let result = PostgresBackend::new(
             "postgres://invalid:invalid@localhost:5432/nonexistent",
             "memories",
