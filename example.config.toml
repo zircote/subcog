@@ -28,9 +28,10 @@ path = "~/.config/subcog/memories.db"
 # Alternative: filesystem
 # backend = "filesystem"
 # path = "~/.config/subcog/prompts/"
-# Alternative: postgresql
+# Alternative: postgresql (requires --features postgres)
 # backend = "postgresql"
 # connection_string = "postgresql://user:pass@localhost/subcog"
+# pool_max_size = 20  # connection pool size (default: 20)
 # Alternative: redis (requires 'redis' feature)
 # backend = "redis"
 # connection_string = "redis://localhost:6379"

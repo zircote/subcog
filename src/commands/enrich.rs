@@ -86,7 +86,7 @@ fn run_enrich_with_client<P: LlmProviderTrait>(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Create service container to get index backend
     let container = ServiceContainer::from_current_dir_or_user()?;
-    let index: Arc<dyn IndexBackend> = Arc::new(container.index()?);
+    let index: Arc<dyn IndexBackend + Send + Sync> = container.index()?;
 
     let resilience_config = build_resilience_config(llm_config);
     let client = subcog::llm::ResilientLlmProvider::new(client, resilience_config);

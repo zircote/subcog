@@ -26,7 +26,7 @@ use std::sync::Arc;
 use super::SqliteBackend;
 
 #[cfg(feature = "postgres")]
-use super::PostgresIndexBackend;
+use super::PostgresBackend;
 
 /// Routes org-scoped storage to the configured backend.
 ///
@@ -125,9 +125,13 @@ impl OrgIndexRouter {
         max_connections: u32,
         timeout_secs: u64,
     ) -> Result<Self> {
-        let backend = PostgresIndexBackend::new(connection_url, "org_memories_index")?;
+        let backend = PostgresBackend::with_pool_size(
+            connection_url,
+            "org_memories_index",
+            "org_memory_vectors",
+            Some(max_connections as usize),
+        )?;
 
-        // Log connection pool settings for debugging
         tracing::debug!(
             max_connections = max_connections,
             timeout_secs = timeout_secs,
