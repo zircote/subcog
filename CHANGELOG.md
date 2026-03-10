@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-03-10
+
+### Added
+
+- **PostgreSQL Storage Backend**: First-class PostgreSQL support as a unified storage backend ([#138](https://github.com/zircote/subcog/pull/138))
+  - Single `PostgresBackend` implements both `PersistenceBackend` and `IndexBackend` traits
+  - Full-text search via PostgreSQL `tsvector`/`tsquery`
+  - pgvector support for vector similarity search
+  - Connection pooling via `deadpool-postgres`
+  - Transactional migration system with advisory locking
+  - Table name whitelist for SQL injection prevention
+  - Optional TLS via `postgres-tls` feature (rustls)
+  - Comprehensive integration test suite
+
+### Changed
+
+- **Dependencies**: Major dependency updates
+  - rmcp: 0.13.0 → 1.1.1 (adapted to `#[non_exhaustive]` struct changes)
+  - rand: 0.9.2 → 0.10.0 (adapted to removed `RngCore` re-export)
+  - arrow/parquet: 57.2.0 → 58.0.0
+  - tokio: 1.49.0 → 1.50.0
+  - fastembed: 5.8.1 → 5.12.0
+  - chrono: 0.4.43 → 0.4.44
+  - clap: 4.5.54 → 4.5.60
+  - redis: 1.0.2 → 1.0.5
+  - uuid: 1.19.0 → 1.21.0
+  - git2: 0.20.3 → 0.20.4
+  - rustls: 0.23.36 → 0.23.37
+  - usearch: 2.23.0 → 2.24.0
+  - jsonwebtoken: 10.2.0 → 10.3.0
+
+- **CI**: Updated GitHub Actions
+  - actions/checkout: v4 → v6
+  - actions/upload-artifact: v6 → v7
+  - actions/download-artifact: v7 → v8
+  - actions/setup-node: 4.4.0 → 6.3.0
+  - docker/setup-buildx-action: v3 → v4
+  - docker/build-push-action: v6 → v7
+  - docker/setup-qemu-action: v3 → v4
+  - docker/login-action: v3 → v4
+  - aquasecurity/trivy-action: 0.34.1 → 0.35.0
+  - actions/dependency-review-action: 4.8.3 → 4.9.0
+
+### Fixed
+
+- **CI**: Split Windows test job to exclude `usearch-hnsw` feature (build.rs panics on MSVC)
+- **CI**: Fixed Trivy security scan exit-code being silently ignored when `trivy-config` action input was set
+- **Security**: Updated `time` to 0.3.47 (stack exhaustion advisory) and `bytes` to 1.11.1 (integer overflow RUSTSEC-2026-0007)
+- **MCP**: Adapted to rmcp 1.1.1 non-exhaustive struct API changes (7 call sites updated to use builders/constructors)
+- **Encryption**: Fixed `rand` 0.10 import (`RngCore` → `Rng`)
+
+## [0.14.7] - 2026-02-10
+
+### Fixed
+
+- **Hooks**: Prevent slash command echo in hook output
+
+## [0.14.6] - 2026-02-08
+
 ### Changed
 
 - **MCP**: `subcog_init` now returns compressed XML output instead of full markdown documentation
@@ -15,11 +74,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Full markdown documentation remains available via `prompt_understanding` tool
   - Memory previews limited to 150 characters; use `subcog_get` for full content
 
+- **Hooks**: Compressed hook outputs to single-line XML format
+
 ### Fixed
 
 - **Hooks**: CaptureService now uses config's `data_dir` for SQLite persistence
   - Fixes issue where hook-based captures used different database than MCP server
   - Ensures consistent memory storage across all entry points
+
+## [0.14.3] - 2026-01-28
+
+### Fixed
+
+- **MCP**: Removed optional env vars from config that caused startup failures
 
 ## [0.14.2] - 2026-01-22
 
@@ -474,13 +541,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prompt template management
 - Deduplication service
 
-[Unreleased]: https://github.com/zircote/subcog/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/zircote/subcog/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/zircote/subcog/compare/v0.14.7...v0.15.0
+[0.14.7]: https://github.com/zircote/subcog/compare/v0.14.6...v0.14.7
+[0.14.6]: https://github.com/zircote/subcog/compare/v0.14.3...v0.14.6
+[0.14.3]: https://github.com/zircote/subcog/compare/v0.14.2...v0.14.3
+[0.14.2]: https://github.com/zircote/subcog/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/zircote/subcog/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/zircote/subcog/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/zircote/subcog/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/zircote/subcog/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/zircote/subcog/compare/v0.10.0...v0.11.0
-[0.10.0]: https://github.com/zircote/subcog/compare/v0.9.0...v0.10.0
+[0.10.0]: https://github.com/zircote/subcog/compare/v0.9.2...v0.10.0
+[0.9.2]: https://github.com/zircote/subcog/compare/v0.9.1...v0.9.2
+[0.9.1]: https://github.com/zircote/subcog/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/zircote/subcog/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/zircote/subcog/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/zircote/subcog/compare/v0.6.1...v0.7.0
