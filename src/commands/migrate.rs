@@ -8,7 +8,6 @@ use std::path::PathBuf;
 
 use subcog::Error;
 use subcog::services::ServiceContainer;
-use subcog::storage::IndexBackend;
 
 /// Migrate embeddings command.
 ///

@@ -4,6 +4,7 @@
 //! - Reduce code duplication between `for_repo` and `for_user`
 //! - Enable easier backend swapping for testing
 //! - Provide consistent error handling and graceful degradation
+//! - Route to PostgreSQL or `SQLite` backends based on configuration
 //!
 //! # Architecture
 //!
@@ -19,12 +20,17 @@
 //! Factory methods return `Option` for backends that may fail to initialize.
 //! This allows the service container to continue with reduced functionality.
 
+use crate::config::{StorageBackendConfig, StorageBackendType};
 use crate::embedding::{Embedder, FastEmbedEmbedder};
 use crate::storage::index::SqliteBackend;
-use crate::storage::traits::{IndexBackend, VectorBackend};
+use crate::storage::persistence::FilesystemBackend;
+use crate::storage::traits::{IndexBackend, PersistenceBackend, VectorBackend};
 use crate::storage::vector::UsearchBackend;
 use std::path::Path;
 use std::sync::Arc;
+
+#[cfg(feature = "postgres")]
+use crate::storage::index::PostgresBackend;
 
 /// Result of backend initialization with optional components.
 ///
@@ -33,10 +39,12 @@ use std::sync::Arc;
 pub struct BackendSet {
     /// Embedder for generating vector embeddings.
     pub embedder: Option<Arc<dyn Embedder>>,
-    /// Index backend for full-text search (`SQLite` FTS5).
+    /// Index backend for full-text search (`SQLite` FTS5 or PostgreSQL tsvector).
     pub index: Option<Arc<dyn IndexBackend + Send + Sync>>,
-    /// Vector backend for similarity search (usearch HNSW).
+    /// Vector backend for similarity search (usearch HNSW or pgvector).
     pub vector: Option<Arc<dyn VectorBackend + Send + Sync>>,
+    /// Persistence backend for authoritative storage (filesystem, `SQLite`, or PostgreSQL).
+    pub persistence: Option<Arc<dyn PersistenceBackend + Send + Sync>>,
 }
 
 impl BackendSet {
@@ -63,6 +71,12 @@ impl BackendSet {
     pub fn has_vector(&self) -> bool {
         self.vector.is_some()
     }
+
+    /// Returns true if persistence is available.
+    #[must_use]
+    pub fn has_persistence(&self) -> bool {
+        self.persistence.is_some()
+    }
 }
 
 /// Factory for creating storage backends.
@@ -75,7 +89,7 @@ impl BackendSet {
 /// use subcog::services::{BackendFactory, PathManager};
 ///
 /// let paths = PathManager::for_repo("/path/to/repo");
-/// let backends = BackendFactory::create_all(&paths);
+/// let backends = BackendFactory::create_all(&paths.index_path(), &paths.vector_path());
 ///
 /// if backends.is_complete() {
 ///     println!("All backends initialized successfully");
@@ -107,7 +121,127 @@ impl BackendFactory {
             embedder,
             index,
             vector,
+            persistence: None,
         }
+    }
+
+    /// Creates all backends based on storage configuration.
+    ///
+    /// Routes to PostgreSQL or `SQLite`/usearch backends based on the
+    /// `StorageBackendConfig`. Falls back to `SQLite` paths when PostgreSQL
+    /// initialization fails.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Storage backend configuration (backend type, connection string, etc.)
+    /// * `index_path` - Fallback path for `SQLite` index database
+    /// * `vector_path` - Fallback path for vector index files
+    #[must_use]
+    pub fn create_from_config(
+        config: &StorageBackendConfig,
+        index_path: &Path,
+        vector_path: &Path,
+    ) -> BackendSet {
+        match config.backend {
+            StorageBackendType::PostgreSQL => {
+                Self::create_postgres_backends(config, index_path, vector_path)
+            },
+            StorageBackendType::Filesystem => {
+                let mut set = Self::create_all(index_path, vector_path);
+                // Create filesystem persistence if a path is configured
+                if let Some(ref path) = config.path {
+                    let fs_path = std::path::Path::new(path);
+                    set.persistence =
+                        Some(Arc::new(FilesystemBackend::new(fs_path)));
+                    tracing::debug!(
+                        path = %fs_path.display(),
+                        "Created filesystem persistence backend"
+                    );
+                }
+                set
+            },
+            // SQLite and Redis both fall back to default SQLite/usearch
+            StorageBackendType::Sqlite | StorageBackendType::Redis => {
+                Self::create_all(index_path, vector_path)
+            },
+        }
+    }
+
+    /// Creates PostgreSQL-backed storage backends.
+    ///
+    /// Attempts to create PostgreSQL index, vector (pgvector), and persistence
+    /// backends from the connection string. Falls back to `SQLite`/usearch for
+    /// any component that fails.
+    ///
+    /// Requires the `postgres` feature flag. Without it, logs a warning and
+    /// falls back to `SQLite`.
+    fn create_postgres_backends(
+        config: &StorageBackendConfig,
+        index_path: &Path,
+        vector_path: &Path,
+    ) -> BackendSet {
+        let Some(connection_string) = config.connection_string.as_deref() else {
+            tracing::warn!(
+                "PostgreSQL backend configured but no connection_string provided, \
+                 falling back to SQLite"
+            );
+            return Self::create_all(index_path, vector_path);
+        };
+
+        Self::create_postgres_backends_inner(connection_string, config.pool_max_size, index_path, vector_path)
+    }
+
+    /// Inner implementation for PostgreSQL backend creation (feature-gated).
+    #[cfg(feature = "postgres")]
+    fn create_postgres_backends_inner(
+        connection_url: &str,
+        pool_max_size: Option<usize>,
+        fallback_index_path: &Path,
+        fallback_vector_path: &Path,
+    ) -> BackendSet {
+        let embedder = Self::create_embedder();
+
+        // Create a single PostgreSQL backend that handles both FTS (memories table)
+        // and vector search (memory_vectors table) with one shared connection pool.
+        match PostgresBackend::with_pool_size(connection_url, "memories", "memory_vectors", pool_max_size) {
+            Ok(backend) => {
+                tracing::info!("Created PostgreSQL backend (index + vector + persistence)");
+                let backend = Arc::new(backend);
+                BackendSet {
+                    embedder,
+                    index: Some(backend.clone()),
+                    vector: Some(backend.clone()),
+                    persistence: Some(backend),
+                }
+            },
+            Err(e) => {
+                tracing::warn!(
+                    error = ?e,
+                    "Failed to create PostgreSQL backend, falling back to SQLite/usearch"
+                );
+                BackendSet {
+                    embedder,
+                    index: Self::create_index_backend(fallback_index_path),
+                    vector: Self::create_vector_backend(fallback_vector_path),
+                    persistence: None,
+                }
+            },
+        }
+    }
+
+    /// Fallback when `postgres` feature is not enabled.
+    #[cfg(not(feature = "postgres"))]
+    fn create_postgres_backends_inner(
+        _connection_url: &str,
+        _pool_max_size: Option<usize>,
+        index_path: &Path,
+        vector_path: &Path,
+    ) -> BackendSet {
+        tracing::error!(
+            "PostgreSQL backend configured but the 'postgres' feature is not enabled. \
+             Rebuild with: cargo build --features postgres. Falling back to SQLite."
+        );
+        Self::create_all(index_path, vector_path)
     }
 
     /// Creates the embedder backend.
@@ -228,6 +362,7 @@ impl BackendFactory {
             embedder,
             index,
             vector,
+            persistence: None,
         }
     }
 }
@@ -244,6 +379,7 @@ mod tests {
         assert!(!set.has_embedder());
         assert!(!set.has_index());
         assert!(!set.has_vector());
+        assert!(!set.has_persistence());
     }
 
     #[test]
@@ -293,5 +429,56 @@ mod tests {
         assert!(set.has_embedder());
         assert!(!set.has_index());
         assert!(!set.has_vector());
+        assert!(!set.has_persistence());
+    }
+
+    #[test]
+    fn test_create_from_config_sqlite_default() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let index_path = temp_dir.path().join("index.db");
+        let vector_path = temp_dir.path().join("vectors");
+
+        let config = StorageBackendConfig::default();
+        let backends = BackendFactory::create_from_config(&config, &index_path, &vector_path);
+
+        assert!(backends.has_embedder());
+        assert!(backends.has_index());
+    }
+
+    #[test]
+    fn test_create_from_config_postgres_no_connection_string() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let index_path = temp_dir.path().join("index.db");
+        let vector_path = temp_dir.path().join("vectors");
+
+        let config = StorageBackendConfig {
+            backend: StorageBackendType::PostgreSQL,
+            connection_string: None,
+            ..Default::default()
+        };
+
+        // Should fall back to SQLite when no connection string provided
+        let backends = BackendFactory::create_from_config(&config, &index_path, &vector_path);
+        assert!(backends.has_embedder());
+        assert!(backends.has_index());
+    }
+
+    #[test]
+    fn test_create_from_config_filesystem() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let index_path = temp_dir.path().join("index.db");
+        let vector_path = temp_dir.path().join("vectors");
+        let persistence_path = temp_dir.path().join("data");
+
+        let config = StorageBackendConfig {
+            backend: StorageBackendType::Filesystem,
+            path: Some(persistence_path.to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+
+        let backends = BackendFactory::create_from_config(&config, &index_path, &vector_path);
+        assert!(backends.has_embedder());
+        assert!(backends.has_index());
+        assert!(backends.has_persistence());
     }
 }
