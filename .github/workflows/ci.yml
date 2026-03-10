@@ -108,8 +108,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-huggingface-
 
-      - name: Run tests
+      - name: Run tests (Unix)
+        if: runner.os != 'Windows'
         run: cargo test --all-features --verbose
+        timeout-minutes: 30
+
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        # Skip usearch-hnsw on Windows (build.rs panics on MSVC)
+        run: cargo test --features postgres,postgres-tls,redis,fastembed-embeddings,http,encryption,parquet-export --verbose
         timeout-minutes: 30
 
   doc:
