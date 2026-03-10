@@ -60,8 +60,7 @@ pub fn cmd_gc(
     let container = ServiceContainer::from_current_dir()?;
 
     // Get the index backend
-    let index = container.index()?;
-    let index_arc = Arc::new(index);
+    let index_arc = container.index()?;
 
     // Create garbage collector
     let gc = BranchGarbageCollector::new(index_arc);
@@ -157,8 +156,7 @@ fn display_gc_result(result: &GcResult, branch_filter: Option<&str>) {
 #[allow(dead_code)]
 pub fn run_gc(project_id: &str, dry_run: bool) -> Result<GcResult, Box<dyn std::error::Error>> {
     let container = ServiceContainer::from_current_dir()?;
-    let index = container.index()?;
-    let index_arc = Arc::new(index);
+    let index_arc = container.index()?;
 
     let gc = BranchGarbageCollector::new(index_arc);
     let result = gc.gc_stale_branches(project_id, dry_run)?;

@@ -589,7 +589,7 @@ pub fn execute_consolidate(arguments: Value) -> Result<ToolResult> {
     // Create service container for recall service and index
     let services = ServiceContainer::from_current_dir_or_user()?;
     let recall_service = services.recall()?;
-    let index = Arc::new(services.index()?);
+    let index = services.index()?;
 
     // Build LLM provider (optional, for summarization)
     let llm_provider: Option<Arc<dyn crate::llm::LlmProvider + Send + Sync>> =
@@ -787,8 +787,8 @@ fn run_mcp_consolidation<P: crate::storage::PersistenceBackend>(
 }
 
 /// Formats a single source memory entry for display.
-fn format_source_memory_entry<I: crate::storage::traits::IndexBackend>(
-    index: &I,
+fn format_source_memory_entry(
+    index: &dyn crate::storage::traits::IndexBackend,
     source_id: &crate::models::MemoryId,
     position: usize,
 ) -> Result<String> {
@@ -831,7 +831,6 @@ fn format_source_memory_entry<I: crate::storage::traits::IndexBackend>(
 pub fn execute_get_summary(arguments: Value) -> Result<ToolResult> {
     use crate::mcp::tool_types::GetSummaryArgs;
     use crate::models::{EdgeType, MemoryId};
-    use crate::storage::traits::IndexBackend;
 
     let args: GetSummaryArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
@@ -883,7 +882,7 @@ pub fn execute_get_summary(arguments: Value) -> Result<ToolResult> {
 
         // Retrieve each source memory using IndexBackend::get_memory
         for (idx, source_id) in source_ids.iter().enumerate() {
-            let entry = format_source_memory_entry(&index, source_id, idx + 1)?;
+            let entry = format_source_memory_entry(&*index, source_id, idx + 1)?;
             output.push_str(&entry);
         }
     }
@@ -1022,7 +1021,6 @@ pub fn execute_gdpr_export(_arguments: Value) -> Result<ToolResult> {
 /// This is a fundamental CRUD operation that provides direct access to
 /// a specific memory without requiring a search query.
 pub fn execute_get(arguments: Value) -> Result<ToolResult> {
-    use crate::storage::traits::IndexBackend;
 
     let args: GetArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
@@ -1107,7 +1105,6 @@ pub fn execute_get(arguments: Value) -> Result<ToolResult> {
 /// Defaults to soft delete (tombstone) which can be restored later.
 /// Use `hard: true` for permanent deletion.
 pub fn execute_delete(arguments: Value) -> Result<ToolResult> {
-    use crate::storage::traits::IndexBackend;
     use chrono::TimeZone;
 
     let args: DeleteArgs =
@@ -1200,8 +1197,6 @@ pub fn execute_delete(arguments: Value) -> Result<ToolResult> {
 ///
 /// This is a partial update operation - only provided fields are changed.
 pub fn execute_update(arguments: Value) -> Result<ToolResult> {
-    use crate::storage::traits::IndexBackend;
-
     let args: UpdateArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
@@ -1488,7 +1483,7 @@ pub fn execute_delete_all(arguments: Value) -> Result<ToolResult> {
     }
 
     // Execute the deletion
-    let (deleted_count, failed_count) = execute_bulk_delete(&result.memories, args.hard, &index)?;
+    let (deleted_count, failed_count) = execute_bulk_delete(&result.memories, args.hard, &*index)?;
 
     let output = build_delete_result_output(deleted_count, failed_count, &filter_desc, args.hard);
 
@@ -1564,7 +1559,7 @@ fn build_dry_run_output(
 fn execute_bulk_delete(
     memories: &[crate::models::SearchHit],
     hard: bool,
-    index: &crate::storage::index::SqliteBackend,
+    index: &dyn crate::storage::traits::IndexBackend,
 ) -> Result<(u64, u64)> {
     let mut deleted_count = 0u64;
     let mut failed_count = 0u64;
@@ -1590,11 +1585,10 @@ fn execute_bulk_delete(
 
 /// Performs hard (permanent) deletion of a memory.
 fn delete_memory_hard(
-    index: &crate::storage::index::SqliteBackend,
+    index: &dyn crate::storage::traits::IndexBackend,
     memory_id: &MemoryId,
     now: u64,
 ) -> bool {
-    use crate::storage::traits::IndexBackend;
 
     match index.remove(memory_id) {
         Ok(true) => {
@@ -1611,11 +1605,10 @@ fn delete_memory_hard(
 
 /// Performs soft deletion (tombstone) of a memory.
 fn delete_memory_soft(
-    index: &crate::storage::index::SqliteBackend,
+    index: &dyn crate::storage::traits::IndexBackend,
     memory: &crate::models::Memory,
     now: u64,
 ) -> bool {
-    use crate::storage::traits::IndexBackend;
     use chrono::TimeZone;
 
     let now_i64 = i64::try_from(now).unwrap_or(i64::MAX);
@@ -1679,7 +1672,6 @@ fn build_delete_result_output(
 /// Sets the memory status back to Active and clears the tombstone timestamp.
 pub fn execute_restore(arguments: Value) -> Result<ToolResult> {
     use crate::mcp::tool_types::RestoreArgs;
-    use crate::storage::traits::IndexBackend;
 
     let args: RestoreArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
@@ -1761,7 +1753,6 @@ pub fn execute_restore(arguments: Value) -> Result<ToolResult> {
 /// Note: This provides audit trail visibility but doesn't store full version snapshots.
 pub fn execute_history(arguments: Value) -> Result<ToolResult> {
     use crate::mcp::tool_types::HistoryArgs;
-    use crate::storage::traits::IndexBackend;
 
     let args: HistoryArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;

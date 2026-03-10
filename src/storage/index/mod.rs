@@ -10,7 +10,7 @@ pub use domain::{
     get_user_data_dir, is_in_git_repo, is_path_in_git_repo,
 };
 pub use org_router::{OrgBackendType, OrgIndexRouter, OrgIndexStatus};
-pub use postgresql::PostgresIndexBackend;
+pub use postgresql::PostgresBackend;
 pub use sqlite::SqliteBackend;
 
 // Redis backend available with feature flag

@@ -140,4 +140,39 @@ pub trait IndexBackend: Send + Sync {
         // Default implementation falls back to individual queries
         ids.iter().map(|id| self.get_memory(id)).collect()
     }
+
+    /// Stores a directed edge between two memories.
+    ///
+    /// Used by consolidation to track relationships between summary nodes
+    /// and their source memories. The default implementation is a no-op
+    /// (returns `Ok(())`) for backends that don't support edge storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the edge cannot be stored.
+    fn store_edge(
+        &self,
+        _from_id: &MemoryId,
+        _to_id: &MemoryId,
+        _edge_type: crate::models::EdgeType,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Queries edges from a given memory by edge type.
+    ///
+    /// Returns the target memory IDs for all edges matching the type.
+    /// The default implementation returns an empty list for backends
+    /// that don't support edge storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    fn query_edges(
+        &self,
+        _from_id: &MemoryId,
+        _edge_type: crate::models::EdgeType,
+    ) -> Result<Vec<MemoryId>> {
+        Ok(vec![])
+    }
 }

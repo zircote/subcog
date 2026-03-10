@@ -42,6 +42,9 @@ mod implementation {
     pub struct MigrationRunner {
         pool: Pool,
         table_name: String,
+        /// Additional placeholder replacements applied to migration SQL.
+        /// Each entry is `("{placeholder}", "replacement_value")`.
+        extra_replacements: Vec<(String, String)>,
     }
 
     impl MigrationRunner {
@@ -51,7 +54,22 @@ mod implementation {
             Self {
                 pool,
                 table_name: table_name.into(),
+                extra_replacements: Vec::new(),
             }
+        }
+
+        /// Registers an additional placeholder replacement for migration SQL.
+        ///
+        /// The `{table}` placeholder is always replaced with the table name.
+        /// Use this for additional placeholders like `{vector_table}`.
+        #[must_use]
+        pub fn with_replacement(
+            mut self,
+            placeholder: impl Into<String>,
+            value: impl Into<String>,
+        ) -> Self {
+            self.extra_replacements.push((placeholder.into(), value.into()));
+            self
         }
 
         /// Returns the table name.
@@ -68,19 +86,45 @@ mod implementation {
         pub async fn run(&self, migrations: &[Migration]) -> Result<()> {
             let mut client = self.pool.get().await.map_err(|e| Error::OperationFailed {
                 operation: "migration_get_connection".to_string(),
-                cause: e.to_string(),
+                cause: format!("{e:?}"),
             })?;
 
+            // Acquire advisory lock to prevent concurrent migration runs.
+            // hashtext('subcog_migrations') produces a stable int4 lock key.
+            client
+                .execute("SELECT pg_advisory_lock(hashtext('subcog_migrations'))", &[])
+                .await
+                .map_err(|e| Error::OperationFailed {
+                    operation: "migration_advisory_lock".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            let result = self.run_inner(&mut client, migrations).await;
+
+            // Always release the advisory lock, even on failure
+            let _ = client
+                .execute("SELECT pg_advisory_unlock(hashtext('subcog_migrations'))", &[])
+                .await;
+
+            result
+        }
+
+        /// Inner migration logic, called while holding the advisory lock.
+        async fn run_inner(
+            &self,
+            client: &mut deadpool_postgres::Object,
+            migrations: &[Migration],
+        ) -> Result<()> {
             // Ensure migrations tracking table exists
-            self.ensure_migrations_table(&client).await?;
+            self.ensure_migrations_table(client).await?;
 
             // Get current version
-            let current_version = self.get_current_version(&client).await?;
+            let current_version = self.get_current_version(client).await?;
 
             // Apply pending migrations
             for migration in migrations {
                 if migration.version > current_version {
-                    self.apply_migration(&mut client, migration).await?;
+                    self.apply_migration(client, migration).await?;
                 }
             }
 
@@ -110,8 +154,8 @@ mod implementation {
         }
 
         /// Returns the name of the migrations tracking table.
-        fn migrations_table_name(&self) -> String {
-            format!("{}_schema_migrations", self.table_name)
+        fn migrations_table_name(&self) -> &str {
+            "migrations"
         }
 
         /// Ensures the `schema_migrations` table exists.
@@ -148,7 +192,7 @@ mod implementation {
             let sql = r"
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables
-                    WHERE table_name = $1
+                    WHERE table_schema = 'public' AND table_name = $1
                 )
             ";
 
@@ -191,7 +235,12 @@ mod implementation {
             let migrations_table = self.migrations_table_name();
 
             // Replace {table} placeholder with actual table name
-            let sql = migration.sql.replace("{table}", &self.table_name);
+            let mut sql = migration.sql.replace("{table}", &self.table_name);
+
+            // Apply any additional placeholder replacements
+            for (placeholder, value) in &self.extra_replacements {
+                sql = sql.replace(placeholder, value);
+            }
 
             // Start transaction for atomic migration application
             let tx = client
@@ -202,21 +251,34 @@ mod implementation {
                     cause: e.to_string(),
                 })?;
 
-            // Execute all statements within the transaction
-            for statement in sql.split(';') {
-                let statement = statement.trim();
-                if statement.is_empty() {
-                    continue;
-                }
-
-                tx.execute(statement, &[])
+            // Execute all statements within the transaction.
+            // Uses dollar-quote-aware splitting so PL/pgSQL function
+            // bodies containing semicolons are not split incorrectly.
+            for statement in split_sql_statements(&sql) {
+                tx.execute(statement.as_str(), &[])
                     .await
-                    .map_err(|e| Error::OperationFailed {
-                        operation: format!(
-                            "migration_v{}: {}",
-                            migration.version, migration.description
-                        ),
-                        cause: e.to_string(),
+                    .map_err(|e| {
+                        // tokio_postgres::Error Display impl only shows "db error"
+                        // for database errors — use Debug format to include the
+                        // actual message, detail, and hint from PostgreSQL.
+                        let cause = if let Some(db_err) = e.as_db_error() {
+                            format!(
+                                "{}: {} (detail: {:?}, hint: {:?})",
+                                db_err.severity(),
+                                db_err.message(),
+                                db_err.detail(),
+                                db_err.hint(),
+                            )
+                        } else {
+                            e.to_string()
+                        };
+                        Error::OperationFailed {
+                            operation: format!(
+                                "migration_v{}: {}",
+                                migration.version, migration.description
+                            ),
+                            cause,
+                        }
                     })?;
             }
 
@@ -245,6 +307,90 @@ mod implementation {
             );
 
             Ok(())
+        }
+    }
+
+    /// Splits SQL text into individual statements, respecting dollar-quoted blocks.
+    ///
+    /// PL/pgSQL function bodies use dollar-quote delimiters (`$$`, `$body$`, `$func$`)
+    /// and contain semicolons that should NOT be treated as statement separators.
+    /// This function tracks whether we're inside a dollar-quoted block and only
+    /// splits on semicolons that are outside such blocks.
+    fn split_sql_statements(sql: &str) -> Vec<String> {
+        let mut statements = Vec::new();
+        let mut current = String::new();
+        let mut dollar_quote_tag: Option<String> = None;
+        let bytes = sql.as_bytes();
+        let len = bytes.len();
+        let mut i = 0;
+
+        while i < len {
+            if bytes[i] == b'$' {
+                // Try to match a dollar-quote tag: $tag$ where tag is [a-zA-Z0-9_]*
+                if let Some(tag) = try_parse_dollar_tag(bytes, i) {
+                    let full_tag = &sql[i..i + tag.len()];
+                    current.push_str(full_tag);
+                    i += tag.len();
+
+                    match &dollar_quote_tag {
+                        Some(open_tag) if open_tag == full_tag => {
+                            // Closing tag matches — exit dollar-quoted block
+                            dollar_quote_tag = None;
+                        },
+                        None => {
+                            // Opening tag — enter dollar-quoted block
+                            dollar_quote_tag = Some(full_tag.to_string());
+                        },
+                        _ => {
+                            // Inside a different dollar-quoted block, treat as content
+                        },
+                    }
+                    continue;
+                }
+            }
+
+            let ch = sql[i..].chars().next().unwrap();
+            if ch == ';' && dollar_quote_tag.is_none() {
+                let trimmed = current.trim().to_string();
+                if !trimmed.is_empty() {
+                    statements.push(trimmed);
+                }
+                current.clear();
+            } else {
+                current.push(ch);
+            }
+            i += ch.len_utf8();
+        }
+
+        let trimmed = current.trim().to_string();
+        if !trimmed.is_empty() {
+            statements.push(trimmed);
+        }
+
+        statements
+    }
+
+    /// Tries to parse a dollar-quote tag starting at position `i`.
+    ///
+    /// Returns the full tag (e.g., `$$`, `$body$`, `$func$`) if found,
+    /// or `None` if the `$` is not the start of a valid dollar-quote tag.
+    fn try_parse_dollar_tag(bytes: &[u8], i: usize) -> Option<String> {
+        if i >= bytes.len() || bytes[i] != b'$' {
+            return None;
+        }
+
+        let mut j = i + 1;
+        // Scan tag name: [a-zA-Z0-9_]*
+        while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+            j += 1;
+        }
+
+        // Must end with another $
+        if j < bytes.len() && bytes[j] == b'$' {
+            let tag = std::str::from_utf8(&bytes[i..=j]).ok()?;
+            Some(tag.to_string())
+        } else {
+            None
         }
     }
 
