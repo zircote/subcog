@@ -75,14 +75,11 @@ impl Default for OtlpExporter {
 }
 
 pub(super) fn endpoint_from_env() -> Option<String> {
-    std::env::var("SUBCOG_OTLP_ENDPOINT")
-        .ok()
-        .or_else(|| std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok())
+    std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok()
 }
 
 fn protocol_from_env_override() -> Option<OtlpProtocol> {
-    std::env::var("SUBCOG_OTLP_PROTOCOL")
-        .or_else(|_| std::env::var("OTEL_EXPORTER_OTLP_PROTOCOL"))
+    std::env::var("OTEL_EXPORTER_OTLP_PROTOCOL")
         .ok()
         .and_then(|value| OtlpProtocol::parse(&value))
 }
