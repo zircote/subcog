@@ -115,14 +115,17 @@ pub fn build_tracing(config: &TracingConfig) -> Result<Option<TracingInit>> {
         return Ok(None);
     }
 
-    let endpoint = config
-        .otlp
-        .endpoint
-        .clone()
-        .ok_or_else(|| Error::OperationFailed {
+    // Validate that an OTLP endpoint is configured. Without this the SDK
+    // silently defaults to localhost. The endpoint itself is read by the SDK
+    // from standard OTEL env vars — we never pass it programmatically.
+    if config.otlp.endpoint.is_none() {
+        return Err(Error::OperationFailed {
             operation: "tracing_init".to_string(),
-            cause: "OTLP endpoint required when tracing is enabled".to_string(),
-        })?;
+            cause: "OTLP endpoint required when tracing is enabled \
+                    — set OTEL_EXPORTER_OTLP_ENDPOINT"
+                .to_string(),
+        });
+    }
 
     let runtime = match (config.otlp.protocol, tokio::runtime::Handle::try_current()) {
         (OtlpProtocol::Grpc, Err(_)) => Some(
@@ -139,41 +142,40 @@ pub fn build_tracing(config: &TracingConfig) -> Result<Option<TracingInit>> {
 
     let _guard = runtime.as_ref().map(tokio::runtime::Runtime::enter);
 
-    // Build trace exporter
-    let trace_exporter = match config.otlp.protocol {
-        OtlpProtocol::Grpc => SpanExporter::builder()
-            .with_tonic()
-            .with_endpoint(&endpoint)
-            .build()
-            .map_err(|e| Error::OperationFailed {
-                operation: "otlp_exporter_build".to_string(),
-                cause: e.to_string(),
+    // Build exporters without with_endpoint() — the SDK reads
+    // OTEL_EXPORTER_OTLP_ENDPOINT natively and auto-appends signal paths
+    // for HTTP (/v1/traces, /v1/logs per the OTLP spec).
+    let trace_exporter =
+        match config.otlp.protocol {
+            OtlpProtocol::Grpc => SpanExporter::builder().with_tonic().build().map_err(|e| {
+                Error::OperationFailed {
+                    operation: "otlp_exporter_build".to_string(),
+                    cause: e.to_string(),
+                }
             })?,
-        OtlpProtocol::Http => SpanExporter::builder()
-            .with_http()
-            .with_protocol(Protocol::HttpBinary)
-            .with_endpoint(&endpoint)
-            .build()
-            .map_err(|e| Error::OperationFailed {
-                operation: "otlp_exporter_build".to_string(),
-                cause: e.to_string(),
-            })?,
-    };
+            OtlpProtocol::Http => SpanExporter::builder()
+                .with_http()
+                .with_protocol(Protocol::HttpBinary)
+                .build()
+                .map_err(|e| Error::OperationFailed {
+                    operation: "otlp_exporter_build".to_string(),
+                    cause: e.to_string(),
+                })?,
+        };
 
-    // Build logs exporter
     let log_exporter = match config.otlp.protocol {
-        OtlpProtocol::Grpc => LogExporter::builder()
-            .with_tonic()
-            .with_endpoint(&endpoint)
-            .build()
-            .map_err(|e| Error::OperationFailed {
-                operation: "otlp_log_exporter_build".to_string(),
-                cause: e.to_string(),
-            })?,
+        OtlpProtocol::Grpc => {
+            LogExporter::builder()
+                .with_tonic()
+                .build()
+                .map_err(|e| Error::OperationFailed {
+                    operation: "otlp_log_exporter_build".to_string(),
+                    cause: e.to_string(),
+                })?
+        },
         OtlpProtocol::Http => LogExporter::builder()
             .with_http()
             .with_protocol(Protocol::HttpBinary)
-            .with_endpoint(&endpoint)
             .build()
             .map_err(|e| Error::OperationFailed {
                 operation: "otlp_log_exporter_build".to_string(),
@@ -254,21 +256,14 @@ fn parse_resource_attributes_from_settings(values: Vec<String>) -> Vec<KeyValue>
 }
 
 fn parse_sample_ratio() -> Option<f64> {
-    if let Ok(value) = std::env::var("SUBCOG_TRACE_SAMPLE_RATIO") {
-        return value.parse::<f64>().ok().map(|v| v.clamp(0.0, 1.0));
-    }
-
-    if let Ok(value) = std::env::var("OTEL_TRACES_SAMPLER_ARG") {
-        return value.parse::<f64>().ok().map(|v| v.clamp(0.0, 1.0));
-    }
-
-    None
+    std::env::var("OTEL_TRACES_SAMPLER_ARG")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .map(|v| v.clamp(0.0, 1.0))
 }
 
 fn build_sampler(sample_ratio: f64) -> Sampler {
-    let sampler_env = std::env::var("SUBCOG_TRACING_SAMPLER")
-        .ok()
-        .or_else(|| std::env::var("OTEL_TRACES_SAMPLER").ok());
+    let sampler_env = std::env::var("OTEL_TRACES_SAMPLER").ok();
     match sampler_env.as_deref() {
         Some("always_on") => Sampler::AlwaysOn,
         Some("always_off") => Sampler::AlwaysOff,
