@@ -1110,7 +1110,7 @@ impl McpServer {
     /// this simplifies K8s probes to native `httpGet` without token injection.
     #[cfg(feature = "http")]
     #[must_use]
-    pub fn with_health_no_auth(mut self, enabled: bool) -> Self {
+    pub const fn with_health_no_auth(mut self, enabled: bool) -> Self {
         self.health_no_auth = enabled;
         self
     }
