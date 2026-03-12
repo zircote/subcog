@@ -186,6 +186,10 @@ enum Commands {
         /// Port for HTTP transport.
         #[arg(short, long, default_value = "3000")]
         port: u16,
+
+        /// Allow unauthenticated /healthz requests (for K8s sidecar probes).
+        #[arg(long)]
+        health_no_auth: bool,
     },
 
     /// Handle Claude Code hooks.
@@ -505,7 +509,11 @@ async fn dispatch_command(
         Commands::Config { show, set } => run_blocking_cmd!(move || {
             commands::cmd_config(config, show, set).map_err(|e| e.to_string())
         }),
-        Commands::Serve { transport, port } => cmd_serve(transport, port).await,
+        Commands::Serve {
+            transport,
+            port,
+            health_no_auth,
+        } => cmd_serve(transport, port, health_no_auth).await,
         Commands::Hook { event } => {
             let config = config.clone();
             run_blocking_cmd!(move || commands::cmd_hook(event, &config).map_err(|e| e.to_string()))
@@ -680,7 +688,11 @@ fn load_config(path: Option<&str>) -> Result<SubcogConfig, Box<dyn std::error::E
 }
 
 /// Serve command.
-async fn cmd_serve(transport: String, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+async fn cmd_serve(
+    transport: String,
+    port: u16,
+    health_no_auth: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Set instance label for metrics to prevent MCP from overwriting hook metrics
     observability::set_instance_label("mcp");
 
@@ -698,7 +710,10 @@ async fn cmd_serve(transport: String, port: u16) -> Result<(), Box<dyn std::erro
 
     #[cfg(feature = "http")]
     if matches!(transport_type, Transport::Http) {
-        server = server.with_jwt_from_env().map_err(|e| e.to_string())?;
+        server = server
+            .with_jwt_from_env()
+            .map_err(|e| e.to_string())?
+            .with_health_no_auth(health_no_auth);
     }
 
     server.start().await.map_err(|e| e.to_string())?;

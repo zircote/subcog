@@ -185,6 +185,12 @@ impl ToolRegistry {
         Self { tools }
     }
 
+    /// Returns the number of registered tools.
+    #[must_use]
+    pub fn tool_count(&self) -> usize {
+        self.tools.len()
+    }
+
     /// Returns all tool definitions.
     #[must_use]
     pub fn list_tools(&self) -> Vec<&ToolDefinition> {
