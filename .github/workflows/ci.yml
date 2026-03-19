@@ -158,7 +158,7 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@d6e286fa45544157a02d45a43742857ebbc25d12 # v2.68.16
+        uses: taiki-e/install-action@de6bbd1333b8f331563d54a051e542c7dfef81c3 # v2.68.34
         with:
           tool: cargo-deny
 
@@ -215,7 +215,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@d6e286fa45544157a02d45a43742857ebbc25d12 # v2.68.16
+        uses: taiki-e/install-action@de6bbd1333b8f331563d54a051e542c7dfef81c3 # v2.68.34
         with:
           tool: cargo-llvm-cov
 
