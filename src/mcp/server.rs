@@ -422,6 +422,61 @@ async fn map_notification_status(req: Request, next: Next) -> Response {
     response
 }
 
+/// Shared state for the `/healthz` endpoint.
+#[cfg(feature = "http")]
+#[derive(Clone)]
+struct HealthState {
+    /// Number of tools registered at startup.
+    tool_count: usize,
+}
+
+/// Handler for `GET /healthz`.
+///
+/// Checks storage layer connectivity and reports tool registration count.
+/// Returns `200 OK` when healthy, `503 Service Unavailable` otherwise.
+#[cfg(feature = "http")]
+async fn healthz_handler(
+    State(state): State<HealthState>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    use crate::services::ServiceContainer;
+
+    // Run storage check on a blocking thread (storage ops are synchronous)
+    let db_ok = tokio::task::spawn_blocking(|| {
+        ServiceContainer::from_current_dir_or_user()
+            .and_then(|svc| {
+                let recall = svc.recall()?;
+                let filter = crate::models::SearchFilter::new();
+                recall.list_all(&filter, 1)?;
+                Ok(())
+            })
+            .is_ok()
+    })
+    .await
+    .unwrap_or(false);
+
+    let tools_ok = state.tool_count > 0;
+
+    if db_ok && tools_ok {
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "ok",
+                "db": "connected",
+                "tools_registered": state.tool_count,
+            })),
+        )
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "status": "unavailable",
+                "db": if db_ok { "connected" } else { "disconnected" },
+                "tools_registered": state.tool_count,
+            })),
+        )
+    }
+}
+
 #[cfg(feature = "http")]
 fn build_cors_layer(config: &CorsConfig) -> SubcogResult<CorsLayer> {
     if config.allowed_origins.is_empty() {
@@ -1022,6 +1077,9 @@ pub struct McpServer {
     /// CORS configuration for HTTP transport (HIGH-SEC-006).
     #[cfg(feature = "http")]
     cors_config: CorsConfig,
+    /// Allow unauthenticated `/healthz` requests (for K8s sidecar probes).
+    #[cfg(feature = "http")]
+    health_no_auth: bool,
 }
 
 impl McpServer {
@@ -1041,7 +1099,20 @@ impl McpServer {
             jwt_authenticator: None,
             #[cfg(feature = "http")]
             cors_config: CorsConfig::from_env(),
+            #[cfg(feature = "http")]
+            health_no_auth: false,
         }
+    }
+
+    /// Allows unauthenticated `/healthz` requests.
+    ///
+    /// For sidecar deployments where the HTTP port is not externally exposed,
+    /// this simplifies K8s probes to native `httpGet` without token injection.
+    #[cfg(feature = "http")]
+    #[must_use]
+    pub const fn with_health_no_auth(mut self, enabled: bool) -> Self {
+        self.health_no_auth = enabled;
+        self
     }
 
     /// Sets the CORS configuration for HTTP transport (HIGH-SEC-006).
@@ -1245,6 +1316,10 @@ impl McpServer {
             }
         })?;
 
+        // Capture tool count before build_handler takes ownership
+        let tool_count = self.tools.tool_count();
+        let health_state = HealthState { tool_count };
+
         let handler = self.build_handler();
         let session_manager = Arc::new(LocalSessionManager::default());
         let streamable = StreamableHttpService::new(
@@ -1262,13 +1337,31 @@ impl McpServer {
         // Build CORS layer
         let cors_layer = build_cors_layer(&self.cors_config)?;
 
-        let app = Router::new()
+        // Auth-protected routes: /mcp always requires JWT
+        let protected = Router::new()
             .route_service("/mcp", any_service(streamable))
             .layer(axum::middleware::from_fn_with_state(
                 auth_state.clone(),
                 auth_middleware,
             ))
-            .layer(axum::middleware::from_fn(map_notification_status))
+            .layer(axum::middleware::from_fn(map_notification_status));
+
+        // /healthz: auth-protected by default, optionally unauthenticated
+        let health_route = Router::new()
+            .route("/healthz", axum::routing::get(healthz_handler))
+            .with_state(health_state);
+
+        let app = if self.health_no_auth {
+            tracing::info!("Health endpoint /healthz is unauthenticated (--health-no-auth)");
+            protected.merge(health_route)
+        } else {
+            protected.merge(health_route.layer(axum::middleware::from_fn_with_state(
+                auth_state,
+                auth_middleware,
+            )))
+        };
+
+        let app = app
             // CORS layer (HIGH-SEC-006) - must be before other layers
             .layer(cors_layer)
             // Security headers (OWASP recommendations)
@@ -1295,7 +1388,11 @@ impl McpServer {
             .layer(TraceLayer::new_for_http());
 
         let addr = std::net::SocketAddr::from(([0, 0, 0, 0], self.port));
-        tracing::info!(port = self.port, "Starting MCP HTTP server with JWT auth");
+        tracing::info!(
+            port = self.port,
+            health_no_auth = self.health_no_auth,
+            "Starting MCP HTTP server with JWT auth"
+        );
 
         let listener =
             tokio::net::TcpListener::bind(addr)
