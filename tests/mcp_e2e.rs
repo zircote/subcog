@@ -26,6 +26,11 @@
 )]
 
 use serde_json::{Value, json};
+use subcog::services::ServiceContainer;
+
+fn test_services() -> ServiceContainer {
+    ServiceContainer::from_current_dir_or_user().unwrap()
+}
 
 // ============================================================================
 // Tool Registry Tests
@@ -150,7 +155,8 @@ mod tool_registry {
     #[test]
     fn test_execute_unknown_tool_returns_error() {
         let registry = ToolRegistry::new();
-        let result = registry.execute("nonexistent_tool", json!({}));
+        let services = test_services();
+        let result = registry.execute("nonexistent_tool", json!({}), &services);
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -164,7 +170,8 @@ mod tool_registry {
     #[test]
     fn test_execute_status_tool() {
         let registry = ToolRegistry::new();
-        let result = registry.execute("subcog_status", json!({}));
+        let services = test_services();
+        let result = registry.execute("subcog_status", json!({}), &services);
 
         assert!(result.is_ok());
         let tool_result = result.unwrap();
@@ -179,7 +186,8 @@ mod tool_registry {
     #[test]
     fn test_execute_namespaces_tool() {
         let registry = ToolRegistry::new();
-        let result = registry.execute("subcog_namespaces", json!({}));
+        let services = test_services();
+        let result = registry.execute("subcog_namespaces", json!({}), &services);
 
         assert!(result.is_ok());
         let tool_result = result.unwrap();
@@ -203,7 +211,8 @@ mod tool_registry {
     #[test]
     fn test_execute_prompt_understanding_tool() {
         let registry = ToolRegistry::new();
-        let result = registry.execute("prompt_understanding", json!({}));
+        let services = test_services();
+        let result = registry.execute("prompt_understanding", json!({}), &services);
 
         assert!(result.is_ok());
         let tool_result = result.unwrap();
@@ -230,12 +239,14 @@ mod input_validation {
     #[test]
     fn test_capture_rejects_missing_content() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_capture",
             json!({
                 "namespace": "decisions"
                 // Missing "content"
             }),
+            &services,
         );
 
         assert!(result.is_err());
@@ -244,12 +255,14 @@ mod input_validation {
     #[test]
     fn test_capture_rejects_missing_namespace() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_capture",
             json!({
                 "content": "Test memory"
                 // Missing "namespace"
             }),
+            &services,
         );
 
         assert!(result.is_err());
@@ -258,12 +271,14 @@ mod input_validation {
     #[test]
     fn test_capture_rejects_invalid_content_type() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_capture",
             json!({
                 "content": 12345,  // Should be string
                 "namespace": "decisions"
             }),
+            &services,
         );
 
         assert!(result.is_err());
@@ -272,12 +287,14 @@ mod input_validation {
     #[test]
     fn test_capture_rejects_invalid_namespace_type() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_capture",
             json!({
                 "content": "Test memory",
                 "namespace": ["decisions"]  // Should be string, not array
             }),
+            &services,
         );
 
         assert!(result.is_err());
@@ -287,12 +304,14 @@ mod input_validation {
     fn test_recall_accepts_missing_query_for_list_mode() {
         // query is now optional - when omitted, subcog_recall acts like subcog_list
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_recall",
             json!({
                 "limit": 10
                 // Missing "query" - should work in list mode
             }),
+            &services,
         );
 
         // Should succeed (list mode)
@@ -306,12 +325,14 @@ mod input_validation {
     #[test]
     fn test_recall_rejects_invalid_limit_type() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_recall",
             json!({
                 "query": "test",
                 "limit": "ten"  // Should be number
             }),
+            &services,
         );
 
         assert!(result.is_err());
@@ -320,12 +341,14 @@ mod input_validation {
     #[test]
     fn test_prompt_save_rejects_missing_name() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "prompt_save",
             json!({
                 "content": "Test prompt content"
                 // Missing "name"
             }),
+            &services,
         );
 
         assert!(result.is_err());
@@ -334,12 +357,14 @@ mod input_validation {
     #[test]
     fn test_prompt_save_rejects_missing_content_and_file_path() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "prompt_save",
             json!({
                 "name": "test-prompt"
                 // Missing both "content" and "file_path"
             }),
+            &services,
         );
 
         assert!(result.is_err());
@@ -348,12 +373,14 @@ mod input_validation {
     #[test]
     fn test_prompt_delete_requires_domain() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "prompt_delete",
             json!({
                 "name": "test-prompt"
                 // Missing required "domain"
             }),
+            &services,
         );
 
         assert!(result.is_err());
@@ -362,12 +389,14 @@ mod input_validation {
     #[test]
     fn test_consolidate_rejects_missing_namespace() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_consolidate",
             json!({
                 "strategy": "merge"
                 // Missing "namespace"
             }),
+            &services,
         );
 
         assert!(result.is_err());
@@ -376,12 +405,14 @@ mod input_validation {
     #[test]
     fn test_enrich_rejects_missing_memory_id() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_enrich",
             json!({
                 "enrich_tags": true
                 // Missing "memory_id"
             }),
+            &services,
         );
 
         assert!(result.is_err());
@@ -390,12 +421,14 @@ mod input_validation {
     #[test]
     fn test_prompt_get_rejects_missing_name() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "prompt_get",
             json!({
                 "domain": "project"
                 // Missing "name"
             }),
+            &services,
         );
 
         assert!(result.is_err());
@@ -404,12 +437,14 @@ mod input_validation {
     #[test]
     fn test_prompt_run_rejects_missing_name() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "prompt_run",
             json!({
                 "variables": {"key": "value"}
                 // Missing "name"
             }),
+            &services,
         );
 
         assert!(result.is_err());
@@ -419,6 +454,7 @@ mod input_validation {
     #[test]
     fn test_capture_rejects_unknown_fields() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_capture",
             json!({
@@ -426,6 +462,7 @@ mod input_validation {
                 "namespace": "decisions",
                 "malicious_field": "attack"  // Unknown field should be rejected
             }),
+            &services,
         );
 
         assert!(result.is_err());
@@ -440,12 +477,14 @@ mod input_validation {
     #[test]
     fn test_recall_rejects_unknown_fields() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_recall",
             json!({
                 "query": "test",
                 "inject_param": "payload"  // Unknown field
             }),
+            &services,
         );
 
         assert!(result.is_err());
@@ -454,6 +493,7 @@ mod input_validation {
     #[test]
     fn test_prompt_save_rejects_unknown_fields() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "prompt_save",
             json!({
@@ -461,6 +501,7 @@ mod input_validation {
                 "content": "test content",
                 "admin_override": true  // Unknown field
             }),
+            &services,
         );
 
         assert!(result.is_err());
@@ -983,10 +1024,11 @@ mod integration_workflows {
     #[test]
     fn test_status_and_namespaces_consistency() {
         let registry = ToolRegistry::new();
+        let services = test_services();
 
         // Both status and namespaces should work
-        let status_result = registry.execute("subcog_status", json!({}));
-        let namespaces_result = registry.execute("subcog_namespaces", json!({}));
+        let status_result = registry.execute("subcog_status", json!({}), &services);
+        let namespaces_result = registry.execute("subcog_namespaces", json!({}), &services);
 
         assert!(status_result.is_ok());
         assert!(namespaces_result.is_ok());
@@ -995,9 +1037,10 @@ mod integration_workflows {
     #[test]
     fn test_prompt_list_execution() {
         let registry = ToolRegistry::new();
+        let services = test_services();
 
         // prompt_list should work without error
-        let result = registry.execute("prompt_list", json!({}));
+        let result = registry.execute("prompt_list", json!({}), &services);
         assert!(result.is_ok());
 
         let tool_result = result.unwrap();
@@ -1008,6 +1051,7 @@ mod integration_workflows {
     #[test]
     fn test_recall_with_empty_database() {
         let registry = ToolRegistry::new();
+        let services = test_services();
 
         // Recall should work even with empty database
         let result = registry.execute(
@@ -1016,6 +1060,7 @@ mod integration_workflows {
                 "query": "test query",
                 "limit": 5
             }),
+            &services,
         );
 
         // Should succeed (possibly with no results) or return proper error
@@ -1039,10 +1084,11 @@ mod integration_workflows {
     #[test]
     fn test_multiple_sequential_tool_calls() {
         let registry = ToolRegistry::new();
+        let services = test_services();
 
         // Multiple calls should work
         for i in 0..5 {
-            let result = registry.execute("subcog_status", json!({}));
+            let result = registry.execute("subcog_status", json!({}), &services);
             assert!(result.is_ok(), "Call {} should succeed", i);
         }
     }
@@ -1085,11 +1131,13 @@ mod error_handling {
         // We use prompt_get with a nonexistent prompt as an example
 
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "prompt_get",
             json!({
                 "name": "definitely-nonexistent-prompt-xyz123"
             }),
+            &services,
         );
 
         match result {
@@ -1110,6 +1158,7 @@ mod error_handling {
     #[test]
     fn test_tool_errors_have_descriptive_messages() {
         let registry = ToolRegistry::new();
+        let services = test_services();
 
         // Test various error cases have descriptive messages
         let test_cases = vec![
@@ -1122,7 +1171,7 @@ mod error_handling {
         ];
 
         for (tool, args, expected_contains) in test_cases {
-            let result = registry.execute(tool, args);
+            let result = registry.execute(tool, args, &services);
             if let Err(e) = result {
                 let msg = e.to_string().to_lowercase();
                 assert!(
@@ -1139,9 +1188,10 @@ mod error_handling {
     #[test]
     fn test_invalid_json_handling() {
         let registry = ToolRegistry::new();
+        let services = test_services();
 
         // Pass completely wrong type as arguments
-        let result = registry.execute("subcog_capture", json!("not an object"));
+        let result = registry.execute("subcog_capture", json!("not an object"), &services);
 
         assert!(result.is_err());
     }
@@ -1149,9 +1199,10 @@ mod error_handling {
     #[test]
     fn test_null_arguments_handling() {
         let registry = ToolRegistry::new();
+        let services = test_services();
 
         // Tools that don't require arguments should handle null/empty
-        let result = registry.execute("subcog_status", Value::Null);
+        let result = registry.execute("subcog_status", Value::Null, &services);
         // Should work - status doesn't need arguments
         assert!(result.is_ok());
     }

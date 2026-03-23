@@ -74,7 +74,7 @@ fn fetch_consolidation_candidates(
 }
 
 /// Executes the capture tool.
-pub fn execute_capture(arguments: Value) -> Result<ToolResult> {
+pub fn execute_capture(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: CaptureArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
@@ -109,7 +109,6 @@ pub fn execute_capture(arguments: Value) -> Result<ToolResult> {
         group_id: None,
     };
 
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let result = services.capture().capture(request)?;
 
     Ok(ToolResult {
@@ -127,7 +126,7 @@ pub fn execute_capture(arguments: Value) -> Result<ToolResult> {
 ///
 /// When `query` is omitted or empty, behaves like `subcog_list` and returns
 /// all memories matching the filter criteria (with pagination support).
-pub fn execute_recall(arguments: Value) -> Result<ToolResult> {
+pub fn execute_recall(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: RecallArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
@@ -192,7 +191,6 @@ pub fn execute_recall(arguments: Value) -> Result<ToolResult> {
         args.limit.unwrap_or(10).min(50)
     };
 
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let recall = services.recall()?;
 
     // Use list_all for wildcard queries or filter-only queries
@@ -391,60 +389,46 @@ fn check_capture_health(services: &ServiceContainer) -> ComponentHealth {
 /// - "healthy": All components operational
 /// - "degraded": Some components have issues but system is functional
 /// - "unhealthy": Critical components are down
-pub fn execute_status(_arguments: Value) -> Result<ToolResult> {
+pub fn execute_status(services: &ServiceContainer, _arguments: Value) -> Result<ToolResult> {
     let mut components = Vec::new();
     let mut any_unhealthy = false;
     let mut any_degraded = false;
 
-    // Try to get services - if this fails, the system is unhealthy
-    let services_result = ServiceContainer::from_current_dir_or_user();
-
-    match services_result {
-        Ok(services) => {
-            // Check persistence health
-            let persistence = check_persistence_health(&services);
-            if persistence.status == "unhealthy" {
-                any_unhealthy = true;
-            } else if persistence.status == "degraded" {
-                any_degraded = true;
-            }
-            components.push(persistence);
-
-            // Check index health
-            let index = check_index_health(&services);
-            if index.status == "unhealthy" {
-                any_unhealthy = true;
-            } else if index.status == "degraded" {
-                any_degraded = true;
-            }
-            components.push(index);
-
-            // Check vector health
-            let vector = check_vector_health(&services);
-            if vector.status == "unhealthy" {
-                any_unhealthy = true;
-            } else if vector.status == "degraded" {
-                any_degraded = true;
-            }
-            components.push(vector);
-
-            // Check capture service health
-            let capture = check_capture_health(&services);
-            if capture.status == "unhealthy" {
-                any_unhealthy = true;
-            } else if capture.status == "degraded" {
-                any_degraded = true;
-            }
-            components.push(capture);
-        },
-        Err(e) => {
-            any_unhealthy = true;
-            components.push(ComponentHealth::unhealthy(
-                "service_container",
-                e.to_string(),
-            ));
-        },
+    // Check persistence health
+    let persistence = check_persistence_health(services);
+    if persistence.status == "unhealthy" {
+        any_unhealthy = true;
+    } else if persistence.status == "degraded" {
+        any_degraded = true;
     }
+    components.push(persistence);
+
+    // Check index health
+    let index = check_index_health(services);
+    if index.status == "unhealthy" {
+        any_unhealthy = true;
+    } else if index.status == "degraded" {
+        any_degraded = true;
+    }
+    components.push(index);
+
+    // Check vector health
+    let vector = check_vector_health(services);
+    if vector.status == "unhealthy" {
+        any_unhealthy = true;
+    } else if vector.status == "degraded" {
+        any_degraded = true;
+    }
+    components.push(vector);
+
+    // Check capture service health
+    let capture = check_capture_health(services);
+    if capture.status == "unhealthy" {
+        any_unhealthy = true;
+    } else if capture.status == "degraded" {
+        any_degraded = true;
+    }
+    components.push(capture);
 
     // Determine overall status
     let overall_status = if any_unhealthy {
@@ -517,7 +501,7 @@ pub fn execute_namespaces(_arguments: Value) -> Result<ToolResult> {
 /// Executes the consolidate tool.
 /// Triggers memory consolidation and returns statistics.
 #[allow(clippy::too_many_lines)]
-pub fn execute_consolidate(arguments: Value) -> Result<ToolResult> {
+pub fn execute_consolidate(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: ConsolidateArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
@@ -586,8 +570,6 @@ pub fn execute_consolidate(arguments: Value) -> Result<ToolResult> {
     let data_dir = &config.data_dir;
     let storage_config = &config.storage.project;
 
-    // Create service container for recall service and index
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let recall_service = services.recall()?;
     let index = services.index()?;
 
@@ -828,14 +810,13 @@ fn format_source_memory_entry(
 
 /// Executes the get summary tool.
 /// Retrieves a summary memory and its linked source memories.
-pub fn execute_get_summary(arguments: Value) -> Result<ToolResult> {
+pub fn execute_get_summary(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     use crate::mcp::tool_types::GetSummaryArgs;
     use crate::models::{EdgeType, MemoryId};
 
     let args: GetSummaryArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let index = services.index()?;
 
     // Get the summary memory using IndexBackend::get_memory
@@ -895,7 +876,7 @@ pub fn execute_get_summary(arguments: Value) -> Result<ToolResult> {
 
 /// Executes the enrich tool.
 /// Returns a sampling request for the LLM to enrich a memory.
-pub fn execute_enrich(arguments: Value) -> Result<ToolResult> {
+pub fn execute_enrich(_services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: EnrichArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
@@ -935,13 +916,17 @@ pub fn execute_enrich(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the reindex tool.
-pub fn execute_reindex(arguments: Value) -> Result<ToolResult> {
+pub fn execute_reindex(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: ReindexArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
+    let owned_services;
     let services = match args.repo_path {
-        Some(repo_path) => ServiceContainer::for_repo(std::path::PathBuf::from(repo_path), None)?,
-        None => ServiceContainer::from_current_dir_or_user()?,
+        Some(repo_path) => {
+            owned_services = ServiceContainer::for_repo(std::path::PathBuf::from(repo_path), None)?;
+            &owned_services
+        },
+        None => services,
     };
 
     let scope_label = match services.repo_path() {
@@ -971,8 +956,7 @@ pub fn execute_reindex(arguments: Value) -> Result<ToolResult> {
 ///
 /// Implements GDPR Article 20 (Right to Data Portability).
 /// Returns all user data in a portable JSON format.
-pub fn execute_gdpr_export(_arguments: Value) -> Result<ToolResult> {
-    let services = ServiceContainer::from_current_dir_or_user()?;
+pub fn execute_gdpr_export(services: &ServiceContainer, _arguments: Value) -> Result<ToolResult> {
     let data_subject = services.data_subject()?;
 
     match data_subject.export_user_data() {
@@ -1020,11 +1004,10 @@ pub fn execute_gdpr_export(_arguments: Value) -> Result<ToolResult> {
 ///
 /// This is a fundamental CRUD operation that provides direct access to
 /// a specific memory without requiring a search query.
-pub fn execute_get(arguments: Value) -> Result<ToolResult> {
+pub fn execute_get(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: GetArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let index = services.index()?;
 
     // Support both raw IDs and full URNs (e.g., "subcog://project/patterns/abc123")
@@ -1103,13 +1086,12 @@ pub fn execute_get(arguments: Value) -> Result<ToolResult> {
 ///
 /// Defaults to soft delete (tombstone) which can be restored later.
 /// Use `hard: true` for permanent deletion.
-pub fn execute_delete(arguments: Value) -> Result<ToolResult> {
+pub fn execute_delete(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     use chrono::TimeZone;
 
     let args: DeleteArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let index = services.index()?;
 
     // Support both raw IDs and full URNs
@@ -1195,7 +1177,7 @@ pub fn execute_delete(arguments: Value) -> Result<ToolResult> {
 /// Executes the update tool - modifies an existing memory's content and/or tags.
 ///
 /// This is a partial update operation - only provided fields are changed.
-pub fn execute_update(arguments: Value) -> Result<ToolResult> {
+pub fn execute_update(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: UpdateArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
@@ -1211,7 +1193,6 @@ pub fn execute_update(arguments: Value) -> Result<ToolResult> {
         validate_input_length(content, "content", MAX_CONTENT_LENGTH)?;
     }
 
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let index = services.index()?;
 
     let memory_id = MemoryId::new(Urn::extract_memory_id(&args.memory_id));
@@ -1307,7 +1288,7 @@ pub fn execute_update(arguments: Value) -> Result<ToolResult> {
 ///
 /// Unlike recall, this doesn't require a search query. Matches Mem0's `get_all()`
 /// and Zep's `list_memories()` patterns.
-pub fn execute_list(arguments: Value) -> Result<ToolResult> {
+pub fn execute_list(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     use crate::mcp::tool_types::ListArgs;
 
     let args: ListArgs =
@@ -1333,7 +1314,6 @@ pub fn execute_list(arguments: Value) -> Result<ToolResult> {
     let limit = args.limit.unwrap_or(50).min(1000);
     let offset = args.offset.unwrap_or(0);
 
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let recall = services.recall()?;
 
     // Use list_all which returns all matching memories without a search query
@@ -1417,7 +1397,7 @@ pub fn execute_list(arguments: Value) -> Result<ToolResult> {
 ///
 /// Defaults to dry-run mode for safety. Implements Mem0's `delete_all()` pattern.
 #[allow(clippy::too_many_lines)]
-pub fn execute_delete_all(arguments: Value) -> Result<ToolResult> {
+pub fn execute_delete_all(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     use crate::mcp::tool_types::DeleteAllArgs;
 
     let args: DeleteAllArgs =
@@ -1448,7 +1428,6 @@ pub fn execute_delete_all(arguments: Value) -> Result<ToolResult> {
         });
     }
 
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let recall = services.recall()?;
     let index = services.index()?;
 
@@ -1668,13 +1647,12 @@ fn build_delete_result_output(
 /// Executes the restore tool - restores a tombstoned (soft-deleted) memory.
 ///
 /// Sets the memory status back to Active and clears the tombstone timestamp.
-pub fn execute_restore(arguments: Value) -> Result<ToolResult> {
+pub fn execute_restore(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     use crate::mcp::tool_types::RestoreArgs;
 
     let args: RestoreArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let index = services.index()?;
 
     let memory_id = MemoryId::new(Urn::extract_memory_id(&args.memory_id));
@@ -1749,13 +1727,12 @@ pub fn execute_restore(arguments: Value) -> Result<ToolResult> {
 ///
 /// Queries the event log for events related to the specified memory ID.
 /// Note: This provides audit trail visibility but doesn't store full version snapshots.
-pub fn execute_history(arguments: Value) -> Result<ToolResult> {
+pub fn execute_history(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     use crate::mcp::tool_types::HistoryArgs;
 
     let args: HistoryArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let index = services.index()?;
 
     let memory_id = MemoryId::new(Urn::extract_memory_id(&args.memory_id));
@@ -1965,22 +1942,19 @@ fn format_init_recall_xml(services: &ServiceContainer, query: &str, limit: usize
 ///
 /// Returns compressed single-line XML output with namespaces, domains, tools, status,
 /// and optionally recalled memories. Use `prompt_understanding` for full docs.
-pub fn execute_init(arguments: Value) -> Result<ToolResult> {
+pub fn execute_init(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: InitArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
     // Mark session as initialized
     crate::mcp::session::mark_initialized();
 
-    let services_result = ServiceContainer::from_current_dir_or_user();
-    let services = services_result.as_ref().ok();
-
     // Build single-line XML output
     let mut xml = String::from("<subcog>");
-    xml.push_str(&build_xml_namespaces(services));
+    xml.push_str(&build_xml_namespaces(Some(services)));
     xml.push_str(&build_xml_domains());
     xml.push_str(&build_xml_tools());
-    xml.push_str(&build_xml_status(services));
+    xml.push_str(&build_xml_status(Some(services)));
 
     // Optional recalled memories (previews only)
     if args.include_recall {
@@ -1989,11 +1963,7 @@ pub fn execute_init(arguments: Value) -> Result<ToolResult> {
             .unwrap_or_else(|| "project setup OR architecture OR conventions".to_string());
         let limit = args.recall_limit.unwrap_or(5).min(20) as usize;
 
-        if let Some(svc) = services {
-            xml.push_str(&format_init_recall_xml(svc, &query, limit));
-        } else {
-            xml.push_str("<memories count=\"0\"/>");
-        }
+        xml.push_str(&format_init_recall_xml(services, &query, limit));
     }
 
     xml.push_str("<tip>prompt_understanding for full docs</tip></subcog>");
@@ -2062,7 +2032,9 @@ mod tests {
             "namespace": "decisions"
         });
 
-        let result = execute_capture(args);
+        // Validation happens before any ServiceContainer method is called
+        let services = ServiceContainer::from_current_dir_or_user().unwrap();
+        let result = execute_capture(&services, args);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, Error::InvalidInput(_)));
@@ -2076,7 +2048,9 @@ mod tests {
             "query": oversized_query
         });
 
-        let result = execute_recall(args);
+        // Validation happens before any ServiceContainer method is called
+        let services = ServiceContainer::from_current_dir_or_user().unwrap();
+        let result = execute_recall(&services, args);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, Error::InvalidInput(_)));

@@ -41,17 +41,17 @@ use std::collections::HashMap;
 /// # Errors
 ///
 /// Returns an error if argument parsing or the operation fails.
-pub fn execute_entities(arguments: Value) -> Result<ToolResult> {
+pub fn execute_entities(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: EntitiesArgs = serde_json::from_value(arguments)
         .map_err(|e| Error::InvalidInput(format!("Invalid entities arguments: {e}")))?;
 
     match args.action.as_str() {
-        "create" => execute_entity_create(&args),
-        "get" => execute_entity_get(&args),
-        "list" => execute_entity_list(&args),
-        "delete" => execute_entity_delete(&args),
-        "extract" => execute_entity_extract(&args),
-        "merge" => execute_entity_merge_action(&args),
+        "create" => execute_entity_create(services, &args),
+        "get" => execute_entity_get(services, &args),
+        "list" => execute_entity_list(services, &args),
+        "delete" => execute_entity_delete(services, &args),
+        "extract" => execute_entity_extract(services, &args),
+        "merge" => execute_entity_merge_action(services, &args),
         _ => Err(Error::InvalidInput(format!(
             "Unknown entity action: {}. Valid actions: create, get, list, delete, extract, merge",
             args.action
@@ -59,7 +59,7 @@ pub fn execute_entities(arguments: Value) -> Result<ToolResult> {
     }
 }
 
-fn execute_entity_create(args: &EntitiesArgs) -> Result<ToolResult> {
+fn execute_entity_create(services: &ServiceContainer, args: &EntitiesArgs) -> Result<ToolResult> {
     let name = args.name.as_ref().ok_or_else(|| {
         Error::InvalidInput("Entity name is required for create action".to_string())
     })?;
@@ -71,8 +71,7 @@ fn execute_entity_create(args: &EntitiesArgs) -> Result<ToolResult> {
         ))
     })?;
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+    let graph = services.graph()?;
 
     let mut entity = Entity::new(entity_type, name, Domain::new());
     if let Some(aliases) = &args.aliases {
@@ -103,14 +102,13 @@ fn execute_entity_create(args: &EntitiesArgs) -> Result<ToolResult> {
     })
 }
 
-fn execute_entity_get(args: &EntitiesArgs) -> Result<ToolResult> {
+fn execute_entity_get(services: &ServiceContainer, args: &EntitiesArgs) -> Result<ToolResult> {
     let entity_id = args
         .entity_id
         .as_ref()
         .ok_or_else(|| Error::InvalidInput("Entity ID is required for get action".to_string()))?;
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+    let graph = services.graph()?;
 
     let id = EntityId::new(entity_id);
     match graph.get_entity(&id)? {
@@ -150,9 +148,8 @@ fn execute_entity_get(args: &EntitiesArgs) -> Result<ToolResult> {
     }
 }
 
-fn execute_entity_list(args: &EntitiesArgs) -> Result<ToolResult> {
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+fn execute_entity_list(services: &ServiceContainer, args: &EntitiesArgs) -> Result<ToolResult> {
+    let graph = services.graph()?;
 
     let limit = args.limit.unwrap_or(20);
     let mut query = EntityQuery::new().with_limit(limit);
@@ -188,13 +185,12 @@ fn execute_entity_list(args: &EntitiesArgs) -> Result<ToolResult> {
     })
 }
 
-fn execute_entity_delete(args: &EntitiesArgs) -> Result<ToolResult> {
+fn execute_entity_delete(services: &ServiceContainer, args: &EntitiesArgs) -> Result<ToolResult> {
     let entity_id = args.entity_id.as_ref().ok_or_else(|| {
         Error::InvalidInput("Entity ID is required for delete action".to_string())
     })?;
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+    let graph = services.graph()?;
 
     let id = EntityId::new(entity_id);
     let deleted = graph.delete_entity(&id)?;
@@ -214,7 +210,7 @@ fn execute_entity_delete(args: &EntitiesArgs) -> Result<ToolResult> {
 /// Handles the `extract` action for `subcog_entities`.
 ///
 /// Extracts entities from text content using pattern-based extraction.
-fn execute_entity_extract(args: &EntitiesArgs) -> Result<ToolResult> {
+fn execute_entity_extract(services: &ServiceContainer, args: &EntitiesArgs) -> Result<ToolResult> {
     let content = args.content.as_ref().ok_or_else(|| {
         Error::InvalidInput("'content' is required for extract action".to_string())
     })?;
@@ -225,8 +221,6 @@ fn execute_entity_extract(args: &EntitiesArgs) -> Result<ToolResult> {
         ));
     }
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-
     // Load config and build LLM provider if available
     let config = SubcogConfig::load_default();
     tracing::info!(
@@ -236,10 +230,10 @@ fn execute_entity_extract(args: &EntitiesArgs) -> Result<ToolResult> {
     );
     let extractor = if let Some(llm) = build_llm_provider_for_entity_extraction(&config) {
         tracing::info!("execute_entity_extract: using LLM-powered extraction");
-        container.entity_extractor_with_llm(llm)
+        services.entity_extractor_with_llm(llm)
     } else {
         tracing::info!("execute_entity_extract: LLM provider not available, using fallback");
-        container.entity_extractor()
+        services.entity_extractor()
     };
 
     let min_confidence = args.min_confidence.unwrap_or(0.5);
@@ -291,7 +285,7 @@ fn execute_entity_extract(args: &EntitiesArgs) -> Result<ToolResult> {
 
     // Store entities if requested (with automatic deduplication)
     if args.store && !result.entities.is_empty() {
-        let graph = container.graph()?;
+        let graph = services.graph()?;
         let graph_entities = extractor.to_graph_entities(&result);
 
         // Store entities with deduplication and build map with actual IDs
@@ -334,12 +328,15 @@ fn execute_entity_extract(args: &EntitiesArgs) -> Result<ToolResult> {
 /// Handles the `merge` action for `subcog_entities`.
 ///
 /// Supports sub-actions: `find_duplicates`, merge.
-fn execute_entity_merge_action(args: &EntitiesArgs) -> Result<ToolResult> {
+fn execute_entity_merge_action(
+    services: &ServiceContainer,
+    args: &EntitiesArgs,
+) -> Result<ToolResult> {
     let merge_action = args.merge_action.as_deref().unwrap_or("find_duplicates");
 
     match merge_action {
-        "find_duplicates" => execute_entity_find_duplicates(args),
-        "merge" => execute_entity_merge_impl(args),
+        "find_duplicates" => execute_entity_find_duplicates(services, args),
+        "merge" => execute_entity_merge_impl(services, args),
         _ => Err(Error::InvalidInput(format!(
             "Unknown merge sub-action: '{merge_action}'. Valid sub-actions: find_duplicates, merge"
         ))),
@@ -347,13 +344,15 @@ fn execute_entity_merge_action(args: &EntitiesArgs) -> Result<ToolResult> {
 }
 
 /// Finds duplicate entities for the `merge` action.
-fn execute_entity_find_duplicates(args: &EntitiesArgs) -> Result<ToolResult> {
+fn execute_entity_find_duplicates(
+    services: &ServiceContainer,
+    args: &EntitiesArgs,
+) -> Result<ToolResult> {
     let entity_id = args.entity_id.as_ref().ok_or_else(|| {
         Error::InvalidInput("'entity_id' is required for find_duplicates".to_string())
     })?;
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+    let graph = services.graph()?;
 
     let id = EntityId::new(entity_id);
     let entity = graph
@@ -407,7 +406,10 @@ fn execute_entity_find_duplicates(args: &EntitiesArgs) -> Result<ToolResult> {
 }
 
 /// Merges entities for the `merge` action.
-fn execute_entity_merge_impl(args: &EntitiesArgs) -> Result<ToolResult> {
+fn execute_entity_merge_impl(
+    services: &ServiceContainer,
+    args: &EntitiesArgs,
+) -> Result<ToolResult> {
     let entity_ids = args.entity_ids.as_ref().ok_or_else(|| {
         Error::InvalidInput("'entity_ids' is required for merge (minimum 2)".to_string())
     })?;
@@ -423,8 +425,7 @@ fn execute_entity_merge_impl(args: &EntitiesArgs) -> Result<ToolResult> {
         .as_ref()
         .ok_or_else(|| Error::InvalidInput("'canonical_name' is required for merge".to_string()))?;
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+    let graph = services.graph()?;
 
     let ids: Vec<EntityId> = entity_ids.iter().map(EntityId::new).collect();
     let merged = graph.merge_entities(&ids, canonical_name)?;
@@ -454,15 +455,15 @@ fn execute_entity_merge_impl(args: &EntitiesArgs) -> Result<ToolResult> {
 /// # Errors
 ///
 /// Returns an error if argument parsing or the operation fails.
-pub fn execute_relationships(arguments: Value) -> Result<ToolResult> {
+pub fn execute_relationships(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: RelationshipsArgs = serde_json::from_value(arguments)
         .map_err(|e| Error::InvalidInput(format!("Invalid relationships arguments: {e}")))?;
 
     match args.action.as_str() {
-        "create" => execute_relationship_create(&args),
-        "get" | "list" => execute_relationship_list(&args),
-        "delete" => execute_relationship_delete(&args),
-        "infer" => execute_relationship_infer_action(&args),
+        "create" => execute_relationship_create(services, &args),
+        "get" | "list" => execute_relationship_list(services, &args),
+        "delete" => execute_relationship_delete(services, &args),
+        "infer" => execute_relationship_infer_action(services, &args),
         _ => Err(Error::InvalidInput(format!(
             "Unknown relationship action: {}. Valid actions: create, get, list, delete, infer",
             args.action
@@ -470,7 +471,10 @@ pub fn execute_relationships(arguments: Value) -> Result<ToolResult> {
     }
 }
 
-fn execute_relationship_create(args: &RelationshipsArgs) -> Result<ToolResult> {
+fn execute_relationship_create(
+    services: &ServiceContainer,
+    args: &RelationshipsArgs,
+) -> Result<ToolResult> {
     let from_id = args.from_entity.as_ref().ok_or_else(|| {
         Error::InvalidInput("from_entity is required for create action".to_string())
     })?;
@@ -487,8 +491,7 @@ fn execute_relationship_create(args: &RelationshipsArgs) -> Result<ToolResult> {
         ))
     })?;
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+    let graph = services.graph()?;
 
     let from = EntityId::new(from_id);
     let to = EntityId::new(to_id);
@@ -509,9 +512,11 @@ fn execute_relationship_create(args: &RelationshipsArgs) -> Result<ToolResult> {
     })
 }
 
-fn execute_relationship_list(args: &RelationshipsArgs) -> Result<ToolResult> {
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+fn execute_relationship_list(
+    services: &ServiceContainer,
+    args: &RelationshipsArgs,
+) -> Result<ToolResult> {
+    let graph = services.graph()?;
 
     let limit = args.limit.unwrap_or(20);
     let direction = args.direction.as_deref().unwrap_or("both");
@@ -557,7 +562,10 @@ fn execute_relationship_list(args: &RelationshipsArgs) -> Result<ToolResult> {
     })
 }
 
-fn execute_relationship_delete(args: &RelationshipsArgs) -> Result<ToolResult> {
+fn execute_relationship_delete(
+    services: &ServiceContainer,
+    args: &RelationshipsArgs,
+) -> Result<ToolResult> {
     let from_id = args.from_entity.as_ref().ok_or_else(|| {
         Error::InvalidInput("from_entity is required for delete action".to_string())
     })?;
@@ -565,8 +573,7 @@ fn execute_relationship_delete(args: &RelationshipsArgs) -> Result<ToolResult> {
         Error::InvalidInput("to_entity is required for delete action".to_string())
     })?;
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+    let graph = services.graph()?;
 
     let from = EntityId::new(from_id);
     let to = EntityId::new(to_id);
@@ -591,9 +598,11 @@ fn execute_relationship_delete(args: &RelationshipsArgs) -> Result<ToolResult> {
 /// Handles the `infer` action for `subcog_relationships`.
 ///
 /// Infers implicit relationships between entities using pattern-based extraction.
-fn execute_relationship_infer_action(args: &RelationshipsArgs) -> Result<ToolResult> {
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+fn execute_relationship_infer_action(
+    services: &ServiceContainer,
+    args: &RelationshipsArgs,
+) -> Result<ToolResult> {
+    let graph = services.graph()?;
 
     // Get entities to analyze
     let entities = if let Some(entity_ids) = &args.entity_ids {
@@ -624,9 +633,9 @@ fn execute_relationship_infer_action(args: &RelationshipsArgs) -> Result<ToolRes
     // Load config and build LLM provider if available
     let config = SubcogConfig::load_default();
     let extractor = if let Some(llm) = build_llm_provider_for_entity_extraction(&config) {
-        container.entity_extractor_with_llm(llm)
+        services.entity_extractor_with_llm(llm)
     } else {
-        container.entity_extractor()
+        services.entity_extractor()
     };
 
     let min_confidence = args.min_confidence.unwrap_or(0.6);
@@ -708,15 +717,15 @@ fn execute_relationship_infer_action(args: &RelationshipsArgs) -> Result<ToolRes
 /// # Errors
 ///
 /// Returns an error if argument parsing or the operation fails.
-pub fn execute_graph(arguments: Value) -> Result<ToolResult> {
+pub fn execute_graph(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: GraphArgs = serde_json::from_value(arguments)
         .map_err(|e| Error::InvalidInput(format!("Invalid graph arguments: {e}")))?;
 
     match args.operation.as_str() {
-        "neighbors" => execute_graph_neighbors(&args),
-        "path" => execute_graph_path(&args),
-        "stats" => execute_graph_stats(),
-        "visualize" => execute_graph_visualize_action(&args),
+        "neighbors" => execute_graph_neighbors(services, &args),
+        "path" => execute_graph_path(services, &args),
+        "stats" => execute_graph_stats(services),
+        "visualize" => execute_graph_visualize_action(services, &args),
         _ => Err(Error::InvalidInput(format!(
             "Unknown graph operation: {}. Valid operations: neighbors, path, stats, visualize",
             args.operation
@@ -725,13 +734,12 @@ pub fn execute_graph(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Handles the `neighbors` operation for `subcog_graph`.
-fn execute_graph_neighbors(args: &GraphArgs) -> Result<ToolResult> {
+fn execute_graph_neighbors(services: &ServiceContainer, args: &GraphArgs) -> Result<ToolResult> {
     let entity_id = args.entity_id.as_ref().ok_or_else(|| {
         Error::InvalidInput("'entity_id' is required for neighbors operation".to_string())
     })?;
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+    let graph = services.graph()?;
 
     let id = EntityId::new(entity_id);
     let depth = u32::try_from(args.depth.unwrap_or(2).min(5)).unwrap_or(2);
@@ -765,7 +773,7 @@ fn execute_graph_neighbors(args: &GraphArgs) -> Result<ToolResult> {
 }
 
 /// Handles the `path` operation for `subcog_graph`.
-fn execute_graph_path(args: &GraphArgs) -> Result<ToolResult> {
+fn execute_graph_path(services: &ServiceContainer, args: &GraphArgs) -> Result<ToolResult> {
     let from_id = args.from_entity.as_ref().ok_or_else(|| {
         Error::InvalidInput("'from_entity' is required for path operation".to_string())
     })?;
@@ -773,8 +781,7 @@ fn execute_graph_path(args: &GraphArgs) -> Result<ToolResult> {
         Error::InvalidInput("'to_entity' is required for path operation".to_string())
     })?;
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+    let graph = services.graph()?;
 
     let from = EntityId::new(from_id);
     let to = EntityId::new(to_id);
@@ -821,9 +828,8 @@ fn execute_graph_path(args: &GraphArgs) -> Result<ToolResult> {
 }
 
 /// Handles the `stats` operation for `subcog_graph`.
-fn execute_graph_stats() -> Result<ToolResult> {
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+fn execute_graph_stats(services: &ServiceContainer) -> Result<ToolResult> {
+    let graph = services.graph()?;
 
     let stats = graph.get_stats()?;
 
@@ -848,9 +854,11 @@ fn execute_graph_stats() -> Result<ToolResult> {
 }
 
 /// Handles the `visualize` operation for `subcog_graph`.
-fn execute_graph_visualize_action(args: &GraphArgs) -> Result<ToolResult> {
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+fn execute_graph_visualize_action(
+    services: &ServiceContainer,
+    args: &GraphArgs,
+) -> Result<ToolResult> {
+    let graph = services.graph()?;
 
     let format = args.format.as_deref().unwrap_or("mermaid");
     let limit = args.limit.unwrap_or(50);
@@ -949,14 +957,14 @@ fn execute_graph_visualize_action(args: &GraphArgs) -> Result<ToolResult> {
 /// # Errors
 ///
 /// Returns an error if argument parsing or the operation fails.
-pub fn execute_graph_query(arguments: Value) -> Result<ToolResult> {
+pub fn execute_graph_query(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: GraphQueryArgs = serde_json::from_value(arguments)
         .map_err(|e| Error::InvalidInput(format!("Invalid graph query arguments: {e}")))?;
 
     match args.operation.as_str() {
-        "neighbors" => execute_query_neighbors(&args),
-        "path" => execute_query_path(&args),
-        "stats" => execute_query_stats(),
+        "neighbors" => execute_query_neighbors(services, &args),
+        "path" => execute_query_path(services, &args),
+        "stats" => execute_query_stats(services),
         _ => Err(Error::InvalidInput(format!(
             "Unknown graph query operation: {}. Valid operations: neighbors, path, stats",
             args.operation
@@ -964,13 +972,15 @@ pub fn execute_graph_query(arguments: Value) -> Result<ToolResult> {
     }
 }
 
-fn execute_query_neighbors(args: &GraphQueryArgs) -> Result<ToolResult> {
+fn execute_query_neighbors(
+    services: &ServiceContainer,
+    args: &GraphQueryArgs,
+) -> Result<ToolResult> {
     let entity_id = args.entity_id.as_ref().ok_or_else(|| {
         Error::InvalidInput("entity_id is required for neighbors operation".to_string())
     })?;
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+    let graph = services.graph()?;
 
     let id = EntityId::new(entity_id);
     let depth = u32::try_from(args.depth.unwrap_or(2).min(5)).unwrap_or(2);
@@ -1003,7 +1013,7 @@ fn execute_query_neighbors(args: &GraphQueryArgs) -> Result<ToolResult> {
     })
 }
 
-fn execute_query_path(args: &GraphQueryArgs) -> Result<ToolResult> {
+fn execute_query_path(services: &ServiceContainer, args: &GraphQueryArgs) -> Result<ToolResult> {
     let from_id = args.from_entity.as_ref().ok_or_else(|| {
         Error::InvalidInput("from_entity is required for path operation".to_string())
     })?;
@@ -1011,8 +1021,7 @@ fn execute_query_path(args: &GraphQueryArgs) -> Result<ToolResult> {
         Error::InvalidInput("to_entity is required for path operation".to_string())
     })?;
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+    let graph = services.graph()?;
 
     let from = EntityId::new(from_id);
     let to = EntityId::new(to_id);
@@ -1058,9 +1067,8 @@ fn execute_query_path(args: &GraphQueryArgs) -> Result<ToolResult> {
     }
 }
 
-fn execute_query_stats() -> Result<ToolResult> {
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+fn execute_query_stats(services: &ServiceContainer) -> Result<ToolResult> {
+    let graph = services.graph()?;
 
     let stats = graph.get_stats()?;
 
@@ -1104,7 +1112,10 @@ fn format_type_counts<K: std::fmt::Debug>(counts: &HashMap<K, usize>) -> String 
 /// # Errors
 ///
 /// Returns an error if argument parsing or extraction fails.
-pub fn execute_extract_entities(arguments: Value) -> Result<ToolResult> {
+pub fn execute_extract_entities(
+    services: &ServiceContainer,
+    arguments: Value,
+) -> Result<ToolResult> {
     let args: ExtractEntitiesArgs = serde_json::from_value(arguments)
         .map_err(|e| Error::InvalidInput(format!("Invalid extract entities arguments: {e}")))?;
 
@@ -1114,14 +1125,12 @@ pub fn execute_extract_entities(arguments: Value) -> Result<ToolResult> {
         ));
     }
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-
     // Load config and build LLM provider if available
     let config = SubcogConfig::load_default();
     let extractor = if let Some(llm) = build_llm_provider_for_entity_extraction(&config) {
-        container.entity_extractor_with_llm(llm)
+        services.entity_extractor_with_llm(llm)
     } else {
-        container.entity_extractor()
+        services.entity_extractor()
     };
 
     let min_confidence = args.min_confidence.unwrap_or(0.5);
@@ -1173,7 +1182,7 @@ pub fn execute_extract_entities(arguments: Value) -> Result<ToolResult> {
 
     // Store entities if requested (with automatic deduplication)
     if args.store && !result.entities.is_empty() {
-        let graph = container.graph()?;
+        let graph = services.graph()?;
         let graph_entities = extractor.to_graph_entities(&result);
 
         // Store entities with deduplication and build map with actual IDs
@@ -1222,13 +1231,13 @@ pub fn execute_extract_entities(arguments: Value) -> Result<ToolResult> {
 /// # Errors
 ///
 /// Returns an error if argument parsing or the operation fails.
-pub fn execute_entity_merge(arguments: Value) -> Result<ToolResult> {
+pub fn execute_entity_merge(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: EntityMergeArgs = serde_json::from_value(arguments)
         .map_err(|e| Error::InvalidInput(format!("Invalid entity merge arguments: {e}")))?;
 
     match args.action.as_str() {
-        "find_duplicates" => execute_find_duplicates(&args),
-        "merge" => execute_merge(&args),
+        "find_duplicates" => execute_find_duplicates(services, &args),
+        "merge" => execute_merge(services, &args),
         _ => Err(Error::InvalidInput(format!(
             "Unknown merge action: {}. Valid actions: find_duplicates, merge",
             args.action
@@ -1236,13 +1245,15 @@ pub fn execute_entity_merge(arguments: Value) -> Result<ToolResult> {
     }
 }
 
-fn execute_find_duplicates(args: &EntityMergeArgs) -> Result<ToolResult> {
+fn execute_find_duplicates(
+    services: &ServiceContainer,
+    args: &EntityMergeArgs,
+) -> Result<ToolResult> {
     let entity_id = args.entity_id.as_ref().ok_or_else(|| {
         Error::InvalidInput("entity_id is required for find_duplicates action".to_string())
     })?;
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+    let graph = services.graph()?;
 
     let id = EntityId::new(entity_id);
     let entity = graph
@@ -1295,7 +1306,7 @@ fn execute_find_duplicates(args: &EntityMergeArgs) -> Result<ToolResult> {
     })
 }
 
-fn execute_merge(args: &EntityMergeArgs) -> Result<ToolResult> {
+fn execute_merge(services: &ServiceContainer, args: &EntityMergeArgs) -> Result<ToolResult> {
     let entity_ids = args.entity_ids.as_ref().ok_or_else(|| {
         Error::InvalidInput("entity_ids is required for merge action (minimum 2)".to_string())
     })?;
@@ -1310,8 +1321,7 @@ fn execute_merge(args: &EntityMergeArgs) -> Result<ToolResult> {
         Error::InvalidInput("canonical_name is required for merge action".to_string())
     })?;
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+    let graph = services.graph()?;
 
     let ids: Vec<EntityId> = entity_ids.iter().map(EntityId::new).collect();
     let merged = graph.merge_entities(&ids, canonical_name)?;
@@ -1341,12 +1351,14 @@ fn execute_merge(args: &EntityMergeArgs) -> Result<ToolResult> {
 /// # Errors
 ///
 /// Returns an error if argument parsing or inference fails.
-pub fn execute_relationship_infer(arguments: Value) -> Result<ToolResult> {
+pub fn execute_relationship_infer(
+    services: &ServiceContainer,
+    arguments: Value,
+) -> Result<ToolResult> {
     let args: RelationshipInferArgs = serde_json::from_value(arguments)
         .map_err(|e| Error::InvalidInput(format!("Invalid relationship infer arguments: {e}")))?;
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+    let graph = services.graph()?;
 
     // Get entities to analyze
     let entities = if let Some(entity_ids) = &args.entity_ids {
@@ -1377,9 +1389,9 @@ pub fn execute_relationship_infer(arguments: Value) -> Result<ToolResult> {
     // Load config and build LLM provider if available
     let config = SubcogConfig::load_default();
     let extractor = if let Some(llm) = build_llm_provider_for_entity_extraction(&config) {
-        container.entity_extractor_with_llm(llm)
+        services.entity_extractor_with_llm(llm)
     } else {
-        container.entity_extractor()
+        services.entity_extractor()
     };
 
     let min_confidence = args.min_confidence.unwrap_or(0.6);
@@ -1459,12 +1471,14 @@ pub fn execute_relationship_infer(arguments: Value) -> Result<ToolResult> {
 /// # Errors
 ///
 /// Returns an error if argument parsing or visualization fails.
-pub fn execute_graph_visualize(arguments: Value) -> Result<ToolResult> {
+pub fn execute_graph_visualize(
+    services: &ServiceContainer,
+    arguments: Value,
+) -> Result<ToolResult> {
     let args: GraphVisualizeArgs = serde_json::from_value(arguments)
         .map_err(|e| Error::InvalidInput(format!("Invalid graph visualize arguments: {e}")))?;
 
-    let container = ServiceContainer::from_current_dir_or_user()?;
-    let graph = container.graph()?;
+    let graph = services.graph()?;
 
     let format = args.format.as_deref().unwrap_or("mermaid");
     let limit = args.limit.unwrap_or(50);
