@@ -40,3 +40,13 @@ make quick           # Build + install (skip tests)
 4. **Prefer borrowing** over ownership: `&str` over `String`, `&[T]` over `Vec<T>`.
 5. **Document public items** with `///` including `# Errors` and `# Examples` sections.
 
+
+---
+
+## Mnemonic
+
+This project uses mnemonic for persistent memory.
+
+- Search before implementing: `rg -i "{topic}" ~/.claude/mnemonic/ ./.claude/mnemonic/ --glob "*.memory.md"`
+- Capture decisions, learnings, patterns via `/mnemonic:capture {namespace}`
+- See `~/.claude/CLAUDE.md` for full protocol
