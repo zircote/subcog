@@ -92,7 +92,16 @@ Example: "authentication token refresh issues"
 - `mode` (optional): "hybrid" (default), "vector", or "text"
 - `namespace` (optional): Filter to specific namespace
 - `limit` (optional): Maximum results (default: 10, max: 50)
+- `format` (optional): Output format for MIF (Memory Interchange Format)
+  - `json` (default): Single-line JSON-LD for token efficiency
+  - `detail`: Pretty-printed JSON-LD for human readability
+  - `md`: Markdown with YAML frontmatter
+  - `compact`: Single-line JSON for streaming
 
 **Returns:**
-- Array of `MemoryResult` objects with memory_id, namespace, content, score, tags, timestamp
+- Array of memories in the specified MIF format, each including:
+  - `@id`: URN identifier (e.g., `urn:mif:memory-id`)
+  - `@type`: "Memory"
+  - `content`, `namespace`, `tags`, `created`, `modified`
+  - `subcog:score`: Relevance score (0.0-1.0)
 </mcp>
