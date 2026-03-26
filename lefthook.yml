@@ -1,0 +1,28 @@
+# Lefthook git hooks configuration
+# https://github.com/evilmartians/lefthook
+#
+# Mirrors CI gates from .github/workflows/ci.yml
+# Bypass: git commit --no-verify / git push --no-verify
+
+pre-commit:
+  parallel: true
+  commands:
+    fmt-check:
+      glob: "*.rs"
+      run: cargo fmt -- --check
+      fail_text: |
+        Formatting check failed. Run 'cargo fmt' to fix, then re-stage.
+
+pre-push:
+  parallel: true
+  commands:
+    clippy:
+      run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      fail_text: |
+        Clippy found warnings treated as errors.
+        Run 'cargo clippy --all-targets --all-features' to see details.
+    doc-check:
+      run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked
+      fail_text: |
+        Documentation build failed or has warnings.
+        Run 'cargo doc --no-deps --all-features' to see details.

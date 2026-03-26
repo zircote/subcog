@@ -1,7 +1,7 @@
 ---
 description: Search persistent memories using semantic, hybrid, or text search
 allowed-tools: mcp__subcog__subcog_recall, mcp__subcog__subcog_namespaces, Bash
-argument-hint: "<query> [--namespace <ns>] [--mode hybrid|vector|text] [--limit N]"
+argument-hint: "<query> [--namespace <ns>] [--mode hybrid|vector|text] [--format json|md|compact] [--limit N]"
 ---
 
 # /subcog:recall
@@ -14,6 +14,7 @@ Search the memory system for relevant decisions, learnings, patterns, and contex
 /subcog:recall "database storage decision"
 /subcog:recall --namespace decisions "storage"
 /subcog:recall --mode vector "error handling patterns"
+/subcog:recall --format md "API design patterns"
 /subcog:recall --limit 5 "API design"
 ```
 
@@ -26,7 +27,12 @@ Search the memory system for relevant decisions, learnings, patterns, and contex
    - `hybrid` (default): Combines semantic + keyword (best for most queries)
    - `vector`: Pure semantic similarity (best for conceptual searches)
    - `text`: Traditional BM25 keyword matching (best for exact terms)
-4. **--limit**: Maximum results (default: 10, max: 50)
+4. **--format**: Output format (MIF - Memory Interchange Format)
+   - `json` (default): Single-line JSON-LD for token efficiency
+   - `detail`: Pretty-printed JSON-LD for human readability
+   - `md`: Markdown with YAML frontmatter
+   - `compact`: Single-line JSON per memory (streaming/processing)
+5. **--limit**: Maximum results (default: 10, max: 50)
 </arguments>
 
 ## Execution Strategy
