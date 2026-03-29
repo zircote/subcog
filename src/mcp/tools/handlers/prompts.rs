@@ -49,7 +49,7 @@ fn format_list_or_none(items: &[String]) -> String {
 }
 
 /// Executes the prompt.save tool.
-pub fn execute_prompt_save(arguments: Value) -> Result<ToolResult> {
+pub fn execute_prompt_save(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     use crate::services::{EnrichmentStatus, PartialMetadata, SaveOptions};
 
     let args: PromptSaveArgs =
@@ -98,7 +98,6 @@ pub fn execute_prompt_save(arguments: Value) -> Result<ToolResult> {
     let options = SaveOptions::new().with_skip_enrichment(args.skip_enrichment);
 
     // Get repo path and create service (works in both project and user scope)
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let mut prompt_service = if let Some(repo_path) = services.repo_path() {
         create_prompt_service(repo_path)
     } else {
@@ -159,7 +158,7 @@ pub fn execute_prompt_save(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the prompt.list tool.
-pub fn execute_prompt_list(arguments: Value) -> Result<ToolResult> {
+pub fn execute_prompt_list(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: PromptListArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
@@ -181,7 +180,6 @@ pub fn execute_prompt_list(arguments: Value) -> Result<ToolResult> {
     }
 
     // Get prompts (works in both project and user scope)
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let mut prompt_service = if let Some(repo_path) = services.repo_path() {
         create_prompt_service(repo_path)
     } else {
@@ -249,14 +247,13 @@ pub fn execute_prompt_list(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the prompt.get tool.
-pub fn execute_prompt_get(arguments: Value) -> Result<ToolResult> {
+pub fn execute_prompt_get(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: PromptGetArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
     let domain = args.domain.map(|d| parse_domain_scope(Some(&d)));
 
     // Works in both project and user scope
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let mut prompt_service = if let Some(repo_path) = services.repo_path() {
         create_prompt_service(repo_path)
     } else {
@@ -311,14 +308,13 @@ pub fn execute_prompt_get(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the prompt.run tool.
-pub fn execute_prompt_run(arguments: Value) -> Result<ToolResult> {
+pub fn execute_prompt_run(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: PromptRunArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
     let domain = args.domain.map(|d| parse_domain_scope(Some(&d)));
 
     // Works in both project and user scope
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let mut prompt_service = if let Some(repo_path) = services.repo_path() {
         create_prompt_service(repo_path)
     } else {
@@ -388,14 +384,13 @@ pub fn execute_prompt_run(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the prompt.delete tool.
-pub fn execute_prompt_delete(arguments: Value) -> Result<ToolResult> {
+pub fn execute_prompt_delete(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: PromptDeleteArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
     let domain = parse_domain_scope(Some(&args.domain));
 
     // Works in both project and user scope
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let mut prompt_service = if let Some(repo_path) = services.repo_path() {
         create_prompt_service(repo_path)
     } else {
@@ -437,16 +432,16 @@ pub fn execute_prompt_delete(arguments: Value) -> Result<ToolResult> {
 ///
 /// Dispatches to the appropriate action handler based on the `action` field.
 /// Valid actions: save, list, get, run, delete.
-pub fn execute_prompts(arguments: Value) -> Result<ToolResult> {
+pub fn execute_prompts(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: PromptsArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
     match args.action.as_str() {
-        "save" => execute_prompts_save(&args),
-        "list" => execute_prompts_list(&args),
-        "get" => execute_prompts_get(&args),
-        "run" => execute_prompts_run(&args),
-        "delete" => execute_prompts_delete(&args),
+        "save" => execute_prompts_save(services, &args),
+        "list" => execute_prompts_list(services, &args),
+        "get" => execute_prompts_get(services, &args),
+        "run" => execute_prompts_run(services, &args),
+        "delete" => execute_prompts_delete(services, &args),
         _ => Err(Error::InvalidInput(format!(
             "Unknown prompts action: '{}'. Valid actions: save, list, get, run, delete",
             args.action
@@ -455,7 +450,7 @@ pub fn execute_prompts(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Handles the `save` action for `subcog_prompts`.
-fn execute_prompts_save(args: &PromptsArgs) -> Result<ToolResult> {
+fn execute_prompts_save(services: &ServiceContainer, args: &PromptsArgs) -> Result<ToolResult> {
     use crate::services::{EnrichmentStatus, PartialMetadata, SaveOptions};
 
     let name = args
@@ -506,7 +501,6 @@ fn execute_prompts_save(args: &PromptsArgs) -> Result<ToolResult> {
     let options = SaveOptions::new().with_skip_enrichment(args.skip_enrichment);
 
     // Get repo path and create service
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let mut prompt_service = if let Some(repo_path) = services.repo_path() {
         create_prompt_service(repo_path)
     } else {
@@ -567,7 +561,7 @@ fn execute_prompts_save(args: &PromptsArgs) -> Result<ToolResult> {
 }
 
 /// Handles the `list` action for `subcog_prompts`.
-fn execute_prompts_list(args: &PromptsArgs) -> Result<ToolResult> {
+fn execute_prompts_list(services: &ServiceContainer, args: &PromptsArgs) -> Result<ToolResult> {
     // Build filter
     let mut filter = PromptFilter::new();
     if let Some(domain) = &args.domain {
@@ -586,7 +580,6 @@ fn execute_prompts_list(args: &PromptsArgs) -> Result<ToolResult> {
     }
 
     // Get prompts
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let mut prompt_service = if let Some(repo_path) = services.repo_path() {
         create_prompt_service(repo_path)
     } else {
@@ -654,7 +647,7 @@ fn execute_prompts_list(args: &PromptsArgs) -> Result<ToolResult> {
 }
 
 /// Handles the `get` action for `subcog_prompts`.
-fn execute_prompts_get(args: &PromptsArgs) -> Result<ToolResult> {
+fn execute_prompts_get(services: &ServiceContainer, args: &PromptsArgs) -> Result<ToolResult> {
     let name = args
         .name
         .as_ref()
@@ -662,7 +655,6 @@ fn execute_prompts_get(args: &PromptsArgs) -> Result<ToolResult> {
 
     let domain = args.domain.as_ref().map(|d| parse_domain_scope(Some(d)));
 
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let mut prompt_service = if let Some(repo_path) = services.repo_path() {
         create_prompt_service(repo_path)
     } else {
@@ -717,7 +709,7 @@ fn execute_prompts_get(args: &PromptsArgs) -> Result<ToolResult> {
 }
 
 /// Handles the `run` action for `subcog_prompts`.
-fn execute_prompts_run(args: &PromptsArgs) -> Result<ToolResult> {
+fn execute_prompts_run(services: &ServiceContainer, args: &PromptsArgs) -> Result<ToolResult> {
     let name = args
         .name
         .as_ref()
@@ -725,7 +717,6 @@ fn execute_prompts_run(args: &PromptsArgs) -> Result<ToolResult> {
 
     let domain = args.domain.as_ref().map(|d| parse_domain_scope(Some(d)));
 
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let mut prompt_service = if let Some(repo_path) = services.repo_path() {
         create_prompt_service(repo_path)
     } else {
@@ -794,7 +785,7 @@ fn execute_prompts_run(args: &PromptsArgs) -> Result<ToolResult> {
 }
 
 /// Handles the `delete` action for `subcog_prompts`.
-fn execute_prompts_delete(args: &PromptsArgs) -> Result<ToolResult> {
+fn execute_prompts_delete(services: &ServiceContainer, args: &PromptsArgs) -> Result<ToolResult> {
     let name = args
         .name
         .as_ref()
@@ -806,7 +797,6 @@ fn execute_prompts_delete(args: &PromptsArgs) -> Result<ToolResult> {
 
     let domain = parse_domain_scope(Some(domain_str));
 
-    let services = ServiceContainer::from_current_dir_or_user()?;
     let mut prompt_service = if let Some(repo_path) = services.repo_path() {
         create_prompt_service(repo_path)
     } else {

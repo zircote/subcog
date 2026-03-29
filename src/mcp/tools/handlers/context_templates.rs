@@ -50,7 +50,10 @@ fn format_list_or_none(items: &[String]) -> String {
 }
 
 /// Executes the `context_template_save` tool.
-pub fn execute_context_template_save(arguments: Value) -> Result<ToolResult> {
+pub fn execute_context_template_save(
+    _services: &ServiceContainer,
+    arguments: Value,
+) -> Result<ToolResult> {
     let args: ContextTemplateSaveArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
@@ -129,7 +132,10 @@ pub fn execute_context_template_save(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the `context_template_list` tool.
-pub fn execute_context_template_list(arguments: Value) -> Result<ToolResult> {
+pub fn execute_context_template_list(
+    _services: &ServiceContainer,
+    arguments: Value,
+) -> Result<ToolResult> {
     let args: ContextTemplateListArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
@@ -193,7 +199,10 @@ pub fn execute_context_template_list(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the `context_template_get` tool.
-pub fn execute_context_template_get(arguments: Value) -> Result<ToolResult> {
+pub fn execute_context_template_get(
+    _services: &ServiceContainer,
+    arguments: Value,
+) -> Result<ToolResult> {
     let args: ContextTemplateGetArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
@@ -277,7 +286,10 @@ pub fn execute_context_template_get(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the `context_template_render` tool.
-pub fn execute_context_template_render(arguments: Value) -> Result<ToolResult> {
+pub fn execute_context_template_render(
+    services: &ServiceContainer,
+    arguments: Value,
+) -> Result<ToolResult> {
     let args: ContextTemplateRenderArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
@@ -286,8 +298,6 @@ pub fn execute_context_template_render(arguments: Value) -> Result<ToolResult> {
 
     // Get memories via search if query provided
     let (memories, statistics) = if let Some(query) = &args.query {
-        // Get service container for recall
-        let services = ServiceContainer::from_current_dir_or_user()?;
         let recall_service = services.recall()?;
 
         // Build search filter
@@ -364,7 +374,10 @@ pub fn execute_context_template_render(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the `context_template_delete` tool.
-pub fn execute_context_template_delete(arguments: Value) -> Result<ToolResult> {
+pub fn execute_context_template_delete(
+    _services: &ServiceContainer,
+    arguments: Value,
+) -> Result<ToolResult> {
     let args: ContextTemplateDeleteArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
@@ -414,7 +427,7 @@ pub fn execute_context_template_delete(arguments: Value) -> Result<ToolResult> {
 ///
 /// Dispatches to the appropriate action handler based on the `action` field.
 /// Valid actions: save, list, get, render, delete.
-pub fn execute_templates(arguments: Value) -> Result<ToolResult> {
+pub fn execute_templates(services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: TemplatesArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
@@ -422,7 +435,7 @@ pub fn execute_templates(arguments: Value) -> Result<ToolResult> {
         "save" => execute_templates_save(&args),
         "list" => execute_templates_list(&args),
         "get" => execute_templates_get(&args),
-        "render" => execute_templates_render(&args),
+        "render" => execute_templates_render(services, &args),
         "delete" => execute_templates_delete(&args),
         _ => Err(Error::InvalidInput(format!(
             "Unknown templates action: '{}'. Valid actions: save, list, get, render, delete",
@@ -665,7 +678,10 @@ fn execute_templates_get(args: &TemplatesArgs) -> Result<ToolResult> {
 }
 
 /// Handles the `render` action for `subcog_templates`.
-fn execute_templates_render(args: &TemplatesArgs) -> Result<ToolResult> {
+fn execute_templates_render(
+    services: &ServiceContainer,
+    args: &TemplatesArgs,
+) -> Result<ToolResult> {
     let name = args
         .name
         .as_ref()
@@ -676,8 +692,6 @@ fn execute_templates_render(args: &TemplatesArgs) -> Result<ToolResult> {
 
     // Get memories via search if query provided
     let (memories, statistics) = if let Some(query) = &args.query {
-        // Get service container for recall
-        let services = ServiceContainer::from_current_dir_or_user()?;
         let recall_service = services.recall()?;
 
         // Build search filter

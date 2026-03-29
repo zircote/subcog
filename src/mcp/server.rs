@@ -184,7 +184,10 @@ fn execute_call_tool(
         None => Value::Object(Map::new()),
     };
 
-    let result = match state.tools.execute(&request.name, arguments) {
+    let result = match state
+        .tools
+        .execute(&request.name, arguments, &state.services)
+    {
         Ok(result) => result,
         Err(err) => {
             record_event(MemoryEvent::McpRequestError {
@@ -428,6 +431,8 @@ async fn map_notification_status(req: Request, next: Next) -> Response {
 struct HealthState {
     /// Number of tools registered at startup.
     tool_count: usize,
+    /// Shared service container (created once at startup).
+    services: Arc<ServiceContainer>,
 }
 
 /// Handler for `GET /healthz`.
@@ -438,13 +443,12 @@ struct HealthState {
 async fn healthz_handler(
     State(state): State<HealthState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    use crate::services::ServiceContainer;
-
-    // Run storage check on a blocking thread (storage ops are synchronous)
-    let db_ok = tokio::task::spawn_blocking(|| {
-        ServiceContainer::from_current_dir_or_user()
-            .and_then(|svc| {
-                let recall = svc.recall()?;
+    // Run storage check on a blocking thread using the shared service container
+    let services = state.services.clone();
+    let db_ok = tokio::task::spawn_blocking(move || {
+        services
+            .recall()
+            .and_then(|recall| {
                 let filter = crate::models::SearchFilter::new();
                 recall.list_all(&filter, 1)?;
                 Ok(())
@@ -642,6 +646,7 @@ struct McpState {
     tools: ToolRegistry,
     resources: Mutex<ResourceHandler>,
     prompts: PromptRegistry,
+    services: Arc<ServiceContainer>,
     #[cfg(feature = "http")]
     tool_auth: ToolAuthorization,
 }
@@ -652,12 +657,18 @@ struct McpHandler {
 }
 
 impl McpHandler {
-    fn new(tools: ToolRegistry, resources: ResourceHandler, prompts: PromptRegistry) -> Self {
+    fn new(
+        tools: ToolRegistry,
+        resources: ResourceHandler,
+        prompts: PromptRegistry,
+        services: Arc<ServiceContainer>,
+    ) -> Self {
         Self {
             state: Arc::new(McpState {
                 tools,
                 resources: Mutex::new(resources),
                 prompts,
+                services,
                 #[cfg(feature = "http")]
                 tool_auth: ToolAuthorization::default(),
             }),
@@ -1063,8 +1074,6 @@ fn resource_content_to_rmcp(content: ResourceContent) -> ResourceContents {
 pub struct McpServer {
     /// Tool registry.
     tools: ToolRegistry,
-    /// Resource handler.
-    resources: ResourceHandler,
     /// Transport type.
     transport: Transport,
     /// HTTP port (if using HTTP transport).
@@ -1086,12 +1095,8 @@ impl McpServer {
     /// Creates a new MCP server.
     #[must_use]
     pub fn new() -> Self {
-        // Try to initialize RecallService for memory browsing
-        let resources = Self::try_init_resources();
-
         Self {
             tools: ToolRegistry::new(),
-            resources,
             transport: Transport::Stdio,
             port: 3000,
             rate_limit: RateLimitConfig::from_env(),
@@ -1167,31 +1172,28 @@ impl McpServer {
     /// Tries to initialize `ResourceHandler` with services.
     ///
     /// Uses domain-scoped index (user-level index with project facets).
-    fn try_init_resources() -> ResourceHandler {
+    fn try_init_resources(services: &ServiceContainer) -> ResourceHandler {
         use crate::config::SubcogConfig;
         use crate::services::PromptService;
 
         let mut handler = ResourceHandler::new();
 
-        // Try to add RecallService (works in both project and user scope)
-        if let Ok(services) = ServiceContainer::from_current_dir_or_user() {
-            if let Ok(recall) = services.recall() {
-                handler = handler.with_recall_service(recall);
-            }
+        if let Ok(recall) = services.recall() {
+            handler = handler.with_recall_service(recall);
+        }
 
-            // Try to add PromptService with full config (respects storage settings)
-            // For user-scope, repo_path is None - PromptService still works with user storage
-            if let Some(repo_path) = services.repo_path() {
-                let config = SubcogConfig::load_default().with_repo_path(repo_path);
-                let prompt_service =
-                    PromptService::with_subcog_config(config).with_repo_path(repo_path);
-                handler = handler.with_prompt_service(prompt_service);
-            } else {
-                // User-scope: create prompt service without repo path
-                let config = SubcogConfig::load_default();
-                let prompt_service = PromptService::with_subcog_config(config);
-                handler = handler.with_prompt_service(prompt_service);
-            }
+        // Try to add PromptService with full config (respects storage settings)
+        // For user-scope, repo_path is None - PromptService still works with user storage
+        if let Some(repo_path) = services.repo_path() {
+            let config = SubcogConfig::load_default().with_repo_path(repo_path);
+            let prompt_service =
+                PromptService::with_subcog_config(config).with_repo_path(repo_path);
+            handler = handler.with_prompt_service(prompt_service);
+        } else {
+            // User-scope: create prompt service without repo path
+            let config = SubcogConfig::load_default();
+            let prompt_service = PromptService::with_subcog_config(config);
+            handler = handler.with_prompt_service(prompt_service);
         }
 
         handler
@@ -1239,16 +1241,17 @@ impl McpServer {
         }
     }
 
-    fn build_handler(&mut self) -> McpHandler {
+    fn build_handler(&mut self) -> SubcogResult<McpHandler> {
         let tools = std::mem::take(&mut self.tools);
-        let resources = std::mem::take(&mut self.resources);
         let prompts = PromptRegistry::new();
-        McpHandler::new(tools, resources, prompts)
+        let services = Arc::new(ServiceContainer::from_current_dir_or_user()?);
+        let resources = Self::try_init_resources(&services);
+        Ok(McpHandler::new(tools, resources, prompts, services))
     }
 
     /// Runs the server over stdio with graceful shutdown (RES-M4).
     async fn run_stdio(&mut self) -> SubcogResult<()> {
-        let handler = self.build_handler();
+        let handler = self.build_handler()?;
         let service = handler
             .serve(stdio())
             .await
@@ -1318,9 +1321,12 @@ impl McpServer {
 
         // Capture tool count before build_handler takes ownership
         let tool_count = self.tools.tool_count();
-        let health_state = HealthState { tool_count };
 
-        let handler = self.build_handler();
+        let handler = self.build_handler()?;
+        let health_state = HealthState {
+            tool_count,
+            services: Arc::clone(&handler.state.services),
+        };
         let session_manager = Arc::new(LocalSessionManager::default());
         let streamable = StreamableHttpService::new(
             move || Ok(handler.clone()),

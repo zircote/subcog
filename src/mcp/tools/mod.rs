@@ -12,6 +12,7 @@
 mod definitions;
 mod handlers;
 
+use crate::services::ServiceContainer;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -208,27 +209,43 @@ impl ToolRegistry {
     /// # Errors
     ///
     /// Returns an error if the tool execution fails.
-    pub fn execute(&self, name: &str, arguments: Value) -> Result<ToolResult> {
+    pub fn execute(
+        &self,
+        name: &str,
+        arguments: Value,
+        services: &ServiceContainer,
+    ) -> Result<ToolResult> {
         // Handle group management tools (feature-gated)
         #[cfg(feature = "group-scope")]
         {
             let group_result = match name {
                 // Consolidated group management tool
-                "subcog_groups" => Some(handlers::execute_groups(arguments.clone())),
+                "subcog_groups" => Some(handlers::execute_groups(services, arguments.clone())),
                 // Legacy group management tools
-                "subcog_group_create" => Some(handlers::execute_group_create(arguments.clone())),
-                "subcog_group_list" => Some(handlers::execute_group_list(arguments.clone())),
-                "subcog_group_get" => Some(handlers::execute_group_get(arguments.clone())),
-                "subcog_group_add_member" => {
-                    Some(handlers::execute_group_add_member(arguments.clone()))
+                "subcog_group_create" => {
+                    Some(handlers::execute_group_create(services, arguments.clone()))
                 },
-                "subcog_group_remove_member" => {
-                    Some(handlers::execute_group_remove_member(arguments.clone()))
+                "subcog_group_list" => {
+                    Some(handlers::execute_group_list(services, arguments.clone()))
                 },
-                "subcog_group_update_role" => {
-                    Some(handlers::execute_group_update_role(arguments.clone()))
+                "subcog_group_get" => {
+                    Some(handlers::execute_group_get(services, arguments.clone()))
                 },
-                "subcog_group_delete" => Some(handlers::execute_group_delete(arguments.clone())),
+                "subcog_group_add_member" => Some(handlers::execute_group_add_member(
+                    services,
+                    arguments.clone(),
+                )),
+                "subcog_group_remove_member" => Some(handlers::execute_group_remove_member(
+                    services,
+                    arguments.clone(),
+                )),
+                "subcog_group_update_role" => Some(handlers::execute_group_update_role(
+                    services,
+                    arguments.clone(),
+                )),
+                "subcog_group_delete" => {
+                    Some(handlers::execute_group_delete(services, arguments.clone()))
+                },
                 _ => None,
             };
             if let Some(result) = group_result {
@@ -237,53 +254,59 @@ impl ToolRegistry {
         }
 
         let result = match name {
-            "subcog_capture" => handlers::execute_capture(arguments),
-            "subcog_recall" => handlers::execute_recall(arguments),
-            "subcog_status" => handlers::execute_status(arguments),
+            "subcog_capture" => handlers::execute_capture(services, arguments),
+            "subcog_recall" => handlers::execute_recall(services, arguments),
+            "subcog_status" => handlers::execute_status(services, arguments),
             "prompt_understanding" => handlers::execute_prompt_understanding(arguments),
             "subcog_namespaces" => handlers::execute_namespaces(arguments),
-            "subcog_consolidate" => handlers::execute_consolidate(arguments),
-            "subcog_get_summary" => handlers::execute_get_summary(arguments),
-            "subcog_enrich" => handlers::execute_enrich(arguments),
-            "subcog_reindex" => handlers::execute_reindex(arguments),
-            "subcog_gdpr_export" => handlers::execute_gdpr_export(arguments),
+            "subcog_consolidate" => handlers::execute_consolidate(services, arguments),
+            "subcog_get_summary" => handlers::execute_get_summary(services, arguments),
+            "subcog_enrich" => handlers::execute_enrich(services, arguments),
+            "subcog_reindex" => handlers::execute_reindex(services, arguments),
+            "subcog_gdpr_export" => handlers::execute_gdpr_export(services, arguments),
             // Consolidated prompt management tool
-            "subcog_prompts" => handlers::execute_prompts(arguments),
+            "subcog_prompts" => handlers::execute_prompts(services, arguments),
             // Legacy prompt management tools
-            "prompt_save" => handlers::execute_prompt_save(arguments),
-            "prompt_list" => handlers::execute_prompt_list(arguments),
-            "prompt_get" => handlers::execute_prompt_get(arguments),
-            "prompt_run" => handlers::execute_prompt_run(arguments),
-            "prompt_delete" => handlers::execute_prompt_delete(arguments),
+            "prompt_save" => handlers::execute_prompt_save(services, arguments),
+            "prompt_list" => handlers::execute_prompt_list(services, arguments),
+            "prompt_get" => handlers::execute_prompt_get(services, arguments),
+            "prompt_run" => handlers::execute_prompt_run(services, arguments),
+            "prompt_delete" => handlers::execute_prompt_delete(services, arguments),
             // Core CRUD tools (industry parity: Mem0, Zep, LangMem)
-            "subcog_get" => handlers::execute_get(arguments),
-            "subcog_delete" => handlers::execute_delete(arguments),
-            "subcog_update" => handlers::execute_update(arguments),
+            "subcog_get" => handlers::execute_get(services, arguments),
+            "subcog_delete" => handlers::execute_delete(services, arguments),
+            "subcog_update" => handlers::execute_update(services, arguments),
             // Mem0 parity tools: list, delete_all, restore, history
-            "subcog_list" => handlers::execute_list(arguments),
-            "subcog_delete_all" => handlers::execute_delete_all(arguments),
-            "subcog_restore" => handlers::execute_restore(arguments),
-            "subcog_history" => handlers::execute_history(arguments),
+            "subcog_list" => handlers::execute_list(services, arguments),
+            "subcog_delete_all" => handlers::execute_delete_all(services, arguments),
+            "subcog_restore" => handlers::execute_restore(services, arguments),
+            "subcog_history" => handlers::execute_history(services, arguments),
             // Knowledge graph tools
-            "subcog_entities" => handlers::execute_entities(arguments),
-            "subcog_relationships" => handlers::execute_relationships(arguments),
-            "subcog_graph_query" => handlers::execute_graph_query(arguments),
-            "subcog_extract_entities" => handlers::execute_extract_entities(arguments),
-            "subcog_entity_merge" => handlers::execute_entity_merge(arguments),
-            "subcog_relationship_infer" => handlers::execute_relationship_infer(arguments),
-            "subcog_graph_visualize" => handlers::execute_graph_visualize(arguments),
+            "subcog_entities" => handlers::execute_entities(services, arguments),
+            "subcog_relationships" => handlers::execute_relationships(services, arguments),
+            "subcog_graph_query" => handlers::execute_graph_query(services, arguments),
+            "subcog_extract_entities" => handlers::execute_extract_entities(services, arguments),
+            "subcog_entity_merge" => handlers::execute_entity_merge(services, arguments),
+            "subcog_relationship_infer" => {
+                handlers::execute_relationship_infer(services, arguments)
+            },
+            "subcog_graph_visualize" => handlers::execute_graph_visualize(services, arguments),
             // Consolidated graph tool
-            "subcog_graph" => handlers::execute_graph(arguments),
+            "subcog_graph" => handlers::execute_graph(services, arguments),
             // Session initialization
-            "subcog_init" => handlers::execute_init(arguments),
+            "subcog_init" => handlers::execute_init(services, arguments),
             // Consolidated context template tool
-            "subcog_templates" => handlers::execute_templates(arguments),
+            "subcog_templates" => handlers::execute_templates(services, arguments),
             // Legacy context template tools
-            "context_template_save" => handlers::execute_context_template_save(arguments),
-            "context_template_list" => handlers::execute_context_template_list(arguments),
-            "context_template_get" => handlers::execute_context_template_get(arguments),
-            "context_template_render" => handlers::execute_context_template_render(arguments),
-            "context_template_delete" => handlers::execute_context_template_delete(arguments),
+            "context_template_save" => handlers::execute_context_template_save(services, arguments),
+            "context_template_list" => handlers::execute_context_template_list(services, arguments),
+            "context_template_get" => handlers::execute_context_template_get(services, arguments),
+            "context_template_render" => {
+                handlers::execute_context_template_render(services, arguments)
+            },
+            "context_template_delete" => {
+                handlers::execute_context_template_delete(services, arguments)
+            },
             _ => Err(Error::InvalidInput(format!("Unknown tool: {name}"))),
         }?;
 
@@ -362,7 +385,12 @@ mod tests {
         parse_domain_scope, parse_namespace, parse_search_mode, truncate,
     };
     use crate::models::{Namespace, SearchMode};
+    use crate::services::ServiceContainer;
     use crate::storage::index::DomainScope;
+
+    fn test_services() -> ServiceContainer {
+        ServiceContainer::from_current_dir_or_user().unwrap()
+    }
 
     #[test]
     fn test_tool_registry_creation() {
@@ -395,8 +423,9 @@ mod tests {
     #[test]
     fn test_execute_namespaces() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry
-            .execute("subcog_namespaces", serde_json::json!({}))
+            .execute("subcog_namespaces", serde_json::json!({}), &services)
             .unwrap();
 
         assert!(!result.is_error);
@@ -411,8 +440,9 @@ mod tests {
     #[test]
     fn test_execute_status() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry
-            .execute("subcog_status", serde_json::json!({}))
+            .execute("subcog_status", serde_json::json!({}), &services)
             .unwrap();
 
         assert!(!result.is_error);
@@ -424,7 +454,8 @@ mod tests {
     #[test]
     fn test_execute_unknown_tool() {
         let registry = ToolRegistry::new();
-        let result = registry.execute("unknown_tool", serde_json::json!({}));
+        let services = test_services();
+        let result = registry.execute("unknown_tool", serde_json::json!({}), &services);
 
         assert!(result.is_err());
     }
@@ -609,7 +640,8 @@ mod tests {
     #[test]
     fn test_error_response_unknown_tool() {
         let registry = ToolRegistry::new();
-        let result = registry.execute("nonexistent_tool", serde_json::json!({}));
+        let services = test_services();
+        let result = registry.execute("nonexistent_tool", serde_json::json!({}), &services);
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -624,6 +656,7 @@ mod tests {
     #[test]
     fn test_error_response_invalid_json_arguments() {
         let registry = ToolRegistry::new();
+        let services = test_services();
 
         // Invalid argument type for subcog_capture - namespace should be string
         let result = registry.execute(
@@ -632,6 +665,7 @@ mod tests {
                 "content": "test content",
                 "namespace": 12345,  // Invalid: should be string
             }),
+            &services,
         );
 
         // Should return error due to deserialization failure
@@ -641,6 +675,7 @@ mod tests {
     #[test]
     fn test_error_response_missing_required_argument() {
         let registry = ToolRegistry::new();
+        let services = test_services();
 
         // Missing required 'content' field for subcog_capture
         let result = registry.execute(
@@ -648,6 +683,7 @@ mod tests {
             serde_json::json!({
                 "namespace": "decisions",
             }),
+            &services,
         );
 
         assert!(result.is_err());
@@ -657,11 +693,13 @@ mod tests {
     fn test_error_response_prompt_get_not_found() {
         // This test verifies that prompt_get returns proper error for missing prompts
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "prompt_get",
             serde_json::json!({
                 "name": "nonexistent-prompt-that-does-not-exist-12345",
             }),
+            &services,
         );
 
         // Result might be error or a tool result with is_error=true
@@ -689,6 +727,7 @@ mod tests {
     #[test]
     fn test_error_response_prompt_save_missing_content() {
         let registry = ToolRegistry::new();
+        let services = test_services();
 
         // Missing both content and file_path
         let result = registry.execute(
@@ -696,6 +735,7 @@ mod tests {
             serde_json::json!({
                 "name": "test-prompt",
             }),
+            &services,
         );
 
         // Should fail - either content or file_path required
@@ -711,12 +751,14 @@ mod tests {
     #[test]
     fn test_error_response_prompt_delete_not_found() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "prompt_delete",
             serde_json::json!({
                 "name": "nonexistent-prompt-12345",
                 "domain": "project",
             }),
+            &services,
         );
 
         // Result should indicate not found (either as error or is_error=true)
@@ -744,6 +786,7 @@ mod tests {
     #[test]
     fn test_error_response_prompt_run_missing_variables() {
         let registry = ToolRegistry::new();
+        let services = test_services();
 
         // Try to run a prompt without providing required variables
         // First need a prompt that exists with required variables
@@ -752,6 +795,7 @@ mod tests {
             serde_json::json!({
                 "name": "nonexistent-prompt-12345",
             }),
+            &services,
         );
 
         // Should fail - prompt doesn't exist (either as Err or is_error=true)
@@ -770,6 +814,7 @@ mod tests {
     #[test]
     fn test_error_response_recall_invalid_filter() {
         let registry = ToolRegistry::new();
+        let services = test_services();
 
         // Valid recall with empty query should work but return no results
         let result = registry.execute(
@@ -778,6 +823,7 @@ mod tests {
                 "query": "",
                 "limit": 10,
             }),
+            &services,
         );
 
         // Empty query might return error or empty results
@@ -799,9 +845,10 @@ mod tests {
     #[test]
     fn test_tool_result_content_format() {
         let registry = ToolRegistry::new();
+        let services = test_services();
 
         // Test that successful results have proper content format
-        let result = registry.execute("subcog_namespaces", serde_json::json!({}));
+        let result = registry.execute("subcog_namespaces", serde_json::json!({}), &services);
         assert!(result.is_ok());
 
         let tool_result = result.expect("checked above");
@@ -818,8 +865,9 @@ mod tests {
     #[test]
     fn test_status_tool_returns_structured_info() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry
-            .execute("subcog_status", serde_json::json!({}))
+            .execute("subcog_status", serde_json::json!({}), &services)
             .unwrap();
 
         assert!(!result.is_error);
@@ -884,11 +932,13 @@ mod tests {
     #[test]
     fn test_get_nonexistent_memory() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_get",
             serde_json::json!({
                 "memory_id": "nonexistent-memory-12345"
             }),
+            &services,
         );
 
         // Should succeed but return is_error=true for not found
@@ -906,11 +956,13 @@ mod tests {
     #[test]
     fn test_delete_nonexistent_memory() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_delete",
             serde_json::json!({
                 "memory_id": "nonexistent-memory-12345"
             }),
+            &services,
         );
 
         // Should succeed but return is_error=true for not found
@@ -927,12 +979,14 @@ mod tests {
     #[test]
     fn test_update_nonexistent_memory() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_update",
             serde_json::json!({
                 "memory_id": "nonexistent-memory-12345",
                 "content": "new content"
             }),
+            &services,
         );
 
         // Should succeed but return is_error=true for not found
@@ -949,12 +1003,14 @@ mod tests {
     #[test]
     fn test_update_requires_at_least_one_field() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_update",
             serde_json::json!({
                 "memory_id": "some-memory-id"
                 // No content or tags provided
             }),
+            &services,
         );
 
         // Should fail - at least one of content or tags is required
@@ -1050,7 +1106,8 @@ mod tests {
     #[test]
     fn test_list_with_empty_args() {
         let registry = ToolRegistry::new();
-        let result = registry.execute("subcog_list", serde_json::json!({}));
+        let services = test_services();
+        let result = registry.execute("subcog_list", serde_json::json!({}), &services);
 
         // Should succeed with empty args (returns all memories or empty list)
         assert!(result.is_ok());
@@ -1061,12 +1118,14 @@ mod tests {
     #[test]
     fn test_list_with_pagination() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_list",
             serde_json::json!({
                 "limit": 10,
                 "offset": 0
             }),
+            &services,
         );
 
         assert!(result.is_ok());
@@ -1077,12 +1136,14 @@ mod tests {
     #[test]
     fn test_list_with_user_scoping() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_list",
             serde_json::json!({
                 "user_id": "test-user-123",
                 "limit": 5
             }),
+            &services,
         );
 
         assert!(result.is_ok());
@@ -1093,12 +1154,14 @@ mod tests {
     #[test]
     fn test_delete_all_dry_run_default() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         // Empty filter with dry_run (default true) should return preview
         let result = registry.execute(
             "subcog_delete_all",
             serde_json::json!({
                 "filter": "ns:decisions"
             }),
+            &services,
         );
 
         assert!(result.is_ok());
@@ -1117,6 +1180,7 @@ mod tests {
     #[test]
     fn test_delete_all_explicit_dry_run_false() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         // With dry_run=false but no matching memories
         let result = registry.execute(
             "subcog_delete_all",
@@ -1124,6 +1188,7 @@ mod tests {
                 "filter": "ns:nonexistent-namespace-12345",
                 "dry_run": false
             }),
+            &services,
         );
 
         // Should succeed (even if no memories deleted)
@@ -1133,11 +1198,13 @@ mod tests {
     #[test]
     fn test_restore_nonexistent_memory() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_restore",
             serde_json::json!({
                 "memory_id": "nonexistent-tombstoned-memory-12345"
             }),
+            &services,
         );
 
         // Should return error (memory not found or not tombstoned)
@@ -1159,11 +1226,13 @@ mod tests {
     #[test]
     fn test_history_nonexistent_memory() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_history",
             serde_json::json!({
                 "memory_id": "nonexistent-memory-12345"
             }),
+            &services,
         );
 
         // History provides helpful guidance even for non-existent memories
@@ -1185,12 +1254,14 @@ mod tests {
     #[test]
     fn test_history_with_limit() {
         let registry = ToolRegistry::new();
+        let services = test_services();
         let result = registry.execute(
             "subcog_history",
             serde_json::json!({
                 "memory_id": "some-memory-id",
                 "limit": 5
             }),
+            &services,
         );
 
         // Schema parsing should work, and function provides guidance

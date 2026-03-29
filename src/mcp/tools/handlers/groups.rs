@@ -7,6 +7,7 @@
 use super::super::{ToolContent, ToolResult};
 use crate::mcp::tool_types::GroupsArgs;
 use crate::models::group::{GroupId, GroupRole};
+use crate::services::ServiceContainer;
 use crate::services::group::GroupService;
 use crate::{Error, Result};
 use serde::Deserialize;
@@ -100,7 +101,7 @@ const fn desc_or_none(desc: &str) -> &str {
 }
 
 /// Executes the `group_create` tool.
-pub fn execute_group_create(arguments: Value) -> Result<ToolResult> {
+pub fn execute_group_create(_services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: GroupCreateArgs = parse_args(arguments)?;
 
     let service = GroupService::try_default()?;
@@ -131,7 +132,7 @@ pub fn execute_group_create(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the `group_list` tool.
-pub fn execute_group_list(_arguments: Value) -> Result<ToolResult> {
+pub fn execute_group_list(_services: &ServiceContainer, _arguments: Value) -> Result<ToolResult> {
     let service = GroupService::try_default()?;
     let user_id = get_user_id();
     let org_id = get_org_id();
@@ -170,7 +171,7 @@ pub fn execute_group_list(_arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the `group_get` tool.
-pub fn execute_group_get(arguments: Value) -> Result<ToolResult> {
+pub fn execute_group_get(_services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: GroupGetArgs = parse_args(arguments)?;
 
     let service = GroupService::try_default()?;
@@ -209,7 +210,10 @@ pub fn execute_group_get(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the `group_add_member` tool.
-pub fn execute_group_add_member(arguments: Value) -> Result<ToolResult> {
+pub fn execute_group_add_member(
+    _services: &ServiceContainer,
+    arguments: Value,
+) -> Result<ToolResult> {
     let args: GroupAddMemberArgs = parse_args(arguments)?;
 
     let service = GroupService::try_default()?;
@@ -233,7 +237,10 @@ pub fn execute_group_add_member(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the `group_remove_member` tool.
-pub fn execute_group_remove_member(arguments: Value) -> Result<ToolResult> {
+pub fn execute_group_remove_member(
+    _services: &ServiceContainer,
+    arguments: Value,
+) -> Result<ToolResult> {
     let args: GroupRemoveMemberArgs = parse_args(arguments)?;
 
     let service = GroupService::try_default()?;
@@ -262,7 +269,10 @@ pub fn execute_group_remove_member(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the `group_update_role` tool.
-pub fn execute_group_update_role(arguments: Value) -> Result<ToolResult> {
+pub fn execute_group_update_role(
+    _services: &ServiceContainer,
+    arguments: Value,
+) -> Result<ToolResult> {
     let args: GroupUpdateRoleArgs = parse_args(arguments)?;
 
     let service = GroupService::try_default()?;
@@ -294,7 +304,7 @@ pub fn execute_group_update_role(arguments: Value) -> Result<ToolResult> {
 }
 
 /// Executes the `group_delete` tool.
-pub fn execute_group_delete(arguments: Value) -> Result<ToolResult> {
+pub fn execute_group_delete(_services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: GroupDeleteArgs = parse_args(arguments)?;
 
     let service = GroupService::try_default()?;
@@ -326,7 +336,7 @@ pub fn execute_group_delete(arguments: Value) -> Result<ToolResult> {
 ///
 /// Dispatches to the appropriate action handler based on the `action` field.
 /// Valid actions: create, list, get, `add_member`, `remove_member`, `update_role`, delete.
-pub fn execute_groups(arguments: Value) -> Result<ToolResult> {
+pub fn execute_groups(_services: &ServiceContainer, arguments: Value) -> Result<ToolResult> {
     let args: GroupsArgs =
         serde_json::from_value(arguments).map_err(|e| Error::InvalidInput(e.to_string()))?;
 
