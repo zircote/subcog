@@ -85,7 +85,7 @@ rand = { version = "0.10", optional = true }
 base64 = { version = "0.22", optional = true }
 
 # LRU cache for recent capture tracking
-lru = "0.16"
+lru = "0.17"
 
 # FastEmbed for semantic embeddings (optional - fallback to pseudo-embeddings if not available)
 # Use rustls instead of native-tls (openssl) for TLS
