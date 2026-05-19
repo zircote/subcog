@@ -57,7 +57,7 @@ metrics = "0.24"
 metrics-exporter-prometheus = "0.18"
 
 # Git operations (vendored for cross-platform builds)
-git2 = { version = "0.20", features = ["vendored-openssl", "vendored-libgit2"] }
+git2 = { version = "0.21", features = ["vendored-openssl", "vendored-libgit2"] }
 
 # SQLite for FTS5 index
 rusqlite = { version = "0.39", features = ["bundled", "modern-full"] }
