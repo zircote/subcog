@@ -116,7 +116,7 @@ redis = { version = "1.2", features = ["tokio-comp", "connection-manager"], opti
 # PostgreSQL client (optional)
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1"], optional = true }
 deadpool-postgres = { version = "0.14", optional = true }
-tokio-postgres-rustls = { version = "0.13", optional = true }
+tokio-postgres-rustls = { version = "0.14", optional = true }
 rustls = { version = "0.23", optional = true }
 webpki-roots = { version = "1.0", optional = true }
 hmac = "0.13.0"
