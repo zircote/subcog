@@ -54,6 +54,9 @@ pub fn build_anthropic_client(llm_config: &LlmConfig) -> AnthropicClient {
     if let Some(ref base_url) = llm_config.base_url {
         client = client.with_endpoint(base_url);
     }
+    if let Some(max_tokens) = llm_config.max_tokens {
+        client = client.with_max_tokens(max_tokens);
+    }
     client.with_http_config(build_http_config(llm_config))
 }
 
