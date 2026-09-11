@@ -35,6 +35,8 @@ pub struct AnthropicClient {
     endpoint: String,
     /// Model to use.
     model: String,
+    /// Maximum output tokens (default: 8192).
+    max_tokens: Option<u32>,
     /// HTTP client.
     client: reqwest::blocking::Client,
 }
@@ -46,6 +48,9 @@ impl AnthropicClient {
     /// Default model.
     pub const DEFAULT_MODEL: &'static str = "claude-3-haiku-20240307";
 
+    /// Default max output tokens.
+    pub const DEFAULT_MAX_TOKENS: u32 = 8192;
+
     /// Creates a new Anthropic client.
     #[must_use]
     pub fn new() -> Self {
@@ -56,6 +61,7 @@ impl AnthropicClient {
             api_key,
             endpoint: Self::DEFAULT_ENDPOINT.to_string(),
             model: Self::DEFAULT_MODEL.to_string(),
+            max_tokens: None,
             client: build_http_client(LlmHttpConfig::from_env()),
         }
     }
@@ -85,6 +91,13 @@ impl AnthropicClient {
     #[must_use]
     pub fn with_http_config(mut self, config: LlmHttpConfig) -> Self {
         self.client = build_http_client(config);
+        self
+    }
+
+    /// Sets the maximum output tokens.
+    #[must_use]
+    pub const fn with_max_tokens(mut self, max_tokens: u32) -> Self {
+        self.max_tokens = Some(max_tokens);
         self
     }
 
@@ -151,7 +164,7 @@ impl AnthropicClient {
 
         let request = MessagesRequest {
             model: self.model.clone(),
-            max_tokens: 1024,
+            max_tokens: self.max_tokens.unwrap_or(Self::DEFAULT_MAX_TOKENS),
             messages,
         };
 
@@ -374,6 +387,7 @@ mod tests {
             api_key: None,
             endpoint: AnthropicClient::DEFAULT_ENDPOINT.to_string(),
             model: AnthropicClient::DEFAULT_MODEL.to_string(),
+            max_tokens: None,
             client: reqwest::blocking::Client::new(),
         };
 

@@ -92,8 +92,8 @@ pub struct EntityExtractionStats {
 
 /// Runs entity extraction and logs results/metrics.
 ///
-/// Extracted to a separate function to support both async (`tokio::spawn`) and
-/// sync (inline) execution paths.
+/// Extracted to a separate function to support both background (`spawn_blocking`)
+/// and sync (inline) execution paths.
 fn run_entity_extraction(callback: &EntityExtractionCallback, content: &str, memory_id: &MemoryId) {
     let _span = info_span!(
         "subcog.memory.capture.entity_extraction",
@@ -686,8 +686,9 @@ impl CaptureService {
 
                 // Check if we're in a tokio runtime context
                 if tokio::runtime::Handle::try_current().is_ok() {
-                    // Async path: spawn background task
-                    tokio::spawn(async move {
+                    // The callback makes a blocking LLM request; on an async worker it
+                    // stalls every other task on that worker, including /healthz.
+                    tokio::task::spawn_blocking(move || {
                         run_entity_extraction(&callback, &content, &memory_id_for_task);
                     });
                 } else {
